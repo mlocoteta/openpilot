@@ -393,6 +393,13 @@ class CarState(CarStateBase):
     if CP.carFingerprint in [CAR.CRV, CAR.CRV_EU, CAR.ACURA_RDX, CAR.ODYSSEY_CHN]:
       checks = [(0x194, 100)]
 
+    if CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING:
+      checks = [("STEER_MOTOR_TORQUE",100),
+                ("STEER_STATUS",100)]
+      signals += [("MOTOR_TORQUE", "STEER_MOTOR_TORQUE", 0),
+                  ("STEER_TORQUE_SENSOR", "STEER_STATUS", 0),
+                  ("STEER_STATUS", "STEER_STATUS", 0)]
+
     if CP.carFingerprint not in HONDA_BOSCH:
       signals += [("COMPUTER_BRAKE", "BRAKE_COMMAND", 0),
                   ("AEB_REQ_1", "BRAKE_COMMAND", 0),
@@ -406,13 +413,6 @@ class CarState(CarStateBase):
         ("ACC_HUD", 10),
         ("BRAKE_COMMAND", 50),
       ]
-    if CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING:
-      checks = [("STEER_MOTOR_TORQUE",100),
-                ("STEER_STATUS",100)]
-      signals += [("MOTOR_TORQUE", "STEER_MOTOR_TORQUE", 0),
-                  ("STEER_TORQUE_SENSOR", "STEER_STATUS", 0),
-                  ("STEER_STATUS", "STEER_STATUS", 0)]
-
     return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, 2)
 
   @staticmethod
