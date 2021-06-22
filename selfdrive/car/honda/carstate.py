@@ -60,7 +60,7 @@ def get_can_signals(CP, gearbox_msg="GEARBOX"):
     ("CRUISE", 10),
     ("POWERTRAIN_DATA", 100),
     ("VSA_STATUS", 50),
-    ("STEER_STATUS", 100),
+    ("STEER_STATUS", 0), #SerialSteering doesn't have this - only on cp_cam
     ("STEER_MOTOR_TORQUE", 0), # TODO: not on every car
   ]
 
@@ -388,13 +388,13 @@ class CarState(CarStateBase):
   def get_cam_can_parser(CP):
     signals = []
 
-    # all hondas except CRV, RDX and 2019 Odyssey@China use 0xe4 for steering
+    # all hondas except CRV, RDX, 2019 Odyssey@China and serial steering vehicles use 0xe4 for steering
     checks = [(0xe4, 100)]
     if CP.carFingerprint in [CAR.CRV, CAR.CRV_EU, CAR.ACURA_RDX, CAR.ODYSSEY_CHN]:
       checks = [(0x194, 100)]
 
     if CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING:
-      checks = [("STEER_MOTOR_TORQUE",100),
+      checks = [("STEER_MOTOR_TORQUE",100), 
                 ("STEER_STATUS",100)]
       signals += [("MOTOR_TORQUE", "STEER_MOTOR_TORQUE", 0),
                   ("STEER_TORQUE_SENSOR", "STEER_STATUS", 0),
