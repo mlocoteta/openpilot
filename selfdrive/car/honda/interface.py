@@ -221,7 +221,7 @@ class CarInterface(CarInterfaceBase):
       ret.wheelbase = 2.75
       ret.centerToFront = ret.wheelbase * 0.39
       ret.steerRatio = 13.23 
-      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 240], [0, 240]]  # TODO: determine if there is a dead zone at the top end
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.135], [0.045]]      
       tire_stiffness_factor = 0.8467
       ret.longitudinalTuning.kpBP = [0., 5., 35.]
