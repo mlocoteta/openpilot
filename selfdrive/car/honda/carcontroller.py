@@ -134,7 +134,7 @@ class CarController():
     # steer torque is converted back to CAN reference (positive when steering right)
     if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING):
       new_steer = int(round(apply_steer))
-      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, CarControllerParams)
+      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
       self.steer_rate_limited = new_steer != apply_steer 
 
     lkas_active = enabled and not CS.steer_not_allowed
