@@ -5,8 +5,9 @@ from selfdrive.controls.lib.drive_helpers import rate_limit
 from common.numpy_fast import clip, interp
 from selfdrive.car import create_gas_command
 from selfdrive.car.honda import hondacan
-from selfdrive.car.honda.values import CruiseButtons, CAR, VISUAL_HUD, HONDA_BOSCH, CarControllerParams
+from selfdrive.car.honda.values import CruiseButtons, CAR, HONDA_NIDEC_SERIAL_STEERING, VISUAL_HUD, HONDA_BOSCH, CarControllerParams
 from opendbc.can.packer import CANPacker
+from selfdrive.car import apply_std_steer_torque_limits
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 
@@ -84,6 +85,7 @@ class CarController():
     self.last_pump_ts = 0.
     self.packer = CANPacker(dbc_name)
     self.new_radar_config = False
+    self.apply_steer_last = 0
 
     self.params = CarControllerParams(CP)
 
@@ -128,9 +130,12 @@ class CarController():
                   hud_lanes, fcw_display, acc_alert, steer_required)
 
     # **** process the car messages ****
-
-    # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
+    # steer torque is converted back to CAN reference (positive when steering right)
+    if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING):
+      new_steer = int(round(apply_steer))
+      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, CarControllerParams)
+      self.steer_rate_limited = new_steer != apply_steer 
 
     lkas_active = enabled and not CS.steer_not_allowed
 
@@ -141,6 +146,8 @@ class CarController():
     idx = frame % 4
     can_sends.append(hondacan.create_steering_control(self.packer, apply_steer,
       lkas_active, CS.CP.carFingerprint, idx, CS.CP.openpilotLongitudinalControl))
+      
+    self.apply_steer_last = apply_steer
 
     # Send dashboard UI commands.
     if (frame % 10) == 0:
