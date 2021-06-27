@@ -9,11 +9,14 @@
 #include "selfdrive/ui/ui.h"
 #include "selfdrive/ui/qt/util.h"
 #include "selfdrive/ui/qt/maps/map_helpers.h"
+#include "selfdrive/ui/qt/request_repeater.h"
 
 
 const int PAN_TIMEOUT = 100;
 const bool DRAW_MODEL_PATH = false;
 const qreal REROUTE_DISTANCE = 25;
+const float MANEUVER_TRANSITION_THRESHOLD = 10;
+
 const float MAX_ZOOM = 17;
 const float MIN_ZOOM = 14;
 const float MAX_PITCH = 50;
@@ -37,13 +40,13 @@ MapWindow::MapWindow(const QMapboxGLSettings &settings) : m_settings(settings) {
 
   // Instructions
   map_instructions = new MapInstructions(this);
-  connect(this, &MapWindow::instructionsChanged, map_instructions, &MapInstructions::updateInstructions);
-  connect(this, &MapWindow::distanceChanged, map_instructions, &MapInstructions::updateDistance);
-  connect(this, &MapWindow::GPSValidChanged, map_instructions, &MapInstructions::updateGPSValid);
+  QObject::connect(this, &MapWindow::instructionsChanged, map_instructions, &MapInstructions::updateInstructions);
+  QObject::connect(this, &MapWindow::distanceChanged, map_instructions, &MapInstructions::updateDistance);
   map_instructions->setFixedWidth(width());
+  map_instructions->setVisible(false);
 
   map_eta = new MapETA(this);
-  connect(this, &MapWindow::ETAChanged, map_eta, &MapETA::updateETA);
+  QObject::connect(this, &MapWindow::ETAChanged, map_eta, &MapETA::updateETA);
 
   const int h = 120;
   map_eta->setFixedHeight(h);
@@ -60,13 +63,12 @@ MapWindow::MapWindow(const QMapboxGLSettings &settings) : m_settings(settings) {
     qDebug() << geoservice_provider->errorString();
     assert(routing_manager);
   }
-  connect(routing_manager, SIGNAL(finished(QGeoRouteReply*)), this, SLOT(routeCalculated(QGeoRouteReply*)));
+  QObject::connect(routing_manager, &QGeoRoutingManager::finished, this, &MapWindow::routeCalculated);
 
   auto last_gps_position = coordinate_from_param("LastGPSPosition");
   if (last_gps_position) {
     last_position = *last_gps_position;
   }
-
 
   grabGesture(Qt::GestureType::PinchGesture);
 }
@@ -93,7 +95,7 @@ void MapWindow::initLayers() {
     nav["type"] = "line";
     nav["source"] = "navSource";
     m_map->addLayer(nav, "road-intersection");
-    m_map->setPaintProperty("navLayer", "line-color", QColor("#8cb3d1"));
+    m_map->setPaintProperty("navLayer", "line-color", QColor("#31a1ee"));
     m_map->setPaintProperty("navLayer", "line-width", 7.5);
     m_map->setLayoutProperty("navLayer", "line-cap", "round");
   }
@@ -115,6 +117,12 @@ void MapWindow::initLayers() {
 }
 
 void MapWindow::timerUpdate() {
+  loaded_once = loaded_once || m_map->isFullyLoaded();
+  if (!loaded_once) {
+    map_instructions->showError("Map loading");
+    return;
+  }
+
   initLayers();
 
   sm->update(0);
@@ -123,7 +131,6 @@ void MapWindow::timerUpdate() {
     gps_ok = location.getGpsOK();
 
     bool localizer_valid = location.getStatus() == cereal::LiveLocationKalman::Status::VALID;
-    emit GPSValidChanged(localizer_valid);
 
     if (localizer_valid) {
       auto pos = location.getPositionGeodetic();
@@ -175,8 +182,8 @@ void MapWindow::timerUpdate() {
         auto attrs = cur_maneuver.extendedAttributes();
         if (cur_maneuver.isValid() && attrs.contains("mapbox.banner_instructions")) {
           float along_geometry = distance_along_geometry(segment.path(), to_QGeoCoordinate(*last_position));
-          float distance = std::max(0.0f, float(segment.distance()) - along_geometry);
-          emit distanceChanged(distance);
+          float distance_to_maneuver = segment.distance() - along_geometry;
+          emit distanceChanged(std::max(0.0f, distance_to_maneuver));
 
           m_map->setPitch(MAX_PITCH); // TODO: smooth pitching based on maneuver distance
 
@@ -184,44 +191,36 @@ void MapWindow::timerUpdate() {
           if (banner.size()) {
             auto banner_0 = banner[0].toMap();
             float show_at = banner_0["distance_along_geometry"].toDouble();
-            emit instructionsChanged(banner_0, distance < show_at);
+            emit instructionsChanged(banner_0, distance_to_maneuver < show_at);
           }
-        }
 
-        // Handle transition to next route segment
-        auto next_segment = segment.nextRouteSegment();
-        if (next_segment.isValid()) {
-          auto next_maneuver = next_segment.maneuver();
-          if (next_maneuver.isValid()) {
-            float next_maneuver_distance = next_maneuver.position().distanceTo(to_QGeoCoordinate(*last_position));
-            // Switch to next route segment
-            if (next_maneuver_distance < REROUTE_DISTANCE && next_maneuver_distance > last_maneuver_distance) {
+          // Transition to next route segment
+          if (distance_to_maneuver < -MANEUVER_TRANSITION_THRESHOLD) {
+            auto next_segment = segment.nextRouteSegment();
+            if (next_segment.isValid()) {
               segment = next_segment;
 
               recompute_backoff = std::max(0, recompute_backoff - 1);
               recompute_countdown = 0;
-            }
-            last_maneuver_distance = next_maneuver_distance;
-          }
-        } else {
-          // Destination reached
-          Params().remove("NavDestination");
+            } else {
+              // Destination reached
+              Params().remove("NavDestination");
 
-          // Clear route if driving away from destination
-          float d = segment.maneuver().position().distanceTo(to_QGeoCoordinate(*last_position));
-          if (d > REROUTE_DISTANCE) {
-            clearRoute();
+              // Clear route if driving away from destination
+              float d = segment.maneuver().position().distanceTo(to_QGeoCoordinate(*last_position));
+              if (d > REROUTE_DISTANCE) {
+                clearRoute();
+              }
+            }
           }
         }
-      } else {
-        map_instructions->setVisible(false);
       }
+    } else {
+      map_instructions->showError("Waiting for GPS");
     }
   }
 
   update();
-
-
 }
 
 void MapWindow::resizeGL(int w, int h) {
@@ -239,7 +238,7 @@ void MapWindow::initializeGL() {
 
   m_map->setMargins({0, 350, 0, 50});
   m_map->setPitch(MIN_PITCH);
-  m_map->setStyleUrl("mapbox://styles/pd0wm/cknuhcgvr0vs817o1akcx6pek"); // Larger fonts
+  m_map->setStyleUrl("mapbox://styles/commadotai/ckq7zp8ts1k0o17p8m6rv6cet");
 
   connect(m_map.data(), SIGNAL(needsRendering()), this, SLOT(update()));
   timer->start(100);
@@ -276,6 +275,7 @@ void MapWindow::recomputeRoute() {
 
   if (*new_destination != nav_destination) {
     setVisible(true); // Show map on destination set/change
+    // TODO: close sidebar
     should_recompute = true;
   }
 
@@ -360,7 +360,7 @@ void MapWindow::clearRoute() {
     m_map->setPitch(MIN_PITCH);
   }
 
-  map_instructions->setVisible(false);
+  map_instructions->hideIfNoError();
   map_eta->setVisible(false);
 }
 
@@ -483,8 +483,6 @@ MapInstructions::MapInstructions(QWidget * parent) : QWidget(parent) {
     lane_layout = new QHBoxLayout;
     layout->addLayout(lane_layout);
 
-    layout->addStretch(); // Make sure the word-wrapped labels are as small as possible
-
     main_layout->addWidget(w);
   }
 
@@ -529,20 +527,19 @@ void MapInstructions::updateDistance(float d) {
   distance->setText(distance_str);
 }
 
-void MapInstructions::updateGPSValid(bool valid) {
-  if (!valid) {
-    primary->setText("");
-    distance->setText("Waiting for GPS position");
-    distance->setAlignment(Qt::AlignCenter);
+void MapInstructions::showError(QString error) {
+  primary->setText("");
+  distance->setText(error);
+  distance->setAlignment(Qt::AlignCenter);
 
-    secondary->setVisible(false);
-    icon_01->setVisible(false);
+  secondary->setVisible(false);
+  icon_01->setVisible(false);
 
-    last_banner = {};
+  last_banner = {};
+  error = true;
 
-    setVisible(true);
-    adjustSize();
-  }
+  setVisible(true);
+  adjustSize();
 }
 
 void MapInstructions::updateInstructions(QMap<QString, QVariant> banner, bool full) {
@@ -550,6 +547,10 @@ void MapInstructions::updateInstructions(QMap<QString, QVariant> banner, bool fu
   // seems like it takes a little bit of time for the images to change and
   // the size can only be changed afterwards
   adjustSize();
+
+  // Word wrap widgets need fixed width
+  primary->setFixedWidth(width() - 250);
+  secondary->setFixedWidth(width() - 250);
 
   if (banner == last_banner) return;
   QString primary_str, secondary_str;
@@ -634,9 +635,16 @@ void MapInstructions::updateInstructions(QMap<QString, QVariant> banner, bool fu
   secondary->setText(secondary_str);
 
   last_banner = banner;
+  error = false;
 
-  setVisible(true);
+  show();
   adjustSize();
+}
+
+void MapInstructions::hideIfNoError() {
+  if (!error) {
+    hide();
+  }
 }
 
 MapETA::MapETA(QWidget * parent) : QWidget(parent) {

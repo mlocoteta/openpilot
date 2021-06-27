@@ -23,6 +23,12 @@ class CarControllerParams():
       self.STEER_DRIVER_FACTOR = 1
 
 
+      self.BOSCH_ACCEL_LOOKUP_BP = [-1., 0., 0.6]
+      self.BOSCH_ACCEL_LOOKUP_V = [-3.5, 0., 2.]
+      self.BOSCH_GAS_LOOKUP_BP = [0., 0.6]
+      self.BOSCH_GAS_LOOKUP_V = [0, 2000]
+
+
 # Car button codes
 class CruiseButtons:
   RES_ACCEL = 4
