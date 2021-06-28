@@ -232,13 +232,12 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate == CAR.ACCORD_NIDEC:
       stop_and_go = False
-      ret.safetyParam = 1 
       ret.mass = 3360. * CV.LB_TO_KG + STD_CARGO_KG
       ret.wheelbase = 2.75
       ret.centerToFront = ret.wheelbase * 0.39
-      ret.steerRatio = 13.23 
+      ret.steerRatio = 16.33
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.135], [0.045]]      
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.24], [0.08]]      
       tire_stiffness_factor = 0.8467
       ret.longitudinalTuning.kpBP = [0., 5., 35.]
       ret.longitudinalTuning.kpV = [1.2, 0.8, 0.5]
