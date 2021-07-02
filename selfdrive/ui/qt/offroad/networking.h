@@ -67,16 +67,13 @@ private:
   QStackedLayout* main_layout = nullptr; // nm_warning, wifiScreen, advanced
   QWidget* wifiScreen = nullptr;
   AdvancedNetworking* an = nullptr;
-  bool ui_setup_complete = false;
   bool show_advanced;
 
   WifiUI* wifiWidget;
   WifiManager* wifi = nullptr;
-  void attemptInitialization();
-  void requestScan();
 
 public slots:
-  void refreshSlot();
+  void refresh();
 
 private slots:
   void connectToNetwork(const Network &n);

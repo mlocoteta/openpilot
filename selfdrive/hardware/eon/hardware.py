@@ -377,3 +377,10 @@ class Android(HardwareBase):
 
   def set_power_save(self, enabled):
     pass
+
+  def get_gpu_usage_percent(self):
+    try:
+      used, total = open('/sys/devices/soc/b00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/gpubusy').read().strip().split()
+      return 100.0 * int(used) / int(total)
+    except Exception:
+      return 0
