@@ -5,10 +5,12 @@ from selfdrive.controls.lib.drive_helpers import rate_limit
 from common.numpy_fast import clip, interp
 from selfdrive.car import create_gas_command
 from selfdrive.car.honda import hondacan
-from selfdrive.car.honda.values import CruiseButtons, CAR, VISUAL_HUD, HONDA_BOSCH, CarControllerParams
+from selfdrive.car.honda.values import CruiseButtons, CAR, VISUAL_HUD, HONDA_BOSCH, CarControllerParams, HONDA_NIDEC_SERIAL_STEERING
 from opendbc.can.packer import CANPacker
+from selfdrive.car import apply_std_steer_torque_limits
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
+
 
 def actuator_hystereses(brake, braking, brake_steady, v_ego, car_fingerprint):
   # hyst params
@@ -129,7 +131,33 @@ class CarController():
 
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
-
+    if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING): #SerialSteering requirs torque blending and limiting before EPS error
+      new_steer = int(round(apply_steer))
+      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
+      self.steer_rate_limited = new_steer != apply_steer 
+    lkas_active = enabled and not CS.steer_not_allowed and CS.lkMode
+    if apply_steer > 229 and False:
+      apply_steer_orig = apply_steer
+      apply_steer = (apply_steer - 229) * 2 + apply_steer
+      if apply_steer > 240:
+        self.apply_steer_over_max_counter += 1
+        if self.apply_steer_over_max_counter > 3:
+          apply_steer = apply_steer_orig
+          self.apply_steer_over_max_counter = 0
+      else:
+        self.apply_steer_over_max_counter = 0
+    elif apply_steer < -229 and False:
+      apply_steer_orig = apply_steer
+      apply_steer = (apply_steer + 229) * 2 + apply_steer
+      if apply_steer < -240:
+        self.apply_steer_over_max_counter+= 1
+        if self.apply_steer_over_max_counter > 3:
+          apply_steer = apply_steer_orig
+          self.apply_steer_over_max_counter = 0
+      else:
+        self.apply_steer_over_max_counter = 0
+    else:
+      self.apply_steer_over_max_counter = 0
     # Send CAN commands.
     can_sends = []
 
@@ -137,6 +165,7 @@ class CarController():
     idx = frame % 4
     can_sends.append(hondacan.create_steering_control(self.packer, apply_steer,
       lkas_active, CS.CP.carFingerprint, idx, CS.CP.isPandaBlackDEPRECATED, CS.CP.openpilotLongitudinalControl))
+    self.apply_steer_last = apply_steer
 
     # Send dashboard UI commands.
     if (frame % 10) == 0:
