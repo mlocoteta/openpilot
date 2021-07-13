@@ -379,7 +379,8 @@ class CarState(CarStateBase):
       self.stock_hud = False
       ret.stockFcw = False
     else:
-      ret.stockFcw = cp_cam.vl["BRAKE_COMMAND"]["FCW"] != 0
+      #ret.stockFcw = cp_cam.vl["BRAKE_COMMAND"]["FCW"] != 0
+      ret.stockFcw = False
       self.stock_hud = cp_cam.vl["ACC_HUD"]
       self.stock_brake = cp_cam.vl["BRAKE_COMMAND"]
 
