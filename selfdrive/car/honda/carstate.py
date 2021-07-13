@@ -304,6 +304,7 @@ class CarState(CarStateBase):
 
     if self.CP.carFingerprint in (HONDA_NIDEC_SERIAL_STEERING):
       self.steer_not_allowed = bool(abs(ret.steeringTorque) > 75)
+    self.brake_switch = cp.vl["POWERTRAIN_DATA"]['BRAKE_SWITCH'] != 0
 
     if self.CP.carFingerprint in HONDA_BOSCH:
       self.cruise_mode = cp.vl["ACC_HUD"]['CRUISE_CONTROL_LABEL']
