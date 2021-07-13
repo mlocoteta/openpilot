@@ -99,18 +99,8 @@ class opParams:
 
     self.fork_params = {'camera_offset': Param(0.06, NUMBER, 'Your camera offset to use in lane_planner.py', live=True),
                         'dynamic_follow': Param('auto', str, static=True, hidden=True),
-                        'eager_accel': Param(False, [bool, int], 'Experimental❗ Combats hysteresis in the cruise control system, braking sooner to eliminate jerking\n'
-                                                                 'Set the param to `1` to use the first method: uses the smoothened derivative of desired accel\n'
-                                                                 'Setting the param to `2` uses the smoothened jerk of acceleration (tighter control/modification)\n'
-                                                                 'Try out both and see which is smoother. False disables this feature (so does True)', live=True),
-                        'accel_eagerness': Param(1.0, NUMBER, 'Multiplier for the acceleration modifier. 1 is full eagerness (default), 0.8 is 80%, etc.', live=True),
-
-                        'accel_time_constant_0_mph': Param(0.01, NUMBER, 'Time constant for eager accel at 0 mph in seconds\n'  # todo: tune using these then remove
-                                                                         'Approaching 0 is no change, the higher it is the more the response\n'
-                                                                         'The defaults are generally okay', live=True),
-                        'accel_time_constant_10_mph': Param(0.1, NUMBER, 'Time constant for eager accel at 10 mph in seconds', live=True),
-                        'accel_time_constant_80_mph': Param(1.0, NUMBER, 'Time constant for eager accel at 80 mph in seconds', live=True),
-
+                        'long_accel_delay': Param(0.4, NUMBER, 'The delay in seconds from requesting acceleration to seeing it\n'
+                                                               'Raise if braking late, lower if braking early. Stock openpilot uses 0.0', live=True),
                         # 'replay_accel': Param(False, bool, 'Set param to True while engaged at 20 mph', live=True),
                         'global_df_mod': Param(1.0, NUMBER, 'The multiplier for the current distance used by dynamic follow. The range is limited from 0.85 to 2.5\n'
                                                             'Smaller values will get you closer, larger will get you farther\n'
@@ -123,8 +113,8 @@ class opParams:
                         # 'lane_speed_alerts': Param('silent', str, 'Can be: (\'off\', \'silent\', \'audible\')\n'
                         #                                           'Whether you want openpilot to alert you of faster-traveling adjacent lanes'),
                         'upload_on_hotspot': Param(False, bool, 'If False, openpilot will not upload driving data while connected to your phone\'s hotspot'),
-                        'enable_long_derivative': Param(False, bool, 'If you have longitudinal overshooting, enable this! This enables derivative-based\n'
-                                                                     'integral wind-down to help reduce overshooting within the long PID loop'),
+                        #'enable_long_derivative': Param(False, bool, 'If you have longitudinal overshooting, enable this! This enables derivative-based\n'
+                        #                                             'integral wind-down to help reduce overshooting within the long PID loop'),
                         'disengage_on_gas': Param(False, bool, 'Whether you want openpilot to disengage on gas input or not'),
                         'update_behavior': Param('auto', str, 'Can be: (\'off\', \'alert\', \'auto\') without quotes\n'
                                                               'off will never update, alert shows an alert on-screen\n'
