@@ -1,3 +1,15 @@
+Branches?
+------
+
+* _**torqueLimits**_ - Base 0.85/0.86, stock without submodule for Accord 2016/2017, some experimentation with driver torque limits
+* _**82shanespektorcoast**_ - Base 0.82, clone of [Aragon777's fork](https://github.com/Aragon7777/openpilot/tree/0.8.2-shane-spektor-coasting). with submodules for 2016/2017 accord
+* **_DP85_** -4 - base 0.85 [dragonpilot](https://github.com/dragonpilot-community/dragonpilot/tree/0.8.5) for 2016/2017 accord
+* _**kegman83SerialSteeringMDX**_ - [kegman](https://github.com/kegman/openpilot) 0.83 with submodules, for 2016/2017 accord and 2017 MDX hybrid
+* _**master**_ - Base 0.85/0.86 with eventual (one day) intent to upstream. submodules are separate.
+
+For daily driving I reccomend 82shanespektorcoast or kegman83SerialSteeringMDX. 
+**Note**: Neither fork is perfect, however, I find that Shane's long tweaks make 82shanespektorcoast more pleasant for daily driving.
+
 [![](https://i.imgur.com/UelUjKAh.png)](#)
 
 Table of Contents
