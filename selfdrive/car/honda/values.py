@@ -46,13 +46,15 @@ VISUAL_HUD = {
   VisualAlert.brakePressed: 10,
   VisualAlert.wrongGear: 6,
   VisualAlert.seatbeltUnbuckled: 5,
-  VisualAlert.speedTooHigh: 8}
+  VisualAlert.speedTooHigh: 8
+}
 
 class CAR:
   ACCORD = "HONDA ACCORD 2018 SPORT 2T"
   ACCORD_15 = "HONDA ACCORD 2018 LX 1.5T"
   ACCORDH = "HONDA ACCORD 2018 HYBRID TOURING"
   ACCORD_NIDEC = "HONDA ACCORD 2016/2017 NIDEC SERIAL STEERING"
+  ACCORD_NIDEC_HYBRID = "HONDA ACCORD HYBRID 2017 NIDEC SERIAL STEERING"
   CIVIC = "HONDA CIVIC 2016 TOURING"
   CIVIC_BOSCH = "HONDA CIVIC HATCHBACK 2017 SEDAN/COUPE 2019"
   CIVIC_BOSCH_DIESEL = "HONDA CIVIC SEDAN 1.6 DIESEL"
@@ -93,6 +95,9 @@ FINGERPRINTS = {
   },
   { 
     57: 3, 145: 8, 316: 8, 342: 6, 344: 8, 380: 8, 398: 3, 401: 8, 420: 8, 422: 8, 426: 8, 432: 7, 464: 8, 476: 4, 487: 4, 490: 8, 506: 8, 507: 1, 513: 6, 521: 8, 542: 7, 545: 4, 597: 8, 660: 8, 661: 4, 773: 7, 777: 8, 780: 8, 800: 8, 804: 8, 808: 8, 829: 5, 871: 8, 882: 2, 884: 8, 891: 8, 892: 8, 918: 7, 923: 2, 927: 8, 929: 8, 983: 8, 985: 3, 1024: 5, 1027: 5, 1029: 8, 1036: 8, 1039: 8, 1057: 5, 1064: 7, 1088: 8, 1089: 8, 1108: 8, 1125: 8, 1296: 3, 1365: 5, 1424: 5, 1600: 5, 1601: 8
+  }],
+  CAR.ACCORD_NIDEC_HYBRID: [{
+    57: 3, 145: 8, 304: 8, 342: 6, 344: 8, 380: 8, 387: 8, 388: 8, 392: 6, 398: 3, 420: 8, 422: 8, 432: 7, 464: 8, 490: 8, 506: 8, 513: 6, 520: 8, 521: 8, 531: 8, 533: 8, 537: 8, 660: 8, 661: 4, 773: 7, 777: 8, 780: 8, 800: 8, 804: 8, 808: 8, 829: 5, 832: 3, 884: 8, 892: 8, 900: 7, 901: 8, 904: 8, 927: 8, 929: 8, 954: 2, 985: 3, 1024: 5, 1027: 5, 1029: 8, 1030: 5, 1036: 8, 1039: 8, 1057: 5, 1108: 8, 1296: 8, 1322: 5, 1341: 5, 1365: 5, 1429: 5, 1600: 5, 1601: 8, 1604: 5, 1605: 8, 1606: 5, 1607: 8, 1608: 5, 1609: 8
   }],
   CAR.ACURA_ILX: [{
     57: 3, 145: 8, 228: 5, 304: 8, 316: 8, 342: 6, 344: 8, 380: 8, 398: 3, 399: 7, 419: 8, 420: 8, 422: 8, 428: 8, 432: 7, 464: 8, 476: 4, 490: 8, 506: 8, 512: 6, 513: 6, 542: 7, 545: 4, 597: 8, 660: 8, 773: 7, 777: 8, 780: 8, 800: 8, 804: 8, 808: 8, 819: 7, 821: 5, 829: 5, 882: 2, 884: 7, 887: 8, 888: 8, 892: 8, 923: 2, 929: 4, 983: 8, 985: 3, 1024: 5, 1027: 5, 1029: 8, 1030: 5, 1034: 5, 1036: 8, 1039: 8, 1057: 5, 1064: 7, 1108: 8, 1365: 5,
@@ -370,7 +375,7 @@ FW_VERSIONS = {
       b'39990-TVA-A150\x00\x00',
     ],
   },
-CAR.ACCORD_NIDEC: {
+  CAR.ACCORD_NIDEC: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-T2F-X840\x00\x00',
     ],
@@ -384,6 +389,23 @@ CAR.ACCORD_NIDEC: {
       b'77959-T2F-A030\x00\x00',
     ],
   }, 
+  CAR.ACCORD_NIDEC_HYBRID: {
+    (Ecu.vsa, 0x18da28f1, None): [
+      b'57114-T3Z-A040\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-T3Z-A830\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-T3Z-A220\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-T3Z-A020\x00\x00',
+    ],
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-T3W-0130\x00\x00',
+    ],
+  },
   CAR.CIVIC: {
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-5AA-A640\x00\x00',
@@ -1115,6 +1137,7 @@ DBC = {
   CAR.ACCORD_15: dbc_dict('honda_accord_lx15t_2018_can_generated', None),
   CAR.ACCORDH: dbc_dict('honda_accord_s2t_2018_can_generated', None),
   CAR.ACCORD_NIDEC: dbc_dict('honda_accord_touring_2016_can', 'acura_ilx_2016_nidec'),  
+  CAR.ACCORD_NIDEC_HYBRID: dbc_dict('honda_accord_touring_hybrid_2017_can', 'acura_ilx_2016_nidec'),  
   CAR.ACURA_ILX: dbc_dict('acura_ilx_2016_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACURA_RDX: dbc_dict('acura_rdx_2018_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACURA_RDX_3G: dbc_dict('acura_rdx_2020_can_generated', None),
@@ -1140,6 +1163,7 @@ STEER_THRESHOLD = {
   CAR.ACCORD_15: 1200,
   CAR.ACCORDH: 1200,
   CAR.ACCORD_NIDEC: 25,
+  CAR.ACCORD_NIDEC_HYBRID: 25,
   CAR.ACURA_ILX: 1200,
   CAR.ACURA_RDX: 400,
   CAR.ACURA_RDX_3G: 1200,
@@ -1165,6 +1189,7 @@ SPEED_FACTOR = {
   CAR.ACCORD_15: 1.,
   CAR.ACCORDH: 1.,
   CAR.ACCORD_NIDEC: 1.,
+  CAR.ACCORD_NIDEC_HYBRID: 1.,
   CAR.ACURA_ILX: 1.,
   CAR.ACURA_RDX: 1.,
   CAR.ACURA_RDX_3G: 1.,
@@ -1192,4 +1217,4 @@ ECU_FINGERPRINT = {
 }
 
 HONDA_BOSCH = set([CAR.ACCORD, CAR.ACCORD_15, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_5G, CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G])
-HONDA_NIDEC_SERIAL_STEERING = set([CAR.ACCORD_NIDEC])
+HONDA_NIDEC_SERIAL_STEERING = set([CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID])
