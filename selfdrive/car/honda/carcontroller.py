@@ -139,7 +139,7 @@ class CarController():
 #      self.steer_rate_limited = new_steer != apply_steer 
     if apply_steer > 229:
       apply_steer_orig = apply_steer
-      apply_steer = (apply_steer - 232) * 2 + apply_steer
+      apply_steer = (apply_steer - 233) * 2 + apply_steer
       if apply_steer > 240:
         self.apply_steer_over_max_counter += 1
         if self.apply_steer_over_max_counter > 3:
@@ -149,7 +149,7 @@ class CarController():
         self.apply_steer_over_max_counter = 0
     elif apply_steer < -229:
       apply_steer_orig = apply_steer
-      apply_steer = (apply_steer + 232) * 2 + apply_steer
+      apply_steer = (apply_steer + 233) * 2 + apply_steer
       if apply_steer < -240:
         self.apply_steer_over_max_counter+= 1
         if self.apply_steer_over_max_counter > 3:
