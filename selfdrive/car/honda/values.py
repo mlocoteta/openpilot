@@ -401,7 +401,7 @@ FW_VERSIONS = {
     (Ecu.gateway, 0x18DAEFF1, None): [
       b'38897-T3W-0130\x00\x00',
     ],
-  }.
+  },
   CAR.CIVIC: {
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-5AA-A640\x00\x00',
