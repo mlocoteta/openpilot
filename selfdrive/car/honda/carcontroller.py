@@ -132,7 +132,7 @@ class CarController():
 
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
-    if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING): #SerialSteering requirs torque blending and limiting before EPS error
+#    if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING): #SerialSteering requirs torque blending and limiting before EPS error
 #      new_steer = int(round(apply_steer))
 #      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
 #      self.steer_rate_limited = new_steer != apply_steer 
