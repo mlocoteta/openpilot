@@ -139,7 +139,7 @@ class CarController():
 #      self.steer_rate_limited = new_steer != apply_steer 
     if apply_steer > 229:
       apply_steer_orig = apply_steer
-      apply_steer = (apply_steer - 229) * 2 + apply_steer
+      apply_steer = (apply_steer - 230) * 2 + apply_steer
       if apply_steer > 240:
         self.apply_steer_over_max_counter += 1
         if self.apply_steer_over_max_counter > 3:
@@ -149,7 +149,7 @@ class CarController():
         self.apply_steer_over_max_counter = 0
     elif apply_steer < -229:
       apply_steer_orig = apply_steer
-      apply_steer = (apply_steer + 229) * 2 + apply_steer
+      apply_steer = (apply_steer + 230) * 2 + apply_steer
       if apply_steer < -240:
         self.apply_steer_over_max_counter+= 1
         if self.apply_steer_over_max_counter > 3:
@@ -161,13 +161,12 @@ class CarController():
       self.apply_steer_over_max_counter = 0
   # Send CAN commands.
     can_sends = []
-
+    print(apply_steer)
     # Send steering command.
     idx = frame % 4
     can_sends.append(hondacan.create_steering_control(self.packer, apply_steer,
       lkas_active, CS.CP.carFingerprint, idx, CS.CP.isPandaBlackDEPRECATED, CS.CP.openpilotLongitudinalControl))
     self.apply_steer_last = apply_steer
-
     # Send dashboard UI commands.
     if (frame % 10) == 0:
       idx = (frame//10) % 4
