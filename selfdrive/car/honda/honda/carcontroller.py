@@ -5,7 +5,7 @@ from selfdrive.controls.lib.drive_helpers import rate_limit
 from common.numpy_fast import clip, interp
 from selfdrive.car import create_gas_command
 from selfdrive.car.honda import hondacan
-from selfdrive.car.honda.values import CruiseButtons, CAR, VISUAL_HUD, HONDA_BOSCH, CarControllerParams, HONDA_NIDEC_SERIAL_STEERING
+from selfdrive.car.honda.values import CruiseButtons, CAR, HONDA_NIDEC_SERIAL_STEERING, VISUAL_HUD, HONDA_BOSCH, CarControllerParams
 from opendbc.can.packer import CANPacker
 from selfdrive.car import apply_std_steer_torque_limits
 
@@ -64,7 +64,7 @@ def process_hud_alert(hud_alert):
   # priority is: FCW, steer required, all others
   if hud_alert == VisualAlert.fcw:
     fcw_display = VISUAL_HUD[hud_alert.raw]
-  elif hud_alert == VisualAlert.steerRequired:
+  elif hud_alert in [VisualAlert.steerRequired, VisualAlert.ldw]:
     steer_required = VISUAL_HUD[hud_alert.raw]
   else:
     acc_alert = VISUAL_HUD[hud_alert.raw]
@@ -74,7 +74,7 @@ def process_hud_alert(hud_alert):
 
 HUDData = namedtuple("HUDData",
                      ["pcm_accel", "v_cruise",  "car",
-                     "lanes", "fcw", "acc_alert", "steer_required", "dashed_lanes"])
+                     "lanes", "fcw", "acc_alert", "steer_required"])
 
 
 class CarController():
@@ -82,7 +82,6 @@ class CarController():
     self.braking = False
     self.brake_steady = 0.
     self.brake_last = 0.
-    self.signal_last = 0.
     self.apply_brake_last = 0
     self.last_pump_ts = 0.
     self.packer = CANPacker(dbc_name)
@@ -105,10 +104,20 @@ class CarController():
       # send pcm acc cancel cmd if drive is disabled but pcm is still on, or if the system can't be activated
       pcm_cancel_cmd = True
 
+    # Never send cancel command if we never enter cruise state (no cruise if pedal)
+    # Cancel cmd causes brakes to release at a standstill causing grinding
+    pcm_cancel_cmd = pcm_cancel_cmd and CS.CP.enableCruise
+
     # *** rate limit after the enable check ***
     self.brake_last = rate_limit(brake, self.brake_last, -2., DT_CTRL)
 
-    if enabled and CS.out.cruiseState.enabled:
+    # vehicle hud display, wait for one update from 10Hz 0x304 msg
+    if hud_show_lanes:
+      hud_lanes = 1
+    else:
+      hud_lanes = 0
+
+    if enabled:
       if hud_show_car:
         hud_car = 2
       else:
@@ -118,24 +127,17 @@ class CarController():
 
     fcw_display, steer_required, acc_alert = process_hud_alert(hud_alert)
 
-    cur_time = frame * DT_CTRL
-    if (CS.leftBlinkerOn or CS.rightBlinkerOn):
-      self.signal_last = cur_time
-    
-    lkas_active = enabled and not CS.steer_not_allowed and CS.lkasEnabled and ((CS.automaticLaneChange and not CS.belowLaneChangeSpeed) or ((not ((cur_time - self.signal_last) < 2) or not CS.belowLaneChangeSpeed) and not (CS.leftBlinkerOn or CS.rightBlinkerOn)))
-    
-    enabled and CS.out.cruiseState.enabled
-    hud = HUDData(int(pcm_accel), (int(round(hud_v_cruise)) if hud_car != 0 else 255), hud_car,
-                  hud_show_lanes and lkas_active, fcw_display, acc_alert, steer_required, CS.lkasEnabled and not lkas_active)
+    hud = HUDData(int(pcm_accel), int(round(hud_v_cruise)), hud_car,
+                  hud_lanes, fcw_display, acc_alert, steer_required)
 
     # **** process the car messages ****
-
-    # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
+    # steer torque is converted back to CAN reference (positive when steering right)
     if(CS.CP.carFingerprint in HONDA_NIDEC_SERIAL_STEERING): #SerialSteering requirs torque blending and limiting before EPS error
-#      new_steer = int(round(apply_steer))
-#      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
-#      self.steer_rate_limited = new_steer != apply_steer 
+      new_steer = int(round(apply_steer))
+      apply_steer = apply_std_steer_torque_limits(new_steer, self.apply_steer_last, CS.out.steeringTorque, self.params)
+      self.steer_rate_limited = new_steer != apply_steer 
+    lkas_active = enabled and not CS.steer_not_allowed and CS.lkMode
     if apply_steer > 229 and False:
       apply_steer_orig = apply_steer
       apply_steer = (apply_steer - 229) * 2 + apply_steer
@@ -158,29 +160,35 @@ class CarController():
         self.apply_steer_over_max_counter = 0
     else:
       self.apply_steer_over_max_counter = 0
-  # Send CAN commands.
+    # Send CAN commands.
     can_sends = []
+
+    # tester present - w/ no response (keeps radar disabled)
+    if CS.CP.carFingerprint in HONDA_BOSCH and CS.CP.openpilotLongitudinalControl:
+      if (frame % 10) == 0:
+        can_sends.append((0x18DAB0F1, 0, b"\x02\x3E\x80\x00\x00\x00\x00\x00", 1))
 
     # Send steering command.
     idx = frame % 4
     can_sends.append(hondacan.create_steering_control(self.packer, apply_steer,
-      lkas_active, CS.CP.carFingerprint, idx, CS.CP.isPandaBlackDEPRECATED, CS.CP.openpilotLongitudinalControl))
+      lkas_active, CS.CP.carFingerprint, idx, CS.CP.openpilotLongitudinalControl))
+      
     self.apply_steer_last = apply_steer
 
     # Send dashboard UI commands.
     if (frame % 10) == 0:
       idx = (frame//10) % 4
-      can_sends.extend(hondacan.create_ui_commands(self.packer, pcm_speed, hud, CS.CP.carFingerprint, CS.is_metric, idx, CS.CP.isPandaBlackDEPRECATED, CS.CP.openpilotLongitudinalControl, CS.stock_hud))
+      can_sends.extend(hondacan.create_ui_commands(self.packer, pcm_speed, hud, CS.CP.carFingerprint, CS.is_metric, idx, CS.CP.openpilotLongitudinalControl, CS.stock_hud))
 
     if not CS.CP.openpilotLongitudinalControl:
       if (frame % 2) == 0:
         idx = frame // 2
-        can_sends.append(hondacan.create_bosch_supplemental_1(self.packer, CS.CP.carFingerprint, idx, CS.CP.isPandaBlackDEPRECATED))
+        can_sends.append(hondacan.create_bosch_supplemental_1(self.packer, CS.CP.carFingerprint, idx))
       # If using stock ACC, spam cancel command to kill gas when OP disengages.
       if pcm_cancel_cmd:
-        can_sends.append(hondacan.spam_buttons_command(self.packer, CruiseButtons.CANCEL, idx, CS.CP.carFingerprint, CS.CP.isPandaBlackDEPRECATED))
+        can_sends.append(hondacan.spam_buttons_command(self.packer, CruiseButtons.CANCEL, idx, CS.CP.carFingerprint))
       elif CS.out.cruiseState.standstill:
-        can_sends.append(hondacan.spam_buttons_command(self.packer, CruiseButtons.RES_ACCEL, idx, CS.CP.carFingerprint, CS.CP.isPandaBlackDEPRECATED))
+        can_sends.append(hondacan.spam_buttons_command(self.packer, CruiseButtons.RES_ACCEL, idx, CS.CP.carFingerprint))
 
     else:
       # Send gas and brake commands.
@@ -188,17 +196,25 @@ class CarController():
         idx = frame // 2
         ts = frame * DT_CTRL
         if CS.CP.carFingerprint in HONDA_BOSCH:
-          pass # TODO: implement
+          accel = actuators.gas - actuators.brake
+
+          # TODO: pass in LoC.long_control_state and use that to decide starting/stoppping
+          stopping = accel < 0 and CS.out.vEgo < 0.3
+          starting = accel > 0 and CS.out.vEgo < 0.3
+
+          # Prevent rolling backwards
+          accel = -1.0 if stopping else accel
+
+          apply_accel = interp(accel, P.BOSCH_ACCEL_LOOKUP_BP, P.BOSCH_ACCEL_LOOKUP_V)
+          apply_gas = interp(accel, P.BOSCH_GAS_LOOKUP_BP, P.BOSCH_GAS_LOOKUP_V)
+          can_sends.extend(hondacan.create_acc_commands(self.packer, enabled, apply_accel, apply_gas, idx, stopping, starting, CS.CP.carFingerprint))
+
         else:
-          apply_gas = clip(actuators.gas, 0., 1.) ** 1.2
-          if not CS.out.cruiseState.enabled:
-            apply_gas = 0.
+          apply_gas = clip(actuators.gas, 0., 1.)
           apply_brake = int(clip(self.brake_last * P.BRAKE_MAX, 0, P.BRAKE_MAX - 1))
-          if not CS.out.cruiseState.enabled:
-            apply_brake = 0
           pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
           can_sends.append(hondacan.create_brake_command(self.packer, apply_brake, pump_on,
-            pcm_override, pcm_cancel_cmd, hud.fcw, idx, CS.CP.carFingerprint, CS.CP.isPandaBlackDEPRECATED, CS.stock_brake))
+            pcm_override, pcm_cancel_cmd, hud.fcw, idx, CS.CP.carFingerprint, CS.stock_brake))
           self.apply_brake_last = apply_brake
 
           if CS.CP.enableGasInterceptor:
