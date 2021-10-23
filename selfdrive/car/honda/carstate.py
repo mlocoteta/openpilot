@@ -74,7 +74,7 @@ def get_can_signals(CP, gearbox_msg="GEARBOX"):
       ("STEER_STATUS", 100)
     ]
 
-  if CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID):
+  if CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID, CAR.V6ACCORD_NIDEC):
     checks += [
       ("SCM_FEEDBACK", 25),
       ("SCM_BUTTONS", 50),
@@ -124,7 +124,7 @@ def get_can_signals(CP, gearbox_msg="GEARBOX"):
     signals += [("CRUISE_SPEED_PCM", "CRUISE", 0),
                 ("CRUISE_SPEED_OFFSET", "CRUISE_PARAMS", 0)]
 
-    if CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID):
+    if CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID, CAR.V6ACCORD_NIDEC):
       checks += [("CRUISE_PARAMS", 10)]
     else:
       checks += [("CRUISE_PARAMS", 50)]
@@ -195,7 +195,7 @@ def get_can_signals(CP, gearbox_msg="GEARBOX"):
     signals += [("MAIN_ON", "SCM_BUTTONS", 0),
                 ("EPB_STATE", "EPB_STATUS", 0)]
     checks += [("EPB_STATUS", 50)]
-  elif CP.carFingerprint in (CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID):
+  elif CP.carFingerprint in (CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.V6ACCORD_NIDEC):
     signals += [("MAIN_ON", "SCM_BUTTONS", 0),
                 ("CAR_GAS", "GAS_PEDAL", 0)]
     checks += [("GAS_PEDAL", 100)]
@@ -329,7 +329,7 @@ class CarState(CarStateBase):
 
     self.pedal_gas = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"]
     # crv doesn't include cruise control
-    if self.CP.carFingerprint in (CAR.CRV, CAR.CRV_EU, CAR.HRV, CAR.ODYSSEY, CAR.ACURA_RDX, CAR.RIDGELINE, CAR.PILOT_2019, CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID):
+    if self.CP.carFingerprint in (CAR.CRV, CAR.CRV_EU, CAR.HRV, CAR.ODYSSEY, CAR.ACURA_RDX, CAR.RIDGELINE, CAR.PILOT_2019, CAR.ODYSSEY_CHN, CAR.ACCORD_NIDEC, CAR.V6ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID):
       ret.gas = self.pedal_gas / 256.
     else:
       ret.gas = cp.vl["GAS_PEDAL_2"]["CAR_GAS"] / 256.
@@ -446,7 +446,7 @@ class CarState(CarStateBase):
       if (self.automaticLaneChange and not self.belowLaneChangeSpeed and (self.rightBlinkerOn or self.leftBlinkerOn)) or not (self.rightBlinkerOn or self.leftBlinkerOn):
         ret.steerWarning = steer_status not in ["NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2"]
     # User steering input above a certain threshold should cancel computer steering temporarily
-    if self.CP.carFingerprint in (CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID):
+    if self.CP.carFingerprint in (CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.ACURA_MDX_HYBRID, CAR.V6ACCORD_NIDEC):
       self.steer_not_allowed = True if bool(abs(ret.steeringTorque) >= 60) else self.steer_not_allowed
       self.steer_torque_limited = True if bool(abs(ret.steeringTorque) >= 60) else self.steer_torque_limited
 
