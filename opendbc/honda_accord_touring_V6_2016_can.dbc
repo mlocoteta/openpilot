@@ -91,8 +91,8 @@ BO_ 380 POWERTRAIN_DATA: 8 PCM
  SG_ CHECKSUM : 59|4@0+ (1,0) [0|3] "" NEO
 
 BO_ 392 GEARBOX: 6 PCM
- SG_ GEAR_SHIFTER : 5|6@0+ (1,0) [0|63] "" NEO
- SG_ GEAR : 35|4@0+ (1,0) [0|15] "" NEO
+ SG_ GEAR : 5|6@0+ (1,0) [0|63] "" NEO
+ SG_ GEAR_SHIFTER : 35|4@0+ (1,0) [0|15] "" NEO
  SG_ COUNTER : 45|2@0+ (1,0) [0|3] "" NEO
  SG_ CHECKSUM : 43|4@0+ (1,0) [0|15] "" NEO
 
