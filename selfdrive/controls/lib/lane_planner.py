@@ -1,3 +1,4 @@
+from common.numpy_fast import interp, clip
 import numpy as np
 from cereal import log
 from common.filter_simple import FirstOrderFilter
@@ -5,19 +6,18 @@ from common.numpy_fast import interp
 from common.realtime import DT_MDL
 from selfdrive.hardware import EON, TICI
 from selfdrive.swaglog import cloudlog
+from common.op_params import opParams
 
 
 TRAJECTORY_SIZE = 33
-# camera offset is meters from center car to camera
+# model path is 0.06 m left of car center
+MODEL_PATH_OFFSET = 0.06
 if EON:
   CAMERA_OFFSET = 0.06
-  PATH_OFFSET = 0.0
 elif TICI:
   CAMERA_OFFSET = -0.04
-  PATH_OFFSET = -0.04
 else:
   CAMERA_OFFSET = 0.0
-  PATH_OFFSET = 0.0
 
 
 class LanePlanner:
@@ -41,10 +41,13 @@ class LanePlanner:
     self.r_lane_change_prob = 0.
 
     self.camera_offset = -CAMERA_OFFSET if wide_camera else CAMERA_OFFSET
-    self.path_offset = -PATH_OFFSET if wide_camera else PATH_OFFSET
+    self.path_offset = self.camera_offset - MODEL_PATH_OFFSET
 
   def parse_model(self, md):
     if len(md.laneLines) == 4 and len(md.laneLines[0].t) == TRAJECTORY_SIZE:
+      self.camera_offset = clip(-0.04 if TICI else 0.06, -0.5, 0.5)  # update camera offset
+      self.path_offset = self.camera_offset - MODEL_PATH_OFFSET
+
       self.ll_t = (np.array(md.laneLines[1].t) + np.array(md.laneLines[2].t))/2
       # left and right ll x is the same
       self.ll_x = md.laneLines[1].x
@@ -101,3 +104,4 @@ class LanePlanner:
     else:
       cloudlog.warning("Lateral mpc - NaNs in laneline times, ignoring")
     return path_xyz
+    

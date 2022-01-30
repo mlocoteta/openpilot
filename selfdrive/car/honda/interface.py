@@ -251,8 +251,9 @@ class CarInterface(CarInterfaceBase):
       ret.centerToFront = ret.wheelbase * 0.39
       ret.steerRatio = 13.66 # 13.37 is spec
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.28], [0.06]]      
-      ret.lateralTuning.pid.kf = 0.000025
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.25], [0.06]]      
+      ret.lateralTuning.pid.kf = 2e-7
+      ret.steerActuatorDelay = 0.425
       tire_stiffness_factor = 0.8467
 
     elif candidate == CAR.ACURA_MDX_HYBRID:
