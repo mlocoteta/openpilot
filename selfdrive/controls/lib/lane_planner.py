@@ -6,7 +6,6 @@ from common.numpy_fast import interp
 from common.realtime import DT_MDL
 from selfdrive.hardware import EON, TICI
 from selfdrive.swaglog import cloudlog
-from common.op_params import opParams
 
 
 TRAJECTORY_SIZE = 33
