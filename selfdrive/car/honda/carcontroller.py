@@ -7,6 +7,7 @@ from selfdrive.car import create_gas_interceptor_command, apply_std_steer_torque
 from selfdrive.car.honda import hondacan
 from selfdrive.car.honda.values import CruiseButtons, VISUAL_HUD, HONDA_BOSCH, HONDA_NIDEC_ALT_PCM_ACCEL, CarControllerParams, SERIAL_STEERING, LKAS_LIMITS
 from opendbc.can.packer import CANPacker
+from common.op_params import opParams, STOCK_DELTA_DOWN, STOCK_DELTA_UP, STOCK_STEER_MAX
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 LongCtrlState = car.CarControl.Actuators.LongControlState
@@ -97,7 +98,7 @@ HUDData = namedtuple("HUDData",
 
 
 class CarController():
-  def __init__(self, dbc_name, CP, VM):
+  def __init__(self, dbc_name, CP, VM, OP=None):
     self.braking = False
     self.brake_steady = 0.
     self.brake_last = 0.
@@ -111,13 +112,18 @@ class CarController():
     self.gas = 0
     self.brake = 0
 
+    if not OP:
+      OP = opParams()
+    self.op_params = OP
     self.params = CarControllerParams(CP)
 
   def update(self, enabled, active, CS, frame, actuators, pcm_cancel_cmd,
              hud_v_cruise, hud_show_lanes, hud_show_car, hud_alert):
 
     P = self.params
-
+    LKAS_LIMITS.STEER_DELTA_UP = self.op_params.get(STOCK_DELTA_UP)
+    LKAS_LIMITS.STEER_DELTA_DOWN = self.op_params.get(STOCK_DELTA_DOWN)
+    LKAS_LIMITS.STEER_MAX = self.op_params.get(STOCK_STEER_MAX)
     if active:
       accel = actuators.accel
       gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo, CS.CP.carFingerprint)

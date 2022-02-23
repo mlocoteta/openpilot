@@ -83,3 +83,4 @@ models/*.thneed
 build/
 
 !**/.gitkeep
+.lfsconfig
