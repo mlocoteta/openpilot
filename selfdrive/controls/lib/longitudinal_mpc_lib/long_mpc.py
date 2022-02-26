@@ -51,7 +51,7 @@ T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 MIN_ACCEL = -3.5
 T_FOLLOW = 1.45
 COMFORT_BRAKE = 2.5
-STOP_DISTANCE = 5.5
+STOP_DISTANCE = 5.75
 
 def get_stopped_equivalence_factor(v_lead, v_ego, t_follow=T_FOLLOW):
   # KRKeegan this offset rapidly decreases the following distance when the lead pulls
@@ -230,14 +230,14 @@ class LongitudinalMpc:
     self.x0 = np.zeros(X_DIM)
     self.set_weights()
 
-  def set_weights(self, prev_accel_constraint=True):
+  def set_weights(self):
     if self.e2e:
       self.set_weights_for_xva_policy()
       self.params[:,0] = -10.
       self.params[:,1] = 10.
       self.params[:,2] = 1e5
     else:
-      self.set_weights_for_lead_policy(prev_accel_constraint)
+      self.set_weights_for_lead_policy()
 
   def get_cost_multipliers(self):
     v_ego = self.x0[1]
@@ -337,7 +337,7 @@ class LongitudinalMpc:
       # At slow speeds more time, decrease time up to 60mph
       # in mph ~= 5     10   15   20  25     30    35     40  45     50    55     60  65     70    75     80  85     90
       x_vel = [0, 2.25, 4.5, 6.75, 9, 11.25, 13.5, 15.75, 18, 20.25, 22.5, 24.75, 27, 29.25, 31.5, 33.75, 36, 38.25, 40.5]
-      y_dist = [1.25, 1.24, 1.24, 1.23, 1.22, 1.21, 1.18, 1.16, 1.13, 1.11, 1.09, 1.07, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05]
+      y_dist = [1.25, 1.25, 1.25, 1.24, 1.23, 1.22, 1.18, 1.16, 1.13, 1.11, 1.09, 1.07, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05]
       self.desired_TF = np.interp(carstate.vEgo, x_vel, y_dist)
     elif carstate.distanceLines == 2: # Relaxed
       self.desired_TF = 1.25
@@ -348,6 +348,7 @@ class LongitudinalMpc:
     self.update_TF(carstate)
     self.set_weights()
     v_ego = self.x0[1]
+    a_ego = self.x0[2]
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
