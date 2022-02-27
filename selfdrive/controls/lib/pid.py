@@ -1,6 +1,6 @@
 import numpy as np
 from numbers import Number
-from common.op_params import opParams
+from common.op_params import opParams, LONG_KP_BP, LONG_KP_V, LONG_KI_BP, LONG_KI_V
 from common.numpy_fast import clip, interp
 
 def apply_deadzone(error, deadzone):
@@ -44,6 +44,10 @@ class PIController():
     self._k_p = (self.op_params.get(self.pidList[0][0]), self.op_params.get(self.pidList[0][1]))
     self._k_i = (self.op_params.get(self.pidList[1][0]), self.op_params.get(self.pidList[1][1]))
     self.k_f = self.op_params.get(self.pidList[2])
+  
+  def update_long(self):
+    self._k_p = (self.op_params.get(LONG_KP_BP), self.op_params.get(LONG_KP_V))
+    self._k_i = (self.op_params.get(LONG_KI_BP), self.op_params.get(LONG_KI_V))
 
   @property
   def k_p(self):
@@ -62,6 +66,8 @@ class PIController():
   def update(self, setpoint, measurement, speed=0.0, override=False, feedforward=0., deadzone=0., freeze_integrator=False):
     if(self.is_lateral):
       self._update_params()
+    else:
+      self.update_long()
     self.speed = speed
 
     error = float(apply_deadzone(setpoint - measurement, deadzone))

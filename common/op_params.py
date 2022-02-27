@@ -160,18 +160,25 @@ class opParams:
 
     VT = ValueTypes()
     self.fork_params = {
-                        LAT_KP_BP: Param([0., 35.,], [list, float, int], live=True),
-                        LAT_KP_V: Param([0.28, 0.28], [list, float, int], live=True),
-                        LAT_KI_BP: Param([0.,35], [list, float, int], live=True),
-                        LAT_KI_V: Param([0.06, 0.06], [list, float, int], live=True),
-                        LAT_KF: Param(6e-6, VT.number, live=True),
+                        SHOW_LONG_PID: Param(False, [bool], live=True),
+                        LONG_KP_BP: Param([0., 5., 35.,], [list, float, int], live=SHOW_LONG_PID),
+                        LONG_KP_V: Param([1.2, 0.8, 0.5], [list, float, int], live=SHOW_LONG_PID),
+                        LONG_KI_BP: Param([0.,35], [list, float, int], live=SHOW_LONG_PID),
+                        LONG_KI_V: Param([0.18, 0.12], [list, float, int], live=SHOW_LONG_PID),
+
+                        SHOW_LAT_PID: Param(False, [bool], live=True),
+                        LAT_KP_BP: Param([0., 35.,], [list, float, int], live=True, depends_on=SHOW_LAT_PID),
+                        LAT_KP_V: Param([0.28, 0.28], [list, float, int], live=True, depends_on=SHOW_LAT_PID),
+                        LAT_KI_BP: Param([0.,35], [list, float, int], live=True, depends_on=SHOW_LAT_PID),
+                        LAT_KI_V: Param([0.06, 0.06], [list, float, int], live=True, depends_on=SHOW_LAT_PID),
+                        LAT_KF: Param(6e-6, VT.number, live=True, depends_on=SHOW_LAT_PID),
                         
                         SHOW_RATE_PARAMS: Param(False, [bool], live=True),
                         ENABLE_RATE_PARAMS: Param(False, [bool], live=True, depends_on=SHOW_RATE_PARAMS),
                         STOCK_DELTA_UP: Param(238, VT.number, live=True ,depends_on=SHOW_RATE_PARAMS),
                         STOCK_DELTA_DOWN: Param(238, VT.number, live=True ,depends_on=SHOW_RATE_PARAMS),
                         STOCK_STEER_MAX: Param(238, VT.number, live=True ,depends_on=SHOW_RATE_PARAMS),
-		                  	STEER_ACT_DELAY: Param(0.1, VT.number, live=True)
+                        STEER_ACT_DELAY: Param(0.1, VT.number, live=True)
 }
 
     self._params_file = '/data/op_params.json'
@@ -316,11 +323,18 @@ class opParams:
 SHOW_INDI_PARAMS = 'show_indi_params'
 ENABLE_INDI_BREAKPOINTS = 'enable_indi_breakpoints'
 
+SHOW_LAT_PID = 'show_lat_pid'
 LAT_KP_BP = 'lat_kp_bp'
 LAT_KP_V = 'lat_kp_v'
 LAT_KI_BP = 'lat_ki_bp'
 LAT_KI_V = 'lat_ki_v'
 LAT_KF = 'lat_kf'
+
+SHOW_LONG_PID = 'show_long_pid'
+LONG_KP_BP = 'long_kp_bp'
+LONG_KP_V = 'long_kp_v'
+LONG_KI_BP = 'long_ki_bp'
+LONG_KI_V = 'long_ki_v'
 
 SHOW_RATE_PARAMS = 'show_rate_params'
 ENABLE_RATE_PARAMS = 'enable_rate_params'

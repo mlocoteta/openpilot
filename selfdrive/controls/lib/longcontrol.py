@@ -4,6 +4,7 @@ from common.realtime import DT_CTRL
 from selfdrive.controls.lib.pid import PIController
 from selfdrive.controls.lib.drive_helpers import CONTROL_N
 from selfdrive.modeld.constants import T_IDXS
+from common.op_params import opParams, LONG_KP_BP, LONG_KP_V, LONG_KI_BP, LONG_KI_V
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
@@ -40,10 +41,13 @@ def long_control_state_trans(CP, active, long_control_state, v_ego, v_target_fut
 
 
 class LongControl():
-  def __init__(self, CP):
+  def __init__(self, CP, OP=None):
     self.long_control_state = LongCtrlState.off  # initialized to off
-    self.pid = PIController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
-                            (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
+    if OP is None:
+      OP = opParams()
+    self.op_params = OP
+    self.pid = PIController((self.op_params.get(LONG_KP_BP), self.op_params.get(LONG_KP_V)),
+                            (self.op_params.get(LONG_KI_BP), self.op_params.get(LONG_KI_V)),
                             k_f = CP.longitudinalTuning.kf, rate=1 / DT_CTRL)
     self.v_pid = 0.0
     self.last_output_accel = 0.0
