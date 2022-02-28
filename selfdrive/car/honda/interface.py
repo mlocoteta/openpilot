@@ -236,10 +236,13 @@ class CarInterface(CarInterfaceBase):
       ret.centerToFront = ret.wheelbase * 0.39
       ret.steerRatio = 13.66 # 13.37 is spec
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.25], [0.06]]      
-      ret.lateralTuning.pid.kf = 2e-8
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.3], [0.1]]      
+      ret.lateralTuning.pid.kf = 8e-6
       tire_stiffness_factor = 0.8467
-      ret.steerActuatorDelay - 0.425
+      ret.longitudinalTuning.kpBP = [0., 5., 35.]
+      ret.longitudinalTuning.kpV = [2.2, 1.7, 1.2]
+      ret.longitudinalTuning.kiBP = [0., 35.]
+      ret.longitudinalTuning.kiV = [0.3, 0.18]
 
     elif candidate == CAR.ACURA_MDX_HYBRID:
       stop_and_go = False
@@ -249,7 +252,6 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 15.66  # as spec
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
       tire_stiffness_factor = 0.444
-      ret.steerActuatorDelay = 0.3
       ret.lateralTuning.pid.kf = 0.000040
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.135], [0.062]]
 
@@ -344,6 +346,9 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.1
     ret.steerRateCost = 0.5
     ret.steerLimitTimer = 0.8
+
+    if candidate in (CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.V6ACCORD_NIDEC, CAR.ACURA_MDX_HYBRID):
+      ret.steerActuatorDelay = 0.25
 
     return ret
 
