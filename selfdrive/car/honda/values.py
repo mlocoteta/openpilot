@@ -1170,40 +1170,49 @@ FW_VERSIONS = {
       b'57114-TGS-A530\x00\x00',
     ],
   },
- # CAR.ACURA_MDX_HYBRID: {
- #   (Ecu.shiftByWire, 0x18DA0BF1, None): [
- #     b'54008-TZ5-A710\x00\x00',
- #   ],
- #   (Ecu.gateway, 0x18DA1EF1, None): [
- #     b'28101-5NB-A660\x00\x00',
- #   ],
- #   (Ecu.hud, 0x416961521, None): [
- #     b'77959-TZ5-A110\x00\x00',
- #   ],
- #   (Ecu.apgs, 0x18DA60F1, None): [
- #     b'78109-TZ5-A610\x00\x00',
- #   ],
- # },
-  CAR.ACURA_RDX: {
-    (Ecu.vsa, 0x18da28f1, None): [
-      b'57114-TX5-A220\x00\x00',
-      b'57114-TX4-A220\x00\x00',
+CAR.ACURA_RDX: {
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-TY3-A020\x00\x00',
     ],
-    (Ecu.fwdCamera, 0x18dab0f1, None): [
-      b'36161-TX5-A030\x00\x00',
-      b'36161-TX4-A030\x00\x00',
+    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+      b'54008-TY3-J010\x00\x00',
     ],
-    (Ecu.srs, 0x18da53f1, None): [
-      b'77959-TX4-C010\x00\x00',
-      b'77959-TX4-B010\x00\x00',
-      b'77959-TX4-C020\x00\x00',
+    (Ecu.fwdRadar, 0x416985329, None): [
+      b'36161-TY3-A030\x00\x00',
     ],
-    (Ecu.combinationMeter, 0x18da60f1, None): [
-      b'78109-TX5-A310\x00\x00',
-      b'78109-TX4-A210\x00\x00',
-      b'78109-TX4-A310\x00\x00',
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-TY3-L130\x00\x00',
+    ],
+    (Ecu.hud, 0x18DA61F1, None): [
+      b'78209-TY3-A110\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-TY3-A050\x00\x00',
+    ],
+    (Ecu.eps, 0x18DA30F1, None): [
+      b'39990-TY3-J040\x00\x00',
     ],
   },
+#  CAR.ACURA_RDX: {
+#    (Ecu.vsa, 0x18da28f1, None): [
+#      b'57114-TX5-A220\x00\x00',
+#      b'57114-TX4-A220\x00\x00',
+#    ],
+#    (Ecu.fwdCamera, 0x18dab0f1, None): [
+#      b'36161-TX5-A030\x00\x00',
+#      b'36161-TX4-A030\x00\x00',
+#    ],
+#    (Ecu.srs, 0x18da53f1, None): [
+#      b'77959-TX4-C010\x00\x00',
+#      b'77959-TX4-B010\x00\x00',
+#      b'77959-TX4-C020\x00\x00',
+#    ],
+#    (Ecu.combinationMeter, 0x18da60f1, None): [
+#      b'78109-TX5-A310\x00\x00',
+#      b'78109-TX4-A210\x00\x00',
+#      b'78109-TX4-A310\x00\x00',
+#    ],
+#  },
   CAR.ACURA_RDX_3G: {
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-5YF-A130\x00\x00',
