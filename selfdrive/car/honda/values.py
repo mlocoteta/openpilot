@@ -1171,25 +1171,25 @@ FW_VERSIONS = {
     ],
   },
 CAR.ACURA_RDX: {
-    (Ecu.gateway, 0x18DAEFF1, None): [
+    (Ecu.gateway, 0x18daeff1, None): [
       b'38897-TY3-A020\x00\x00',
     ],
-    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+    (Ecu.shiftByWire, 0x18da0bf1, None): [
       b'54008-TY3-J010\x00\x00',
     ],
-    (Ecu.fwdRadar, 0x416985329, None): [
+    (Ecu.fwdRadar, 0x18dab0f1, None): [
       b'36161-TY3-A030\x00\x00',
     ],
-    (Ecu.srs, 0x18DA53F1, None): [
+    (Ecu.srs, 0x18da53f1, None): [
       b'77959-TY3-L130\x00\x00',
     ],
-    (Ecu.hud, 0x18DA61F1, None): [
+    (Ecu.hud, 0x18da61f1, None): [
       b'78209-TY3-A110\x00\x00',
     ],
-    (Ecu.combinationMeter, 0x18DA60F1, None): [
+    (Ecu.combinationMeter, 0x18da60f1, None): [
       b'78109-TY3-A050\x00\x00',
     ],
-    (Ecu.eps, 0x18DA30F1, None): [
+    (Ecu.eps, 0x18da30f1, None): [
       b'39990-TY3-J040\x00\x00',
     ],
   },
