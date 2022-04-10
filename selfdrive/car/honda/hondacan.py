@@ -40,8 +40,21 @@ def create_brake_command(packer, apply_brake, pump_on, pcm_override, pcm_cancel_
     "AEB_STATUS": 0,
   }
   bus = get_pt_bus(car_fingerprint)
+  if car_fingerprint == CAR.ACURA_RLX:
+    bus = 2
   return packer.make_can_msg("BRAKE_COMMAND", bus, values, idx)
 
+def enable_rlx(packer, car_fingerprint, enable):
+
+  chksum = enable
+
+  if car_fingerprint == (CAR.ACURA_RLX):
+    values = {
+        "ENABLE"           : enable,
+        "CHKSUM"           : chksum,
+     }
+
+  return packer.make_can_msg("RLX_ENABLE", 2, values)
 
 def create_acc_commands(packer, enabled, active, accel, gas, idx, stopping, car_fingerprint):
   commands = []
@@ -103,7 +116,8 @@ def create_ui_commands(packer, CP, pcm_speed, hud, is_metric, idx, stock_hud):
   bus_pt = get_pt_bus(CP.carFingerprint)
   radar_disabled = CP.carFingerprint in HONDA_BOSCH and CP.openpilotLongitudinalControl
   bus_lkas = get_lkas_cmd_bus(CP.carFingerprint, radar_disabled)
-
+  if CP.carFingerprint == CAR.ACURA_RLX:
+    bus_pt = 2
   if CP.openpilotLongitudinalControl:
     if CP.carFingerprint in HONDA_BOSCH:
       acc_hud_values = {
@@ -123,7 +137,7 @@ def create_ui_commands(packer, CP, pcm_speed, hud, is_metric, idx, stock_hud):
         'PCM_GAS': hud.pcm_accel,
         'CRUISE_SPEED': hud.v_cruise,
         'ENABLE_MINI_CAR': 1,
-	      'HUD_LEAD': hud.car,
+	'HUD_LEAD': hud.car,
         'HUD_DISTANCE_3': 1 if hud.car != 0 else 0,
         'HUD_DISTANCE': hud.dist_lines,    # max distance setting on display
         'IMPERIAL_UNIT': int(not is_metric),

@@ -157,11 +157,12 @@ class CarController():
     # **** process the car messages ****
 
     # steer torque is converted back to CAN reference (positive when steering right)
-    apply_steer = int(interp(actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
+    apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
 
     if (CS.CP.carFingerprint in SERIAL_STEERING):
       apply_steer = apply_std_steer_torque_limits(apply_steer, self.apply_steer_last, CS.out.steeringTorque, LKAS_LIMITS, ss=True)
       self.apply_steer_last = apply_steer
+      apply_steer = -apply_steer
 
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = -apply_steer
@@ -170,7 +171,9 @@ class CarController():
 
     # Send CAN commands.
     can_sends = []
-
+    if (frame % 5) == 0:
+      can_sends.append(hondacan.enable_rlx(self.packer, CS.CP.carFingerprint, 1))
+      
     # tester present - w/ no response (keeps radar disabled)
     if CS.CP.carFingerprint in HONDA_BOSCH and CS.CP.openpilotLongitudinalControl:
       if (frame % 10) == 0:
