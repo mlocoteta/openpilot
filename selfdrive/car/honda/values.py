@@ -74,6 +74,7 @@ class CAR:
   CIVIC_BOSCH = "HONDA CIVIC (BOSCH) 2019"
   CIVIC_BOSCH_DIESEL = "HONDA CIVIC SEDAN 1.6 DIESEL 2019"
   ACURA_ILX = "ACURA ILX 2016-18"
+  ACURA_RLX = "ACURA RLX 2017"
   CRV = "HONDA CR-V 2016-18"
   CRV_5G = "HONDA CR-V 2017"
   CRV_EU = "HONDA CR-V EU 2016"
@@ -1150,6 +1151,29 @@ FW_VERSIONS = {
       b'78109-TX4-A310\x00\x00',
     ],
   },
+  CAR.ACURA_RLX: {
+    (Ecu.gateway, 0x18daeff1, None): [
+      b'38897-TY3-A020\x00\x00',
+    ],
+    (Ecu.shiftByWire, 0x18da0bf1, None): [
+      b'54008-TY3-J010\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18dab0f1, None): [
+      b'36161-TY3-A030\x00\x00',
+    ],
+    (Ecu.srs, 0x18da53f1, None): [
+      b'77959-TY3-L130\x00\x00',
+    ],
+    (Ecu.hud, 0x18da61f1, None): [
+      b'78209-TY3-A110\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18da60f1, None): [
+      b'78109-TY3-A050\x00\x00',
+    ],
+    (Ecu.eps, 0x18da30f1, None): [
+      b'39990-TY3-J040\x00\x00',
+    ],
+  },
   CAR.ACURA_RDX_3G: {
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
       b'37805-5YF-A130\x00\x00',
@@ -1372,6 +1396,7 @@ DBC = {
   CAR.ACURA_ILX: dbc_dict('acura_ilx_2016_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACURA_RDX: dbc_dict('acura_rdx_2018_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACURA_RDX_3G: dbc_dict('acura_rdx_2020_can_generated', None),
+  CAR.ACURA_RLX: dbc_dict('acura_rlx_2017_can_generated', 'acura_ilx_2016_nidec'),
   CAR.CIVIC: dbc_dict('honda_civic_touring_2016_can_generated', 'acura_ilx_2016_nidec'),
   CAR.CIVIC_BOSCH: dbc_dict('honda_civic_hatchback_ex_2017_can_generated', None),
   CAR.CIVIC_BOSCH_DIESEL: dbc_dict('honda_civic_sedan_16_diesel_2019_can_generated', None),
@@ -1399,7 +1424,7 @@ STEER_THRESHOLD = {
 }
 
 HONDA_NIDEC_ALT_PCM_ACCEL = set([CAR.ODYSSEY])
-HONDA_NIDEC_ALT_SCM_MESSAGES = set([CAR.ACURA_ILX, CAR.ACURA_RDX, CAR.CRV, CAR.CRV_EU, CAR.FIT, CAR.FREED, CAR.HRV, CAR.ODYSSEY_CHN,
+HONDA_NIDEC_ALT_SCM_MESSAGES = set([CAR.ACURA_ILX, CAR.ACURA_RDX, CAR.ACURA_RLX, CAR.CRV, CAR.CRV_EU, CAR.FIT, CAR.FREED, CAR.HRV, CAR.ODYSSEY_CHN,
                                     CAR.PILOT, CAR.PILOT_2019, CAR.PASSPORT, CAR.RIDGELINE])
 HONDA_BOSCH = set([CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_5G,
                    CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E])

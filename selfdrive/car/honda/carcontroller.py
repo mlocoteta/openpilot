@@ -1,4 +1,5 @@
 from collections import namedtuple
+from wsgiref.util import application_uri
 from cereal import car, log
 from common.realtime import DT_CTRL
 from selfdrive.controls.lib.drive_helpers import rate_limit
@@ -192,10 +193,13 @@ class CarController():
 
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * P.STEER_MAX, P.STEER_LOOKUP_BP, P.STEER_LOOKUP_V))
-
+    apply_steer = -apply_steer
+    
     # Send CAN commands.
     can_sends = []
-
+    if (frame % 5) == 0:
+      can_sends.append(hondacan.enable_rlx(self.packer, CS.CP.carFingerprint, 1))
+      
     # tester present - w/ no response (keeps radar disabled)
     if CS.CP.carFingerprint in HONDA_BOSCH and CS.CP.openpilotLongitudinalControl:
       if (frame % 10) == 0:
@@ -314,7 +318,7 @@ class CarController():
           pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
 
           pcm_override = True
-          can_sends.append(hondacan.create_brake_command(self.packer, apply_brake, pump_on,
+          can_sends.append(hondacan.create_brake_command(self.packer, apply_brake,
             pcm_override, pcm_cancel_cmd, fcw_display, idx, CS.CP.carFingerprint, CS.stock_brake))
           self.apply_brake_last = apply_brake
 

@@ -6,7 +6,7 @@
 //      accel rising edge
 //      brake rising edge
 //      brake > 0mph
-const CanMsg HONDA_N_TX_MSGS[] = {{0xE4, 0, 5}, {0x194, 0, 4}, {0x1FA, 0, 8}, {0x200, 0, 6}, {0x30C, 0, 8}, {0x33D, 0, 5}};
+const CanMsg HONDA_N_TX_MSGS[] = {{0xE4, 0, 5}, {0x194, 0, 4}, {0x1FA, 2, 8}, {0x200, 0, 6}, {0x30C, 2, 8}, {0x33D, 0, 5}, {0x249, 2, 8}};
 const CanMsg HONDA_BOSCH_TX_MSGS[] = {{0xE4, 0, 5}, {0xE5, 0, 8}, {0x296, 1, 4}, {0x33D, 0, 5}, {0x33DA, 0, 5}, {0x33DB, 0, 8}};  // Bosch
 const CanMsg HONDA_BOSCH_LONG_TX_MSGS[] = {{0xE4, 1, 5}, {0x1DF, 1, 8}, {0x1EF, 1, 8}, {0x1FA, 1, 8}, {0x30C, 1, 8}, {0x33D, 1, 5}, {0x33DA, 1, 5}, {0x33DB, 1, 8}, {0x39F, 1, 8}, {0x18DAB0F1, 1, 8}};  // Bosch w/ gas and brakes
 
@@ -375,8 +375,17 @@ static int honda_nidec_fwd_hook(int bus_num, CANPacket_t *to_fwd) {
   int bus_fwd = -1;
 
   if (bus_num == 0) {
-    bus_fwd = 2;
+    int addr = GET_ADDR(to_fwd);
+    
+    bool is_acc_hud_msg = addr == 0x30C;
+    bool is_brake_msg = addr == 0x1FA;
+    bool block_fwd = is_acc_hud_msg || is_brake_msg;
+    
+    if (!block_fwd) {
+      bus_fwd = 2;
+    }
   }
+
 
   if (bus_num == 2) {
     // block stock lkas messages and stock acc messages (if OP is doing ACC)
