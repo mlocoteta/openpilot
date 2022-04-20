@@ -340,15 +340,15 @@ class LongitudinalMpc():
     gap_adjust_cruise = Params().get_bool("GapAdjustCruise")
     if gap_adjust_cruise:
       gap_adjust_cruise_tr = int(clip(carstate.gapAdjustCruiseTr, 0., 3.))
-      if gap_adjust_cruise_tr == 0: # Traffic
+      if gap_adjust_cruise_tr == 1: # Traffic
         # At slow speeds more time, decrease time up to 60mph
         # in mph ~= 5     10   15   20  25     30    35     40  45     50    55     60  65     70    75     80  85     90
         x_vel = [0, 2.25, 4.5, 6.75, 9, 11.25, 13.5, 15.75, 18, 20.25, 22.5, 24.75, 27, 29.25, 31.5, 33.75, 36, 38.25, 40.5]
         y_dist = [1.25, 1.24, 1.23, 1.22, 1.21, 1.20, 1.18, 1.16, 1.13, 1.11, 1.09, 1.07, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05, 1.05]
         self.tr = np.interp(carstate.vEgo, x_vel, y_dist)
-      elif gap_adjust_cruise_tr == 1: # Relaxed
+      elif gap_adjust_cruise_tr == 2: # Relaxed
         self.tr = 1.25
-      elif gap_adjust_cruise_tr == 2: # Stock openpilot
+      elif gap_adjust_cruise_tr == 3: # Stock openpilot
         self.tr = T_FOLLOW
       else:
         self.tr = 1.95 # Stock HKG's Distance 3

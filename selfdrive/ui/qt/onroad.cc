@@ -259,17 +259,17 @@ ButtonsWindow::ButtonsWindow(QWidget *parent) : QWidget(parent) {
     if (QUIState::ui_state.scene.gap_adjust_cruise_tr < 0) {
       QUIState::ui_state.scene.gap_adjust_cruise_tr = 3;
     }
-    if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 3) {
-      Params().put("GapAdjustCruiseTr", "3", 1);
+    if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 0) {
+      Params().put("GapAdjustCruiseTr", "0", 1);
       gacBtn->setText("Far\nGap");
+    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 3) {
+      Params().put("GapAdjustCruiseTr", "3", 1);
+      gacBtn->setText("Normal\nGap");
     } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 2) {
       Params().put("GapAdjustCruiseTr", "2", 1);
-      gacBtn->setText("Normal\nGap");
+      gacBtn->setText("Relax\nGap");
     } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 1) {
       Params().put("GapAdjustCruiseTr", "1", 1);
-      gacBtn->setText("Relax\nGap");
-    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 0) {
-      Params().put("GapAdjustCruiseTr", "0", 1);
       gacBtn->setText("Traffic\nGap");
     }
   });
@@ -312,17 +312,24 @@ void ButtonsWindow::updateState(const UIState &s) {
   }
 
   if ((prev_gap_adjust_cruise_tr != QUIState::ui_state.scene.gap_adjust_cruise_tr) || (prev_gap_adjust_cruise_tr != gapAdjustCruiseTr)) {
-    prev_gap_adjust_cruise_tr = QUIState::ui_state.scene.gap_adjust_cruise_tr;
-    if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 3 || gapAdjustCruiseTr == 3) {
+    if (prev_gap_adjust_cruise_tr != QUIState::ui_state.scene.gap_adjust_cruise_tr){
+	prev_gap_adjust_cruise_tr = QUIState::ui_state.scene.gap_adjust_cruise_tr;
+} else {
+	prev_gap_adjust_cruise_tr = gapAdjustCruiseTr;
+	QUIState::ui_state.scene.gap_adjust_cruise_tr = gapAdjustCruiseTr;
+}
+//    prev_gap_adjust_cruise_tr = QUIState::ui_state.scene.gap_adjust_cruise_tr;
+    //prev_gap_adjust_cruise_tr = gapAdjustCruiseTr;  
+    if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 0 || gapAdjustCruiseTr == 0) {
       gacBtn->setStyleSheet(QString("font-size: 45px; border-radius: 100px; border-color: %1").arg(gacBtnColors.at(3)));
       gacBtn->setText("Far\nGap");
-    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 2 || gapAdjustCruiseTr == 2) {
+    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 3 || gapAdjustCruiseTr == 3) {
       gacBtn->setStyleSheet(QString("font-size: 45px; border-radius: 100px; border-color: %1").arg(gacBtnColors.at(2)));
       gacBtn->setText("Normal\nGap");
-    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 1 || gapAdjustCruiseTr == 1) {
+    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 2 || gapAdjustCruiseTr == 2) {
       gacBtn->setStyleSheet(QString("font-size: 45px; border-radius: 100px; border-color: %1").arg(gacBtnColors.at(1)));
       gacBtn->setText("Relax\nGap");
-    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 0 || gapAdjustCruiseTr == 0) {
+    } else if (QUIState::ui_state.scene.gap_adjust_cruise_tr == 1 || gapAdjustCruiseTr == 1) {
       gacBtn->setStyleSheet(QString("font-size: 45px; border-radius: 100px; border-color: %1").arg(gacBtnColors.at(0)));
       gacBtn->setText("Traffic\nGap");
     }
