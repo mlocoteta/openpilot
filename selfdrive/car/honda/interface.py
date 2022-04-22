@@ -218,6 +218,16 @@ class CarInterface(CarInterfaceBase):
       tire_stiffness_factor = 0.444
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
 
+    elif candidate == CAR.ACURA_RLX:
+      stop_and_go = True
+      ret.mass = 4003. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelbase = 2.85
+      ret.centerToFront = ret.wheelbase * 0.41
+      ret.steerRatio = 13.9  # as spec
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 32767], [0, 32676]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.3], [0.1]]
+      tire_stiffness_factor = 0.677
+
     elif candidate == CAR.ACURA_RDX_3G:
       stop_and_go = True
       ret.mass = 4068. * CV.LB_TO_KG + STD_CARGO_KG
