@@ -61,7 +61,7 @@ def actuator_hysteresis(brake, braking, brake_steady, v_ego, car_fingerprint):
 
 
 def brake_pump_hysteresis(apply_brake, apply_brake_last, last_pump_ts, ts):
-  pump_on = False
+#  pump_on = False
 
   # reset pump timer if:
   # - there is an increment in brake request
@@ -71,10 +71,10 @@ def brake_pump_hysteresis(apply_brake, apply_brake_last, last_pump_ts, ts):
     last_pump_ts = ts
 
   # once the pump is on, run it for at least 0.2s
-  if ts - last_pump_ts < 0.2 and apply_brake > 0:
-    pump_on = True
+#  if ts - last_pump_ts < 0.2 and apply_brake > 0:
+#    pump_on = True
 
-  return pump_on, last_pump_ts
+  return last_pump_ts
 
 
 def process_hud_alert(hud_alert):
@@ -158,10 +158,12 @@ class CarController:
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_steer = int(interp(-actuators.steer * self.params.STEER_MAX,
                              self.params.STEER_LOOKUP_BP, self.params.STEER_LOOKUP_V))
+    apply_steer = -apply_steer # RLX is reverse for some reason
 
     # Send CAN commands
     can_sends = []
-
+    if self.frame % 5 == 0: # RLX needs a message for WP to start blocking messages
+      can_sends.append(hondacan.enable_rlx(self.packer, CS.CP.carFingerprint, 1))
     # tester present - w/ no response (keeps radar disabled)
     if self.CP.carFingerprint in HONDA_BOSCH and self.CP.openpilotLongitudinalControl:
       if self.frame % 10 == 0:
@@ -227,10 +229,10 @@ class CarController:
         else:
           apply_brake = clip(self.brake_last - wind_brake, 0.0, 1.0)
           apply_brake = int(clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
-          pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
+          self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)        
 
-          pcm_override = True
-          can_sends.append(hondacan.create_brake_command(self.packer, apply_brake, pump_on,
+          pcm_override = True # RLX has a problem with normal braking? removed PUMP ON
+          can_sends.append(hondacan.create_brake_command(self.packer, apply_brake, 
                                                          pcm_override, pcm_cancel_cmd, fcw_display, idx,
                                                          self.CP.carFingerprint, CS.stock_brake))
           self.apply_brake_last = apply_brake

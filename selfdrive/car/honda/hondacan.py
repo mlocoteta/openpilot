@@ -18,8 +18,9 @@ def get_lkas_cmd_bus(car_fingerprint, radar_disabled=False):
   # normally steering commands are sent to radar, which forwards them to powertrain bus
   return 0
 
-def create_brake_command(packer, apply_brake, pump_on, pcm_override, pcm_cancel_cmd, fcw, idx, car_fingerprint, stock_brake):
+def create_brake_command(packer, apply_brake, pcm_override, pcm_cancel_cmd, fcw, idx, car_fingerprint, stock_brake): # Need to kill pump_on for RLX
   # TODO: do we loose pressure if we keep pump off for long?
+  pump_on = apply_brake > 0
   brakelights = apply_brake > 0
   brake_rq = apply_brake > 0
   pcm_fault_cmd = False
@@ -40,8 +41,21 @@ def create_brake_command(packer, apply_brake, pump_on, pcm_override, pcm_cancel_
     "AEB_STATUS": 0,
   }
   bus = get_pt_bus(car_fingerprint)
+  if car_fingerprint == CAR.ACURA_RLX:
+    bus = 2
   return packer.make_can_msg("BRAKE_COMMAND", bus, values, idx)
 
+def enable_rlx(packer, car_fingerprint, enable):
+
+  chksum = enable
+
+  if car_fingerprint == (CAR.ACURA_RLX):
+    values = {
+        "ENABLE"           : enable,
+        "CHKSUM"           : chksum,
+     }
+
+  return packer.make_can_msg("RLX_ENABLE", 2, values)
 
 def create_acc_commands(packer, enabled, active, accel, gas, idx, stopping, car_fingerprint):
   commands = []
@@ -103,7 +117,8 @@ def create_ui_commands(packer, CP, pcm_speed, hud, is_metric, idx, stock_hud):
   bus_pt = get_pt_bus(CP.carFingerprint)
   radar_disabled = CP.carFingerprint in HONDA_BOSCH and CP.openpilotLongitudinalControl
   bus_lkas = get_lkas_cmd_bus(CP.carFingerprint, radar_disabled)
-
+  if CP.carFingerprint == CAR.ACURA_RLX:
+    bus_pt = 2
   if CP.openpilotLongitudinalControl:
     if CP.carFingerprint in HONDA_BOSCH:
       acc_hud_values = {
