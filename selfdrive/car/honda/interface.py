@@ -227,6 +227,15 @@ class CarInterface(CarInterfaceBase):
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 32767], [0, 32676]]
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.3], [0.1]]
       tire_stiffness_factor = 0.677
+      max_torque = 1.15
+      friction = 0.1
+
+      ret.lateralTuning.init('torque')
+      ret.lateralTuning.torque.useSteeringAngle = True
+      ret.lateralTuning.torque.kp = 2.0 / max_torque
+      ret.lateralTuning.torque.kf = 1.0 / max_torque
+      ret.lateralTuning.torque.ki = 0.5 / max_torque
+      ret.lateralTuning.torque.friction = friction
 
     elif candidate == CAR.ACURA_RDX_3G:
       stop_and_go = True
