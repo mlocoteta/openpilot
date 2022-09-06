@@ -74,7 +74,7 @@ repos:
 -   repo: local
     hooks:
     -   id: test_translations
-        name: test translations
+        name: test translations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
         entry: selfdrive/ui/tests/test_translations.py
         language: script
         pass_filenames: false
