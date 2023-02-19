@@ -59,6 +59,7 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
 
   if CP.carFingerprint in SERIAL_STEERING:
     checks.append(("STEER_STATUS", 0))
+    signals.append(("LIN_INTERFACE_FATAL_ERROR","STEER_STATUS"))
   else:
     checks.append(("STEER_STATUS", 100))
 
@@ -199,6 +200,9 @@ class CarState(CarStateBase):
     # LOW_SPEED_LOCKOUT is not worth a warning
     # NO_TORQUE_ALERT_2 can be caused by bump or steering nudge from driver
     ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
+
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steerFaultPermanent = True if cp.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"] else ret.steerFaultPermanent
 
     if self.CP.openpilotLongitudinalControl:
       self.brake_error = cp.vl["STANDSTILL"]["BRAKE_ERROR_1"] or cp.vl["STANDSTILL"]["BRAKE_ERROR_2"]
