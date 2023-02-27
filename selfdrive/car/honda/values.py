@@ -385,15 +385,18 @@ FW_VERSIONS = {
   CAR.ACCORD_NIDEC: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-T2F-X840\x00\x00',
+      b'57114-T2F-X830\x00\x00',
     ],
     (Ecu.fwdRadar, 0x18DAB0F1, None): [
       b'36161-T2F-A140\x00\x00',
     ],
     (Ecu.combinationMeter, 0x18DA60F1, None): [
       b'78109-T2F-L110\x00\x00',
+      b'78109-T2F-L010\x00\x00',
     ],
     (Ecu.srs, 0x18DA53F1, None): [
       b'77959-T2F-A030\x00\x00',
+      b'77959-T2F-A020\x00\x00',
     ],
   }, 
   CAR.V6ACCORD_NIDEC: {
