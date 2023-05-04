@@ -271,6 +271,32 @@ class CarInterface(CarInterfaceBase):
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 4096], [0, 4096]]  # TODO: determine if there is a dead zone at the top end
       tire_stiffness_factor = 0.82
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.6], [0.18]] # TODO: can probably use some tuning
+    
+    elif candidate == CAR.ACURA_MDX_HYBRID:
+      stop_and_go = False
+      ret.mass = 4204. * CV.LB_TO_KG + STD_CARGO_KG  # average weight
+      ret.wheelbase = 2.82
+      ret.centerToFront = ret.wheelbase * 0.428
+      ret.steerRatio = 15.66  # as spec
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
+      tire_stiffness_factor = 0.444
+      ret.steerActuatorDelay = 0.3
+#      ret.lateralTuning.pid.kf = 0.000040
+#      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.135], [0.062]]
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.ACURA_MDX:
+        stop_and_go = True
+        ret.mass = 4204. * CV.LB_TO_KG + STD_CARGO_KG  # average weight
+        ret.wheelbase = 2.82
+        ret.centerToFront = ret.wheelbase * 0.428
+        ret.steerRatio = 15.66  # as spec
+        ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
+        tire_stiffness_factor = 0.444
+        ret.steerActuatorDelay = 0.1
+        #ret.lateralTuning.pid.kf = 0.000035
+        #ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.115], [0.052]]
+        CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     else:
       raise ValueError(f"unsupported car {candidate}")
@@ -292,7 +318,7 @@ class CarInterface(CarInterfaceBase):
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter. Otherwise, add 0.5 mph margin to not
     # conflict with PCM acc
-    stop_and_go = candidate in (HONDA_BOSCH | {CAR.CIVIC}) or ret.enableGasInterceptor
+    stop_and_go = candidate in (HONDA_BOSCH | {CAR.CIVIC}) or ret.enableGasInterceptor # DO WE NEED TO COMMENT THIS OUT?
     ret.minEnableSpeed = -1. if stop_and_go else 25.5 * CV.MPH_TO_MS
 
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
