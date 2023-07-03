@@ -6,7 +6,7 @@ from common.numpy_fast import interp
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from selfdrive.car.honda.hondacan import get_cruise_speed_conversion, get_pt_bus
-from selfdrive.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_ALT_BRAKE_SIGNAL, HONDA_BOSCH_RADARLESS
+from selfdrive.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_ALT_BRAKE_SIGNAL, HONDA_BOSCH_RADARLESS, SERIAL_STEERING
 from selfdrive.car.interfaces import CarStateBase
 
 TransmissionType = car.CarParams.TransmissionType
@@ -57,7 +57,13 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
     ("STEER_MOTOR_TORQUE", 0),  # TODO: not on every car
   ]
 
-  if CP.carFingerprint == CAR.ODYSSEY_CHN:
+  if CP.carFingerprint in SERIAL_STEERING:
+    checks.append(("STEER_STATUS", 0))
+    signals.append(("LIN_INTERFACE_FATAL_ERROR","STEER_STATUS"))
+  else:
+    checks.append(("STEER_STATUS", 100))
+
+  if CP.carFingerprint == CAR.ODYSSEY_CHN or CP.carFingerprint in SERIAL_STEERING:
     checks += [
       ("SCM_FEEDBACK", 25),
       ("SCM_BUTTONS", 50),
@@ -98,15 +104,17 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
     signals += [("CRUISE_SPEED_PCM", "CRUISE"),
                 ("CRUISE_SPEED_OFFSET", "CRUISE_PARAMS")]
 
-    if CP.carFingerprint == CAR.ODYSSEY_CHN:
+    if CP.carFingerprint == CAR.ODYSSEY_CHN or CP.carFingerprint in SERIAL_STEERING:
       checks.append(("CRUISE_PARAMS", 10))
     else:
       checks.append(("CRUISE_PARAMS", 50))
 
-  if CP.carFingerprint in (CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G):
+  if CP.carFingerprint in (CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G, CAR.ACURA_MDX_HYBRID):
     signals.append(("DRIVERS_DOOR_OPEN", "SCM_FEEDBACK"))
   elif CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV):
     signals.append(("DRIVERS_DOOR_OPEN", "SCM_BUTTONS"))
+  elif CP.carFingerprint == CAR.ACURA_MDX_HYBRID:
+    signals.append(("WHEELS_MOVING", "STANDSTILL"))
   else:
     signals += [("DOOR_OPEN_FL", "DOORS_STATUS"),
                 ("DOOR_OPEN_FR", "DOORS_STATUS"),
@@ -182,6 +190,8 @@ class CarState(CarStateBase):
       ret.doorOpen = bool(cp.vl["SCM_FEEDBACK"]["DRIVERS_DOOR_OPEN"])
     elif self.CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV):
       ret.doorOpen = bool(cp.vl["SCM_BUTTONS"]["DRIVERS_DOOR_OPEN"])
+    elif self.CP.carFingerprint == CAR.ACURA_MDX_HYBRID:
+      ret.doorOpen = False #Can't find this signal for some reason
     else:
       ret.doorOpen = any([cp.vl["DOORS_STATUS"]["DOOR_OPEN_FL"], cp.vl["DOORS_STATUS"]["DOOR_OPEN_FR"],
                           cp.vl["DOORS_STATUS"]["DOOR_OPEN_RL"], cp.vl["DOORS_STATUS"]["DOOR_OPEN_RR"]])
@@ -192,6 +202,9 @@ class CarState(CarStateBase):
     # LOW_SPEED_LOCKOUT is not worth a warning
     # NO_TORQUE_ALERT_2 can be caused by bump or steering nudge from driver
     ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
+
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steerFaultPermanent = True if cp.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"] else ret.steerFaultPermanent
 
     if self.CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       ret.accFaulted = bool(cp.vl["CRUISE_FAULT_STATUS"]["CRUISE_FAULT"])
@@ -323,6 +336,9 @@ class CarState(CarStateBase):
     checks = [
       ("STEERING_CONTROL", 100),
     ]
+
+    if CP.carFingerprint in SERIAL_STEERING:
+      checks =[]
 
     if CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       signals.append(("LKAS_PROBLEM", "LKAS_HUD"))
