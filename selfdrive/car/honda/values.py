@@ -389,7 +389,7 @@ FW_VERSIONS = {
       b'38897-TVA-A240\x00\x00',
     ],
   },
-    CAR.ACURA_MDX: {
+  CAR.ACURA_MDX: {
     (Ecu.shiftByWire, 0x18DA0BF1, None): [
       b'54008-TZ5-A710\x00\x00',
     ],
