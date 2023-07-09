@@ -389,17 +389,17 @@ FW_VERSIONS = {
       b'38897-TVA-A240\x00\x00',
     ],
   },
-  CAR.ACURA_MDX: {
-    (Ecu.shiftByWire, 0x18DA0BF1, None): [
-      b'54008-TZ5-A710\x00\x00',
-    ],
-    (Ecu.gateway, 0x18DA1EF1, None): [
-      b'28101-5NB-A660\x00\x00',
-    ],
-    (Ecu.hud, 0x18DA53F1, None): [
-      b'77959-TZ5-A110\x00\x00',
-    ],
-  },
+  # CAR.ACURA_MDX: {
+  #   (Ecu.shiftByWire, 0x18DA0BF1, None): [
+  #     b'54008-TZ5-A710\x00\x00',
+  #   ],
+  #   (Ecu.gateway, 0x18DA1EF1, None): [
+  #     b'28101-5NB-A660\x00\x00',
+  #   ],
+  #   (Ecu.hud, 0x18DA53F1, None): [
+  #     b'77959-TZ5-A110\x00\x00',
+  #   ],
+  # },
   CAR.ACURA_MDX_HYBRID: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-TRX-H130\x00\x00',
