@@ -186,7 +186,7 @@ class Panda:
   CAN_PACKET_VERSION = 4
   HEALTH_PACKET_VERSION = 14
   CAN_HEALTH_PACKET_VERSION = 4
-  HEALTH_STRUCT = struct.Struct("<IIIIIIIIIBBBBBBHBBBHfBBHBHHB")
+  HEALTH_STRUCT = struct.Struct("<IIIIIIIIIBBBBBBHBBBHfBBHBHH")
   CAN_HEALTH_STRUCT = struct.Struct("<BIBBBBBBBBIIIIIIIHHBBB")
 
   F2_DEVICES = (HW_TYPE_PEDAL, )
@@ -602,7 +602,6 @@ class Panda:
       "fan_stall_count": a[24],
       "sbu1_voltage_mV": a[25],
       "sbu2_voltage_mV": a[26],
-      "controls_allowed_long": a[27],
     }
 
   @ensure_can_health_packet_version

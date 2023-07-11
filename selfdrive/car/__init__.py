@@ -82,7 +82,7 @@ def dbc_dict(pt_dbc, radar_dbc, chassis_dbc=None, body_dbc=None) -> Dict[str, st
   return {'pt': pt_dbc, 'radar': radar_dbc, 'chassis': chassis_dbc, 'body': body_dbc}
 
 
-def apply_driver_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS):
+def apply_driver_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS, ss=False):
 
   # limits due to driver torque
   driver_max_torque = LIMITS.STEER_MAX + (LIMITS.STEER_DRIVER_ALLOWANCE + driver_torque * LIMITS.STEER_DRIVER_FACTOR) * LIMITS.STEER_DRIVER_MULTIPLIER
@@ -90,7 +90,10 @@ def apply_driver_steer_torque_limits(apply_torque, apply_torque_last, driver_tor
   max_steer_allowed = max(min(LIMITS.STEER_MAX, driver_max_torque), 0)
   min_steer_allowed = min(max(-LIMITS.STEER_MAX, driver_min_torque), 0)
   apply_torque = clip(apply_torque, min_steer_allowed, max_steer_allowed)
-
+  if ss:
+      min_torque = min(abs(max_steer_allowed), abs(min_steer_allowed))
+      max_steer_allowed = min_torque
+      min_steer_allowed = -min_torque
   # slow rate if steer torque increases in magnitude
   if apply_torque_last > 0:
     apply_torque = clip(apply_torque, max(apply_torque_last - LIMITS.STEER_DELTA_DOWN, -LIMITS.STEER_DELTA_UP),
