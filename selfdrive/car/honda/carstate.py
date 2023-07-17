@@ -53,9 +53,14 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
     ("POWERTRAIN_DATA", 100),
     ("CAR_SPEED", 10),
     ("VSA_STATUS", 50),
-    ("STEER_STATUS", 100),
+    # ("STEER_STATUS", 100),
     ("STEER_MOTOR_TORQUE", 0),  # TODO: not on every car
   ]
+
+  if CP.carFingerprint in SERIAL_STEERING:
+      checks.append(("STEER_STATUS", 0))
+  else:
+      checks.append(("STEER_STATUS", 100))
 
   if CP.carFingerprint in (SERIAL_STEERING | {CAR.ODYSSEY_CHN, }):
     checks += [
@@ -68,7 +73,7 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
       ("SCM_BUTTONS", 25),
     ]
 
-  if CP.carFingerprint in (CAR.CRV_HYBRID, CAR.CIVIC_BOSCH_DIESEL, CAR.ACURA_RDX_3G, CAR.HONDA_E):
+  if CP.carFingerprint in (CAR.CRV_HYBRID, CAR.CIVIC_BOSCH_DIESEL, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.ACURA_MDX_HYBRID, CAR.ACURA_MDX):
     checks.append((gearbox_msg, 50))
   else:
     checks.append((gearbox_msg, 100))
@@ -106,8 +111,10 @@ def get_can_signals(CP, gearbox_msg, main_on_sig_msg):
 
   if CP.carFingerprint in (CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G):
     signals.append(("DRIVERS_DOOR_OPEN", "SCM_FEEDBACK"))
-  elif CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV):
+  elif CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV, CAR.ACURA_MDX_HYBRID):
     signals.append(("DRIVERS_DOOR_OPEN", "SCM_BUTTONS"))
+  elif CP.carFingerprint == CAR.ACURA_MDX_HYBRID:
+    signals.append(("WHEELS_MOVING", "STANDSTILL"))
   else:
     signals += [("DOOR_OPEN_FL", "DOORS_STATUS"),
                 ("DOOR_OPEN_FR", "DOORS_STATUS"),
@@ -178,7 +185,8 @@ class CarState(CarStateBase):
     self.cruise_buttons = cp.vl["SCM_BUTTONS"]["CRUISE_BUTTONS"]
 
     # used for car hud message
-    self.is_metric = not cp.vl["CAR_SPEED"]["IMPERIAL_UNIT"]
+    #self.is_metric = not cp.vl["CAR_SPEED"]["IMPERIAL_UNIT"]
+    self.is_metric = False
 
     # ******************* parse out can *******************
     # STANDSTILL->WHEELS_MOVING bit can be noisy around zero, so use XMISSION_SPEED
@@ -187,18 +195,27 @@ class CarState(CarStateBase):
     # TODO: find a common signal across all cars
     if self.CP.carFingerprint in (CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G):
       ret.doorOpen = bool(cp.vl["SCM_FEEDBACK"]["DRIVERS_DOOR_OPEN"])
-    elif self.CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV):
+    elif self.CP.carFingerprint in (CAR.ODYSSEY_CHN, CAR.FREED, CAR.HRV, CAR.ACURA_MDX_HYBRID):
       ret.doorOpen = bool(cp.vl["SCM_BUTTONS"]["DRIVERS_DOOR_OPEN"])
+    elif self.CP.carFingerprint == CAR.ACURA_MDX_HYBRID:
+      ret.doorOpen = False #Can't find this signal for some reason
     else:
       ret.doorOpen = any([cp.vl["DOORS_STATUS"]["DOOR_OPEN_FL"], cp.vl["DOORS_STATUS"]["DOOR_OPEN_FR"],
                           cp.vl["DOORS_STATUS"]["DOOR_OPEN_RL"], cp.vl["DOORS_STATUS"]["DOOR_OPEN_RR"]])
     ret.seatbeltUnlatched = bool(cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LAMP"] or not cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LATCHED"])
 
-    steer_status = self.steer_status_values[cp.vl["STEER_STATUS"]["STEER_STATUS"]]
-    ret.steerFaultPermanent = steer_status not in ("NORMAL", "NO_TORQUE_ALERT_1", "NO_TORQUE_ALERT_2", "LOW_SPEED_LOCKOUT", "TMP_FAULT")
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      steer_status = self.steer_status_values[cp_cam.vl["STEER_STATUS"]['STEER_STATUS']]
+    else:
+      steer_status = self.steer_status_values[cp.vl["STEER_STATUS"]["STEER_STATUS"]]
+
+    #ret.steerFaultPermanent = steer_status not in ("NORMAL", "NO_TORQUE_ALERT_1", "NO_TORQUE_ALERT_2", "LOW_SPEED_LOCKOUT", "TMP_FAULT")
     # LOW_SPEED_LOCKOUT is not worth a warning
     # NO_TORQUE_ALERT_2 can be caused by bump or steering nudge from driver
     ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
+	
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steerFaultPermanent = True if cp_cam.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"] else ret.steerFaultPermanent
 
     if self.CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       ret.accFaulted = bool(cp.vl["CRUISE_FAULT_STATUS"]["CRUISE_FAULT"])
@@ -256,8 +273,12 @@ class CarState(CarStateBase):
       ret.gas = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"]
       ret.gasPressed = ret.gas > 1e-5
 
-    ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
-    ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"]
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steeringTorque = cp_cam.vl["STEER_STATUS"]['STEER_TORQUE_SENSOR']
+      ret.steeringTorqueEps = cp_cam.vl["STEER_MOTOR_TORQUE"]['MOTOR_TORQUE']
+    else:
+      ret.steeringTorque = cp.vl["STEER_STATUS"]['STEER_TORQUE_SENSOR']
+      ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]['MOTOR_TORQUE']
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
@@ -291,7 +312,7 @@ class CarState(CarStateBase):
 
     ret.brake = cp.vl["VSA_STATUS"]["USER_BRAKE"]
     ret.cruiseState.enabled = cp.vl["POWERTRAIN_DATA"]["ACC_STATUS"] != 0
-    ret.cruiseState.available = bool(cp.vl[self.main_on_sig_msg]["MAIN_ON"])
+    ret.cruiseState.available = True#bool(cp.vl[self.main_on_sig_msg]["MAIN_ON"])
 
     # Gets rid of Pedal Grinding noise when brake is pressed at slow speeds for some models
     if self.CP.carFingerprint in (CAR.PILOT, CAR.RIDGELINE):
@@ -344,8 +365,13 @@ class CarState(CarStateBase):
     ]
 
     if CP.carFingerprint in SERIAL_STEERING:
-      checks = []
-
+      checks = [("STEER_MOTOR_TORQUE", 100),
+                ("STEER_STATUS", 100)]
+      signals += [("MOTOR_TORQUE", "STEER_MOTOR_TORQUE"),
+                  ("STEER_TORQUE_SENSOR", "STEER_STATUS"),
+                  ("LIN_INTERFACE_FATAL_ERROR", "STEER_STATUS"),
+                  ("STEER_STATUS", "STEER_STATUS")]
+      
     if CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       signals.append(("LKAS_PROBLEM", "LKAS_HUD"))
       checks.append(("LKAS_HUD", 10))
@@ -355,7 +381,6 @@ class CarState(CarStateBase):
           ("CRUISE_CONTROL_LABEL", "ACC_HUD"),
         ]
         checks.append(("ACC_HUD", 10))
-
     elif CP.carFingerprint not in HONDA_BOSCH:
       aeb_sig = "COMPUTER_BRAKE_ALT" if CP.carFingerprint == CAR.CLARITY else "COMPUTER_BRAKE"
       signals += [(aeb_sig, "BRAKE_COMMAND"),

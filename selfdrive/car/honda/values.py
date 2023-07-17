@@ -45,6 +45,23 @@ class CarControllerParams:
     self.STEER_LOOKUP_BP = [v * -1 for v in CP.lateralParams.torqueBP][1:][::-1] + list(CP.lateralParams.torqueBP)
     self.STEER_LOOKUP_V = [v * -1 for v in CP.lateralParams.torqueV][1:][::-1] + list(CP.lateralParams.torqueV)
 
+class LKAS_LIMITS:
+  STEER_MAX = 239
+  STEER_THRESHOLD = 30
+  STEER_DELTA_UP = 7
+  STEER_DELTA_DOWN = 100
+  STEER_DRIVER_ALLOWANCE = 25
+  STEER_DRIVER_MULTIPLIER = 18
+  STEER_DRIVER_FACTOR = 1
+
+class LKAS_LIMITS:
+  STEER_MAX = 239
+  STEER_THRESHOLD = 15
+  STEER_DELTA_UP = 5
+  STEER_DELTA_DOWN = 9
+  STEER_DRIVER_ALLOWANCE = 25
+  STEER_DRIVER_MULTIPLIER = 18
+  STEER_DRIVER_FACTOR = 1
 
 class HondaFlags(IntFlag):
   # Bosch models with alternate set of LKAS_HUD messages
@@ -76,6 +93,10 @@ class CAR:
   ACCORD = "HONDA ACCORD 2018"
   ACCORDH = "HONDA ACCORD HYBRID 2018"
   ACCORD_NIDEC_4CYL = "HONDA ACCORD 4CYL 9TH GEN"
+  ACCORD_NIDEC_6_CYL = "HONDA ACCORD 6-CYL 9TH GEN SERIAL STEERING"
+  ACCORD_NIDEC_HEV = "HONDA ACCORD HYBRID 9TH GEN SERIAL STEERING"
+  ACURA_MDX_HYBRID = "ACURA MDX HYBRID SERIAL STEERING"
+  ACURA_MDX = "ACURA MDX 2018 STANDARD SERIAL STEERING"
   CIVIC = "HONDA CIVIC 2016"
   CIVIC_BOSCH = "HONDA CIVIC (BOSCH) 2019"
   CIVIC_BOSCH_DIESEL = "HONDA CIVIC SEDAN 1.6 DIESEL 2019"
@@ -100,11 +121,26 @@ class CAR:
   CLARITY = "HONDA CLARITY 2018"
 
 
+# diag message that in some Nidec cars only appear with 1s freq if VIN query is performed
+DIAG_MSGS = {1600: 5, 1601: 8}
+
+FINGERPRINTS = {
+    CAR.ACURA_MDX: [{
+    57: 3, 145: 8, 308: 5, 316: 8, 334: 8, 342: 6, 344: 8, 379: 8, 380: 8, 398: 3, 411: 5, 419: 8, 420: 8, 422: 8, 425: 8, 426: 8, 432: 7, 450: 8, 463: 8, 464: 8, 476: 4, 487: 4, 490: 8, 506: 8, 520: 8, 521: 8, 542: 7, 545: 5, 546: 3, 597: 8, 660: 8, 773: 7, 777: 8, 780: 8, 800: 8, 804: 8, 808: 8, 819: 7, 821: 5, 825: 4, 829: 5, 837: 5, 856: 7, 871: 8, 881: 8, 882: 2, 884: 7, 891: 8, 892: 8, 918: 7, 923: 2, 927: 8, 929: 8, 983: 8, 985: 3, 1027: 5, 1029: 8, 1036: 8, 1039: 8, 1064: 7, 1070: 8, 1080: 8, 1081: 8, 1088: 8, 1089: 8, 1090: 8, 1092: 1, 1108: 8, 1110: 8, 1125: 8, 1137: 8, 1296: 8, 1348: 5, 1600: 5, 1601: 8, 1612: 5, 1614: 5, 1615: 8, 1618: 5, 1665: 5
+    }]
+}
+
+# add DIAG_MSGS to fingerprints
+for c in FINGERPRINTS:
+  for f, _ in enumerate(FINGERPRINTS[c]):
+    for d in DIAG_MSGS:
+      FINGERPRINTS[c][f][d] = DIAG_MSGS[d]
+
 class Footnote(Enum):
   CIVIC_DIESEL = CarFootnote(
     "2019 Honda Civic 1.6L Diesel Sedan does not have ALC below 12mph.",
     Column.FSR_STEERING)
-  ACCORD_NIDEC = CarFootnote(
+  ACCORD_NIDEC_4_CYL = CarFootnote(
     "openpilot operates above 25mph for 9th Generation Accord 4CYL, 6CYL and Hybrid which don't have Low-Speed Follow.",
     Column.FSR_LONGITUDINAL)
   SERIAL_STEERING = CarFootnote(
@@ -162,7 +198,7 @@ CAR_INFO: Dict[str, Optional[Union[HondaCarInfo, List[HondaCarInfo]]]] = {
   CAR.INSIGHT: HondaCarInfo("Honda Insight 2019-22", "All", min_steer_speed=3. * CV.MPH_TO_MS),
   CAR.HONDA_E: HondaCarInfo("Honda e 2020", "All", min_steer_speed=3. * CV.MPH_TO_MS),
   CAR.CLARITY: HondaCarInfo("Honda Clarity 2018-22"),
-  CAR.ACCORD_NIDEC_4CYL: HondaCarInfo("Honda Accord 4-Cylinder 2016-17", footnotes=[Footnote.ACCORD_NIDEC, Footnote.SERIAL_STEERING], min_steer_speed=3. * CV.MPH_TO_MS),
+  CAR.ACCORD_NIDEC_4CYL: HondaCarInfo("Honda Accord 4-Cylinder 2016-17", footnotes=[Footnote.ACCORD_NIDEC_4_CYL, Footnote.SERIAL_STEERING], min_steer_speed=3. * CV.MPH_TO_MS),
 }
 
 HONDA_VERSION_REQUEST = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER]) + \
@@ -372,6 +408,37 @@ FW_VERSIONS = {
       b'38897-TVA-A240\x00\x00',
     ],
   },
+  # CAR.ACURA_MDX: {
+  #   (Ecu.shiftByWire, 0x18DA0BF1, None): [
+  #     b'54008-TZ5-A710\x00\x00',
+  #   ],
+  #   (Ecu.gateway, 0x18DA1EF1, None): [
+  #     b'28101-5NB-A660\x00\x00',
+  #   ],
+  #   (Ecu.hud, 0x18DA53F1, None): [
+  #     b'77959-TZ5-A110\x00\x00',
+  #   ],
+  # },
+  CAR.ACURA_MDX_HYBRID: {
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-TRX-H130\x00\x00',
+    ],
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-TRX-A220\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-TRX-A820\x00\x00',
+    ],
+    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+      b'77959-TZ5-A110\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-TRX-A011\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-TYT-A220\x00\x00',
+    ],
+  },
   CAR.ACCORDH: {
     (Ecu.gateway, 0x18daeff1, None): [
       b'38897-TWA-A120\x00\x00',
@@ -441,6 +508,65 @@ FW_VERSIONS = {
     (Ecu.srs, 0x18DA53F1, None): [
       b'77959-T2F-A030\x00\x00',
     ],
+  },
+  CAR.ACCORD_NIDEC_4_CYL: {
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-T2F-X840\x00\x00',
+      b'57114-T2F-X830\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-T2F-A140\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-T2F-L110\x00\x00',
+      b'78109-T2F-L010\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-T2F-A030\x00\x00',
+      b'77959-T2F-A020\x00\x00',
+    ],
+  }, 
+  CAR.ACCORD_NIDEC_6_CYL: {
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-T3M-X840\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-T3M-A340\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-T3M-A310\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-T3L-C030\x00\x00',
+    ],
+  }, 
+  CAR.ACCORD_NIDEC_6_CYL: {
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-T3M-X840\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-T3M-A340\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-T3M-A310\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-T3L-C030\x00\x00',
+    ],
+  }, 
+  CAR.ACCORD_NIDEC_HEV: {
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-T3W-0130\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-T3Z-A830\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-T3Z-A220\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-T3Z-A020\x00\x00',
+    ]
   },
   CAR.CIVIC: {
     (Ecu.programmedFuelInjection, 0x18da10f1, None): [
@@ -1250,6 +1376,52 @@ FW_VERSIONS = {
       b'57114-TGT-A530\x00\x00',
     ],
   },
+  CAR.ACURA_MDX_HYBRID: {
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-TRX-H130\x00\x00',
+    ],
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-TRX-A220\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-TRX-A820\x00\x00',
+    ],
+    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+      b'77959-TZ5-A110\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-TRX-A011\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-TYT-A220\x00\x00',
+    ],
+  },
+  CAR.ACURA_MDX: {
+    (Ecu.programmedFuelInjection, 0x18DA10F1, None): [
+      b'37805-5BN-3380\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18DAB0F1, None): [
+      b'36161-TZ6-A660\x00\x00',
+    ],
+    (Ecu.gateway, 0x18DAEFF1, None): [
+      b'38897-TZ5-A110\x00\x00',
+    ],
+    (Ecu.vsa, 0x18DA28F1, None): [
+      b'57114-TZ6-A910\x00\x00',
+    ],
+    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+      b'54008-TZ5-A910\x00\x00',
+    ],
+    (Ecu.transmission, 0x18DA1EF1, None): [
+      b'28103-5DH-A200\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18DA60F1, None): [
+      b'78109-TYS-A220\x00\x00',
+    ],
+    (Ecu.srs, 0x18DA53F1, None): [
+      b'77959-TZ5-A220\x00\x00',
+    ],
+  },
   CAR.ACURA_RDX: {
     (Ecu.vsa, 0x18da28f1, None): [
       b'57114-TX5-A220\x00\x00',
@@ -1608,7 +1780,11 @@ FW_VERSIONS = {
 }
 
 DBC = {
-  CAR.ACCORD_NIDEC_4CYL: dbc_dict('honda_accord_touring_2016_can_generated', 'acura_ilx_2016_nidec'),
+  CAR.ACCORD_NIDEC_4_CYL: dbc_dict('honda_accord_touring_2016_can_generated', 'acura_ilx_2016_nidec'),  
+  CAR.ACCORD_NIDEC_6_CYL: dbc_dict('honda_accord_touring_V6_2016_can_generated', 'acura_ilx_2016_nidec'),  
+  CAR.ACCORD_NIDEC_HEV: dbc_dict('honda_accord_touring_hybrid_2017_can_generated', 'acura_ilx_2016_nidec'),
+  CAR.ACURA_MDX_HYBRID: dbc_dict('acura_mdx_2018_hybrid_generated', 'acura_ilx_2016_nidec'),
+  CAR.ACURA_MDX: dbc_dict('acura_mdx_2018', 'acura_ilx_2016_nidec'),  
   CAR.ACCORD: dbc_dict('honda_accord_2018_can_generated', None),
   CAR.ACCORDH: dbc_dict('honda_accord_2018_can_generated', None),
   CAR.ACURA_ILX: dbc_dict('acura_ilx_2016_can_generated', 'acura_ilx_2016_nidec'),
@@ -1633,21 +1809,29 @@ DBC = {
   CAR.HONDA_E: dbc_dict('acura_rdx_2020_can_generated', None),
   CAR.CIVIC_2022: dbc_dict('honda_civic_ex_2022_can_generated', None),
   CAR.CLARITY: dbc_dict('honda_clarity_hybrid_2018_can_generated', 'acura_ilx_2016_nidec'),
+  CAR.ACURA_MDX: dbc_dict('acura_mdx_2018', 'acura_ilx_2016_nidec'),
+  CAR.ACURA_MDX_HYBRID: dbc_dict('acura_mdx_2018_hybrid_generated', 'acura_ilx_2016_nidec'),
 }
 
 STEER_THRESHOLD = {
   # default is 1200, overrides go here
-  CAR.ACCORD_NIDEC_4CYL: 30,
+  CAR.ACCORD_NIDEC_4_CYL: 30,
+  CAR.ACCORD_NIDEC_6_CYL: 30,
+  CAR.ACCORD_NIDEC_HEV: 30,
+  CAR.ACURA_MDX_HYBRID: 30,
+  CAR.ACURA_MDX: 30,
   CAR.ACURA_RDX: 400,
   CAR.CRV_EU: 400,
+  CAR.ACURA_MDX: 25,
+  CAR.ACURA_MDX_HYBRID: 30,
 }
 
 HONDA_NIDEC_ALT_PCM_ACCEL = {CAR.ODYSSEY}
 HONDA_NIDEC_ALT_SCM_MESSAGES = {CAR.ACURA_ILX, CAR.ACURA_RDX, CAR.CRV, CAR.CRV_EU, CAR.FIT, CAR.FREED, CAR.HRV, CAR.ODYSSEY_CHN,
-                                CAR.PILOT, CAR.RIDGELINE, CAR.ACCORD_NIDEC_4CYL}
+                                CAR.PILOT, CAR.RIDGELINE, CAR.ACURA_MDX, CAR.ACURA_MDX_HYBRID}
 HONDA_BOSCH = {CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_5G,
                CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G}
 HONDA_BOSCH_ALT_BRAKE_SIGNAL = {CAR.ACCORD, CAR.CRV_5G, CAR.ACURA_RDX_3G, CAR.HRV_3G}
 HONDA_BOSCH_RADARLESS = {CAR.CIVIC_2022, CAR.HRV_3G}
-
-SERIAL_STEERING = {CAR.ACCORD_NIDEC_4CYL, }
+SERIAL_STEERING = {CAR.ACCORD_NIDEC_4_CYL, CAR.ACCORD_NIDEC_HEV, CAR.ACURA_MDX_HYBRID, CAR.ACCORD_NIDEC_6_CYL, CAR.ACURA_MDX}
+HYBRID_BRAKE = {CAR.ACURA_MDX_HYBRID, CAR.ACCORD_NIDEC_HEV}

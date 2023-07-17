@@ -1,9 +1,9 @@
 [submodule "panda"]
-  path = panda
-  url = ../../sunnyhaibin/panda.git
+	path = panda
+	url = https://github.com/sunnyhaibin/panda
 [submodule "opendbc"]
-  path = opendbc
-  url = ../../sunnyhaibin/opendbc.git
+	path = opendbc
+	url = https://github.com/sunnyhaibin/opendbc
 [submodule "laika_repo"]
   path = laika_repo
   url = ../../commaai/laika.git
