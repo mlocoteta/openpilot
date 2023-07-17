@@ -198,7 +198,7 @@ CAR_INFO: Dict[str, Optional[Union[HondaCarInfo, List[HondaCarInfo]]]] = {
   CAR.INSIGHT: HondaCarInfo("Honda Insight 2019-22", "All", min_steer_speed=3. * CV.MPH_TO_MS),
   CAR.HONDA_E: HondaCarInfo("Honda e 2020", "All", min_steer_speed=3. * CV.MPH_TO_MS),
   CAR.CLARITY: HondaCarInfo("Honda Clarity 2018-22"),
-  CAR.ACCORD_NIDEC_4CYL: HondaCarInfo("Honda Accord 4-Cylinder 2016-17", footnotes=[Footnote.ACCORD_NIDEC_4_CYL, Footnote.SERIAL_STEERING], min_steer_speed=3. * CV.MPH_TO_MS),
+  CAR.ACCORD_NIDEC_4_CYL: HondaCarInfo("Honda Accord 4-Cylinder 2016-17", footnotes=[Footnote.ACCORD_NIDEC_4_CYL, Footnote.SERIAL_STEERING], min_steer_speed=3. * CV.MPH_TO_MS),
 }
 
 HONDA_VERSION_REQUEST = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER]) + \
@@ -495,7 +495,7 @@ FW_VERSIONS = {
       b'39990-TWB-H120\x00\x00',
     ],
   },
-  CAR.ACCORD_NIDEC_4CYL: {
+  CAR.ACCORD_NIDEC_4_CYL: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-T2F-X840\x00\x00',
     ],
