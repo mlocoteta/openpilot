@@ -219,6 +219,7 @@ class CarController:
     if apply_steer == 0 or CS.out.vEgo < (10 * CV.MPH_TO_MS): # For MDX to not steer
       CC.latActive = False
       apply_steer = 0
+      self.apply_steer_last = apply_steer
 
     if not self.CP.pcmCruiseSpeed:
       if not self.last_speed_limit_sign_tap_prev and self.last_speed_limit_sign_tap:
