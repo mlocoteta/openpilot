@@ -281,7 +281,7 @@ class CarState(CarStateBase):
     ]
 
     if CP.carFingerprint in SERIAL_STEERING:
-      checks =[]
+      messages =[]
 
     if CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       messages.append(("LKAS_HUD", 10))
