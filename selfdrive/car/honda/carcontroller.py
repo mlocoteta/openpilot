@@ -6,7 +6,9 @@ from openpilot.common.realtime import DT_CTRL
 from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import create_gas_interceptor_command, apply_driver_steer_torque_limits
 from openpilot.selfdrive.car.honda import hondacan
-from openpilot.selfdrive.car.honda.values import CruiseButtons, VISUAL_HUD, HONDA_BOSCH, HONDA_BOSCH_RADARLESS, HONDA_NIDEC_ALT_PCM_ACCEL, CarControllerParams, SERIAL_STEERING, LKAS_LIMITS, HYBRID_BRAKE
+from openpilot.selfdrive.car.honda.values import CruiseButtons, VISUAL_HUD, HONDA_BOSCH, \
+                                                                HONDA_BOSCH_RADARLESS,HONDA_NIDEC_ALT_PCM_ACCEL, \
+                                                                CarControllerParams, SERIAL_STEERING, LKAS_LIMITS, HYBRID_BRAKE
 from openpilot.selfdrive.controls.lib.drive_helpers import rate_limit
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert

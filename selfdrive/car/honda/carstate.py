@@ -151,7 +151,7 @@ class CarState(CarStateBase):
     # LOW_SPEED_LOCKOUT is not worth a warning
     # NO_TORQUE_ALERT_2 can be caused by bump or steering nudge from driver
     ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
-	
+
     if self.CP.carFingerprint in SERIAL_STEERING:
       ret.steerFaultPermanent = True if cp_cam.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"] else ret.steerFaultPermanent
 
@@ -214,7 +214,7 @@ class CarState(CarStateBase):
       ret.steeringTorqueEps = cp_cam.vl["STEER_MOTOR_TORQUE"]['MOTOR_TORQUE']
     else:
       ret.steeringTorque = cp.vl["STEER_STATUS"]['STEER_TORQUE_SENSOR']
-      ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]['MOTOR_TORQUE']    
+      ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]['MOTOR_TORQUE']
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
@@ -292,7 +292,7 @@ class CarState(CarStateBase):
     if CP.carFingerprint in SERIAL_STEERING:
       messages = [("STEER_MOTOR_TORQUE", 100),
                 ("STEER_STATUS", 100)]
-      
+
     if CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       messages.append(("LKAS_HUD", 10))
       if not CP.openpilotLongitudinalControl:

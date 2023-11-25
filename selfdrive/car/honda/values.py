@@ -446,7 +446,7 @@ FW_VERSIONS = {
       b'77959-T2F-A030\x00\x00',
       b'77959-T2F-A020\x00\x00',
     ],
-  }, 
+  },
   CAR.V6ACCORD_NIDEC: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-T3M-X840\x00\x00',
@@ -460,7 +460,7 @@ FW_VERSIONS = {
     (Ecu.srs, 0x18DA53F1, None): [
       b'77959-T3L-C030\x00\x00',
     ],
-  }, 
+  },
   CAR.V6ACCORD_NIDEC: {
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-T3M-X840\x00\x00',
@@ -474,7 +474,7 @@ FW_VERSIONS = {
     (Ecu.srs, 0x18DA53F1, None): [
       b'77959-T3L-C030\x00\x00',
     ],
-  }, 
+  },
   CAR.ACCORD_NIDEC_HYBRID: {
     (Ecu.gateway, 0x18DAEFF1, None): [
       b'38897-T3W-0130\x00\x00',
@@ -1680,11 +1680,11 @@ FW_VERSIONS = {
 }
 
 DBC = {
-  CAR.ACCORD_NIDEC: dbc_dict('honda_accord_touring_2016_can_generated', 'acura_ilx_2016_nidec'),  
-  CAR.V6ACCORD_NIDEC: dbc_dict('honda_accord_touring_V6_2016_can_generated', 'acura_ilx_2016_nidec'),  
+  CAR.ACCORD_NIDEC: dbc_dict('honda_accord_touring_2016_can_generated', 'acura_ilx_2016_nidec'),
+  CAR.V6ACCORD_NIDEC: dbc_dict('honda_accord_touring_V6_2016_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACCORD_NIDEC_HYBRID: dbc_dict('honda_accord_touring_hybrid_2017_can_generated', 'acura_ilx_2016_nidec'),
   CAR.ACURA_MDX_HYBRID: dbc_dict('acura_mdx_2018_hybrid_generated', 'acura_ilx_2016_nidec'),
-  CAR.ACURA_MDX: dbc_dict('acura_mdx_2018', 'acura_ilx_2016_nidec'),  
+  CAR.ACURA_MDX: dbc_dict('acura_mdx_2018', 'acura_ilx_2016_nidec'),
   CAR.ACCORD: dbc_dict('honda_accord_2018_can_generated', None),
   CAR.ACCORDH: dbc_dict('honda_accord_2018_can_generated', None),
   CAR.ACURA_ILX: dbc_dict('acura_ilx_2016_can_generated', 'acura_ilx_2016_nidec'),
@@ -1723,7 +1723,7 @@ STEER_THRESHOLD = {
 
 HONDA_NIDEC_ALT_PCM_ACCEL = {CAR.ODYSSEY}
 HONDA_NIDEC_ALT_SCM_MESSAGES = {CAR.ACURA_ILX, CAR.ACURA_RDX, CAR.CRV, CAR.CRV_EU, CAR.FIT, CAR.FREED, CAR.HRV, CAR.ODYSSEY_CHN,
-                                CAR.PILOT, CAR.RIDGELINE, CAR.ACCORD_NIDEC_HYBRID, CAR.V6ACCORD_NIDEC, CAR.ACURA_MDX}
+                                CAR.PILOT, CAR.RIDGELINE, CAR.ACCORD_NIDEC, CAR.ACCORD_NIDEC_HYBRID, CAR.V6ACCORD_NIDEC, CAR.ACURA_MDX}
 HONDA_BOSCH = {CAR.ACCORD, CAR.ACCORDH, CAR.CIVIC_BOSCH, CAR.CIVIC_BOSCH_DIESEL, CAR.CRV_5G,
                CAR.CRV_HYBRID, CAR.INSIGHT, CAR.ACURA_RDX_3G, CAR.HONDA_E, CAR.CIVIC_2022, CAR.HRV_3G}
 HONDA_BOSCH_ALT_BRAKE_SIGNAL = {CAR.ACCORD, CAR.CRV_5G, CAR.ACURA_RDX_3G, CAR.HRV_3G}
