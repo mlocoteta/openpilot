@@ -24,7 +24,7 @@ def get_can_messages(CP, gearbox_msg):
     ("POWERTRAIN_DATA", 100),
     ("CAR_SPEED", 10),
     ("VSA_STATUS", 50),
-    ("STEER_STATUS", 100),
+    ("STEER_STATUS", 0),
     ("STEER_MOTOR_TORQUE", 0),  # TODO: not on every car
   ]
 
@@ -142,11 +142,18 @@ class CarState(CarStateBase):
                           cp.vl["DOORS_STATUS"]["DOOR_OPEN_RL"], cp.vl["DOORS_STATUS"]["DOOR_OPEN_RR"]])
     ret.seatbeltUnlatched = bool(cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LAMP"] or not cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LATCHED"])
 
-    steer_status = self.steer_status_values[cp.vl["STEER_STATUS"]["STEER_STATUS"]]
-    ret.steerFaultPermanent = steer_status not in ("NORMAL", "NO_TORQUE_ALERT_1", "NO_TORQUE_ALERT_2", "LOW_SPEED_LOCKOUT", "TMP_FAULT")
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      steer_status = self.steer_status_values[cp_cam.vl["STEER_STATUS"]['STEER_STATUS']]
+    else:
+      steer_status = self.steer_status_values[cp.vl["STEER_STATUS"]["STEER_STATUS"]]
+
+    #ret.steerFaultPermanent = steer_status not in ("NORMAL", "NO_TORQUE_ALERT_1", "NO_TORQUE_ALERT_2", "LOW_SPEED_LOCKOUT", "TMP_FAULT")
     # LOW_SPEED_LOCKOUT is not worth a warning
     # NO_TORQUE_ALERT_2 can be caused by bump or steering nudge from driver
     ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
+	
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steerFaultPermanent = True if cp_cam.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"] else ret.steerFaultPermanent
 
     if self.CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       ret.accFaulted = bool(cp.vl["CRUISE_FAULT_STATUS"]["CRUISE_FAULT"])
@@ -204,8 +211,12 @@ class CarState(CarStateBase):
       ret.gas = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"]
       ret.gasPressed = ret.gas > 1e-5
 
-    ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
-    ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"]
+    if self.CP.carFingerprint in SERIAL_STEERING:
+      ret.steeringTorque = cp_cam.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
+      ret.steeringTorqueEps = cp_cam.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"]
+    else:
+      ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
+      ret.steeringTorqueEps = cp.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"]
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
@@ -292,7 +303,11 @@ class CarState(CarStateBase):
       messages = [
         ("STEERING_CONTROL", 100),
       ]
-
+    
+    if CP.carFingerprint in SERIAL_STEERING:
+      messages = [("STEER_MOTOR_TORQUE", 100),
+                ("STEER_STATUS", 100)]
+      
     if CP.carFingerprint in HONDA_BOSCH_RADARLESS:
       messages.append(("LKAS_HUD", 10))
       if not CP.openpilotLongitudinalControl:

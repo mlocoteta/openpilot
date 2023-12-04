@@ -129,6 +129,32 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.6], [0.18]]
 
+    elif candidate in (CAR.ACCORD_NIDEC_4_CYL, CAR.ACCORD_NIDEC_HEV, CAR.ACCORD_NIDEC_6_CYL):
+      stop_and_go = False
+      ret.mass = 3279. * CV.LB_TO_KG
+      ret.wheelbase = 2.75
+      ret.centerToFront = ret.wheelbase * 0.39
+      ret.steerRatio = 13.66 # 13.37 is spec
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.,20], [0.,20]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.4,0.3], [0,0]]      
+      tire_stiffness_factor = 0.8467
+      ret.longitudinalTuning.kpBP = [0., 5., 35.]
+      ret.longitudinalTuning.kpV = [2.4, 1.6, 0.8]
+      ret.longitudinalTuning.kiBP = [0., 35.]
+      ret.longitudinalTuning.kiV = [0.2, 0.16]
+
+    elif candidate == CAR.ACURA_MDX_HYBRID:
+      stop_and_go = False
+      ret.mass = 4204. * CV.LB_TO_KG  # average weight
+      ret.wheelbase = 2.82
+      ret.centerToFront = ret.wheelbase * 0.428
+      ret.steerRatio = 15.66  # as spec
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 238], [0, 238]]  # TODO: determine if there is a dead zone at the top end
+      tire_stiffness_factor = 0.444
+      ret.lateralTuning.pid.kf = 0.000040
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.135], [0.062]]
+
     elif candidate == CAR.ACURA_ILX:
       ret.mass = 3095. * CV.LB_TO_KG
       ret.wheelbase = 2.67
@@ -330,7 +356,7 @@ class CarInterface(CarInterfaceBase):
     ret.autoResumeSng = candidate in (HONDA_BOSCH | {CAR.CIVIC, CAR.CLARITY}) or ret.enableGasInterceptor
     ret.minEnableSpeed = -1. if ret.autoResumeSng else 25.5 * CV.MPH_TO_MS
 
-    ret.steerActuatorDelay = 0.1
+    ret.steerActuatorDelay = 0.3
     ret.steerLimitTimer = 0.8
 
     return ret

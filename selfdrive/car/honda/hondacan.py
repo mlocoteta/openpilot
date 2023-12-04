@@ -1,6 +1,5 @@
 from openpilot.common.conversions import Conversions as CV
-from openpilot.selfdrive.car.honda.values import HondaFlags, HONDA_BOSCH, HONDA_BOSCH_RADARLESS, CAR, CarControllerParams
-
+from openpilot.selfdrive.car.honda.values import HondaFlags, HONDA_BOSCH, HONDA_BOSCH_RADARLESS, CAR, CarControllerParams, SERIAL_STEERING
 # CAN bus layout with relay
 # 0 = ACC-CAN - radar side
 # 1 = F-CAN B - powertrain
@@ -107,7 +106,7 @@ def create_steering_control(packer, apply_steer, lkas_active, car_fingerprint, r
     "STEER_TORQUE": apply_steer if lkas_active else 0,
     "STEER_TORQUE_REQUEST": lkas_active,
   }
-  bus = get_lkas_cmd_bus(car_fingerprint, radar_disabled)
+  bus = 2 if car_fingerprint in SERIAL_STEERING else get_lkas_cmd_bus(car_fingerprint, radar_disabled)
   return packer.make_can_msg("STEERING_CONTROL", bus, values)
 
 
