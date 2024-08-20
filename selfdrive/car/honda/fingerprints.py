@@ -1110,17 +1110,29 @@ FW_VERSIONS = {
     (Ecu.gateway, 0x18DAEFF1, None): [
       b'38897-TZ4-A010\x00\x00',
     ],
+    (Ecu.programmedFuelInjection, 0x18da10f1, None): [
+      b'37805-5J2-3390\x00\x00',
+    ],
     (Ecu.fwdRadar, 0x18DAB0F1, None): [
       b'36161-TZ4-A120\x00\x00',
+	  b'36161-TZ7-A520\x00\x00',
     ],
     (Ecu.vsa, 0x18DA28F1, None): [
       b'57114-TZ4-A510\x00\x00',
     ],
+    (Ecu.transmission, 0x18DA1EF1, None): [
+      b'28101-5L9-A690\x00\x00',
+    ],
+    (Ecu.shiftByWire, 0x18DA0BF1, None): [
+      b'54008-TZ3-A820\x00\x00',
+    ],
     (Ecu.combinationMeter, 0x18DA60F1, None): [
       b'78109-TZ4-A210\x00\x00',
+	  b'78109-TZ7-A210\x00\x00',
     ],
     (Ecu.srs, 0x18DA53F1, None): [
       b'77959-TZ4-A510\x00\x00',
+	  b'77959-TZ7-A020\x00\x00',
     ],
   },
   CAR.HONDA_E: {
