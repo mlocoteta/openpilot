@@ -10,13 +10,84 @@ from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
 from opendbc.car.interfaces import CarInterfaceBase
+from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
+
+
+# ---- Honda 9G Accord Torque Interceptor: sigmoid+linear torque curve ----
+# torque(x) = b*sign(a*x)*(sigmoid(|a*x|) - 0.5) + c*x, where x is lateral accel.
+# a/b/c come from Params (TISigmoidA/B/C), gated by TISigmoidEnabled. Defaults are
+# the proven on-car tune. Slope at x=0 is a*b/4 + c.
+HONDA_NON_LINEAR_TORQUE_PARAMS_DEFAULT = {
+  CAR.HONDA_ACCORD_9G: (15.0, 0.72, 0.16),
+}
+
+
+def get_ti_siglin_params(car_fingerprint):
+  """Active (a, b, c), or None if sigmoid disabled / car unsupported."""
+  defaults = HONDA_NON_LINEAR_TORQUE_PARAMS_DEFAULT.get(car_fingerprint)
+  if defaults is None:
+    return None
+  p = Params()
+  if not p.get_bool("TISigmoidEnabled"):
+    return None
+  a = p.get_float("TISigmoidA")
+  b = p.get_float("TISigmoidB")
+  c = p.get_float("TISigmoidC")
+  if a <= 0 or b <= 0 or c <= 0:  # unset/invalid -> code default
+    return defaults
+  return (a, b, c)
+
+
+def build_sigmoid_tables(a, b, c):
+  lataccel_values = np.arange(-8.0, 8.0, 0.01)
+  sig_input = a * lataccel_values
+  sig = np.sign(sig_input) * (1.0 / (1.0 + np.exp(-np.abs(sig_input))) - 0.5)
+  torque_values = sig * b + lataccel_values * c
+  return torque_values, lataccel_values
 
 
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
+
+  # Mutable class-level tables so live updates (controlsd) are seen by the
+  # closures the torque controller already captured.
+  _sigmoid_lookup = None   # [torque_values, lataccel_values]
+  _sigmoid_params = None   # (a, b, c) currently active
+
+  @classmethod
+  def rebuild_sigmoid_lookup(cls, a, b, c):
+    torque_values, lataccel_values = build_sigmoid_tables(a, b, c)
+    if cls._sigmoid_lookup is None:
+      cls._sigmoid_lookup = [torque_values, lataccel_values]
+    else:
+      cls._sigmoid_lookup[0] = torque_values
+      cls._sigmoid_lookup[1] = lataccel_values
+    cls._sigmoid_params = (a, b, c)
+
+  def get_lataccel_torque_siglin(self):
+    params = get_ti_siglin_params(self.CP.carFingerprint)
+    assert params, "Non-linear torque params not defined for this car"
+    self.rebuild_sigmoid_lookup(*params)
+    return CarInterface._sigmoid_lookup
+
+  def torque_from_lateral_accel(self):
+    if get_ti_siglin_params(self.CP.carFingerprint) is not None:
+      lookup = self.get_lataccel_torque_siglin()
+      def torque_from_lateral_accel_siglin(lateral_acceleration, torque_params):
+        return float(np.interp(lateral_acceleration, lookup[1], lookup[0]))
+      return torque_from_lateral_accel_siglin
+    return self.torque_from_lateral_accel_linear
+
+  def lateral_accel_from_torque(self):
+    if get_ti_siglin_params(self.CP.carFingerprint) is not None:
+      lookup = self.get_lataccel_torque_siglin()
+      def lateral_accel_from_torque_siglin(torque, torque_params):
+        return float(np.interp(torque, lookup[0], lookup[1]))
+      return lateral_accel_from_torque_siglin
+    return self.lateral_accel_from_torque_linear
   RadarInterface = RadarInterface
 
   @staticmethod
@@ -141,6 +212,12 @@ class CarInterface(CarInterfaceBase):
         ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.6], [0.18]]
       if ret.transmissionType == TransmissionType.manual:
         CarControllerParams.BOSCH_GAS_LOOKUP_BP = [-0.2, 2.0]
+
+    elif candidate == CAR.HONDA_ACCORD_9G:
+      # 9G Accord Torque Interceptor: use the torque controller so the sigmoid
+      # curve (torque_from_lateral_accel override) applies to steering.
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.1)
 
     elif candidate == CAR.HONDA_ACCORD_11G:
       ret.steerActuatorDelay = 0.22
