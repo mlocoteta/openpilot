@@ -258,7 +258,7 @@ class HondaBase(common.CarSafetyTest):
 
 
 class TestHondaNidecSafetyBase(HondaBase):
-  TX_MSGS = HONDA_N_COMMON_TX_MSGS
+  TX_MSGS = HONDA_N_COMMON_TX_MSGS + [[0x249, 0]]  # + TI_STEERING_CONTROL (9G Accord Torque Interceptor)
   FWD_BLACKLISTED_ADDRS = {2: [0xE4, 0x194, 0x33D, 0x30C]}
   RELAY_MALFUNCTION_ADDRS = {0: (0xE4, 0x194, 0x33D, 0x30C)}
 
@@ -377,7 +377,7 @@ class TestHondaNidecPcmAltSafety(TestHondaNidecPcmSafety):
 
 
 class TestHondaNidecGasInterceptorSafety(GasInterceptorSafetyTest, HondaButtonEnableBase, TestHondaNidecSafetyBase):
-  TX_MSGS = HONDA_N_COMMON_TX_MSGS + [[0x200, 0]]
+  TX_MSGS = HONDA_N_COMMON_TX_MSGS + [[0x200, 0], [0x249, 0]]  # + TI_STEERING_CONTROL (9G Accord)
   INTERCEPTOR_THRESHOLD = 492
 
   def setUp(self):
