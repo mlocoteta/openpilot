@@ -22,6 +22,9 @@
   {.msg = {{0x201, 0, 6, 50U, .max_counter = 15U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, \
            { 0 }, { 0 }}},                                                                                                          \
 
+// Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
+#define HONDA_TI_STEERING_CONTROL 0x249U
+
 #define HONDA_N_COMMON_TX_MSGS            \
   {0xE4, 0, 5, .check_relay = true},    \
   {0x194, 0, 4, .check_relay = true},   \
@@ -265,8 +268,8 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // STEER: safety check
-  if ((msg->addr == 0xE4U) || (msg->addr == 0x194U)) {
+  // STEER: safety check (0x249 = 9G Accord Torque Interceptor steering)
+  if ((msg->addr == 0xE4U) || (msg->addr == 0x194U) || (msg->addr == HONDA_TI_STEERING_CONTROL)) {
     if (!(aol_allowed || controls_allowed)) {
       bool steer_applied = msg->data[0] | msg->data[1];
       if (steer_applied) {
@@ -312,10 +315,14 @@ static safety_config honda_nidec_init(uint16_t param) {
   // 0x1FA is dynamically forwarded based on stock AEB
   // 0xE4 is steering on all cars except CRV and RDX, 0x194 for CRV and RDX,
   // 0x1FA is brake control, 0x30C is acc hud, 0x33D is lkas hud
-  static CanMsg HONDA_N_TX_MSGS[] = {HONDA_N_COMMON_TX_MSGS};
+  static CanMsg HONDA_N_TX_MSGS[] = {
+    HONDA_N_COMMON_TX_MSGS
+    {HONDA_TI_STEERING_CONTROL, 0, 8, .check_relay = false},
+  };
   static CanMsg HONDA_N_INTERCEPTOR_TX_MSGS[] = {
     HONDA_N_COMMON_TX_MSGS
     {0x200, 0, 6, .check_relay = false},
+    {HONDA_TI_STEERING_CONTROL, 0, 8, .check_relay = false},
   };
 
   const uint16_t HONDA_PARAM_NIDEC_ALT = 4;
