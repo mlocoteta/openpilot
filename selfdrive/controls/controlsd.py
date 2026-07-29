@@ -372,7 +372,7 @@ class Controls:
             if a > 0 and b > 0 and c > 0 and (a, b, c) != self._ti_sigmoid_hash:
               self.LaC.update_sigmoid_lookup(a, b, c)
               self._ti_sigmoid_hash = (a, b, c)
-          ti_kp = self.params.get_float("TISteerKp")
+          ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
           if ti_kp > 0 and hasattr(self.LaC, "pid"):
             self.LaC.pid._k_p = [[0], [ti_kp]]
         except Exception:
