@@ -6,3 +6,4 @@ CM_ "IMPORT _steering_sensors_b.dbc";
 CM_ "IMPORT _steering_control_d.dbc";
 CM_ "IMPORT _gearbox_legacy.dbc";
 CM_ "IMPORT _ti_steering.dbc";
+CM_ "IMPORT _community.dbc";
