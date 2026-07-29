@@ -296,8 +296,12 @@ class CarState(CarStateBase):
     return ret, fp_ret
 
   def get_can_parsers(self, CP):
+    # POWERTRAIN_DATA is read via cp.vl_all (BRAKE_SWITCH debounce), which needs the
+    # message registered. With a gas interceptor the first plain cp.vl read of it is
+    # skipped, so register it explicitly for the 9G to avoid a KeyError in vl_all.
+    pt_messages = [("POWERTRAIN_DATA", 0)] if CP.carFingerprint == CAR.HONDA_ACCORD_9G else []
     parsers = {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
     }
     if CP.enableBsm:
