@@ -20,6 +20,7 @@ class StarPilotCarState:
     isSubaru: bool = False
     isVolt: bool = False
     isBolt: bool = False
+    isAccord9G: bool = False
     isAngleCar: bool = False
     isTorqueCar: bool = False
     isTSK: bool = False
@@ -98,6 +99,7 @@ class StarPilotState:
             self.car_state.hasModeStarButtons = False
             self.car_state.isBolt = False
             self.car_state.isVolt = False
+            self.car_state.isAccord9G = False
             self.params.put("CarMake", fallback_make.title())
 
         if fallback_model:
@@ -163,6 +165,7 @@ class StarPilotState:
             self.car_state.hasZSS = starpilot_toggles.get("has_zss", False)
             self.car_state.isAngleCar = self._safe_get(CP, "steerControlType", None) == car.CarParams.SteerControlType.angle
             self.car_state.isBolt = car_fingerprint.startswith("CHEVROLET_BOLT")
+            self.car_state.isAccord9G = car_fingerprint == "HONDA_ACCORD_9G"
             self.car_state.isGM = car_make == "gm"
             self.car_state.isHKG = car_make == "hyundai"
             self.car_state.isHKGCanFd = self.car_state.isHKG and safety_model == car.CarParams.SafetyModel.hyundaiCanfd

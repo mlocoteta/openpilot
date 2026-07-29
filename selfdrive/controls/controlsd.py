@@ -339,7 +339,8 @@ class Controls:
       self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
 
     # Honda 9G Accord Torque Interceptor: live sigmoid reload + Kp override.
-    self.has_ti_sigmoid = (self.CP.carFingerprint == "HONDA_ACCORD_9G")
+    # Only when the TI toggle is on — otherwise the 9G runs stock PID LKAS untouched.
+    self.has_ti_sigmoid = (self.CP.carFingerprint == "HONDA_ACCORD_9G") and self.params.get_bool("TorqueInterceptorEnabled")
     self._ti_frame = 0
     self._ti_sigmoid_hash = getattr(self.CI.__class__, "_sigmoid_params", None)
 
