@@ -677,7 +677,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TISigmoidA", {PERSISTENT, FLOAT, "15.0", "15.0", 3}},
     {"TISigmoidB", {PERSISTENT, FLOAT, "0.72", "0.72", 3}},
     {"TISigmoidC", {PERSISTENT, FLOAT, "0.16", "0.16", 3}},
-    {"TISteerKp", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
+    {"TISteerKp", {PERSISTENT, FLOAT, "0.3", "0.3", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},
