@@ -30,6 +30,8 @@ def get_ti_siglin_params(car_fingerprint):
   if defaults is None:
     return None
   p = Params()
+  if not p.get_bool("TorqueInterceptorEnabled"):  # sigmoid only applies in TI mode
+    return None
   if not p.get_bool("TISigmoidEnabled"):
     return None
   a = p.get_float("TISigmoidA")
@@ -214,10 +216,16 @@ class CarInterface(CarInterfaceBase):
         CarControllerParams.BOSCH_GAS_LOOKUP_BP = [-0.2, 2.0]
 
     elif candidate == CAR.HONDA_ACCORD_9G:
-      # 9G Accord Torque Interceptor: use the torque controller so the sigmoid
-      # curve (torque_from_lateral_accel override) applies to steering.
+      # Normal 9G Accord LKAS: PID lateral (mvl-boston 0111-op-honda-dev reference).
+      ret.steerActuatorDelay = 0.3
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.1)
+      ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[0., 20.], [0., 20.]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.4, 0.3], [0., 0.]]
+      # Torque Interceptor (opt-in toggle): switch to the torque controller so the
+      # sigmoid tune applies. With the toggle off, the PID config above is used and
+      # steering is the stock LKAS path — nothing TI-specific runs.
+      if Params().get_bool("TorqueInterceptorEnabled"):
+        CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.1)
 
     elif candidate == CAR.HONDA_ACCORD_11G:
       ret.steerActuatorDelay = 0.22

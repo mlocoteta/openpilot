@@ -448,10 +448,10 @@ class CAR(Platforms):
       HondaCarDocs("Honda Accord Hybrid 2017", "All"),
     ],
     CarSpecs(mass=3343 * CV.LB_TO_KG, wheelbase=2.78, steerRatio=17.5, centerToFrontRatio=0.37),
-    # TI(9G Accord): use the proven 2016 touring DBC (carries TI_STEERING_CONTROL /
-    # TI_FEEDBACK). StarPilot's referenced 'honda_accord_2017_can_ext_generated' does
-    # not exist in-tree; this is the DBC the working FrogPilot TI branch used.
-    radar_dbc_dict('honda_accord_touring_2016_can_generated'),
+    # 9G Accord (Nidec). Uses the honda_accord_2017 DBC (built from mvl-boston's
+    # 0111-op-honda-dev fragments) — stock STEERING_CONTROL + STEER_STATUS for normal
+    # LKAS, plus TI_STEERING_CONTROL/TI_FEEDBACK for the optional Torque Interceptor.
+    radar_dbc_dict('honda_accord_2017_can_generated'),
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
   )
   ACURA_MDX_3G = HondaNidecPlatformConfig(
