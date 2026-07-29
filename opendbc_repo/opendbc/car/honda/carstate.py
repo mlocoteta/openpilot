@@ -8,8 +8,10 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
-                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags
+                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
+                                                 TI_LIMITS, TI_STATE
 from opendbc.car.interfaces import CarStateBase
+from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -49,6 +51,17 @@ class CarState(CarStateBase):
     self.brake_error_msg = "HYBRID_BRAKE_ERROR" if CP.flags & HondaFlags.HYBRID else "STANDSTILL"
 
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
+
+    # Honda 9G Accord Torque Interceptor (TI): steering torque comes from a separate
+    # CAN device (TI_FEEDBACK) instead of the stock EPS. Gated to the 9G platform and
+    # the TorqueInterceptorEnabled toggle so no other Honda is affected.
+    self.ti_enabled = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and Params().get_bool("TorqueInterceptorEnabled")
+    self.ti_ramp_down = False
+    self.ti_version = 1
+    self.ti_state = TI_STATE.RUN
+    self.ti_violation = 0
+    self.ti_error = 0
+    self.ti_lkas_allowed = False
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -179,7 +192,21 @@ class CarState(CarStateBase):
       ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
-    ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+    if self.ti_enabled:
+      # Override the driver-torque sensor with the TI device's reading, and derive
+      # lkas-allowed from the TI state machine (RUN and not ramping down).
+      ti = cp.vl["TI_FEEDBACK"]
+      ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
+      self.ti_version = ti["VERSION_NUMBER"]
+      self.ti_state = ti["STATE"]
+      self.ti_violation = ti["VIOL"]
+      self.ti_error = ti["ERROR"]
+      if self.ti_version > 1:
+        self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
+      ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
+      self.ti_lkas_allowed = (not self.ti_ramp_down) and (self.ti_state == TI_STATE.RUN)
+    else:
+      ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
