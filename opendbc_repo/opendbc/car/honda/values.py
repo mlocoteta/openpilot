@@ -59,6 +59,25 @@ class HondaSafetyFlags(IntFlag):
   GAS_INTERCEPTOR = 32
 
 
+class TI_LIMITS:
+  # Honda 9G Accord Torque Interceptor steering limits (separate CAN device).
+  TI_STEER_MAX = 575                 # theoretical max_steer 2047
+  TI_STEER_DELTA_UP = 15             # torque increase per refresh
+  TI_STEER_DELTA_DOWN = 15           # torque decrease per refresh
+  TI_STEER_DRIVER_ALLOWANCE = 5      # allowed driver torque before start limiting
+  TI_STEER_DRIVER_MULTIPLIER = 40    # weight driver torque
+  TI_STEER_DRIVER_FACTOR = 1         # from dbc
+  TI_STEER_ERROR_MAX = 350           # max delta between torque cmd and torque motor
+  TI_STEER_THRESHOLD = 15            # steeringPressed threshold on the TI torque sensor
+
+
+class TI_STATE:
+  DISCOVER = 0
+  OFF = 1
+  DRIVER_OVER = 2
+  RUN = 3
+
+
 class HondaFlags(IntFlag):
   # Detected flags
   # Bosch models with alternate set of LKAS_HUD messages
