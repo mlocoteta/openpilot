@@ -49,6 +49,9 @@ interfaces = load_interfaces(interface_names)
 # params from selecting a removed platform name and crashing detection.
 LEGACY_FORCED_CANDIDATE_MAP = {
   "CHEVROLET_BOLT_CC_2019_2021": "CHEVROLET_BOLT_CC_2018_2021",
+  # FrogPilot 9G Accord was CAR.HONDA_ACCORD_2016; StarPilot uses HONDA_ACCORD_9G.
+  # Normalize a stale forced CarModel so migrating from that branch doesn't crash card.
+  "HONDA_ACCORD_2016": "HONDA_ACCORD_9G",
 }
 
 GM_CANDIDATE_PREFIXES = ("CHEVROLET_", "GMC_", "CADILLAC_", "BUICK_", "HOLDEN_")
