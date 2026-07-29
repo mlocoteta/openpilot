@@ -2,7 +2,8 @@ import math
 import numpy as np
 
 from opendbc.can import CANPacker
-from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_interceptor_command, rate_limit, make_tester_present_msg, structs
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_interceptor_command, rate_limit, make_tester_present_msg, structs, \
+                        apply_ti_steer_torque_limits
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.values import (
   CAR,
@@ -14,6 +15,7 @@ from opendbc.car.honda.values import (
   HONDA_NIDEC_ALT_PCM_ACCEL,
   CarControllerParams,
   HondaFlags,
+  TI_LIMITS,
 )
 from opendbc.car.interfaces import CarControllerBase
 from openpilot.common.params import Params
@@ -225,6 +227,9 @@ class CarController(CarControllerBase):
     self.last_torque = 0.0
     self.torque_lpf = 0.0
     self.prev_torque_cmd = 0.0
+    # Honda 9G Accord Torque Interceptor: gated to the 9G platform + toggle.
+    self.has_ti = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and self.param_store.get_bool("TorqueInterceptorEnabled")
+    self.ti_apply_steer_last = 0
     self.steering_pressed_filter_s = 0.0
     self.steering_pressed_robust_prev = False
     self.bosch_last_gas = 0.0
@@ -305,6 +310,14 @@ class CarController(CarControllerBase):
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX, self.params.STEER_LOOKUP_BP, self.params.STEER_LOOKUP_V))
 
+    # Torque Interceptor steering command (9G Accord). Uses the normalized lateral
+    # output directly, scaled to TI units, then driver-torque + rate limited.
+    ti_apply_steer = 0
+    if self.has_ti and CS.ti_lkas_allowed:
+      ti_new_steer = int(round(torque_cmd * TI_LIMITS.TI_STEER_MAX))
+      ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, CS.out.steeringTorque, TI_LIMITS)
+    self.ti_apply_steer_last = ti_apply_steer
+
     # Send CAN commands
     can_sends = []
 
@@ -313,8 +326,14 @@ class CarController(CarControllerBase):
       if self.frame % 10 == 0:
         can_sends.append(make_tester_present_msg(0x18DAB0F1, self.CAN.pt, suppress_response=True))
 
-    # Send steering command.
-    can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    # Send steering command. On the TI car the stock STEERING_CONTROL carries zero
+    # torque (request still follows latActive) and the torque is sent on the separate
+    # TI device instead.
+    if self.has_ti:
+      can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))
+      can_sends.append(hondacan.create_ti_steering_control(self.packer, ti_apply_steer))
+    else:
+      can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
 
     # wind brake from air resistance decel at high speed
     wind_brake = float(np.interp(CS.out.vEgo, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))
