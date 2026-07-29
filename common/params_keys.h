@@ -668,6 +668,15 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ThemesDownloaded", {PERSISTENT, JSON, "{}", "{}"}},
     {"Timezone", {PERSISTENT, STRING, "", ""}},
     {"TinygradUpdateAvailable", {PERSISTENT, BOOL, "0", "0", 1}},
+    // Honda 9G Accord Torque Interceptor (TI) — sigmoid+linear steering tune.
+    // Defaults: sigmoid ON + live-update ON; a=15, b=0.72, c=0.16, Kp=1.
+    {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
+    {"TISigmoidEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
+    {"TISigmoidLive", {PERSISTENT, BOOL, "1", "1", 3}},
+    {"TISigmoidA", {PERSISTENT, FLOAT, "15.0", "15.0", 3}},
+    {"TISigmoidB", {PERSISTENT, FLOAT, "0.72", "0.72", 3}},
+    {"TISigmoidC", {PERSISTENT, FLOAT, "0.16", "0.16", 3}},
+    {"TISteerKp", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},
