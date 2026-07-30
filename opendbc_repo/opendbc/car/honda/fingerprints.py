@@ -1031,6 +1031,23 @@ FW_VERSIONS = {
       b'8S302-T90-A040\x00\x00',
     ],
   },
+  # 9G Accord (Nidec, 2016-17) with aftermarket Torque Interceptor board.
+  # FW captured live from the device so it fingerprints deterministically
+  # (the TI board changes the CAN message set, so CAN fingerprinting can't match).
+  CAR.HONDA_ACCORD_9G: {
+    (Ecu.fwdRadar, 0x18dab0f1, None): [
+      b'36161-T2F-A140\x00\x00',
+    ],
+    (Ecu.vsa, 0x18da28f1, None): [
+      b'57114-T2F-X840\x00\x00',
+    ],
+    (Ecu.combinationMeter, 0x18da60f1, None): [
+      b'78109-T2F-L110\x00\x00',
+    ],
+    (Ecu.srs, 0x18da53f1, None): [
+      b'77959-T2F-A030\x00\x00',
+    ],
+  },
   CAR.HONDA_ACCORD_11G: {
     (Ecu.fwdRadar, 0x18dab0f1, None): [
       b'8S302-30A-A040\x00\x00',
