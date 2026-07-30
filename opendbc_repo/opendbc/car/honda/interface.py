@@ -218,7 +218,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.HONDA_ACCORD_9G:
       # Normal 9G Accord LKAS: PID lateral (mvl-boston 0111-op-honda-dev reference).
       ret.steerActuatorDelay = 0.5  # FrogPilot 9G tuned value
-      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 239], [0, 239]]
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 253], [0, 253]]
       ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[0., 20.], [0., 20.]]
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.4, 0.3], [0., 0.]]
       # Torque Interceptor (opt-in toggle): switch to the torque controller so the
