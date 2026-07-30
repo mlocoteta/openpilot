@@ -300,6 +300,12 @@ class CarState(CarStateBase):
     # message registered. With a gas interceptor the first plain cp.vl read of it is
     # skipped, so register it explicitly for the 9G to avoid a KeyError in vl_all.
     pt_messages = [("POWERTRAIN_DATA", 0)] if CP.carFingerprint == CAR.HONDA_ACCORD_9G else []
+    # The TI board only sends TI_FEEDBACK once openpilot commands it (TI_STEERING_CONTROL),
+    # so it is absent while idle. Register it as optional (freq 0 -> ignore_alive) so a
+    # plain cp.vl["TI_FEEDBACK"] read doesn't lazily add it as a *required* message and
+    # trip canError ("Unknown Vehicle Variant") before we ever get to engage.
+    if CP.carFingerprint == CAR.HONDA_ACCORD_9G and Params().get_bool("TorqueInterceptorEnabled"):
+      pt_messages.append(("TI_FEEDBACK", 0))
     parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
