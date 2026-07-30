@@ -60,21 +60,32 @@ class FrameCachedParams:
     self._cache.clear()
     update_starpilot_toggles()
 
+  def _safe_put(self, fn, key, val, **kwargs):
+    # A settings write must never crash the UI (which bounces the device). This can
+    # happen when a newly-added param key isn't in the compiled params registry yet
+    # (stale params_pyx.so on the device) -> put_* raises UnknownKeyName. Swallow and
+    # log instead of taking down the whole UI.
+    try:
+      fn(key, val, **kwargs)
+      self._notify_changed()
+    except Exception as e:
+      try:
+        from openpilot.common.swaglog import cloudlog
+        cloudlog.warning(f"settings write for {key!r} failed: {e}")
+      except Exception:
+        pass
+
   def put(self, key, val, **kwargs):
-    self._params.put(key, val, **kwargs)
-    self._notify_changed()
+    self._safe_put(self._params.put, key, val, **kwargs)
 
   def put_bool(self, key, val, **kwargs):
-    self._params.put_bool(key, val, **kwargs)
-    self._notify_changed()
+    self._safe_put(self._params.put_bool, key, val, **kwargs)
 
   def put_int(self, key, val, **kwargs):
-    self._params.put_int(key, val, **kwargs)
-    self._notify_changed()
+    self._safe_put(self._params.put_int, key, val, **kwargs)
 
   def put_float(self, key, val, **kwargs):
-    self._params.put_float(key, val, **kwargs)
-    self._notify_changed()
+    self._safe_put(self._params.put_float, key, val, **kwargs)
 
   def remove(self, key):
     self._params.remove(key)
