@@ -12,6 +12,14 @@ from opendbc.car.tesla.preap.pedal_feedback import PedalFeedback
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+TESLA_GAS_PRESS_ON = 0.8
+TESLA_GAS_PRESS_OFF = 0.4
+
+
+def update_tesla_gas_pressed(previous: bool, pedal_position: float) -> bool:
+  threshold = TESLA_GAS_PRESS_OFF if previous else TESLA_GAS_PRESS_ON
+  return float(pedal_position) > threshold
+
 
 class CarState(CarStateBase):
   def __init__(self, CP, FPCP):
@@ -28,6 +36,7 @@ class CarState(CarStateBase):
     self.das_control = None
     self.cruise_buttons = 0
     self.prev_cruise_buttons = 0
+    self.gas_pressed = False
     self.msg_stw_actn_req = None
     self.speed_units = "MPH"
     self.cooperative_steering = any(
@@ -76,7 +85,11 @@ class CarState(CarStateBase):
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
 
     # Gas pedal
-    ret.gasPressed = cp_party.vl["DI_systemStatus"]["DI_accelPedalPos"] > 0
+    self.gas_pressed = update_tesla_gas_pressed(
+      self.gas_pressed,
+      cp_party.vl["DI_systemStatus"]["DI_accelPedalPos"],
+    )
+    ret.gasPressed = self.gas_pressed
 
     # Brake pedal
     ret.brake = 0

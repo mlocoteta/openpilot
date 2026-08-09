@@ -50,7 +50,10 @@ class OpenpilotPrefix:
     symlink_path = Params().get_param_path()
     if os.path.exists(symlink_path):
       shutil.rmtree(os.path.realpath(symlink_path), ignore_errors=True)
-      os.remove(symlink_path)
+      # when the params path is a real directory rather than a symlink, rmtree above already
+      # removed it and there is no link left to unlink
+      if os.path.islink(symlink_path):
+        os.remove(symlink_path)
     shutil.rmtree(self.msgq_path, ignore_errors=True)
     if PC:
       shutil.rmtree(Paths.log_root(), ignore_errors=True)

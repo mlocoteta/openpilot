@@ -55,7 +55,9 @@ from opendbc.car.gm.carcontroller import (
   get_stock_cc_active_for_cancel,
   shape_bolt_acc_pedal_low_speed_friction,
   shape_truck_friction_brake,
+  shape_truck_pitch_accel,
   shape_truck_positive_accel,
+  smooth_truck_follow_accel,
   should_use_fixed_stopping_brake,
   should_activate_auto_hold,
   should_activate_volt_one_pedal,
@@ -859,6 +861,36 @@ def test_shape_truck_positive_accel_does_not_relax_without_speed_error():
   no_error = shape_truck_positive_accel(0.28, 26.0, True, lead_visible=True, set_speed_error=0.0)
 
   assert no_error == base
+
+
+def test_shape_truck_positive_accel_keeps_more_highway_follow_authority():
+  city = shape_truck_positive_accel(0.28, 26.0, True)
+  highway = shape_truck_positive_accel(0.28, 34.0, True)
+
+  assert highway >= city
+
+
+def test_smooth_truck_follow_accel_slews_small_highway_commands():
+  shaped = smooth_truck_follow_accel(0.50, 0.0, 30.0, True, True, False)
+
+  assert shaped == pytest.approx(0.06)
+
+
+def test_smooth_truck_follow_accel_does_not_delay_safety_requests():
+  assert smooth_truck_follow_accel(-0.40, 0.20, 30.0, True, True, False) == -0.40
+  assert smooth_truck_follow_accel(0.20, -0.40, 30.0, True, True, False) == 0.20
+  assert smooth_truck_follow_accel(-0.20, 0.20, 30.0, True, True, True) == -0.20
+  assert smooth_truck_follow_accel(-0.20, 0.20, 20.0, True, True, False) == -0.20
+  assert smooth_truck_follow_accel(-0.20, 0.20, 30.0, True, False, False) == -0.20
+
+
+def test_shape_truck_pitch_accel_attenuates_highway_grade_feedforward():
+  assert shape_truck_pitch_accel(-0.30, 30.0, True) == pytest.approx(-0.0825)
+  assert shape_truck_pitch_accel(0.30, 30.0, True) == pytest.approx(0.0825)
+
+
+def test_shape_truck_pitch_accel_is_inactive_without_truck_tuning():
+  assert shape_truck_pitch_accel(-0.30, 30.0, False) == pytest.approx(-0.30)
 
 
 def test_shape_truck_friction_brake_suppresses_boundary_chatter():

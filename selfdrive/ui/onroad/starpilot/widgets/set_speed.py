@@ -7,6 +7,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
 from openpilot.selfdrive.ui.onroad.hud_renderer import (
   UI_CONFIG, FONT_SIZES, COLORS, CRUISE_DISABLED_CHAR
 )
+from openpilot.selfdrive.ui.onroad.starpilot.widget_style import draw_control_card
 
 class SetSpeedWidget(LayoutWidget):
   def __init__(self, hud_renderer):
@@ -31,8 +32,7 @@ class SetSpeedWidget(LayoutWidget):
     return float(set_speed_width), float(UI_CONFIG.set_speed_height)
 
   def _render(self, rect: rl.Rectangle) -> None:
-    rl.draw_rectangle_rounded(rect, 0.35, 10, COLORS.BLACK_TRANSLUCENT)
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.35, 10, 6, COLORS.BORDER_TRANSLUCENT)
+    draw_control_card(rect)
 
     max_color = COLORS.GREY
     set_speed_color = COLORS.DARK_GREY

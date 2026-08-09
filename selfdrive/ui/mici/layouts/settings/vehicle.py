@@ -195,10 +195,7 @@ class VehicleLayoutMici(NavScroller):
     fingerprint_btn = BigButton("fingerprint", "",gui_app.texture("icons_mici/settings/vehicle/fingerprint.png", 58, 64))
     fingerprint_btn.set_click_callback(lambda: gui_app.push_widget(fingerprint_panel))
 
-    # TODO: make it reloadable without restarting ui
-    match ui_state.params.get("CarModel"):
-      case _:
-        vehicle_specific_widgets = tuple()
+    vehicle_specific_widgets = tuple()
 
     self._scroller.add_widgets([
       fingerprint_btn,
@@ -206,4 +203,3 @@ class VehicleLayoutMici(NavScroller):
     ])
 
     self._font_medium = gui_app.font(FontWeight.MEDIUM)
-

@@ -46,3 +46,18 @@ def test_recent_destinations_dedupe_and_cap():
   assert len(updated) == 10
   assert [entry["place_name"] for entry in updated].count("Home") == 1
   assert updated[-1]["place_name"] == "Old 9"
+
+
+def test_recent_destinations_retain_coordinates_for_saved_name():
+  updated = update_recent_destinations("[]", {
+    "name": "Renamed favorite",
+    "latitude": 41.881832,
+    "longitude": -87.623177,
+  })
+
+  assert updated[0] == {
+    "place_name": "Renamed favorite",
+    "name": "Renamed favorite",
+    "latitude": 41.881832,
+    "longitude": -87.623177,
+  }

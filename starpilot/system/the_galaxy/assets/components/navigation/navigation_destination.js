@@ -407,7 +407,19 @@ export function NavDestination() {
 
     try {
       const prev = JSON.parse(data.previousDestinations);
-      state.previousDestinations = prev.map(d => ({ name: d.place_name }));
+      state.previousDestinations = prev.map(d => {
+        const name = cleanSuggestionText(d?.place_name || d?.name || "");
+        if (!name) return null;
+
+        const latitude = Number(d?.latitude);
+        const longitude = Number(d?.longitude);
+        return {
+          ...d,
+          name,
+          place_name: name,
+          ...(Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : {})
+        };
+      }).filter(Boolean);
       state.suggestions = JSON.stringify(state.previousDestinations);
     } catch { }
     try {
@@ -623,12 +635,14 @@ export function NavDestination() {
   async function selectSuggestion(sugg) {
     const label = sugg.full_address || sugg.name || sugg.address || "Unnamed Location";
     let coords;
-    if (sugg.routeId) {
+    const savedLatitude = Number(sugg.latitude);
+    const savedLongitude = Number(sugg.longitude);
+    if (Number.isFinite(savedLatitude) && Number.isFinite(savedLongitude)) {
       initiateNavigation({
-        name: sugg.name,
-        longitude: sugg.longitude,
-        latitude: sugg.latitude,
-        routeId: sugg.routeId
+        name: sugg.name || label,
+        longitude: savedLongitude,
+        latitude: savedLatitude,
+        routeId: sugg.routeId || null
       });
       return;
     }

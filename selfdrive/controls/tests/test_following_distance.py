@@ -7,6 +7,8 @@ from cereal import log
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import desired_follow_distance, get_T_FOLLOW
 from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
 
+pytestmark = pytest.mark.xdist_group("following_distance")
+
 
 def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personality=0):
   man = Maneuver(

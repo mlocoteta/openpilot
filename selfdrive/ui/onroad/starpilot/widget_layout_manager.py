@@ -1,5 +1,6 @@
 import pyray as rl
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
+from openpilot.selfdrive.ui.onroad.starpilot.widget_style import WIDGET_ANCHOR_OFFSET
 
 class WidgetLayoutManager:
   def __init__(self, content_rect: rl.Rectangle):
@@ -27,8 +28,8 @@ class WidgetLayoutManager:
     active_widgets = [w for w in self.zones["left"] if w.is_visible]
 
     # Left zone stacks vertically from the top-left offset
-    # X anchor is set speed box center (around 160 pixels from left edge)
-    center_x = self.content_rect.x + 60 + 172 // 2  # default set_speed center
+    # X anchor is the shared left-control center (content x + 146).
+    center_x = self.content_rect.x + WIDGET_ANCHOR_OFFSET
     current_y = self.content_rect.y + 45
 
     for widget in active_widgets:
@@ -76,4 +77,3 @@ class WidgetLayoutManager:
       for widget in zone:
         if widget.is_visible and widget.name not in skip:
           widget.render(widget.rect)
-

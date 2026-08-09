@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 import pickle
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +21,7 @@ COMPILE_SCRIPT = REPO_ROOT / "tinygrad_repo/examples/openpilot/compile3.py"
 DRIVING_COMPILE_SCRIPT = REPO_ROOT / "selfdrive/modeld/compile_modeld.py"
 DM_WARP_COMPILE_SCRIPT = REPO_ROOT / "selfdrive/modeld/compile_dm_warp.py"
 MODEL_VERSIONS_CACHE = Path("/data/models/.model_versions.json")
+MODELS_PATH = MODEL_VERSIONS_CACHE.parent  # runtime dir modeld loads from: /data/models
 
 DM_MODEL_KEY = "dm"
 DM_MODEL_NAME = "dmonitoring_model"
@@ -39,6 +42,8 @@ MODEL_RUN_FREQ = 20
 MODEL_CONTEXT_FREQ = 5
 REPOSITORY_FILE_LIMIT = 100 * 1024 * 1024
 DEFAULT_MULTIPART_SIZE = 95 * 1024 * 1024
+USBGPU_PROBE_ATTEMPTS = 3
+USBGPU_PROBE_TIMEOUT = 10
 
 
 def build_compile_env() -> dict[str, str]:
@@ -58,6 +63,54 @@ def build_compile_env() -> dict[str, str]:
     except (TypeError, ValueError):
       env[key] = default
   return env
+
+
+def wait_for_external_gpu(compile_env: dict[str, str]) -> bool:
+  """Wait for the USB GPU's PCIe link before starting the large model build.
+
+  The dock can enumerate on USB before its PCIe link has finished training.
+  OpenPilot probes the tinygrad device in a short-lived process and retries;
+  doing the same here avoids making the model compiler lose its one chance at
+  initialization while keeping all non-GPU builds unchanged.
+  """
+  probe = [sys.executable, "-c", "from tinygrad.device import Device; Device[Device.DEFAULT]; import os; os._exit(0)"]
+  probe_env = {**compile_env, "DEV": "USB+AMD"}
+  diagnostics: list[str] = []
+
+  for attempt in range(USBGPU_PROBE_ATTEMPTS):
+    if attempt:
+      time.sleep(1)
+    try:
+      result = subprocess.run(
+        probe,
+        cwd=REPO_ROOT,
+        env=probe_env,
+        capture_output=True,
+        text=True,
+        timeout=USBGPU_PROBE_TIMEOUT,
+        check=False,
+      )
+    except subprocess.TimeoutExpired as exc:
+      partial = exc.stderr or exc.stdout or ""
+      if isinstance(partial, bytes):
+        partial = partial.decode(errors="replace")
+      partial = partial.strip()
+      diagnostics.append(
+        f"probe timed out after {USBGPU_PROBE_TIMEOUT}s" + (f": {partial[-2000:]}" if partial else "")
+      )
+      continue
+
+    if result.returncode == 0:
+      return True
+    detail = (result.stderr or result.stdout).strip()
+    diagnostics.append((detail[-2000:] if detail else f"probe exited with status {result.returncode}"))
+
+  detail = diagnostics[-1] if diagnostics else "unknown error"
+  print(
+    f"Warning: external GPU probe did not become ready after {USBGPU_PROBE_ATTEMPTS} probes: {detail}\n"
+    "  Continuing; compile_modeld will perform the authoritative link wait and initialization."
+  )
+  return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,6 +137,11 @@ def parse_args() -> argparse.Namespace:
                       help="Compile the driving artifact for the USB AMD GPU.")
   parser.add_argument("--split-artifact", type=Path, help="Split an existing oversized PKL without compiling.")
   parser.add_argument("--chunk-size-mib", type=int, default=95, help="Multipart size in MiB; must be below 100.")
+  parser.add_argument("--no-split", action="store_true",
+                      help="Keep a single .pkl even if >100 MiB (for local installs, which need one "
+                           "file). Auto-enabled for local- model IDs.")
+  parser.add_argument("--no-install", action="store_true",
+                      help="Do not auto-copy a local- model into /data/models after compiling.")
   parser.add_argument(
     "--image-history-pipeline",
     choices=("policy", "warp"),
@@ -294,12 +352,105 @@ def sha256_file(path: Path) -> str:
   return digest.hexdigest()
 
 
+def _read_protobuf_varint(source) -> int:
+  value = 0
+  for shift in range(0, 70, 7):
+    byte = source.read(1)
+    if not byte:
+      raise ValueError("unexpected end of file while reading protobuf varint")
+    value |= (byte[0] & 0x7F) << shift
+    if not byte[0] & 0x80:
+      return value
+  raise ValueError("protobuf varint is too long")
+
+
+def validate_onnx_source(path: Path) -> None:
+  """Validate the top-level ONNX protobuf without materializing model weights."""
+  size = path.stat().st_size
+  if size == 0:
+    raise ValueError(f"ONNX source is empty: {path}")
+
+  with open(path, "rb") as source:
+    if source.read(128).startswith(b"version https://git-lfs.github.com/spec/v1"):
+      raise ValueError(f"ONNX source is a Git LFS pointer, not model data: {path}")
+    source.seek(0)
+
+    while source.tell() < size:
+      tag = _read_protobuf_varint(source)
+      field, wire_type = tag >> 3, tag & 0x07
+      if field == 7:  # ModelProto.graph
+        if wire_type != 2:
+          raise ValueError(f"ONNX graph has invalid protobuf wire type {wire_type}: {path}")
+        graph_size = _read_protobuf_varint(source)
+        remaining = size - source.tell()
+        if graph_size <= 0:
+          raise ValueError(f"ONNX graph is empty: {path}")
+        if graph_size > remaining:
+          raise ValueError(f"ONNX source is truncated: graph needs {graph_size} bytes but only {remaining} remain: {path}")
+        return
+
+      if wire_type == 0:
+        _read_protobuf_varint(source)
+      elif wire_type == 1:
+        source.seek(8, os.SEEK_CUR)
+      elif wire_type == 2:
+        source.seek(_read_protobuf_varint(source), os.SEEK_CUR)
+      elif wire_type == 5:
+        source.seek(4, os.SEEK_CUR)
+      else:
+        raise ValueError(f"ONNX source has invalid protobuf wire type {wire_type}: {path}")
+
+  raise ValueError(f"ONNX ModelProto has no graph: {path}")
+
+
 def multipart_output_paths(artifact: Path, output_dir: Path | None = None) -> list[Path]:
   output_dir = output_dir or artifact.parent
   return [
     *sorted(output_dir.glob(f"{artifact.name}.p[0-9][0-9]")),
     output_dir / f"{artifact.name}.sha256",
   ]
+
+
+def install_local_artifact(artifact: Path, model_key: str, version: str) -> None:
+  """Copy a freshly compiled local- model into the runtime dir modeld loads from,
+  and ensure its <id>.json sidecar carries the correct version.
+
+  The sidecar version is NOT cosmetic: without it _discover_local_models() records
+  an empty version, which downstream parses on the wrong contract (a v15 model then
+  drives like v11). Since we know the build version here, we write it so the local
+  install is correct by default. Local models must be a single is_file() in
+  /data/models to show in the picker. No-ops off-device (no /data/models).
+  """
+  if not MODELS_PATH.is_dir():
+    print(f"  skipped auto-install: {MODELS_PATH} not present (not on device?)")
+    return
+  dest = MODELS_PATH / artifact.name
+  shutil.copy2(artifact, dest)
+  print(f"  installed -> {dest}")
+
+  sidecar = MODELS_PATH / f"{model_key}.json"
+  info: dict = {}
+  if sidecar.is_file():
+    try:
+      loaded = json.loads(sidecar.read_text())
+      if isinstance(loaded, dict):
+        info = loaded
+    except Exception as error:
+      print(f"  WARN: existing sidecar {sidecar.name} is malformed, rewriting: {error}")
+  if not version:
+    if not str(info.get("version") or "").strip():
+      print(f"  WARN: could not determine version -- set it by hand in {sidecar.name} "
+            "or the model may drive on the wrong version contract")
+    return
+  # keep any user-set name/series; only guarantee a correct, non-empty version
+  if str(info.get("version") or "").strip() == version and sidecar.is_file():
+    print(f"  sidecar ok: {sidecar.name} (version {version})")
+    return
+  info.setdefault("name", model_key[len("local-"):].replace("_", " ").replace("-", " ").strip())
+  info.setdefault("series", "Local")
+  info["version"] = version
+  sidecar.write_text(json.dumps(info, indent=2) + "\n")
+  print(f"  wrote sidecar {sidecar.name} (version {version})")
 
 
 def split_oversized_artifact(
@@ -409,8 +560,10 @@ def compile_driving(
       "FLOAT16": "1",
       "JIT_BATCH_SIZE": "0",
       "GMMU": "0",
+      "TC_OPT": "2",
     })
     command.append("--out-of-band")
+    wait_for_external_gpu(compile_env)
   subprocess.run(command, cwd=REPO_ROOT, env=compile_env, check=True)
   return output_path
 
@@ -503,21 +656,43 @@ def main() -> int:
     raise SystemExit(f"No staged ONNX files found for {model_key} in {args.input_dir}")
 
   input_format = select_input_format(args.input_format, files)
+  _, source_args = driving_compile_args(files, input_format)
+  for option, source in zip(source_args[::2], source_args[1::2], strict=True):
+    source_path = Path(source)
+    validate_onnx_source(source_path)
+    print(f"  source {option.removeprefix('--')}: {source_path} ({source_path.stat().st_size} bytes)")
   version = infer_model_version(model_key, args.version)
   if not version and input_format == "supercombo":
     version = "v15"
   version_label = version or "unspecified behavior"
-  print(f"Compiling {model_key} ({input_format}, {version_label}) from {args.input_dir} -> {args.output_dir}")
+  will_install = model_key.startswith("local-") and not args.no_install
+  target = f"{args.output_dir}" + (f" -> {MODELS_PATH} (auto-install)" if will_install else "")
+  print(f"Compiling {model_key} ({input_format}, {version_label}) from {args.input_dir} -> {target}")
   output = compile_driving(model_key, files, input_format, version, args.output_dir,
                            args.image_history_pipeline, args.external_gpu)
   print(f"  saved {output.name}")
-  multipart_outputs = split_oversized_artifact(output)
-  if multipart_outputs:
-    print("  artifact exceeds 100 MiB; created repository-safe multipart files:")
-    for multipart_output in multipart_outputs:
-      print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
-    output.unlink()
-    print(f"  removed oversized source artifact {output.name}")
+  # Local models install as a single is_file() and never go to GitHub, so the >100 MiB
+  # repo split is pointless for them (you'd only have to reassemble it). Keep one .pkl.
+  keep_single = args.no_split or model_key.startswith("local-")
+  if keep_single:
+    is_local = model_key.startswith("local-")
+    if output.stat().st_size > REPOSITORY_FILE_LIMIT:
+      size_mb = output.stat().st_size / 1e6
+      if is_local:
+        print(f"  local model: kept as one {size_mb:.1f} MB file (repo split not needed)")
+      else:
+        print(f"  --no-split: kept one {size_mb:.1f} MB file; over 100 MB, so split it "
+              "before committing to a repo (re-run without --no-split, or --split-artifact)")
+    if is_local and not args.no_install:
+      install_local_artifact(output, model_key, version)
+  else:
+    multipart_outputs = split_oversized_artifact(output)
+    if multipart_outputs:
+      print("  artifact exceeds 100 MiB; created repository-safe multipart files:")
+      for multipart_output in multipart_outputs:
+        print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
+      output.unlink()
+      print(f"  removed oversized source artifact {output.name}")
   print("Done.")
   return 0
 

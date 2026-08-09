@@ -6,6 +6,7 @@ import pytest
 import openpilot.selfdrive.controls.lib.longcontrol as longcontrol
 import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tunes
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from openpilot.selfdrive.controls.lib.longcontrol import (
   LongControl,
   LongCtrlState,
@@ -306,6 +307,155 @@ def test_starting_accel_keeps_start_accel_shove_below_profile_ceiling():
   assert output_accel == pytest.approx(1.5)
 
 
+def test_bolt_acc_pedal_starting_handoff_keeps_small_positive_command():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    startingState=True,
+    vEgoStarting=0.35,
+    enableGasInterceptorDEPRECATED=True,
+    flags=GMFlags.PEDAL_LONG.value,
+    carFingerprint=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+  )
+  CP.longitudinalTuning.kpV = [0.8]
+
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.starting
+  lc.last_output_accel = 0.55
+  CS = car.CarState.new_message(vEgo=0.4, aEgo=1.5, brakePressed=False)
+  CS.cruiseState.standstill = False
+
+  output_accel = lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.55,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(vEgoStarting=0.35),
+    has_lead=True,
+  )
+
+  assert lc.long_control_state == LongCtrlState.pid
+  assert output_accel == pytest.approx(0.188, abs=0.01)
+
+
+def test_tesla_pedal_override_keeps_longitudinal_state_warm_for_release():
+  CP = make_longcontrol_cp(
+    brand="tesla",
+    carFingerprint="TESLA_MODEL_3",
+    startingState=True,
+    vEgoStarting=0.35,
+  )
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.pid
+  lc.last_output_accel = 0.8
+
+  CS = car.CarState.new_message(vEgo=12.0, aEgo=0.8, brakePressed=False, gasPressed=True)
+  CS.cruiseState.standstill = False
+  override_output = lc.update(
+    active=False,
+    CS=CS,
+    a_target=0.6,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    pedal_override=True,
+  )
+
+  assert override_output == 0.0
+  assert lc.long_control_state == LongCtrlState.pid
+  assert lc.last_output_accel == pytest.approx(0.8)
+
+  CS.gasPressed = False
+  release_output = lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.6,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+  )
+
+  assert release_output >= 0.6
+
+
+def test_tesla_pedal_release_guard_blocks_mild_regen_pulse():
+  CP = make_longcontrol_cp(
+    brand="tesla",
+    carFingerprint="TESLA_MODEL_3",
+    startingState=True,
+    vEgoStarting=0.35,
+  )
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.pid
+  CS = car.CarState.new_message(vEgo=12.0, aEgo=0.8, brakePressed=False, gasPressed=True)
+  CS.cruiseState.standstill = False
+  lc.update(False, CS, -0.2, False, (-3.0, 2.0), make_toggles(), pedal_override=True)
+
+  CS.gasPressed = False
+  release_output = lc.update(True, CS, -0.2, False, (-3.0, 2.0), make_toggles())
+
+  assert release_output == 0.0
+
+
+@pytest.mark.parametrize(("a_target", "should_stop"), ((-0.2, False), (0.55, True)))
+def test_bolt_acc_pedal_starting_handoff_never_overrides_stop_request(a_target, should_stop):
+  CP = make_longcontrol_cp(
+    brand="gm",
+    startingState=True,
+    vEgoStarting=0.35,
+    enableGasInterceptorDEPRECATED=True,
+    flags=GMFlags.PEDAL_LONG.value,
+    carFingerprint=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+  )
+
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.starting
+  lc.last_output_accel = 0.55
+  CS = car.CarState.new_message(vEgo=0.4, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+
+  output_accel = lc.update(
+    active=True,
+    CS=CS,
+    a_target=a_target,
+    should_stop=should_stop,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(vEgoStarting=0.35),
+    has_lead=True,
+  )
+
+  assert output_accel <= 0.0
+
+
+def test_bolt_acc_pedal_starting_handoff_floor_clears_when_lead_brakes_again():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    startingState=True,
+    vEgoStarting=0.35,
+    enableGasInterceptorDEPRECATED=True,
+    flags=GMFlags.PEDAL_LONG.value,
+    carFingerprint=CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+  )
+  CP.longitudinalTuning.kpV = [0.8]
+
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.starting
+  lc.last_output_accel = 0.55
+  CS = car.CarState.new_message(vEgo=0.4, aEgo=1.5, brakePressed=False)
+  CS.cruiseState.standstill = False
+  toggles = make_toggles(vEgoStarting=0.35)
+
+  launch_output = lc.update(True, CS, 0.55, False, (-3.0, 2.0), toggles, has_lead=True)
+  assert launch_output > 0.0
+
+  CS.vEgo = 0.5
+  CS.aEgo = 0.0
+  brake_output = lc.update(True, CS, -0.5, True, (-3.0, 2.0), toggles, has_lead=True)
+  assert lc.long_control_state == LongCtrlState.stopping
+  assert brake_output < 0.0
+  assert lc.vehicle_tuning.bolt_start_handoff_frames == 0
+
+
 def test_update_requires_sustained_moderate_positive_target_to_leave_stopping():
   CP = car.CarParams.new_message(startingState=True, vEgoStarting=0.5)
   CP.longitudinalTuning.kpBP = [0.0]
@@ -563,6 +713,68 @@ def test_non_interceptor_volt_testing_ground_handoff_freezes_integrator(monkeypa
 
   assert freeze
   assert lc.vehicle_tuning.integrator_hold_frames > 0
+
+
+def test_volt_cruise_integrator_releases_stale_negative_bias():
+  CP = car.CarParams.new_message()
+  CP.brand = "gm"
+  CP.carFingerprint = "CHEVROLET_VOLT_ASCM"
+  CP.longitudinalTuning.kpBP = [0.0]
+  CP.longitudinalTuning.kpV = [0.0]
+  CP.longitudinalTuning.kiBP = [0.0]
+  CP.longitudinalTuning.kiV = [0.5]
+
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.pid
+  lc.pid.i = -0.20
+  CS = car.CarState.new_message(vEgo=18.0, aEgo=0.0, brakePressed=False, gasPressed=False)
+  CS.cruiseState.standstill = False
+
+  output_accel = lc.update(
+    active=True,
+    CS=CS,
+    a_target=0.0,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+    has_lead=False,
+  )
+
+  assert lc.pid.i > -0.20
+  assert output_accel > -0.20
+
+
+@pytest.mark.parametrize("kwargs", [
+  {"has_lead": True},
+  {"should_stop": True},
+  {"a_target": -0.25},
+  {"aEgo": 0.25},
+  {"vEgo": 4.0},
+])
+def test_volt_cruise_integrator_does_not_release_outside_settled_open_road(kwargs):
+  CP = car.CarParams.new_message()
+  CP.brand = "gm"
+  CP.carFingerprint = "CHEVROLET_VOLT_ASCM"
+  CP.longitudinalTuning.kpBP = [0.0]
+  CP.longitudinalTuning.kpV = [0.0]
+  CP.longitudinalTuning.kiBP = [0.0]
+  CP.longitudinalTuning.kiV = [0.5]
+
+  lc = LongControl(CP)
+  pid = SimpleNamespace(i=-0.20)
+  v_ego = kwargs.get("vEgo", 18.0)
+  a_ego = kwargs.get("aEgo", 0.0)
+  a_target = kwargs.get("a_target", 0.0)
+  lc.vehicle_tuning.trim_volt_cruise_integrator(
+    pid,
+    a_target=a_target,
+    error=a_target - a_ego,
+    v_ego=v_ego,
+    should_stop=kwargs.get("should_stop", False),
+    has_lead=kwargs.get("has_lead", False),
+  )
+
+  assert pid.i == pytest.approx(-0.20)
 
 
 def test_negative_target_unwinds_positive_accel_command_after_sign_flip():
@@ -871,6 +1083,54 @@ def test_gm_stock_truck_target_filter_bypasses_low_speed_and_other_cars():
 
   assert truck_tuning.shape_gm_truck_accel_target(-0.10, 10.0, False) == pytest.approx(-0.10)
   assert bolt_tuning.shape_gm_truck_accel_target(-0.10, 20.0, False) == pytest.approx(-0.10)
+
+
+def test_toyota_sienna_target_filter_smooths_mild_high_speed_handoffs():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  assert tuning.shape_toyota_sienna_accel_target(0.30, 20.0, False) == pytest.approx(0.30)
+  filtered = tuning.shape_toyota_sienna_accel_target(-0.20, 20.0, False)
+
+  assert -0.20 < filtered < 0.30
+
+
+def test_toyota_sienna_target_filter_bypasses_stop_and_urgent_braking():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  tuning.shape_toyota_sienna_accel_target(0.30, 20.0, False)
+  assert tuning.shape_toyota_sienna_accel_target(-0.80, 20.0, False) == pytest.approx(-0.80)
+  assert tuning.shape_toyota_sienna_accel_target(-0.20, 20.0, True) == pytest.approx(-0.20)
+
+
+def test_toyota_sienna_target_filter_smooths_comfortable_lead_braking():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+  lead = SimpleNamespace(status=True, yRel=0.0, dRel=24.0, vLead=9.0, aLeadK=-1.2)
+
+  tuning.shape_toyota_sienna_accel_target(0.50, 10.0, False, leads=(lead,))
+  filtered = tuning.shape_toyota_sienna_accel_target(-1.5, 10.0, False, leads=(lead,))
+
+  assert -1.5 < filtered < 0.50
+
+
+def test_toyota_sienna_target_filter_keeps_authority_when_lead_is_urgent():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+  lead = SimpleNamespace(status=True, yRel=0.0, dRel=12.0, vLead=2.0, aLeadK=-2.0)
+
+  tuning.shape_toyota_sienna_accel_target(0.50, 12.0, False, leads=(lead,))
+  urgent = tuning.shape_toyota_sienna_accel_target(-1.5, 12.0, False, leads=(lead,))
+
+  assert urgent == pytest.approx(-1.5)
+
+
+def test_toyota_sienna_target_filter_does_not_change_other_vehicles():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_CAMRY)
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  assert tuning.shape_toyota_sienna_accel_target(-0.20, 20.0, False) == pytest.approx(-0.20)
 
 
 def test_gm_stock_truck_positive_i_bleeds_during_light_highway_accel_request():

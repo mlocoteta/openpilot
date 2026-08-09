@@ -117,12 +117,14 @@ class CarState(CarStateBase):
                                  "CRUISE_BUTTONS"
     self.is_metric = False
     self.buttons_counter = 0
+    self.main_cruise_on = False
 
     self.cruise_info = {}
     self.msg_161 = {}
     self.msg_162 = {}
     self.msg_1b5 = {}
     self.msg_364 = {}
+    self.lfa_block_msg = {}
     self.stock_lkas_msg = {}
     self.stock_lfa_msg = {}
     self.stock_lfahda_cluster_msg = {}
@@ -137,7 +139,7 @@ class CarState(CarStateBase):
     self.blindspots_front_corner_1_ts = 0
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    if CP.carFingerprint == CAR.KIA_EV9:
+    if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR:
       self.hba_icon = 0
       self.main_cruise_on = False
       self.angle_steering_angle = 0.0
@@ -310,19 +312,19 @@ class CarState(CarStateBase):
 
     # cruise state
     no_scc = bool(self.CP.flags & HyundaiFlags.NON_SCC)
-    if self.CP.openpilotLongitudinalControl:
-      # These are not used for engage/disengage since openpilot keeps track of state using the buttons
-      ret.cruiseState.available = cp.vl["TCS13"]["ACCEnable"] == 0
-      ret.cruiseState.enabled = cp.vl["TCS13"]["ACC_REQ"] == 1
-      ret.cruiseState.standstill = False
-      ret.cruiseState.nonAdaptive = False
-    elif no_scc:
+    if no_scc:
       cruise_available_msg, cruise_available_sig, cruise_enabled_msg, cruise_enabled_sig, cruise_speed_msg, cruise_speed_sig = get_non_scc_cruise_signals(self.CP)
       ret.cruiseState.available = cp.vl[cruise_available_msg][cruise_available_sig] != 0
       ret.cruiseState.enabled = cp.vl[cruise_enabled_msg][cruise_enabled_sig] != 0
       ret.cruiseState.standstill = False
       ret.cruiseState.nonAdaptive = False
       ret.cruiseState.speed = cp.vl[cruise_speed_msg][cruise_speed_sig] * speed_conv
+    elif self.CP.openpilotLongitudinalControl:
+      # These are not used for engage/disengage since openpilot keeps track of state using the buttons
+      ret.cruiseState.available = cp.vl["TCS13"]["ACCEnable"] == 0
+      ret.cruiseState.enabled = cp.vl["TCS13"]["ACC_REQ"] == 1
+      ret.cruiseState.standstill = False
+      ret.cruiseState.nonAdaptive = False
     else:
       scc_msg = "SCC12" if self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED else "SCC11"
       ret.cruiseState.available = cp_cruise.vl[scc_msg]["MainMode_ACC"] == 1
@@ -332,7 +334,10 @@ class CarState(CarStateBase):
       ret.cruiseState.speed = cp_cruise.vl[scc_msg]["VSetDis"] * speed_conv
 
     if self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
-      self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])
+      if self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+        self.lfa_block_msg = copy.copy(cp_cam.vl["CAM_0x2a4"])
+      else:
+        self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])
 
     # TODO: Find brake pressure
     ret.brake = 0
@@ -391,7 +396,10 @@ class CarState(CarStateBase):
       ret.rightBlindspot = cp.vl["LCA11"]["CF_Lca_IndRight"] != 0
 
     # save the entire LKAS11 and CLU11
-    self.lkas11 = copy.copy(cp_cam.vl["LKAS11"])
+    if self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED and self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+      self.lkas11 = {}
+    else:
+      self.lkas11 = copy.copy(cp_cam.vl["LKAS11"])
     self.clu11 = copy.copy(cp.vl["CLU11"])
     self.steer_state = cp.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
     prev_cruise_buttons = self.cruise_buttons[-1]
@@ -408,6 +416,9 @@ class CarState(CarStateBase):
     ret.buttonEvents = [*self.create_cruise_button_events(self.cruise_buttons[-1], prev_cruise_buttons),
                         *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
                         *lkas_button_events]
+
+    if getattr(self.FPCP, "flags", 0) & HyundaiStarPilotFlags.MAIN_CRUISE_STATE_TRACKING:
+      ret.cruiseState.available = self.update_main_cruise(ret)
 
     ret.blockPcmEnable = not self.recent_button_interaction()
 
@@ -614,8 +625,7 @@ class CarState(CarStateBase):
       ("LFAHDA_CLUSTER", 0),  # optional: carries cluster icon state on some variants
       ("BLINKER_STALKS", 0),  # optional: some trims publish live stalk/light state on ECAN during turn camera events
     ]
-    if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and CP.enableBsm:
-      # Keep the suppressed ADAS BSM output optional.
+    if CP.enableBsm:
       msgs.append(("BLINDSPOTS_REAR_CORNERS", 0))
     if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR:
       msgs.append(("BLINDSPOTS_FRONT_CORNER_2", 0))
@@ -633,6 +643,34 @@ class CarState(CarStateBase):
   def get_can_parsers(self, CP):
     if CP.flags & HyundaiFlags.CANFD:
       return self.get_can_parsers_canfd(CP)
+
+    if CP.flags & HyundaiFlags.CAN_CANFD_BLENDED and CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+      msgs = [
+        ("MDPS12", 100),
+        ("TCS11", 100),
+        ("TCS13", 50),
+        ("TCS15", 10),
+        ("CLU11", 50),
+        ("CLU15", 5),
+        ("ESP12", 100),
+        ("CGW1", 10),
+        ("CGW2", 5),
+        ("WHL_SPD11", 50),
+        ("SAS11", 100),
+        ("SCC12", 50),
+        ("EMS12", 100),
+        ("EMS16", 100),
+        ("LVR12", 100),
+        ("BCM_PO_11", 0),
+        ("CLU13", 0),
+      ]
+      if CP.enableBsm:
+        msgs.append(("LCA11", 20))
+
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CAM_0x2a4", 20)], CanBus(CP).CAM),
+      }
 
     msgs = [
       ("BCM_PO_11", 0),

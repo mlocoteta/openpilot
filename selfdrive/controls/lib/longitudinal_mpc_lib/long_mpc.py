@@ -78,7 +78,7 @@ FAR_RADAR_LEAD_ACCEL_TAPER_MIN_GAP_EXCESS = 8.0
 FAR_RADAR_LEAD_ACCEL_TAPER_MIN_GAP_GAIN = 0.25
 FAR_RADAR_LEAD_ACCEL_TAPER_FULL_GAP_EXCESS = 25.0
 FAR_RADAR_LEAD_ACCEL_TAPER_FULL_GAP_GAIN = 0.9
-STABLE_FOLLOW_CRUISE_MIN_SPEED = 12.0
+STABLE_FOLLOW_CRUISE_MIN_SPEED = 8.0
 STABLE_FOLLOW_CRUISE_HYSTERESIS_MIN = 4.0
 STABLE_FOLLOW_CRUISE_HYSTERESIS_GAIN = 0.14
 STABLE_FOLLOW_CRUISE_MAX_REL_SPEED = 2.5
@@ -92,7 +92,7 @@ STABLE_FOLLOW_CRUISE_PULLAWAY_MIN_HEADWAY_MARGIN = -0.10
 STABLE_FOLLOW_CRUISE_PULLAWAY_HYSTERESIS_MAX = 1.75
 VISION_FOLLOW_CRUISE_HOLD_MIN_MODEL_PROB = 0.95
 VISION_FOLLOW_CRUISE_HOLD_MAX_CRUISE_ADVANTAGE = 2.0
-NEAR_DUPLICATE_LEAD_SOURCE_MIN_SPEED = 20.0
+NEAR_DUPLICATE_LEAD_SOURCE_MIN_SPEED = 4.0
 NEAR_DUPLICATE_IDENTICAL_RADAR_SOURCE_MIN_SPEED = 10.0
 NEAR_DUPLICATE_LEAD_SOURCE_MIN_MODEL_PROB = 0.9
 NEAR_DUPLICATE_LEAD_SOURCE_MAX_LEAD_BRAKE = 0.35
@@ -383,6 +383,7 @@ class LongitudinalMpc:
     self.current_filter_time = LEAD_FILTER_TIME_LOW
     self.lead_a_filter = FirstOrderFilter(0.0, self.current_filter_time, self.dt)
     self.lead_v_filter = FirstOrderFilter(0.0, self.current_filter_time, self.dt)
+    self.duplicate_lead_x_filters = [FirstOrderFilter(0.0, 0.0, self.dt, initialized=False) for _ in range(2)]
     self.duplicate_lead_a_filters = [FirstOrderFilter(0.0, 0.0, self.dt, initialized=False) for _ in range(2)]
     self.duplicate_lead_v_filters = [FirstOrderFilter(0.0, 0.0, self.dt, initialized=False) for _ in range(2)]
     # Slew-limited filter factor to avoid abrupt 0.50↔1.00 jumps
@@ -426,7 +427,7 @@ class LongitudinalMpc:
     self.time_linearization = 0.0
     self.time_integrator = 0.0
     self.x0 = np.zeros(X_DIM)
-    for lead_filter in (*self.duplicate_lead_a_filters, *self.duplicate_lead_v_filters):
+    for lead_filter in (*self.duplicate_lead_x_filters, *self.duplicate_lead_a_filters, *self.duplicate_lead_v_filters):
       lead_filter.x = 0.0
       lead_filter.initialized = False
     self.set_weights()
@@ -604,10 +605,17 @@ class LongitudinalMpc:
       filter_time = max(filter_time, DUPLICATE_VISION_LEAD_FILTER_TIME)
       filter_time *= self.filter_time_factor
 
+      x_filter = self.duplicate_lead_x_filters[lead_index]
       a_filter = self.duplicate_lead_a_filters[lead_index]
       v_filter = self.duplicate_lead_v_filters[lead_index]
+      x_filter.update_alpha(filter_time)
       a_filter.update_alpha(filter_time)
       v_filter.update_alpha(filter_time)
+      if x_filter.initialized and x_lead <= x_filter.x:
+        x_filter.x = x_lead
+      else:
+        x_filter.update(x_lead)
+      x_lead = x_filter.x
       a_lead = a_filter.update(a_lead)
       v_lead = v_filter.update(v_lead)
     else:
@@ -616,6 +624,7 @@ class LongitudinalMpc:
       self.lead_v_filter.update(v_lead)
       a_lead = self.lead_a_filter.x
       v_lead = self.lead_v_filter.x
+      self.duplicate_lead_x_filters[lead_index].initialized = False
       self.duplicate_lead_a_filters[lead_index].initialized = False
       self.duplicate_lead_v_filters[lead_index].initialized = False
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego)
@@ -835,7 +844,8 @@ class LongitudinalMpc:
 
   def update(self, radarstate, v_cruise, x, v, a, j, danger_factor, t_follow,
              personality=log.LongitudinalPersonality.standard, tracking_lead=True,
-             optional_far_lead_comfort=True, smooth_duplicate_vision=False):
+             optional_far_lead_comfort=True, smooth_duplicate_vision=False,
+             stop_x=None):
     v_ego = self.x0[1]
     lead_one = radarstate.leadOne
     lead_two = radarstate.leadTwo
@@ -890,6 +900,11 @@ class LongitudinalMpc:
         lead_0_bias, lead_1_bias = self.get_near_duplicate_lead_source_hysteresis(prev_source, lead_one, lead_two, v_ego)
         lead_0_obstacle = lead_0_obstacle + lead_0_bias
         lead_1_obstacle = lead_1_obstacle + lead_1_bias
+      # A forced stop is a position constraint, not a speed one. Folded in here rather than
+      # as a 4th column so the SOURCES[argmin] below keeps working. Lets the solver plan the
+      # stop directly instead of chasing a descending speed ceiling with a persistent lag.
+      if stop_x is not None:
+        cruise_obstacle = np.minimum(cruise_obstacle, stop_x)
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
       candidate_source = SOURCES[np.argmin(x_obstacles[0])]
       sticky_source = None
@@ -939,6 +954,8 @@ class LongitudinalMpc:
       xforward = ((v[1:] + v[:-1]) / 2) * (T_IDXS[1:] - T_IDXS[:-1])
       x = np.cumsum(np.insert(xforward, 0, x[0]))
 
+      if stop_x is not None:
+        cruise_target = np.minimum(cruise_target, stop_x)
       x_and_cruise = np.column_stack([x, cruise_target])
       x = np.min(x_and_cruise, axis=1)
 

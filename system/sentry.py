@@ -107,6 +107,22 @@ def capture_report(discord_user, report, starpilot_toggles):
     sentry_sdk.flush()
 
 
+def capture_flm_tune_submission(submission: dict) -> None:
+  """Send an explicitly submitted FLM tune without attaching drive artifacts."""
+  discord_user = str(submission.get("discordUsername", "Unknown") or "Unknown")
+  car_name = str(submission.get("carName", "Unknown car") or "Unknown car")
+  tune = submission.get("tune", {})
+  if not isinstance(tune, dict):
+    tune = {}
+
+  capture_message(
+    f"{car_name} Tune submitted by {discord_user}",
+    level="info",
+    tags={"report_type": "flm_tune_submission", "car_name": car_name},
+    extras={"flm_tune": tune},
+  )
+
+
 def set_tag(key: str, value: str) -> None:
   sentry_sdk.set_tag(key, value)
 

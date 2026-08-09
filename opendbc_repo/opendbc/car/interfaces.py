@@ -213,9 +213,6 @@ class CarInterfaceBase(ABC):
 
     if platform not in MOCK:
       if platform in CHRYSLER:
-        if candidate == CHRYSLER.RAM_HD_5TH_GEN:
-          if 570 not in fingerprint[0]:
-            fp_ret.flags |= ChryslerStarPilotFlags.RAM_HD_ALT_BUTTONS.value
         if 0x4FF in fingerprint[0]:
           fp_ret.flags |= ChryslerStarPilotFlags.NO_MIN_STEERING_SPEED.value
           CP.minSteerSpeed = 0.
@@ -229,6 +226,9 @@ class CarInterfaceBase(ABC):
           fp_ret.flags |= int(HondaStarPilotFlags.HAS_CAMERA_MESSAGES)
 
       elif platform in HYUNDAI:
+        if CP.openpilotLongitudinalControl and not (CP.flags & HyundaiFlags.CANFD):
+          fp_ret.flags |= HyundaiStarPilotFlags.MAIN_CRUISE_STATE_TRACKING.value
+
         if candidate in CANFD_CAR:
           hda2 = Ecu.adas in [fw.ecu for fw in car_fw]
           CAN = CanBus(None, fingerprint, bool(CP.flags & HyundaiFlags.CANFD_LKA_STEERING))
@@ -238,9 +238,9 @@ class CarInterfaceBase(ABC):
             fp_ret.flags |= HyundaiStarPilotFlags.SPEED_LIMIT_AVAILABLE.value
 
         fp_ret.redneckCruiseAvailable = bool(CP.flags & HyundaiFlags.NON_SCC) and not bool(CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS)
-        if fp_ret.redneckCruiseAvailable and params.get_bool("RedneckCruise") and \
-            not CP.openpilotLongitudinalControl:
+        if fp_ret.redneckCruiseAvailable and params.get_bool("RedneckCruise"):
           fp_ret.pcmCruiseSpeed = False
+          CP.openpilotLongitudinalControl = True
 
         hyundai_has_lda_button = (
           0x391 in fingerprint[0] or
@@ -251,9 +251,16 @@ class CarInterfaceBase(ABC):
         if hyundai_has_lda_button:
           fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON.value
 
+        if getattr(starpilot_toggles, "always_on_lateral_lkas", False):
+          fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
+
         # LKASButtonControl == 9 means BUTTON_FUNCTIONS["AOL_TOGGLE"] in starpilot_variables.
         if params.get_bool("AlwaysOnLateral") and params.get_int("LKASButtonControl") == 9:
           fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
+
+        if candidate == HYUNDAI.HYUNDAI_SONATA_HYBRID and getattr(starpilot_toggles, "always_on_lateral_lkas", False) and \
+            getattr(starpilot_toggles, "main_cruise_aol_toggle", False):
+          fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_SYNC.value
       elif platform in TOYOTA:
         fp_ret.canUsePedal = not CP.autoResumeSng
         fp_ret.canUseSDSU = candidate not in UNSUPPORTED_DSU_CAR and candidate not in TSS2_CAR

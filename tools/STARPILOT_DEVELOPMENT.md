@@ -82,6 +82,9 @@ All three entrypoints do the same thing. `./dev` is the shortest general-purpose
 - `./dev sync`
 - `./dev shell`
 
+`./onroad` replays a route into a desktop UI to watch live. To record one to an mp4 instead of
+watching it in real time, use `tools/clip/run.py` (see [tools/clip/README.md](clip/README.md)).
+
 ### Desktop UI shorthands
 
 - `./c3 [jobs] [args...]`

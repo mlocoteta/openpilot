@@ -193,7 +193,8 @@ class StarPilotState:
             self.car_state.vEgoStopping = float(self._safe_get(CP, "vEgoStopping", self.car_state.vEgoStopping))
 
             if car_fingerprint and (not force_fingerprint or PC):
-                cp_make = car_fingerprint.split('_')[0].title()
+                make_prefix = car_fingerprint.split("_", 1)[0]
+                cp_make = make_prefix if make_prefix in {"CUPRA", "GMC", "MAN", "SEAT"} else make_prefix.title()
                 user_make = self.params.get("CarMake")
                 if not (force_fingerprint and PC and user_make and user_make != cp_make):
                     self.params.put("CarModel", car_fingerprint)

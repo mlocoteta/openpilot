@@ -1,9 +1,11 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from cereal import car
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.car.card import Car
 from openpilot.selfdrive.car.redneck_cruise import (
   DECREASE_INACTIVE_TIMER,
   INCREASE_INACTIVE_TIMER,
@@ -168,6 +170,71 @@ class TestRedneckCruise(unittest.TestCase):
     )
     self.assertAlmostEqual(104.4 * CV.KPH_TO_MS, target_speed)
 
+  def test_target_speed_follows_resolved_slc_target(self):
+    for internal_mph, slc_mph in ((55.0, 65.0), (65.0, 55.0)):
+      with self.subTest(internal_mph=internal_mph, slc_mph=slc_mph):
+        target_speed = select_redneck_target_speed(
+          internal_mph * CV.MPH_TO_KPH,
+          internal_mph * CV.MPH_TO_MS,
+          0.0,
+          [],
+          10,
+          allow_plan_decrease=False,
+          slc_target_speed_ms=slc_mph * CV.MPH_TO_MS,
+        )
+        self.assertAlmostEqual(slc_mph * CV.MPH_TO_MS, target_speed)
+
+  def test_card_target_speed_uses_longitudinal_acceleration(self):
+    sm = MagicMock()
+    sm.seen = {"starpilotPlan": False, "longitudinalPlan": False, "radarState": False}
+    sm.valid = sm.seen.copy()
+    card = SimpleNamespace(
+      CP=SimpleNamespace(openpilotLongitudinalControl=True),
+      sm=sm,
+      starpilot_toggles=SimpleNamespace(speed_limit_controller=False),
+    )
+    car_state = SimpleNamespace(vEgo=55.0 * CV.MPH_TO_MS)
+    car_control = SimpleNamespace(
+      actuators=SimpleNamespace(accel=0.5),
+      hudControl=SimpleNamespace(leadVisible=True),
+    )
+
+    target_speed, lead_present = Car._get_redneck_target_speed(card, car_state, car_control)
+
+    self.assertAlmostEqual(55.0 * CV.MPH_TO_MS * 1.01 + 1.5, target_speed)
+    self.assertTrue(lead_present)
+
+  def test_card_target_speed_uses_slc_target_with_longitudinal_control(self):
+    slc_target = 80.0 * CV.KPH_TO_MS
+    starpilot_plan = SimpleNamespace(
+      vCruise=110.0 * CV.KPH_TO_MS,
+      slcOverriddenSpeed=0.0,
+      slcSpeedLimit=slc_target,
+      slcSpeedLimitOffset=0.0,
+    )
+    sm = MagicMock()
+    sm.seen = {"starpilotPlan": True, "longitudinalPlan": False, "radarState": False}
+    sm.valid = sm.seen.copy()
+    sm.__getitem__.side_effect = {"starpilotPlan": starpilot_plan}.__getitem__
+    card = SimpleNamespace(
+      CP=SimpleNamespace(openpilotLongitudinalControl=True),
+      sm=sm,
+      starpilot_toggles=SimpleNamespace(speed_limit_controller=True),
+    )
+    car_state = SimpleNamespace(
+      vEgo=100.0 * CV.KPH_TO_MS,
+      cruiseState=SimpleNamespace(speedCluster=70.0 * CV.KPH_TO_MS),
+    )
+    car_control = SimpleNamespace(
+      actuators=SimpleNamespace(accel=-1.0),
+      hudControl=SimpleNamespace(leadVisible=False),
+    )
+
+    target_speed, lead_present = Car._get_redneck_target_speed(card, car_state, car_control)
+
+    self.assertAlmostEqual(slc_target, target_speed)
+    self.assertFalse(lead_present)
+
   def test_target_speed_returns_plan_minimum_when_slowing_down(self):
     target_speed = select_redneck_target_speed(
       120.0,
@@ -227,6 +294,54 @@ class TestRedneckCruise(unittest.TestCase):
       lead_rel_speed_ms=-4.5 * CV.MPH_TO_MS,
     )
     self.assertLess(target_speed, 53.0 * CV.MPH_TO_MS)
+
+  def test_target_speed_does_not_recover_while_closing_on_lead(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      88.0 * CV.KPH_TO_MS,
+      0.0,
+      [89.0 * CV.KPH_TO_MS, 89.0 * CV.KPH_TO_MS, 88.0 * CV.KPH_TO_MS,
+       87.0 * CV.KPH_TO_MS, 85.0 * CV.KPH_TO_MS, 80.0 * CV.KPH_TO_MS],
+      6,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=46.8,
+      lead_rel_speed_ms=-2.2,
+    )
+
+    self.assertLess(target_speed, 80.0 * CV.KPH_TO_MS)
+
+  def test_target_speed_coasts_before_closing_lead_plan_crosses_set_speed(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      100.0 * CV.KPH_TO_MS,
+      0.0,
+      [106.0 * CV.KPH_TO_MS, 105.0 * CV.KPH_TO_MS, 104.0 * CV.KPH_TO_MS,
+       103.0 * CV.KPH_TO_MS, 102.0 * CV.KPH_TO_MS],
+      5,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=55.8,
+      lead_rel_speed_ms=-1.1,
+    )
+
+    self.assertLess(target_speed, 100.0 * CV.KPH_TO_MS)
+
+  def test_target_speed_holds_for_distant_closing_lead(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      100.0 * CV.KPH_TO_MS,
+      0.0,
+      [106.0 * CV.KPH_TO_MS, 105.0 * CV.KPH_TO_MS, 104.0 * CV.KPH_TO_MS,
+       103.0 * CV.KPH_TO_MS, 102.0 * CV.KPH_TO_MS],
+      5,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=150.0,
+      lead_rel_speed_ms=-1.1,
+    )
+
+    self.assertAlmostEqual(100.0 * CV.KPH_TO_MS, target_speed)
 
   def test_target_speed_uses_near_term_recovery_for_lead_speedup(self):
     target_speed = select_redneck_target_speed(

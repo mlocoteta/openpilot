@@ -12,6 +12,7 @@ from openpilot.system.manager.launch_param_migrations import (
   LATERAL_METHOD_REBRAND_MIGRATION_MARKER,
   MARKER_DIRNAME,
   STANDARD_ACCELERATION_PROFILE,
+  SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER,
   USE_OLD_UI_MIGRATION_MARKER,
   VISION_SPEED_LIMIT_DETECTION_MIGRATION_MARKER,
   apply_launch_param_migrations,
@@ -111,6 +112,35 @@ def test_apply_launch_param_migrations_does_not_reapply_after_marker(tmp_path):
   assert not params.get_bool("LongPitch")
   assert params.get_float("SteerKP") == 0.65
   assert params.get_float("SteerKPStock") == DEFAULT_STEER_KP
+
+
+def test_apply_launch_param_migrations_converts_legacy_speed_limit_hide_once(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_bool("ShowSpeedLimits", True)
+  params.put_bool("HideSpeedLimit", True)
+
+  apply_launch_param_migrations(params)
+
+  assert not params.get_bool("ShowSpeedLimits")
+  assert not params.get_bool("HideSpeedLimit")
+  assert marker_path(tmp_path, SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER).is_file()
+
+
+def test_apply_launch_param_migrations_preserves_speed_limit_visibility_choice(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_bool("ShowSpeedLimits", False)
+  params.put_bool("HideSpeedLimit", False)
+  marker = marker_path(tmp_path, SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER)
+
+  apply_launch_param_migrations(params)
+
+  assert not params.get_bool("ShowSpeedLimits")
+  assert not params.get_bool("HideSpeedLimit")
+  assert marker.is_file()
+
+  params.put_bool("ShowSpeedLimits", True)
+  apply_launch_param_migrations(params)
+  assert params.get_bool("ShowSpeedLimits")
 
 
 def test_apply_launch_param_migrations_applies_branch_defaults_for_existing_installs(tmp_path):

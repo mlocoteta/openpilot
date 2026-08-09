@@ -30,6 +30,15 @@ from openpilot.starpilot.controls.lib.starpilot_vcruise import StarPilotVCruise
 from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
 
 RADARLESS_TRACK_HOLD_TIME = 0.45
+FORCE_STOP_JERK_SCALE = 0.32  # accel-change cost multiplier while forcing_stop (125 -> ~40)
+FORCE_STOP_JERK_SCALE_OVERRIDES = {
+  "HYUNDAI_ELANTRA_2021": 0.60,
+}
+
+
+def get_force_stop_jerk_scale(car_params):
+  fingerprint = str(getattr(car_params, "carFingerprint", ""))
+  return FORCE_STOP_JERK_SCALE_OVERRIDES.get(fingerprint, FORCE_STOP_JERK_SCALE)
 
 
 def _sanitize_json_value(value):
@@ -152,17 +161,19 @@ class StarPilotPlanner:
     self.lateral_acceleration = v_ego**2 * sm["controlsState"].curvature
     self.driving_in_curve = abs(self.lateral_acceleration) >= MINIMUM_LATERAL_ACCELERATION
 
+    CS = sm["carState"]
+    blinker_on = CS.leftBlinker or CS.rightBlinker
+    signal_pause = blinker_on and starpilot_toggles.pause_lateral_below_signal
+
     self.lateral_check = v_ego >= starpilot_toggles.pause_lateral_below_speed
-    self.lateral_check |= not (sm["carState"].leftBlinker or sm["carState"].rightBlinker) and starpilot_toggles.pause_lateral_below_signal
-    self.lateral_check |= sm["carState"].standstill
+    self.lateral_check |= not blinker_on and starpilot_toggles.pause_lateral_below_signal
+    self.lateral_check |= CS.standstill and not signal_pause
     self.lateral_check &= not sm["starpilotCarState"].pauseLateral
 
     # Blinker-based lateral resume delay: after blinker turns off, delay lateral
     # resumption if the vehicle went below half the pause speed during the blinker.
     # This lets the driver manually straighten the wheel after a turn without
     # openpilot fighting them.
-    CS = sm["carState"]
-    blinker_on = CS.leftBlinker or CS.rightBlinker
     prev_blinker_on = self.CS_prev_left_blinker or self.CS_prev_right_blinker
 
     if blinker_on:
@@ -282,7 +293,17 @@ class StarPilotPlanner:
     starpilot_plan_send.valid = sm.all_checks(service_list=["carState", "controlsState", "selfdriveState", "radarState"])
     starpilotPlan = starpilot_plan_send.starpilotPlan
 
-    starpilotPlan.accelerationJerk = float(A_CHANGE_COST * self.starpilot_following.acceleration_jerk)
+    # While committed to a Force Stop, cut the MPC's accel-change penalty so terminal
+    # braking can ramp faster. 0.32 lands near 40, what long_mpc uses in blended mode.
+    if self.starpilot_vcruise.forcing_stop:
+      try:
+        car_params = sm["carParams"]
+      except (KeyError, IndexError, TypeError, AttributeError):
+        car_params = None
+      jerk_scale = get_force_stop_jerk_scale(car_params)
+    else:
+      jerk_scale = 1.0
+    starpilotPlan.accelerationJerk = float(A_CHANGE_COST * self.starpilot_following.acceleration_jerk * jerk_scale)
     starpilotPlan.dangerFactor = float(self.starpilot_following.danger_factor)
     starpilotPlan.dangerJerk = float(DANGER_ZONE_COST * self.starpilot_following.danger_jerk)
     starpilotPlan.speedJerk = float(J_EGO_COST * self.starpilot_following.speed_jerk)

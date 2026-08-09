@@ -74,6 +74,11 @@ def test_disable_far_lead_throttle_keeps_mild_coast_near_target_gap():
   assert should_disable
 
 
+def test_disable_far_lead_throttle_waits_until_reduced_gap():
+  should_disable = should_disable_far_lead_throttle(31.4, 43.5, 38.0, 0.5, False)
+  assert should_disable
+
+
 def test_disable_far_lead_throttle_rejects_fast_closing():
   should_disable = should_disable_far_lead_throttle(31.4, 52.0, 38.0, 3.5, False)
   assert not should_disable

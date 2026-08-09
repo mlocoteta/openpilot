@@ -49,6 +49,7 @@ def test_external_gpu_compilation_is_opt_in(tmp_path, monkeypatch):
     "DEV": "QCOM", "IMAGE": "2", "NOLOCALS": "1", "OPENPILOT_HACKS": "1",
   })
   monkeypatch.setattr(model_compiler.subprocess, "run", lambda command, **kwargs: invocations.append((command, kwargs)))
+  monkeypatch.setattr(model_compiler, "wait_for_external_gpu", lambda _: None)
   files = {"driving_supercombo": tmp_path / "model.onnx"}
 
   model_compiler.compile_driving("normal", files, "supercombo", "v15", tmp_path, "policy")
@@ -79,7 +80,15 @@ def test_requested_model_id_uses_only_staged_source(tmp_path):
   }
 
 
-def test_fat_onnx_is_streamed_to_disk(tmp_path, monkeypatch):
+def test_regular_fat_onnx_is_parsed_in_place(tmp_path, monkeypatch):
+  source = tmp_path / "big_driving_supercombo.onnx"
+  source.write_bytes(b"model")
+  monkeypatch.setattr(file_chunker, "open_file_chunked", lambda _: (_ for _ in ()).throw(AssertionError("must not copy")))
+
+  assert compile_modeld.read_file_chunked_to_disk(source) == str(source)
+
+
+def test_chunked_fat_onnx_is_streamed_to_disk(tmp_path, monkeypatch):
   payload = b"fat model" * 1024
 
   class StreamingOnly(io.BytesIO):
@@ -95,6 +104,30 @@ def test_fat_onnx_is_streamed_to_disk(tmp_path, monkeypatch):
     assert Path(staged).read_bytes() == payload
   finally:
     Path(staged).unlink(missing_ok=True)
+
+
+def test_onnx_preflight_accepts_graph_without_reading_weights(tmp_path):
+  source = tmp_path / "model.onnx"
+  source.write_bytes(b"\x08\x09\x3a\x02\x12\x00")
+
+  model_compiler.validate_onnx_source(source)
+
+
+def test_onnx_preflight_rejects_empty_truncated_and_lfs_sources(tmp_path):
+  empty = tmp_path / "empty.onnx"
+  empty.touch()
+  truncated = tmp_path / "truncated.onnx"
+  truncated.write_bytes(b"\x3a\x08bad")
+  pointer = tmp_path / "pointer.onnx"
+  pointer.write_text("version https://git-lfs.github.com/spec/v1\n")
+
+  for source, message in ((empty, "empty"), (truncated, "truncated"), (pointer, "Git LFS pointer")):
+    try:
+      model_compiler.validate_onnx_source(source)
+    except ValueError as error:
+      assert message in str(error)
+    else:
+      raise AssertionError(f"{source} should have failed validation")
 
 
 def test_dropbox_urls_are_direct_downloads():

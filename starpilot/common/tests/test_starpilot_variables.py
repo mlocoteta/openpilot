@@ -41,9 +41,27 @@ def test_get_starpilot_toggles_uses_persisted_force_torque_request(monkeypatch):
   monkeypatch.setattr(spv.get_starpilot_toggles, "_params", params, raising=False)
 
   payload = '{"force_torque_controller": false}'
-  toggles = spv.get_starpilot_toggles({"starpilotPlan": SimpleNamespace(starpilotToggles=payload)})
+  toggles = spv.get_starpilot_toggles(
+    {"starpilotPlan": SimpleNamespace(starpilotToggles=payload)},
+    read_persisted_force_params=True,
+  )
 
   assert toggles.force_torque_controller is True
+
+
+def test_get_starpilot_toggles_realtime_path_does_not_read_persisted_force_params(monkeypatch):
+  class UnexpectedParamsRead:
+    def get_bool(self, key):
+      raise AssertionError(f"unexpected persisted param read: {key}")
+
+  monkeypatch.setattr(spv.get_starpilot_toggles, "_params", UnexpectedParamsRead(), raising=False)
+
+  payload = '{"force_offroad": false, "force_onroad": true, "force_torque_controller": false}'
+  toggles = spv.get_starpilot_toggles({"starpilotPlan": SimpleNamespace(starpilotToggles=payload)})
+
+  assert toggles.force_offroad is False
+  assert toggles.force_onroad is True
+  assert toggles.force_torque_controller is False
 
 
 class _FakeParams:
@@ -170,6 +188,16 @@ def test_runtime_values_ignore_legacy_tuning_level_metadata():
   assert variables.get_button_function("LKASButtonControl") == spv.BUTTON_FUNCTIONS["AOL_TOGGLE"]
 
 
+def test_missing_bounded_value_uses_explicit_default():
+  variables = object.__new__(spv.StarPilotVariables)
+  variables.params = _FakeParams()
+  variables.default_values = {}
+
+  value = variables.get_value("LaneChangeCloseGapSeconds", cast=float, default=1.0, min=0.5, max=3.0)
+
+  assert value == 1.0
+
+
 def test_favorite_button_flags_map_to_three_slots():
   toggle = SimpleNamespace()
 
@@ -194,3 +222,9 @@ def test_set_speed_limit_available_on_redneck_helper_path():
 
 def test_set_speed_limit_unavailable_on_stock_pcm_without_helper():
   assert spv.set_speed_limit_available(openpilot_longitudinal=False, has_cc_long=False, pcm_cruise_speed=True) is False
+
+
+def test_speed_limit_controller_available_on_openpilot_longitudinal_or_redneck():
+  assert spv.speed_limit_controller_available(openpilot_longitudinal=True, redneck_cruise=False) is True
+  assert spv.speed_limit_controller_available(openpilot_longitudinal=False, redneck_cruise=True) is True
+  assert spv.speed_limit_controller_available(openpilot_longitudinal=False, redneck_cruise=False) is False

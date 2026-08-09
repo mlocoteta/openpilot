@@ -63,7 +63,7 @@ class VisualsLayoutMici(NavScroller):
     self._torque_bar_btn = BigParamControl("torque bar", "EnableTorqueBarWidget")
     self._rainbow_path_btn = BigParamControl("rainbow road", "RainbowPath")
     self._lead_indicator_btn = LeadIndicatorBigButton()
-    self._speed_limit_signs_btn = BigParamControl("speed limit signs", "ShowSpeedLimits")
+    self._speed_limit_signs_btn = BigParamControl("show speed limits", "ShowSpeedLimits")
     self._slc_confirmation_btn = BigParamControl("confirm new speed limits", "SLCConfirmation")
     self._slc_confirmation_lower_btn = BigParamControl("confirm lower limits", "SLCConfirmationLower")
     self._slc_confirmation_higher_btn = BigParamControl("confirm higher limits", "SLCConfirmationHigher")

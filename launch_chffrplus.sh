@@ -51,8 +51,6 @@ function agnos_init {
   # StarPilot variables
   sudo chmod 0777 /cache
 
-  sudo rm -f /data/misc/display/color_cal/color_cal /data/misc/display/color_cal/source.sha256
-
   # Check if AGNOS update is required
   AGNOS_CURRENT_VERSION="$(< /VERSION)"
   AGNOS_UPDATE_REQUIRED=1
@@ -157,6 +155,8 @@ from pathlib import Path
 import sys
 import time
 
+from openpilot.common.file_chunker import get_existing_chunks
+
 start = time.monotonic()
 last = start
 log_path = os.environ.get("SP_BOOT_TIMING_LOG")
@@ -195,12 +195,14 @@ for mod in mods:
   log_step(f"import:{mod}")
 
 repo_root = Path.cwd().parents[1]
-required_files = [
+required_model_artifacts = [
   repo_root / "selfdrive/modeld/models/driving_tinygrad.pkl",
   repo_root / "selfdrive/modeld/models/dmonitoring_model_metadata.pkl",
   repo_root / "selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl",
   repo_root / "selfdrive/modeld/models/dm_warp_1928x1208_tinygrad.pkl",
   repo_root / "selfdrive/modeld/models/dm_warp_1344x760_tinygrad.pkl",
+]
+required_files = [
   repo_root / "selfdrive/pandad/pandad_api_impl.so",
   repo_root / "selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
   repo_root / "selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/libacados_ocp_solver_lat.so",
@@ -208,6 +210,17 @@ required_files = [
   repo_root / "selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so",
   repo_root / "opendbc_repo/opendbc/dbc/gm_global_a_powertrain_generated.dbc",
 ]
+
+for path in required_model_artifacts:
+  try:
+    artifact_paths = [Path(p) for p in get_existing_chunks(path)]
+  except Exception as e:
+    raise FileNotFoundError(f"Missing prebuilt runtime artifact: {path}") from e
+  missing_chunks = [p for p in artifact_paths if not p.is_file()]
+  if missing_chunks:
+    missing = ", ".join(str(p) for p in missing_chunks)
+    raise FileNotFoundError(f"Missing prebuilt runtime artifact chunks for {path}: {missing}")
+log_step("required_model_artifacts")
 
 for path in required_files:
   if not path.is_file():

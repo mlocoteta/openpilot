@@ -77,6 +77,13 @@ SLC_TARGET_EPS = 0.15
 RELEVANT_LEAD_MIN_CLOSING_SPEED = 0.5
 RELEVANT_LEAD_MIN_BRAKE = -0.4
 
+# Drive mode -> profile mapping used by the map_acceleration / map_deceleration toggles.
+GEAR_STATE_PROFILES = {
+  "eco": (ACCELERATION_PROFILES["ECO"], DECELERATION_PROFILES["ECO"]),
+  "sport": (ACCELERATION_PROFILES["SPORT_PLUS"], DECELERATION_PROFILES["SPORT"]),
+  "normal": (ACCELERATION_PROFILES["STANDARD"], DECELERATION_PROFILES["STANDARD"]),
+}
+
 def get_max_accel_eco(v_ego, ev_tuning=True, truck_tuning=False):
   return interpolate_accel_profile(v_ego, get_accel_profile_curve_values(ACCELERATION_PROFILES["ECO"], ev_tuning, truck_tuning))
 
@@ -135,6 +142,7 @@ class StarPilotAcceleration:
   def __init__(self, StarPilotPlanner):
     self.starpilot_planner = StarPilotPlanner
     self.params = Params()
+    self.params_memory = Params(memory=True)
 
     self.max_accel = 0
     self.min_accel = 0
@@ -156,11 +164,17 @@ class StarPilotAcceleration:
       self.max_accel = get_max_accel_traffic(v_ego)
     elif custom_accel_profile:
       self.max_accel = get_max_accel_custom(v_ego, custom_accel_profile_values, starpilot_toggles.acceleration_profile, ev_tuning, truck_tuning)
-    elif starpilot_toggles.map_acceleration and (eco_gear or sport_gear):
+    elif starpilot_toggles.map_acceleration:
+      # Drive mode is authoritative while mapping is on, normal gear included. Letting
+      # normal fall through to the profile param instead leaves the car on a stale eco
+      # or sport curve for the rest of the ignition cycle once the driver selects it
+      # again, because the param resync below cannot be observed any sooner.
       if eco_gear:
         self.max_accel = get_max_accel_eco(v_ego, ev_tuning, truck_tuning)
-      else:
+      elif sport_gear:
         self.max_accel = get_max_allowed_accel(v_ego, ev_tuning, truck_tuning)
+      else:
+        self.max_accel = get_max_accel_standard(v_ego, ev_tuning, truck_tuning)
     else:
       if starpilot_toggles.acceleration_profile == ACCELERATION_PROFILES["ECO"]:
         self.max_accel = get_max_accel_eco(v_ego, ev_tuning, truck_tuning)
@@ -184,6 +198,10 @@ class StarPilotAcceleration:
       else:
         self.min_accel = A_CRUISE_MIN_SPORT
     else:
+      if starpilot_toggles.map_deceleration:
+        # Same reasoning as the acceleration side, but resolved through the profile so
+        # normal gear keeps the SLC-shaped floor below.
+        deceleration_profile = DECELERATION_PROFILES["STANDARD"]
       self.min_accel = get_profile_min_accel_floor(deceleration_profile)
 
       raw_v_cruise_kph = 0.0 if sm["carState"].vCruise == V_CRUISE_UNSET else min(sm["carState"].vCruise, V_CRUISE_MAX)
@@ -227,20 +245,18 @@ class StarPilotAcceleration:
     # Sync AccelerationProfile and DecelerationProfile params so the UI reflects the active drive mode
     # Eco → Eco, Normal → Standard, Sport → Sport+
     gear_state = "eco" if eco_gear else ("sport" if sport_gear else "normal")
-    if gear_state != self.last_gear_state:
+    mapping_enabled = starpilot_toggles.map_acceleration or starpilot_toggles.map_deceleration
+    # Latch only once a mapping is actually enabled. Consuming the transition while both
+    # toggles are still off would skip the resync for the life of the process, since gear
+    # state never changes again on a drive that stays in one mode.
+    if gear_state != self.last_gear_state and mapping_enabled:
       self.last_gear_state = gear_state
-      if gear_state == "eco":
-        if starpilot_toggles.map_acceleration:
-          self.params.put_nonblocking("AccelerationProfile", ACCELERATION_PROFILES["ECO"])
-        if starpilot_toggles.map_deceleration:
-          self.params.put_nonblocking("DecelerationProfile", DECELERATION_PROFILES["ECO"])
-      elif gear_state == "sport":
-        if starpilot_toggles.map_acceleration:
-          self.params.put_nonblocking("AccelerationProfile", ACCELERATION_PROFILES["SPORT_PLUS"])
-        if starpilot_toggles.map_deceleration:
-          self.params.put_nonblocking("DecelerationProfile", DECELERATION_PROFILES["SPORT"])
-      else:
-        if starpilot_toggles.map_acceleration:
-          self.params.put_nonblocking("AccelerationProfile", ACCELERATION_PROFILES["STANDARD"])
-        if starpilot_toggles.map_deceleration:
-          self.params.put_nonblocking("DecelerationProfile", DECELERATION_PROFILES["STANDARD"])
+      mapped_acceleration_profile, mapped_deceleration_profile = GEAR_STATE_PROFILES[gear_state]
+      if starpilot_toggles.map_acceleration:
+        self.params.put_nonblocking("AccelerationProfile", mapped_acceleration_profile)
+      if starpilot_toggles.map_deceleration:
+        self.params.put_nonblocking("DecelerationProfile", mapped_deceleration_profile)
+      # The planner reads the toggles blob rather than these params, and that blob is only
+      # rebuilt when this flag is set. Without it the write stays invisible until the next
+      # ignition cycle and the UI disagrees with what the planner is actually running.
+      self.params_memory.put_bool("StarPilotTogglesUpdated", True)

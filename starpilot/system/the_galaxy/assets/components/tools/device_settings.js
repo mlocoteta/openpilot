@@ -11,7 +11,7 @@ const FAVORITE_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, s
 const FAVORITE_ACTION_PREFIX = "__starpilot_favorite_action__:"
 const GALAXY_DEVELOPER_MODE_KEY = "GalaxyDeveloperMode"
 const HIDDEN_SECTION_NAMES = new Set(["Model & Customization"])
-const HIDDEN_SETTING_KEYS = new Set(["DisableWideRoad", "HumanAcceleration", "ReverseCruise"])
+const HIDDEN_SETTING_KEYS = new Set(["HumanAcceleration", "ReverseCruise"])
 const GM_MAKES = ["Buick", "Cadillac", "Chevrolet", "GMC", "Holden"]
 const HKG_MAKES = ["Genesis", "Hyundai", "Kia"]
 const VEHICLE_SETTING_MAKES = {
@@ -73,6 +73,7 @@ const state = reactive({
   fetched: false,
   activeSectionSlug: "",
   numericUpdating: {},
+  sliderPreviewValues: {},
   actionUpdating: {},
   favoriteLoading: false,
   favoriteSaving: false,
@@ -840,6 +841,16 @@ function getParamDisplayLabel(key) {
   return state.paramMetaByKey[key]?.label || key
 }
 
+function getSliderDescription(param, value) {
+  const steps = Array.isArray(param.description_steps) ? param.description_steps : []
+  if (!steps.length) return param.description || ""
+
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return param.description || ""
+  const selected = steps.find(step => numericValue <= Number(step.max)) || steps[steps.length - 1]
+  return selected.description || param.description || ""
+}
+
 function confirmPandaFirmwareToggle(key, enabled) {
   if (!PANDA_FIRMWARE_TOGGLE_KEYS.has(key)) return true
 
@@ -870,7 +881,12 @@ function syncNumericDisplay(param, rawValue) {
 
 async function updateNumericParam(param, numericValue, options = {}) {
   const key = param.key
-  const current = state.values[key]
+  const current = options.previousValue !== undefined ? options.previousValue : state.values[key]
+  if (Object.prototype.hasOwnProperty.call(state.sliderPreviewValues, key)) {
+    const nextPreviewValues = { ...state.sliderPreviewValues }
+    delete nextPreviewValues[key]
+    state.sliderPreviewValues = nextPreviewValues
+  }
   const successMessage = options.successMessage
   state.numericUpdating = { ...state.numericUpdating, [key]: true }
   state.values = { ...state.values, [key]: numericValue }
@@ -903,6 +919,40 @@ async function updateNumericParam(param, numericValue, options = {}) {
     syncNumericDisplay(param, current)
     showParamSnackbar("Network error — is the device reachable?", "error")
   }
+}
+
+function previewSliderParam(param, rawValue) {
+  if (isNumericUpdating(param.key)) return
+
+  const bounds = numericBounds(param)
+  const precision = stepPrecision(bounds.step, param.precision)
+  const snapped = snapNumericToBoundsAndStep(rawValue, bounds, precision)
+  if (snapped === null) return
+
+  state.sliderPreviewValues = { ...state.sliderPreviewValues, [param.key]: snapped }
+  syncNumericDisplay(param, snapped)
+}
+
+function commitSliderParam(param, rawValue) {
+  if (isNumericUpdating(param.key)) return
+
+  const bounds = numericBounds(param)
+  const precision = stepPrecision(bounds.step, param.precision)
+  const next = snapNumericToBoundsAndStep(rawValue, bounds, precision)
+  if (next === null) return
+
+  const current = resolveCurrentNumericValue(param, bounds)
+  const previewValues = { ...state.sliderPreviewValues }
+  delete previewValues[param.key]
+  state.sliderPreviewValues = previewValues
+
+  const epsilon = Math.pow(10, -(precision + 2))
+  if (Math.abs(next - current) <= epsilon) {
+    syncNumericDisplay(param, current)
+    return
+  }
+
+  updateNumericParam(param, next, { previousValue: current })
 }
 
 function stepNumericParam(param, direction) {
@@ -1408,6 +1458,7 @@ function renderSettingRow(p) {
   }
 
   const isNumeric = p.ui_type === "numeric"
+  const isSlider = isNumeric && p.control === "slider"
   const isColor = p.ui_type === "color"
   const isAction = p.ui_type === "action"
   const isGroup = isGroupParam(p)
@@ -1426,6 +1477,41 @@ function renderSettingRow(p) {
         @click="${() => runSettingAction(p)}">
         ${() => state.actionUpdating[p.key] ? "Resetting..." : (p.action_label || "Run")}
       </button>
+    `
+  } else if (isSlider) {
+    rowControl = html`
+      <div class="ds-slider-container">
+        <input
+          type="range"
+          class="ds-slider"
+          min="${numericBounds(p).min}"
+          max="${numericBounds(p).max}"
+          step="${numericBounds(p).step}"
+          aria-label="${p.label}"
+          disabled="${() => isLocked() || isNumericUpdating(p.key)}"
+          value="${() => {
+            const bounds = numericBounds(p)
+            const preview = state.sliderPreviewValues[p.key]
+            return formatNumericForInput(preview ?? resolveCurrentNumericValue(p, bounds), stepPrecision(bounds.step, p.precision))
+          }}"
+          @input="${(event) => previewSliderParam(p, event.currentTarget.value)}"
+          @change="${(event) => commitSliderParam(p, event.currentTarget.value)}" />
+        <div class="ds-slider-scale">
+          <span>${formatSliderValue(numericBounds(p).min, String(numericBounds(p).step), p.precision, p.key)}</span>
+          <span>${formatSliderValue(numericBounds(p).max, String(numericBounds(p).step), p.precision, p.key)}</span>
+        </div>
+        <button
+          class="ds-reset-btn"
+          disabled="${() => {
+            const bounds = numericBounds(p)
+            const defaultValue = resolveDefaultNumericValue(p, bounds)
+            const currentValue = resolveCurrentNumericValue(p, bounds)
+            const precision = stepPrecision(bounds.step, p.precision)
+            const epsilon = Math.pow(10, -(precision + 2))
+            return isLocked() || isNumericUpdating(p.key) || defaultValue === null || Math.abs(defaultValue - currentValue) <= epsilon
+          }}"
+          @click="${() => resetNumericParam(p)}">Reset to Default</button>
+      </div>
     `
   } else if (isNumeric) {
     rowControl = html`
@@ -1550,7 +1636,9 @@ function renderSettingRow(p) {
             <span class="ds-row-label">${p.label}</span>
             ${flmParamStatus ? html`<span class="ds-flm-badge">Currently overridden by FLM</span>` : ""}
           </div>
-          ${p.description ? html`<div class="ds-row-desc">${p.description}</div>` : ""}
+          ${p.description_steps
+            ? html`<div class="ds-row-desc">${() => getSliderDescription(p, state.sliderPreviewValues[p.key] ?? state.values[p.key])}</div>`
+            : (p.description ? html`<div class="ds-row-desc">${p.description}</div>` : "")}
           ${() => {
             const reason = lockReason()
             return reason ? html`<div class="ds-row-desc"><strong>Locked:</strong> ${reason}</div>` : ""
@@ -1584,7 +1672,7 @@ function renderSettingRow(p) {
         </div>
         ${(isNumeric || isColor) ? html`<span class="ds-row-value" id="ds-display-${p.key}">${() => {
             if (isColor) return formatColorDisplayValue(p)
-            const currentValue = state.values[p.key]
+            const currentValue = state.sliderPreviewValues[p.key] ?? state.values[p.key]
             const bounds = numericBounds(p)
             return currentValue !== undefined ? formatSliderValue(currentValue, String(bounds.step), p.precision, p.key) : ".."
           }}</span>` : ""}

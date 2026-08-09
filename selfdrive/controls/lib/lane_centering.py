@@ -15,10 +15,13 @@ _MIN_CENTER_TO_LINE = 1.1
 _MAX_RAW_CORRECTION = 0.004
 _MAX_GAIN = 0.30
 _SMOOTH_TAU = 0.4
+_SIGNAL_RELEASE_TAU = 0.20
+_CONFIDENCE_RELEASE_TAU = 0.20
+_CENTER_ERROR_DEADBAND = 0.08
 
 _E2E_MAX_PATH_STD = 0.35
-_E2E_BREAK_IN_START = 0.25
-_E2E_BREAK_IN_FULL = 0.75
+_E2E_BREAK_IN_START = 0.15
+_E2E_BREAK_IN_FULL = 0.50
 
 
 class LaneCenteringController:
@@ -28,7 +31,8 @@ class LaneCenteringController:
   def reset(self) -> None:
     self._correction = 0.0
 
-  def update(self, model_curvature, model_v2, v_ego, enabled, offset, e2e_authority, lat_active, model_valid) -> float:
+  def update(self, model_curvature, model_v2, v_ego, enabled, offset, e2e_authority, lat_active, model_valid,
+             pause_on_signal=False, turn_signal_active=False) -> float:
     model_curvature = float(model_curvature)
 
     try:
@@ -47,6 +51,10 @@ class LaneCenteringController:
       self.reset()
       return model_curvature
 
+    if pause_on_signal and turn_signal_active:
+      self._correction = float(smooth_value(0.0, self._correction, _SIGNAL_RELEASE_TAU, dt=DT_CTRL))
+      return model_curvature + self._correction
+
     try:
       if model_v2.meta.laneChangeState != log.LaneChangeState.off:
         self.reset()
@@ -62,8 +70,8 @@ class LaneCenteringController:
       float(np.clip(e2e_authority, 0.0, 1.0)),
     )
     if not valid:
-      self.reset()
-      return model_curvature
+      self._correction = float(smooth_value(0.0, self._correction, _CONFIDENCE_RELEASE_TAU, dt=DT_CTRL))
+      return model_curvature + self._correction
 
     target = float(np.clip(raw_correction, -_MAX_RAW_CORRECTION, _MAX_RAW_CORRECTION)) * _MAX_GAIN
     self._correction = float(smooth_value(target, self._correction, _SMOOTH_TAU, dt=DT_CTRL))
@@ -114,6 +122,11 @@ class LaneCenteringController:
       target_y = 0.5 * (left + right) + float(np.clip(offset, -max_safe_offset, max_safe_offset))
       model_y = float(np.interp(lookahead, pos_x, pos_y))
       error = target_y - model_y
+      error_abs = abs(error)
+      if error_abs <= _CENTER_ERROR_DEADBAND:
+        error = 0.0
+      else:
+        error = np.copysign(error_abs - _CENTER_ERROR_DEADBAND, error)
 
       try:
         pos_y_std = np.asarray(model_v2.position.yStd, dtype=float)
@@ -121,7 +134,7 @@ class LaneCenteringController:
           path_std = float(np.interp(lookahead, pos_x, pos_y_std))
           if 0.0 <= path_std <= _E2E_MAX_PATH_STD:
             break_in = np.clip(
-              (abs(error) - _E2E_BREAK_IN_START) / (_E2E_BREAK_IN_FULL - _E2E_BREAK_IN_START),
+              (error_abs - _E2E_BREAK_IN_START) / (_E2E_BREAK_IN_FULL - _E2E_BREAK_IN_START),
               0.0,
               1.0,
             )

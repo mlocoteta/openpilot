@@ -54,6 +54,7 @@ DISPLAY_MENU_TIMER = 350                  # The length of time the following dis
 EARTH_RADIUS = 6378137                    # Radius of the Earth in meters
 MAX_ACCELERATION = 4.0                    # ISO 15622:2018
 MAX_T_FOLLOW = 3.0                        # Maximum allowed following duration. Larger values risk losing track of the lead but may be increased as models improve
+MIN_T_FOLLOW = 0.75                       # Minimum configurable base following duration; safety buffers remain applied downstream
 MINIMUM_LATERAL_ACCELERATION = 1.3        # m/s^2, typical minimum lateral acceleration when taking curves
 PLANNER_TIME = ModelConstants.T_IDXS[-1]  # Length of time the model projects out for
 THRESHOLD = 1 - 1 / math.e                # Requires the condition to be true for ~1 second
@@ -336,7 +337,7 @@ def default_ev_tuning_enabled(CP):
   ev_vehicle |= getattr(CP, "transmissionType", None) == car.CarParams.TransmissionType.direct
   return bool(ev_vehicle)
 
-def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"])):
+def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"]), *, read_persisted_force_params=False):
   toggles_text = sm["starpilotPlan"].starpilotToggles
   if toggles_text:
     get_starpilot_toggles._last_toggles_text = toggles_text
@@ -345,16 +346,18 @@ def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"])):
 
   toggles = process_starpilot_toggles(toggles_text)
 
-  # Force drive-state controls must be authoritative from params so they
-  # apply immediately even if starpilotPlan publication is temporarily stale.
-  if not hasattr(get_starpilot_toggles, "_params"):
-    get_starpilot_toggles._params = Params(return_defaults=True)
+  # Realtime callers consume these values from the serialized toggle broadcast.
+  # Only startup/state-management callers should synchronously read the backing
+  # files; doing so from every 100 Hz control loop can stall critical processes.
+  if read_persisted_force_params:
+    if not hasattr(get_starpilot_toggles, "_params"):
+      get_starpilot_toggles._params = Params(return_defaults=True)
 
-  toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
-  toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
-  # Controller selection happens before the first live StarPilot broadcast. Do
-  # not let a cached CarParams/controller type hide the persisted user request.
-  toggles.force_torque_controller = get_starpilot_toggles._params.get_bool("ForceTorqueController")
+    toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
+    toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
+    # Controller selection happens before the first live StarPilot broadcast. Do
+    # not let a cached CarParams/controller type hide the persisted user request.
+    toggles.force_torque_controller = get_starpilot_toggles._params.get_bool("ForceTorqueController")
   return toggles
 
 @cache
@@ -374,6 +377,10 @@ def update_starpilot_toggles():
 
 def set_speed_limit_available(openpilot_longitudinal: bool, has_cc_long: bool, pcm_cruise_speed: bool) -> bool:
   return openpilot_longitudinal or has_cc_long or not pcm_cruise_speed
+
+
+def speed_limit_controller_available(openpilot_longitudinal: bool, redneck_cruise: bool) -> bool:
+  return openpilot_longitudinal or redneck_cruise
 
 
 def migrate_cancel_button_controls(params: Params | None = None) -> bool:
@@ -639,12 +646,14 @@ class StarPilotVariables:
     toggle.lkas_allowed_for_aol = hyundai_can_use_lkas_for_aol or toggle.car_make == "honda"
     longitudinalActuatorDelay = CP.longitudinalActuatorDelay
     toggle.openpilot_longitudinal = CP.openpilotLongitudinalControl and not toggle.disable_openpilot_long
-    if not toggle.redneck_cruise_available or toggle.openpilot_longitudinal:
+    if not toggle.redneck_cruise_available or (toggle.openpilot_longitudinal and FPCP.pcmCruiseSpeed):
       self.params.put_bool("RedneckCruise", False)
     toggle.redneck_cruise = self.get_value(
       "RedneckCruise",
       condition=toggle.redneck_cruise_available and not toggle.openpilot_longitudinal,
     )
+    if toggle.redneck_cruise_available and not FPCP.pcmCruiseSpeed:
+      toggle.redneck_cruise = True
     pcm_cruise = CP.pcmCruise
     prohibited_main_aol = not toggle.openpilot_longitudinal and hyundai_can_use_lkas_for_aol
     startAccel = CP.startAccel
@@ -656,6 +665,12 @@ class StarPilotVariables:
     toggle.stoppingDecelRate = CP.stoppingDecelRate
     toggle.vEgoStarting = CP.vEgoStarting
     toggle.vEgoStopping = CP.vEgoStopping
+    if toggle.openpilot_longitudinal and toggle.car_make == "toyota":
+      # Preserve StarPilot's established Toyota stop-state behavior without
+      # coupling it to the removed FrogsGoMoo controller experiment.
+      toggle.stoppingDecelRate = 0.01
+      toggle.vEgoStarting = 0.1
+      toggle.vEgoStopping = 0.5
 
     # Keep stock tuning params synchronized for all device UIs.
     self._migrate_steer_delay_mode(steerActuatorDelay)
@@ -706,6 +721,9 @@ class StarPilotVariables:
 
     advanced_lateral_tuning = self.get_value("AdvancedLateralTune")
     toggle.lane_centering = self.get_value("LaneCentering")
+    toggle.lane_centering_pause_on_signal = self.get_value(
+      "LaneCenteringPauseOnSignal", condition=toggle.lane_centering, default=True,
+    )
     toggle.force_auto_tune = self.get_value("ForceAutoTune", condition=advanced_lateral_tuning and not has_auto_tune and is_torque_car and not is_angle_car)
     # Force-off is also meaningful on manually tuned torque cars: it locks the
     # vehicle-model parameters instead of allowing paramsd to learn over them.
@@ -826,6 +844,7 @@ class StarPilotVariables:
     )
 
     toggle.curve_speed_controller = toggle.openpilot_longitudinal and self.get_value("CurveSpeedController")
+    toggle.csc_no_lead = self.get_value("CurveSpeedControllerNoLead", condition=toggle.curve_speed_controller)
     toggle.csc_status = self.get_value("ShowCSCStatus", condition=toggle.curve_speed_controller) or toggle.debug_mode
 
     custom_alerts = self.get_value("CustomAlerts")
@@ -843,24 +862,24 @@ class StarPilotVariables:
     toggle.aggressive_jerk_danger = self.get_value("AggressiveJerkDanger", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.aggressive_jerk_speed = self.get_value("AggressiveJerkSpeed", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.aggressive_jerk_speed_decrease = self.get_value("AggressiveJerkSpeedDecrease", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
-    aggressive_follow_low = float(self.get_value("AggressiveFollow", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
-    aggressive_follow_high = float(self.get_value("AggressiveFollowHigh", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
+    aggressive_follow_low = float(self.get_value("AggressiveFollow", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
+    aggressive_follow_high = float(self.get_value("AggressiveFollowHigh", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
     toggle.aggressive_follow = [aggressive_follow_low, aggressive_follow_high]
     toggle.standard_jerk_acceleration = self.get_value("StandardJerkAcceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.standard_jerk_deceleration = self.get_value("StandardJerkDeceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.standard_jerk_danger = self.get_value("StandardJerkDanger", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.standard_jerk_speed = self.get_value("StandardJerkSpeed", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.standard_jerk_speed_decrease = self.get_value("StandardJerkSpeedDecrease", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
-    standard_follow_low = float(self.get_value("StandardFollow", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
-    standard_follow_high = float(self.get_value("StandardFollowHigh", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
+    standard_follow_low = float(self.get_value("StandardFollow", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
+    standard_follow_high = float(self.get_value("StandardFollowHigh", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
     toggle.standard_follow = [standard_follow_low, standard_follow_high]
     toggle.relaxed_jerk_acceleration = self.get_value("RelaxedJerkAcceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.relaxed_jerk_deceleration = self.get_value("RelaxedJerkDeceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.relaxed_jerk_danger = self.get_value("RelaxedJerkDanger", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.relaxed_jerk_speed = self.get_value("RelaxedJerkSpeed", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
     toggle.relaxed_jerk_speed_decrease = self.get_value("RelaxedJerkSpeedDecrease", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0)
-    relaxed_follow_low = float(self.get_value("RelaxedFollow", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
-    relaxed_follow_high = float(self.get_value("RelaxedFollowHigh", cast=float, condition=toggle.custom_personalities, min=1, max=MAX_T_FOLLOW))
+    relaxed_follow_low = float(self.get_value("RelaxedFollow", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
+    relaxed_follow_high = float(self.get_value("RelaxedFollowHigh", cast=float, condition=toggle.custom_personalities, min=MIN_T_FOLLOW, max=MAX_T_FOLLOW))
     toggle.relaxed_follow = [relaxed_follow_low, relaxed_follow_high]
     toggle.traffic_mode_jerk_acceleration = [self.get_value("TrafficJerkAcceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0), toggle.relaxed_jerk_acceleration]
     toggle.traffic_mode_jerk_deceleration = [self.get_value("TrafficJerkDeceleration", cast=float, condition=toggle.custom_personalities, conversion=0.01, min=0.25, max=2.0), toggle.relaxed_jerk_deceleration]
@@ -1021,11 +1040,6 @@ class StarPilotVariables:
     toggle.bookmark_via_cancel_very_long = cancel_button_control_very_long == BUTTON_FUNCTIONS["BOOKMARK"]
     self.set_favorite_button_flags(toggle, "cancel_very_long", cancel_button_control_very_long)
 
-    toggle.frogsgomoo_tweak = self.get_value("FrogsGoMoosTweak", condition=toggle.openpilot_longitudinal and toggle.car_make == "toyota")
-    toggle.stoppingDecelRate = 0.01 if toggle.frogsgomoo_tweak else toggle.stoppingDecelRate
-    toggle.vEgoStarting = 0.1 if toggle.frogsgomoo_tweak else toggle.vEgoStarting
-    toggle.vEgoStopping = 0.5 if toggle.frogsgomoo_tweak else toggle.vEgoStopping
-
     toggle.holiday_themes = self.get_value("HolidayThemes")
     toggle.current_holiday_theme = holiday_theme if toggle.holiday_themes else "stock"
     if toggle.current_holiday_theme != "stock":
@@ -1041,6 +1055,10 @@ class StarPilotVariables:
     toggle.lane_change_delay = self.get_value("LaneChangeTime", cast=float, condition=toggle.lane_changes)
     toggle.lane_detection_width = self.get_value("LaneDetectionWidth", cast=float, condition=toggle.lane_changes, conversion=distance_conversion)
     toggle.minimum_lane_change_speed = self.get_value("MinimumLaneChangeSpeed", cast=float, condition=toggle.lane_changes, conversion=speed_conversion)
+    toggle.lane_change_close_gap = self.get_value("LaneChangeCloseGap", condition=toggle.lane_changes)
+    toggle.lane_change_close_gap_seconds = self.get_value(
+      "LaneChangeCloseGapSeconds", cast=float, condition=toggle.lane_change_close_gap, default=0.6, min=0.25, max=1.0,
+    )
     toggle.nudgeless = self.get_value("NudgelessLaneChange", condition=toggle.lane_changes)
     toggle.nudgeless_lane_change_only_when_engaged = self.get_value("NudgelessLaneChangeOnlyWhenEngaged", condition=toggle.lane_changes and toggle.nudgeless)
     toggle.one_lane_change = self.get_value("OneLaneChange", condition=toggle.lane_changes)
@@ -1063,6 +1081,7 @@ class StarPilotVariables:
     toggle.nnff = self.get_value("NNFF", condition=lateral_tuning and has_nnff and not is_angle_car)
     toggle.nnff_lite = self.get_value("NNFFLite", condition=not toggle.nnff and lateral_tuning and not is_angle_car)
     toggle.nav_desires_allowed = self.get_value("NavDesiresAllowed")
+    toggle.nav_lane_positioning_allowed = self.get_value("NavLanePositioningAllowed")
     toggle.use_turn_desires = self.get_value("TurnDesires", condition=lateral_tuning)
 
     lkas_button_control = self.get_button_function("LKASButtonControl", condition=toggle.car_make != "subaru")
@@ -1189,13 +1208,13 @@ class StarPilotVariables:
     toggle.recovery_power = self.get_value("RecoveryPower", cast=float, condition=longitudinal_tuning, default=1.0, min=0.5, max=2.0)
     toggle.taco_tune = self.get_value("TacoTune", condition=longitudinal_tuning)
 
-    toggle.model = self.get_value("Model", cast=None, default="sc2")
+    toggle.model = self.get_value("Model", cast=None, default="rdf")
     if not toggle.model:
-      toggle.model = self.get_value("DrivingModel", cast=None, default="sc2")
-    toggle.model_name = self.get_value("DrivingModelName", cast=None, default="South Carolina")
-    toggle.model_version = self.get_value("ModelVersion", cast=None, default="v11")
+      toggle.model = self.get_value("DrivingModel", cast=None, default="rdf")
+    toggle.model_name = self.get_value("DrivingModelName", cast=None, default="Regret Driven Framework")
+    toggle.model_version = self.get_value("ModelVersion", cast=None, default="v15")
     if not toggle.model_version:
-      toggle.model_version = self.get_value("DrivingModelVersion", cast=None, default="v11")
+      toggle.model_version = self.get_value("DrivingModelVersion", cast=None, default="v15")
     if isinstance(toggle.model, bytes):
       toggle.model = toggle.model.decode("utf-8", "ignore")
     if isinstance(toggle.model_name, bytes):
@@ -1279,7 +1298,8 @@ class StarPilotVariables:
     toggle.sng_hack = self.get_value("SNGHack", condition=toggle.openpilot_longitudinal and toggle.car_make == "toyota" and not toggle.has_pedal and not has_sng)
     toggle.toyota_auto_hold = self.get_value("ToyotaAutoHold", condition=toggle.car_make == "toyota")
 
-    toggle.speed_limit_controller = toggle.openpilot_longitudinal and self.get_value("SpeedLimitController")
+    slc_available = speed_limit_controller_available(toggle.openpilot_longitudinal, toggle.redneck_cruise)
+    toggle.speed_limit_controller = slc_available and self.get_value("SpeedLimitController")
     set_speed_limit_on_engage = set_speed_limit_available(toggle.openpilot_longitudinal, toggle.has_cc_long, FPCP.pcmCruiseSpeed)
     speed_limit_display = toggle.show_speed_limits or toggle.speed_limit_controller
     toggle.map_speed_lookahead_higher = self.get_value("SLCLookaheadHigher", cast=float, condition=speed_limit_display)
@@ -1411,7 +1431,8 @@ class StarPilotVariables:
       toggle.startup_alert_top = "Be ready to take over at any time"
       toggle.startup_alert_bottom = "Always keep hands on wheel and eyes on road"
 
-    toggle.subaru_sng = self.get_value("SubaruSNG", condition=toggle.car_make == "subaru" and not (CP.flags & SubaruFlags.GLOBAL_GEN2 or CP.flags & SubaruFlags.HYBRID))
+    toggle.subaru_sng = self.get_value("SubaruSNG", condition=toggle.car_make == "subaru" and
+                                       not (CP.flags & (SubaruFlags.GLOBAL_GEN2 | SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE)))
     toggle.subaru_sng_manual_parking_brake = self.get_value("SubaruSNGManualParkingBrake", condition=toggle.subaru_sng)
 
     toggle.jeep_brake_hold = self.get_value(

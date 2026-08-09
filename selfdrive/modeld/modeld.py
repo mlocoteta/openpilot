@@ -48,12 +48,20 @@ from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
-BUILTIN_MODEL_KEY = "sc2"
-BUILTIN_MODEL_ALIASES = {BUILTIN_MODEL_KEY, "sc"}
+BUILTIN_MODEL_KEY = "rdf"
+BUILTIN_MODEL_ALIASES = {BUILTIN_MODEL_KEY}
+MODEL_ID_ALIASES = {"sc": "sc2"}
 
 
 LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
+SMOOTH_SECONDS_STEP = 0.005
+
+def _model_smooth_seconds(params, key, default):
+  if not params.get_bool("DeveloperUI") or params.get_bool("SafeMode"):
+    return default
+  value = params.get_float(key, return_default=True, default=default)
+  return round(min(max(value, SMOOTH_SECONDS_STEP), 2.0) / SMOOTH_SECONDS_STEP) * SMOOTH_SECONDS_STEP
 MIN_LAT_CONTROL_SPEED = 0.3
 
 
@@ -109,12 +117,15 @@ def _resolve_mirrored_param(params: Params, primary_key: str, secondary_key: str
 
 def _canonical_model_id(model_id: str) -> str:
   key = (model_id or "").strip().lower()
-  return BUILTIN_MODEL_KEY if key in BUILTIN_MODEL_ALIASES else key
+  if key in BUILTIN_MODEL_ALIASES:
+    return BUILTIN_MODEL_KEY
+  return MODEL_ID_ALIASES.get(key, key)
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
                           lat_action_t: float, long_action_t: float, v_ego: float, mlsim: bool,
-                          is_v9: bool, is_v14: bool, is_v15: bool, starpilot_toggles) -> log.ModelDataV2.Action:
+                          is_v9: bool, is_v14: bool, is_v15: bool, starpilot_toggles,
+                          lat_smooth_seconds=LAT_SMOOTH_SECONDS, long_smooth_seconds=LONG_SMOOTH_SECONDS) -> log.ModelDataV2.Action:
     if is_v14 or is_v15:
       desired_curv_unscaled, desired_accel = model_output['action'][0]
       if is_v15:
@@ -123,9 +134,9 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
         desired_curvature = float(desired_curv_unscaled) / 100.0
       should_stop = (v_ego < 0.3 and desired_accel < 0.1)
 
-      desired_accel = smooth_value(float(desired_accel), prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+      desired_accel = smooth_value(float(desired_accel), prev_action.desiredAcceleration, long_smooth_seconds)
       if v_ego > MIN_LAT_CONTROL_SPEED:
-        desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+        desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
       else:
         desired_curvature = prev_action.desiredCurvature
 
@@ -144,7 +155,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                                                                  ModelConstants.T_IDXS,
                                                                  action_t=long_action_t,
                                                                  vEgoStopping=v_ego_stopping)
-    desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
+    desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, long_smooth_seconds)
 
     if is_v9:
       # V9: use desired_curvature if present; otherwise do NOT fall back to plan
@@ -155,7 +166,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
     else:
       desired_curvature = get_curvature_from_output(model_output, plan, v_ego, lat_action_t, mlsim=mlsim)
     if v_ego > MIN_LAT_CONTROL_SPEED:
-      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
+      desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, lat_smooth_seconds)
     else:
       desired_curvature = prev_action.desiredCurvature
 
@@ -293,9 +304,9 @@ class ModelState:
           model_version = str(json.loads(versions_path.read_text()).get(model_id) or "")
         except Exception:
           pass
-    if loaded_builtin and not use_builtin:
-      model_version = str(artifact.get("behavior_version") or "v11")
-    self.policy_generation = model_version or ("v11" if loaded_builtin else "v8")
+    if loaded_builtin:
+      model_version = str(artifact.get("behavior_version") or "v15")
+    self.policy_generation = model_version or ("v15" if loaded_builtin else "v8")
     self.is_v9 = self.policy_generation == "v9"
     self.is_v14 = self.policy_generation == "v14"
     self.is_v15 = self.policy_generation == "v15"
@@ -409,6 +420,13 @@ class ModelState:
       )
     outputs = [output.numpy().flatten() for output in output_tensors]
 
+    # USB GPU failures can produce NaNs/Infs instead of raising. Never publish
+    # one of those frames; the next frame can recover without affecting the
+    # native GPU/CPU model paths.
+    if self.uses_external_gpu and any(not np.isfinite(output).all() for output in outputs):
+      cloudlog.error("external GPU produced non-finite model output, dropping frame")
+      return None
+
     if self.model_type == "supercombo":
       model_output = outputs[0]
       parsed = self.parser.parse_outputs(self.slice_outputs(model_output, self.output_slices))
@@ -448,6 +466,7 @@ def main(demo=False):
   params.put_bool("UsbGpuPresent", usbgpu_present_now)
   params.put_bool("UsbGpuCompiled", external_artifact_ready)
   params.put_bool("UsbGpuActive", False)
+  params.put_bool("UsbGpuLoading", external_gpu_requested)
   if external_gpu_requested:
     from tinygrad.helpers import DEV
     device_config = tinygrad_dev_config(True, TICI)
@@ -494,6 +513,7 @@ def main(demo=False):
   external_gpu_active = model.uses_external_gpu
   params.put_bool("UsbGpuCompiled", external_model_selected and file_chunked_exists(external_artifact))
   params.put_bool("UsbGpuActive", external_gpu_active)
+  params.put_bool("UsbGpuLoading", False)
   cloudlog.warning(f"model loaded in {time.monotonic() - start_time:.1f}s, modeld starting")
 
   # messaging
@@ -523,9 +543,9 @@ def main(demo=False):
     CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
   cloudlog.info("modeld got CarParams: %s", CP.brand)
 
-  # TODO this needs more thought, use .2s extra for now to estimate other delays
-  # TODO Move smooth seconds to action function
-  long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
+  lat_smooth_seconds = _model_smooth_seconds(params, "LatSmoothSeconds", LAT_SMOOTH_SECONDS)
+  long_smooth_seconds = _model_smooth_seconds(params, "LongSmoothSeconds", LONG_SMOOTH_SECONDS)
+  long_delay = CP.longitudinalActuatorDelay + long_smooth_seconds
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
@@ -566,11 +586,14 @@ def main(demo=False):
       meta_extra = meta_main
 
     sm.update(0)
+    lat_smooth_seconds = _model_smooth_seconds(params, "LatSmoothSeconds", LAT_SMOOTH_SECONDS)
+    long_smooth_seconds = _model_smooth_seconds(params, "LongSmoothSeconds", LONG_SMOOTH_SECONDS)
+    long_delay = CP.longitudinalActuatorDelay + long_smooth_seconds
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_delay = sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    lat_delay = sm["liveDelay"].lateralDelay + lat_smooth_seconds
     lateral_control_params = np.array([v_ego, lat_delay], dtype=np.float32)
     if sm.frame % 60 == 0:
       camera_offset.set_target(params.get_float("CameraOffset", return_default=True))
@@ -659,6 +682,7 @@ def main(demo=False):
         lat_action_t,
         long_action_t,
         v_ego, model.mlsim, model.is_v9, model.is_v14, model.is_v15, starpilot_toggles,
+        lat_smooth_seconds, long_smooth_seconds,
       )
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,

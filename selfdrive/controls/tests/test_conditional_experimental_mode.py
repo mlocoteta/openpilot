@@ -51,10 +51,11 @@ def make_cem(*, model_length: float, model_stopped: bool = False, tracking_lead:
   return ConditionalExperimentalMode(planner)
 
 
-def make_sm(traffic_mode_enabled: bool = False):
+def make_sm(traffic_mode_enabled: bool = False, car_fingerprint: str = ""):
   return {
     "carState": SimpleNamespace(standstill=False, leftBlinker=False, rightBlinker=False, steeringAngleDeg=0.0),
     "starpilotCarState": SimpleNamespace(trafficModeEnabled=traffic_mode_enabled),
+    "carParams": SimpleNamespace(carFingerprint=car_fingerprint),
   }
 
 
@@ -105,6 +106,30 @@ def test_predicted_stop_within_threshold_triggers_stop_light():
   run_stop_light_detector(cem, v_ego, steps=20)
 
   assert cem.stop_light_detected
+
+
+def test_elantra_stop_light_filter_uses_earlier_approach_timing():
+  v_ego = 36 * CV.MPH_TO_MS
+  model_length = v_ego * 4.0
+
+  default_cem = make_cem(model_length=model_length)
+  elantra_cem = make_cem(model_length=model_length)
+  default_sm = make_sm()
+  elantra_sm = make_sm(car_fingerprint="HYUNDAI_ELANTRA_2021")
+
+  default_steps = None
+  elantra_steps = None
+  for step in range(1, 30):
+    default_cem.stop_sign_and_light(v_ego, default_sm, model_time=7.0)
+    elantra_cem.stop_sign_and_light(v_ego, elantra_sm, model_time=7.0)
+    if default_steps is None and default_cem.stop_light_detected:
+      default_steps = step
+    if elantra_steps is None and elantra_cem.stop_light_detected:
+      elantra_steps = step
+
+  assert elantra_steps is not None
+  assert default_steps is not None
+  assert elantra_steps < default_steps
 
 
 def test_chattering_lead_does_not_trigger_stop_light():

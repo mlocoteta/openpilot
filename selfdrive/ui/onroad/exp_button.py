@@ -1,6 +1,5 @@
 import time
 import pyray as rl
-from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import Widget
@@ -15,7 +14,7 @@ from openpilot.starpilot.common.experimental_state import (
 class ExpButton(Widget):
   def __init__(self, button_size: int, icon_size: int):
     super().__init__()
-    self._params = Params()
+    self._params = ui_state.ui_params
     self._experimental_mode: bool = False
     self._engageable: bool = False
 

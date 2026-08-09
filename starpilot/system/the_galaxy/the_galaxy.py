@@ -23,6 +23,9 @@ import selectors
 import shutil
 import signal
 import subprocess
+import numpy as np
+from msgq.visionipc import VisionIpcClient, VisionStreamType
+from PIL import Image
 import threading
 import time
 import traceback
@@ -61,6 +64,7 @@ from openpilot.starpilot.common.maps_catalog import (
   schedule_label,
   schedule_param_value,
 )
+from openpilot.starpilot.common.maps_download_progress import load_size_cache, nonnegative_int, selection_key
 from openpilot.starpilot.common.experimental_state import sync_persist_chill_state, sync_persist_experimental_state
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_OPTIONS,
@@ -93,6 +97,8 @@ GITLAB_SUBMISSIONS_PROJECT_ID = "71992109"
 GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
 LEGACY_LATERAL_METHOD_API_PREFIX = "/api/" + "".join(("f", "t", "m"))
 VASM_CONFIGURATION_KEYS = {"VASMEnabled", "VASMConfidenceThreshold", "VASMSmoothSeconds", "VASMAnnotationConfig"}
+PIP_PREVIEW_CONFIGURATION_KEYS = {"PIPPreviewEnabled", "PIPPreviewMask", "PIPPreviewShowOnBlinker", "PIPPreviewShowOnBSM"}
+MODEL_SMOOTHING_KEYS = {"LatSmoothSeconds", "LongSmoothSeconds"}
 
 GALAXY_DEPS_PATH = "/data/galaxy_deps"
 LEGACY_GALAXY_DEPS_PATH = "/data/" + "".join(chr(code) for code in (112, 111, 110, 100)) + "_deps"
@@ -634,6 +640,8 @@ MODEL_SORT_MODE_PARAM = "ModelSortMode"
 MODEL_USER_FAVORITES_PARAM = "UserFavorites"
 MAPS_DOWNLOAD_PARAM = "DownloadMaps"
 MAPS_CANCEL_DOWNLOAD_PARAM = "CancelDownloadMaps"
+MAPS_DOWNLOAD_PROGRESS_PARAM = "MapsDownloadProgress"
+MAPS_DOWNLOAD_SIZE_CACHE_PARAM = "MapsDownloadSizeCache"
 
 
 def _get_galaxy_dir():
@@ -799,7 +807,7 @@ FINGERPRINT_MAKE_TO_VALUES_DIR = {
   "volkswagen": "volkswagen",
 }
 
-_FINGERPRINT_CARDOCS_RE = re.compile(r'\w*CarDocs\(\s*"([^"]+)"')
+_FINGERPRINT_CARDOCS_RE = re.compile(r'\w*CarDocs\w*\(\s*"([^"]+)"')
 _FINGERPRINT_PLATFORM_RE = re.compile(r'(\w+)\s*=\s*\w+\s*\(\s*\[([\s\S]*?)\]\s*,')
 _FINGERPRINT_PLATFORM_NAME_RE = re.compile(r'^[A-Z0-9_]+$')
 _FINGERPRINT_VALID_NAME_RE = re.compile(r'^[A-Za-z0-9 \u0160.(),&\-]+$')
@@ -962,6 +970,7 @@ _TROUBLESHOOT_ADVANCED_LATERAL_KEYS = [
   "ForceTorqueController",
   "CameraOffset",
   "LaneCentering",
+  "LaneCenteringPauseOnSignal",
   "LaneCenteringE2EAuthority",
   "LaneCenterOffset",
 ]
@@ -2597,6 +2606,51 @@ def _normalize_vasm_config(data):
   return config
 
 
+def _normalize_pip_preview_config(data):
+  if not isinstance(data, dict):
+    raise ValueError("Configuration must be a JSON object.")
+
+  try:
+    width = int(data.get("width", 0))
+    height = int(data.get("height", 0))
+  except (TypeError, ValueError) as exc:
+    raise ValueError("Invalid camera dimensions.") from exc
+  if not (1 <= width <= 8192 and 1 <= height <= 8192):
+    raise ValueError("Camera dimensions are out of range.")
+
+  try:
+    crop_size = int(data.get("crop_size", 0))
+  except (TypeError, ValueError) as exc:
+    raise ValueError("Invalid crop size.") from exc
+  if not (10 <= crop_size <= 8192):
+    raise ValueError("Crop size is out of range.")
+
+  def normalize_center(key):
+    point = data.get(key)
+    if not point:
+      return []
+    if not isinstance(point, (list, tuple)) or len(point) != 2:
+      raise ValueError(f"{key} requires an (x, y) center point.")
+    try:
+      x, y = float(point[0]), float(point[1])
+    except (TypeError, ValueError) as exc:
+      raise ValueError(f"{key} contains a non-numeric point.") from exc
+    if not (math.isfinite(x) and math.isfinite(y) and 0 <= x <= width and 0 <= y <= height):
+      raise ValueError(f"{key} center is outside the camera frame.")
+    return [round(x), round(y)]
+
+  config = {
+    "width": width,
+    "height": height,
+    "center_left": normalize_center("center_left"),
+    "center_right": normalize_center("center_right"),
+    "crop_size": crop_size,
+  }
+  if not config["center_left"] and not config["center_right"]:
+    raise ValueError("At least one window center is required.")
+  return config
+
+
 def _decode_json_object(value):
   if isinstance(value, bytes):
     value = value.decode("utf-8", errors="replace")
@@ -3984,6 +4038,8 @@ def setup(app):
       "/assets/components/tools/device_settings_layout.json",
       "/assets/components/tools/v_asm.js",
       "/assets/components/tools/v_asm.css",
+      "/assets/components/tools/pip_sidecam.js",
+      "/assets/components/tools/pip_sidecam.css",
       "/assets/components/tools/toggles.js",
     }:
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -4392,6 +4448,16 @@ def setup(app):
         "drivingmodel": "DrivingModel",
         "drivingmodelversion": "DrivingModelVersion",
       }.get(key.lower(), key)
+      if key in MODEL_SMOOTHING_KEYS:
+        if not params.get_bool("DeveloperUI"):
+          return jsonify({"error": "Model smoothing is available only with Developer UI enabled."}), 403
+        try:
+          numeric = float(data["value"])
+        except (TypeError, ValueError):
+          return jsonify({"error": f"{key} must be numeric."}), 400
+        if not math.isfinite(numeric) or numeric < 0.005 or numeric > 2.0:
+          return jsonify({"error": f"{key} must be between 0.005 and 2.0 seconds."}), 400
+        data["value"] = round(numeric / 0.005) * 0.005
       val = data["value"]
       selected_label_input = str(data.get("label") or "").strip()
 
@@ -4445,6 +4511,12 @@ def setup(app):
 
       if key in VASM_CONFIGURATION_KEYS and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot change V-ASM configuration while driving."}), 403
+
+      if key in PIP_PREVIEW_CONFIGURATION_KEYS:
+        if not params.get_bool("GalaxyDeveloperMode"):
+          return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
+        if params.get_bool("IsOnroad"):
+          return jsonify({"error": "Cannot change PiP Side Camera configuration while driving."}), 403
 
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot flash Panda firmware while driving."}), 403
@@ -5126,6 +5198,60 @@ def setup(app):
       except Exception:
         storage_bytes = 0
 
+    selected_key = selection_key(selected_locations)
+    raw_progress = params_memory.get(MAPS_DOWNLOAD_PROGRESS_PARAM, encoding="utf-8") or ""
+    try:
+      download_progress = json.loads(raw_progress) if raw_progress else {}
+    except (TypeError, ValueError):
+      download_progress = {}
+    if not isinstance(download_progress, dict):
+      download_progress = {}
+
+    if not params_memory.get_bool(MAPS_DOWNLOAD_PARAM) and selected_key and download_progress.get("selectedKey") != selected_key:
+      size_cache = load_size_cache(params.get(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, encoding="utf-8") or "")
+      cached_entry = size_cache.get(selected_key, {})
+      cached_bytes = nonnegative_int(cached_entry.get("downloadBytes", 0)) if isinstance(cached_entry, dict) else 0
+      if cached_bytes > 0:
+        download_progress = {
+          "active": False,
+          "cancelled": False,
+          "completed": False,
+          "downloadedBytes": 0,
+          "downloadedFiles": 0,
+          "estimatedDownloadBytes": cached_bytes,
+          "estimateSource": "previous_download",
+          "etaSeconds": 0,
+          "percent": 0,
+          "phase": "idle",
+          "primaryLocation": "",
+          "selectedKey": selected_key,
+          "selectedLocations": selected_locations,
+          "storageBytes": storage_bytes,
+          "totalFiles": nonnegative_int(cached_entry.get("totalFiles", 0)),
+          "updatedAt": cached_entry.get("updatedAt", ""),
+          "bytesPerSecond": 0,
+        }
+      else:
+        download_progress = {
+          "active": False,
+          "cancelled": False,
+          "completed": False,
+          "downloadedBytes": 0,
+          "downloadedFiles": 0,
+          "estimatedDownloadBytes": 0,
+          "estimateSource": "",
+          "etaSeconds": 0,
+          "percent": 0,
+          "phase": "idle",
+          "primaryLocation": "",
+          "selectedKey": selected_key,
+          "selectedLocations": selected_locations,
+          "storageBytes": storage_bytes,
+          "totalFiles": 0,
+          "updatedAt": "",
+          "bytesPerSecond": 0,
+        }
+
     return {
       "selectedLocations": selected_locations,
       "selectedEntries": selected_entries,
@@ -5140,6 +5266,7 @@ def setup(app):
       "scheduleOptions": MAP_SCHEDULE_OPTIONS,
       "scheduleValue": schedule_param_value(params.get("PreferredSchedule")),
       "storageBytes": storage_bytes,
+      "downloadProgress": download_progress,
     }
 
   @app.route("/api/maps/catalog", methods=["GET"])
@@ -5236,14 +5363,14 @@ def setup(app):
 
   def _default_model_key():
     default_key = _param_text(params.get_default_value("Model") or params.get_default_value("DrivingModel"))
-    return canonical_model_key(default_key) or "sc2"
+    return canonical_model_key(default_key) or "rdf"
 
   def _default_model_name():
-    return _param_text(params.get_default_value("DrivingModelName")) or "South Carolina"
+    return _param_text(params.get_default_value("DrivingModelName")) or "Regret Driven Framework"
 
   def _default_model_version():
     default_version = _param_text(params.get_default_value("ModelVersion") or params.get_default_value("DrivingModelVersion"))
-    return default_version or "v11"
+    return default_version or "v15"
 
   def _current_model_key():
     current_model = _param_text(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
@@ -5347,13 +5474,20 @@ def setup(app):
   @app.route("/api/routes", methods=["GET"])
   def list_routes():
     def generate():
-      routes = [(path, name) for path in FOOTAGE_PATHS for name in utilities.get_routes_names(path)]
+      routes = [
+        (path, name, segment_count)
+        for path in FOOTAGE_PATHS
+        for name, segment_count in utilities.get_routes_with_segment_counts(path)
+      ]
       total = len(routes)
       connect_dongle_id = params.get("StockDongleId", encoding="utf-8") or params.get("DongleId", encoding="utf-8") or ""
       yield f"data: {json.dumps({'progress': 0, 'total': total, 'connectDongleId': connect_dongle_id})}\n\n"
 
       with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(utilities.process_route, path, name): (path, name) for path, name in routes}
+        futures = {
+          executor.submit(utilities.process_route, path, name, segment_count): (path, name)
+          for path, name, segment_count in routes
+        }
         for processed, future in enumerate(as_completed(futures), start=1):
           try:
             result = future.result()
@@ -5932,6 +6066,7 @@ def setup(app):
       "status": flm_workspace.read_flm_status(),
       "activeTrial": workspace.get("activeTrial"),
       "reports": workspace.get("reports", [])[:10],
+      "savedTunes": workspace.get("savedTunes", []),
     }), 200
 
   @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/analyze", methods=["POST"])
@@ -6015,6 +6150,61 @@ def setup(app):
     except RuntimeError as error:
       return jsonify({"error": str(error)}), 409
 
+  @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/saved-tunes", methods=["POST"])
+  @app.route("/api/flm/saved-tunes", methods=["POST"])
+  def save_flm_tune():
+    data = request.get_json(silent=True) or {}
+    try:
+      return jsonify(flm_workspace.save_active_trial_as_tune(str(data.get("name") or ""))), 200
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+    except RuntimeError as error:
+      return jsonify({"error": str(error)}), 409
+
+  @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/saved-tunes/<tune_id>/apply", methods=["POST"])
+  @app.route("/api/flm/saved-tunes/<tune_id>/apply", methods=["POST"])
+  def apply_flm_saved_tune(tune_id):
+    try:
+      return jsonify(flm_workspace.apply_saved_tune(tune_id)), 200
+    except FileNotFoundError:
+      return jsonify({"error": "Saved FLM tune not found."}), 404
+    except RuntimeError as error:
+      return jsonify({"error": str(error)}), 409
+
+  @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/saved-tunes/<tune_id>/submit", methods=["POST"])
+  @app.route("/api/flm/saved-tunes/<tune_id>/submit", methods=["POST"])
+  def submit_flm_saved_tune(tune_id):
+    data = request.get_json(silent=True) or {}
+    try:
+      return jsonify(flm_workspace.submit_saved_tune(tune_id, str(data.get("discordUsername") or ""))), 200
+    except FileNotFoundError:
+      return jsonify({"error": "Saved FLM tune not found."}), 404
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+    except RuntimeError as error:
+      return jsonify({"error": str(error)}), 409
+
+  @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/saved-tunes/<tune_id>", methods=["PATCH"])
+  @app.route("/api/flm/saved-tunes/<tune_id>", methods=["PATCH"])
+  def rename_flm_saved_tune(tune_id):
+    data = request.get_json(silent=True) or {}
+    try:
+      return jsonify(flm_workspace.rename_saved_tune(tune_id, str(data.get("name") or ""))), 200
+    except FileNotFoundError:
+      return jsonify({"error": "Saved FLM tune not found."}), 404
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+
+  @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/saved-tunes/<tune_id>", methods=["DELETE"])
+  @app.route("/api/flm/saved-tunes/<tune_id>", methods=["DELETE"])
+  def delete_flm_saved_tune(tune_id):
+    try:
+      return jsonify(flm_workspace.delete_saved_tune(tune_id)), 200
+    except FileNotFoundError:
+      return jsonify({"error": "Saved FLM tune not found."}), 404
+    except RuntimeError as error:
+      return jsonify({"error": str(error)}), 409
+
   @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/trials/apply", methods=["POST"])
   @app.route("/api/flm/trials/apply", methods=["POST"])
   def apply_flm_trial():
@@ -6040,6 +6230,8 @@ def setup(app):
       result = flm_workspace.revert_trial_profile()
     except FileNotFoundError:
       return jsonify({"error": "No active FLM trial snapshot was found."}), 404
+    except Exception as error:
+      return jsonify({"error": f"{type(error).__name__}: {error}"}), 500
 
     return jsonify(result), 200
 
@@ -6381,10 +6573,10 @@ def setup(app):
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     GALAXY_DIR.mkdir(parents=True, exist_ok=True)
     GALAXY_AUTH_FILE.write_text(pw_hash)
-    
+
     # Generate 256-bit secure session token
     GALAXY_SESSION_FILE.write_text(secrets.token_hex(32))
-    
+
     # Generate 16-character alphanumeric routing slug
     charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     slug = ''.join(secrets.choice(charset) for _ in range(16))
@@ -7446,31 +7638,61 @@ def setup(app):
 
   @app.route("/api/v_asm/snapshot", methods=["GET"])
   def v_asm_snapshot():
-    if params.get_bool("IsOnroad"):
-      return jsonify({"error": "Snapshot only available while offroad."}), 409
+    jpeg = _get_live_driver_jpeg()
+    if jpeg is not None:
+      return Response(jpeg, mimetype="image/jpeg")
+    return jsonify({"error": "Unable to capture live frame from driver camera."}), 503
 
-    for footage_path in FOOTAGE_PATHS:
-      if not os.path.isdir(footage_path):
-        continue
+
+  def _get_live_driver_jpeg():
+    from openpilot.system.manager.process_config import managed_processes
+    started = False
+    try:
       try:
-        entries = sorted((e for e in os.listdir(footage_path) if utilities.SEGMENT_RE.fullmatch(e)), reverse=True)
-      except OSError:
-        continue
-      for entry in entries[:3]:
-        camera_file = os.path.join(footage_path, entry, "dcamera.hevc")
-        if not os.path.isfile(camera_file):
-          continue
-        for seek_time in ("5", "2", None):
-          command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", camera_file]
-          if seek_time is not None:
-            command.extend(["-ss", seek_time])
-          command.extend(["-frames:v", "1", "-q:v", "2", "-f", "image2pipe", "-vcodec", "mjpeg", "-"])
-          try:
-            result = subprocess.run(command, capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL)
-            return Response(result.stdout, mimetype="image/jpeg")
-          except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-            continue
-    return jsonify({"error": "No driver camera footage available."}), 404
+        subprocess.check_call(["pgrep", "camerad"])
+      except subprocess.CalledProcessError:
+        managed_processes['camerad'].start()
+        started = True
+
+      client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_DRIVER, True)
+      if not client.connect(True):
+        return None
+
+      if started:
+        settle_deadline = time.monotonic() + 4.0
+        while time.monotonic() < settle_deadline:
+          client.recv(timeout_ms=100)
+
+      buf = client.recv(timeout_ms=5000)
+      if buf is None:
+        return None
+
+      y = np.array(buf.data[:buf.uv_offset], dtype=np.uint8).reshape((-1, buf.stride))[:buf.height, :buf.width]
+      u = np.array(buf.data[buf.uv_offset::2], dtype=np.uint8).reshape((-1, buf.stride // 2))[:buf.height // 2, :buf.width // 2]
+      v = np.array(buf.data[buf.uv_offset + 1::2], dtype=np.uint8).reshape((-1, buf.stride // 2))[:buf.height // 2, :buf.width // 2]
+
+      ul = np.repeat(np.repeat(u, 2).reshape(u.shape[0], y.shape[1]), 2, axis=0).reshape(y.shape)
+      vl = np.repeat(np.repeat(v, 2).reshape(v.shape[0], y.shape[1]), 2, axis=0).reshape(y.shape)
+
+      yuv = np.dstack((y, ul, vl)).astype(np.int16)
+      yuv[:, :, 1:] -= 128
+
+      m = np.array([
+        [1.00000,  1.00000, 1.00000],
+        [0.00000, -0.39465, 2.03211],
+        [1.13983, -0.58060, 0.00000],
+      ])
+      rgb = np.dot(yuv, m).clip(0, 255).astype(np.uint8)
+
+      img = Image.fromarray(rgb)
+      buf_io = BytesIO()
+      img.save(buf_io, format="JPEG", quality=85)
+      return buf_io.getvalue()
+    except Exception:
+      return None
+    finally:
+      if started:
+        managed_processes['camerad'].stop()
 
   @app.route("/api/v_asm/config", methods=["GET"])
   def v_asm_get_config():
@@ -7498,6 +7720,49 @@ def setup(app):
     params.put("VASMAnnotationConfig", {})
     update_starpilot_toggles()
     return jsonify({"success": True, "message": "Annotation config cleared. V-ASM disabled."})
+
+  @app.route("/api/pip_preview/snapshot", methods=["GET"])
+  def pip_preview_snapshot():
+    if not params.get_bool("GalaxyDeveloperMode"):
+      return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Camera snapshots are unavailable while driving."}), 403
+    jpeg = _get_live_driver_jpeg()
+    if jpeg is not None:
+      return Response(jpeg, mimetype="image/jpeg")
+    return jsonify({"error": "Unable to capture live frame from driver camera."}), 503
+
+  @app.route("/api/pip_preview/config", methods=["GET"])
+  def pip_preview_get_config():
+    if not params.get_bool("GalaxyDeveloperMode"):
+      return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
+    return jsonify(_decode_json_object(params.get("PIPPreviewMask")))
+
+  @app.route("/api/pip_preview/config", methods=["POST"])
+  def pip_preview_save_config():
+    if not params.get_bool("GalaxyDeveloperMode"):
+      return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Cannot change PiP Side Camera configuration while driving."}), 403
+    try:
+      config = _normalize_pip_preview_config(request.get_json(silent=True))
+    except ValueError as exc:
+      return jsonify({"error": str(exc)}), 400
+
+    params.put("PIPPreviewMask", config)
+    update_starpilot_toggles()
+    return jsonify({"success": True, "message": "PiP Preview mask saved."})
+
+  @app.route("/api/pip_preview/config", methods=["DELETE"])
+  def pip_preview_delete_config():
+    if not params.get_bool("GalaxyDeveloperMode"):
+      return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Cannot change PiP Side Camera configuration while driving."}), 403
+    params.put("PIPPreviewMask", {})
+    params.put_bool("PIPPreviewEnabled", False)
+    update_starpilot_toggles()
+    return jsonify({"success": True, "message": "PiP Preview mask cleared."})
 
   @app.route("/mapbox-help/<path:filename>", methods=["GET"])
   def serve_mapbox_help(filename):

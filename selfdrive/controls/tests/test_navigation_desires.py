@@ -32,6 +32,8 @@ def make_toggles(**overrides):
     "one_lane_change": False,
     "use_turn_desires": False,
     "lane_changes_require_cruise": False,
+    "nav_desires_allowed": True,
+    "nav_lane_positioning_allowed": True,
   }
   defaults.update(overrides)
   return SimpleNamespace(**defaults)
@@ -52,7 +54,7 @@ def test_nav_desires_keep_left_when_route_requests_it():
   helper._nav_instruction_state = {"valid": True, "maneuverModifier": "slightLeft"}
 
   helper.update(
-    make_car_state(vEgo=20.0),
+    make_car_state(vEgo=20.0, steeringPressed=True, steeringTorque=1.0),
     True,
     0.0,
     make_plan(laneWidthLeft=4.2),
@@ -73,7 +75,7 @@ def test_nav_desires_turn_right_below_lane_change_speed():
     True,
     0.0,
     make_plan(),
-    make_toggles(minimum_lane_change_speed=10.0),
+    make_toggles(minimum_lane_change_speed=10.0, nav_lane_positioning_allowed=False),
   )
 
   assert helper.desire == log.Desire.turnRight
@@ -109,7 +111,7 @@ def test_nav_desires_off_ramp_lane_guidance_becomes_keep_right():
   }
 
   helper.update(
-    make_car_state(vEgo=22.5),
+    make_car_state(vEgo=22.5, steeringPressed=True, steeringTorque=-1.0),
     True,
     0.0,
     make_plan(laneWidthRight=4.2),
@@ -210,7 +212,7 @@ def test_nav_desires_wide_highway_edge_exit_lane_keeps_right():
   }
 
   helper.update(
-    make_car_state(vEgo=19.0),
+    make_car_state(vEgo=19.0, steeringPressed=True, steeringTorque=-1.0),
     True,
     0.0,
     make_plan(laneWidthRight=4.2),
@@ -236,7 +238,7 @@ def test_nav_desires_shared_transition_lane_keeps_when_active_lane_is_not_outerm
   }
 
   helper.update(
-    make_car_state(vEgo=22.5),
+    make_car_state(vEgo=22.5, steeringPressed=True, steeringTorque=-1.0),
     True,
     0.0,
     make_plan(laneWidthRight=4.2),
@@ -260,7 +262,7 @@ def test_nav_desires_ambiguous_fork_slight_right_only_keeps_close_to_split():
   }
 
   helper.update(
-    make_car_state(vEgo=22.5),
+    make_car_state(vEgo=22.5, steeringPressed=True, steeringTorque=-1.0),
     True,
     0.0,
     make_plan(laneWidthRight=4.2),
@@ -447,6 +449,16 @@ def test_nav_desires_nudgeless_only_when_engaged_blocks_keep_when_aol_only():
 
   assert helper.desire == log.Desire.none
 
+  helper.update(
+    make_car_state(vEgo=20.0, steeringPressed=True, steeringTorque=-1.0),
+    True,
+    0.0,
+    make_plan(laneWidthRight=4.2),
+    make_toggles(nav_desires_allowed=True, nav_lane_positioning_allowed=False, nudgeless=True),
+  )
+
+  assert helper.desire == log.Desire.none
+
 
 def test_turn_desire_fires_below_lane_change_speed_when_no_stop():
   helper = DesireHelper()
@@ -493,7 +505,6 @@ def test_turn_desire_released_after_stop_completes():
 
 def test_nav_desires_disabled_leave_desire_unchanged():
   helper = DesireHelper()
-  helper.nav_desires_allowed = False
   helper._update_nav_params = lambda: None
   helper._nav_instruction_state = {"valid": True, "maneuverModifier": "left"}
 
@@ -502,7 +513,47 @@ def test_nav_desires_disabled_leave_desire_unchanged():
     True,
     0.0,
     make_plan(),
-    make_toggles(minimum_lane_change_speed=10.0),
+    make_toggles(minimum_lane_change_speed=10.0, nav_desires_allowed=False),
+  )
+
+  assert helper.desire == log.Desire.none
+
+
+def test_disabling_nav_desires_clears_active_route_desire_immediately():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverModifier": "slightRight"}
+  car_state = make_car_state(vEgo=20.0, steeringPressed=True, steeringTorque=-1.0)
+  plan = make_plan(laneWidthRight=4.2)
+
+  helper.update(car_state, True, 0.0, plan, make_toggles(nav_desires_allowed=True, nav_lane_positioning_allowed=True))
+  assert helper.desire == log.Desire.keepRight
+
+  helper.update(car_state, True, 0.0, plan, make_toggles(nav_desires_allowed=False, nav_lane_positioning_allowed=True))
+  assert helper.desire == log.Desire.none
+
+
+def test_nav_lane_positioning_requires_driver_confirmation():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverModifier": "slightRight"}
+
+  helper.update(
+    make_car_state(vEgo=20.0),
+    True,
+    0.0,
+    make_plan(laneWidthRight=4.2),
+    make_toggles(nav_desires_allowed=True, nav_lane_positioning_allowed=True, nudgeless=True),
+  )
+
+  assert helper.desire == log.Desire.none
+
+  helper.update(
+    make_car_state(vEgo=20.0, steeringPressed=True, steeringTorque=-1.0),
+    True,
+    0.0,
+    make_plan(laneWidthRight=4.2),
+    make_toggles(nav_desires_allowed=True, nav_lane_positioning_allowed=False, nudgeless=True),
   )
 
   assert helper.desire == log.Desire.none

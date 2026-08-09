@@ -227,6 +227,7 @@ class Plant:
       desiredFollowDistance=float(d_rel),
       dangerFactor=1.0,
       tFollow=1.45,
+      forcingStop=False,
       forcingStopLength=2,
     )
 

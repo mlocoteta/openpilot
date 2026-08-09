@@ -35,6 +35,7 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
     params_memory=FakeParams({"NavInstructionState": nav_state or {}}),
     lead_one=SimpleNamespace(status=False, dRel=float("inf"), vLead=0.0),
     starpilot_cem=SimpleNamespace(stop_light_detected=red_light),
+    starpilot_following=SimpleNamespace(following_lead=False),
     tracking_lead=False,
     driving_in_curve=False,
     model_length=60.0,
@@ -83,6 +84,7 @@ def make_toggles():
     force_stops=True,
     force_standstill=False,
     curve_speed_controller=False,
+    csc_no_lead=False,
     nav_longitudinal_allowed=False,
     speed_limit_controller=False,
     show_speed_limits=False,
@@ -149,6 +151,49 @@ def test_curve_speed_controller_releases_immediately_when_disabled():
   result = update_vcruise(vcruise, sm, toggles, now=20.1, v_ego=20.0)
   assert result == pytest.approx(20.0)
   assert not vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_can_be_limited_to_driving_without_a_lead():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+  toggles.csc_no_lead = True
+
+  def set_curve_target(_v_ego):
+    vcruise.csc.target_set = True
+    vcruise.csc.target = 14.0
+
+  vcruise.csc.update_target = set_curve_target
+  planner.road_curvature_detected = True
+
+  result = update_vcruise(vcruise, sm, toggles, now=30.0, v_ego=20.0)
+  assert result == pytest.approx(14.0)
+  assert vcruise.csc_controlling_speed
+
+  planner.starpilot_following.following_lead = True
+  result = update_vcruise(vcruise, sm, toggles, now=30.1, v_ego=20.0)
+  assert result == pytest.approx(20.0)
+  assert not vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_stays_enabled_with_a_lead_by_default():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+  planner.starpilot_following.following_lead = True
+  planner.road_curvature_detected = True
+
+  def set_curve_target(_v_ego):
+    vcruise.csc.target_set = True
+    vcruise.csc.target = 14.0
+
+  vcruise.csc.update_target = set_curve_target
+  result = update_vcruise(vcruise, sm, toggles, now=40.0, v_ego=20.0)
+
+  assert result == pytest.approx(14.0)
+  assert vcruise.csc_controlling_speed
 
 
 def test_curve_speed_controller_ramps_toward_curve_speed_at_bounded_rate():
@@ -633,7 +678,8 @@ def test_approach_light_force_stop_expires_without_rearming_at_standstill():
 
 
 def test_stop_sign_hold_persists_until_resume():
-  _, vcruise = make_vcruise(red_light=True, raw_model_stopped=True, forcing_stop=False)
+  planner, vcruise = make_vcruise(red_light=True, raw_model_stopped=True, forcing_stop=False)
+  planner.model_length = 20.0
   sm = make_sm(standstill=True)
   sm["starpilotCarState"].dashboardStopSign = 1
   toggles = make_toggles()

@@ -13,8 +13,10 @@ FAVORITE_SLOT_COUNT = 3
 FAVORITE_ACTION_PREFIX = "__starpilot_favorite_action__:"
 FAVORITE_ACTION_DISTANCE_DECREASE = f"{FAVORITE_ACTION_PREFIX}distance_decrease"
 FAVORITE_ACTION_DISTANCE_INCREASE = f"{FAVORITE_ACTION_PREFIX}distance_increase"
+FAVORITE_ACTION_TOGGLE_TRAFFIC_MODE = f"{FAVORITE_ACTION_PREFIX}toggle_traffic_mode"
 FAVORITE_ACTION_DECEL_COUNTER = "FavoriteVirtualDecelCruiseCounter"
 FAVORITE_ACTION_ACCEL_COUNTER = "FavoriteVirtualAccelCruiseCounter"
+FAVORITE_ACTION_TRAFFIC_MODE_COUNTER = "FavoriteTrafficModeCounter"
 FAVORITE_ACTION_OPTIONS = (
   {
     "key": FAVORITE_ACTION_DISTANCE_DECREASE,
@@ -29,6 +31,13 @@ FAVORITE_ACTION_OPTIONS = (
     "description": "Acts like a short press of the car's RES/+ cruise button.",
     "section": "Actions",
     "action": "accelCruise",
+  },
+  {
+    "key": FAVORITE_ACTION_TOGGLE_TRAFFIC_MODE,
+    "label": "Toggle Traffic Mode",
+    "description": "Engages or disengages Traffic Mode while openpilot is actively controlling.",
+    "section": "Actions",
+    "action": "trafficMode",
   },
 )
 FAVORITE_ACTION_KEYS = {option["key"] for option in FAVORITE_ACTION_OPTIONS}
@@ -161,11 +170,11 @@ def trigger_favorite_action(key: str | None, params_memory: Params | None = None
     return False
 
   params_memory = params_memory or Params(memory=True)
-  counter_key = (
-    FAVORITE_ACTION_ACCEL_COUNTER
-    if key == FAVORITE_ACTION_DISTANCE_INCREASE
-    else FAVORITE_ACTION_DECEL_COUNTER
-  )
+  counter_key = {
+    FAVORITE_ACTION_DISTANCE_DECREASE: FAVORITE_ACTION_DECEL_COUNTER,
+    FAVORITE_ACTION_DISTANCE_INCREASE: FAVORITE_ACTION_ACCEL_COUNTER,
+    FAVORITE_ACTION_TOGGLE_TRAFFIC_MODE: FAVORITE_ACTION_TRAFFIC_MODE_COUNTER,
+  }[key]
   params_memory.put_int(counter_key, params_memory.get_int(counter_key) + 1)
   return True
 

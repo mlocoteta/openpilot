@@ -1,5 +1,4 @@
 import pyray as rl
-from openpilot.common.params import Params
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -17,7 +16,7 @@ class ExperimentalModeButton(Widget):
     self.horizontal_padding = 25
     self.button_height = 125
 
-    self.params = Params()
+    self.params = ui_state.ui_params
     self.experimental_mode = requested_experimental_mode(self.params, ui_state.params_memory)
     self.mode_variant = get_mode_banner_variant(self.params, ui_state.params_memory)
 

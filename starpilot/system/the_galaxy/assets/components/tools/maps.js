@@ -30,6 +30,20 @@ const state = reactive({
     scheduleLabel: "Monthly",
     selectedCount: 0,
     storageBytes: 0,
+    downloadProgress: {
+      active: false,
+      cancelled: false,
+      completed: false,
+      downloadedBytes: 0,
+      downloadedFiles: 0,
+      estimatedDownloadBytes: 0,
+      estimateSource: "",
+      etaSeconds: 0,
+      percent: 0,
+      phase: "idle",
+      primaryLocation: "",
+      totalFiles: 0,
+    },
   },
   tokenLabels: {},
 });
@@ -80,6 +94,34 @@ function formatBytes(bytes) {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
   const scaled = value / (1024 ** index);
   return `${scaled >= 10 || index === 0 ? scaled.toFixed(0) : scaled.toFixed(2)} ${units[index]}`;
+}
+
+function formatDuration(seconds) {
+  const value = Math.max(0, Math.round(Number(seconds || 0)));
+  if (value < 60) return `${value}s`;
+  const minutes = Math.floor(value / 60);
+  const remainingSeconds = value % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function normalizeDownloadProgress(progress) {
+  const value = progress && typeof progress === "object" ? progress : {};
+  return {
+    active: Boolean(value.active),
+    cancelled: Boolean(value.cancelled),
+    completed: Boolean(value.completed),
+    downloadedBytes: Number(value.downloadedBytes || 0),
+    downloadedFiles: Number(value.downloadedFiles || 0),
+    estimatedDownloadBytes: Number(value.estimatedDownloadBytes || 0),
+    estimateSource: String(value.estimateSource || ""),
+    etaSeconds: Number(value.etaSeconds || 0),
+    percent: Math.max(0, Math.min(100, Number(value.percent || 0))),
+    phase: String(value.phase || "idle"),
+    primaryLocation: String(value.primaryLocation || ""),
+    totalFiles: Number(value.totalFiles || 0),
+  };
 }
 
 function uniqueSorted(values) {
@@ -143,6 +185,7 @@ function applyStatus(payload) {
     scheduleLabel: payload.scheduleLabel || "Monthly",
     selectedCount: Number(payload.selectedCount || 0),
     storageBytes: Number(payload.storageBytes || 0),
+    downloadProgress: normalizeDownloadProgress(payload.downloadProgress),
   };
   state.selectedSaved = selectedLocations;
   if (!hadSelectionChanges) {
@@ -375,6 +418,53 @@ function renderSelectedSummary() {
   `;
 }
 
+function downloadSizeLabel() {
+  const progress = state.status.downloadProgress;
+  if (!selectionDirty() && progress.estimatedDownloadBytes > 0) {
+    return `~${formatBytes(progress.estimatedDownloadBytes)}`;
+  }
+  if (state.selectedDraft.length > 0) {
+    return "Calculated during download";
+  }
+  return "Select regions";
+}
+
+function renderDownloadProgress() {
+  const progress = state.status.downloadProgress;
+  const visible = state.status.downloading || (!selectionDirty() && (progress.completed || progress.cancelled || progress.estimatedDownloadBytes > 0));
+  if (!visible) return "";
+
+  const isActive = state.status.downloading;
+  const title = isActive ? "Download Progress" : progress.completed ? "Last Download" : progress.cancelled ? "Download Cancelled" : "Download Estimate";
+  const sizeLabel = progress.estimatedDownloadBytes > 0 ? `~${formatBytes(progress.estimatedDownloadBytes)} total` : "Calculating total size...";
+  const storedLabel = progress.downloadedBytes > 0 ? `${formatBytes(progress.downloadedBytes)} stored` : "No files stored yet";
+  const filesLabel = progress.totalFiles > 0 ? `${progress.downloadedFiles} / ${progress.totalFiles} files` : "Waiting for map service...";
+  const etaLabel = isActive && progress.etaSeconds > 0 ? `About ${formatDuration(progress.etaSeconds)} remaining` : "ETA unavailable until files start arriving";
+  const sourceLabel = progress.estimateSource === "previous_download"
+    ? "Estimate based on the last download of this exact selection."
+    : "Size is estimated from the map files as they arrive.";
+
+  return html`
+    <div class="maps-progress-card">
+      <div class="maps-progress-header">
+        <strong>${title}</strong>
+        <span>${Math.round(progress.percent)}%</span>
+      </div>
+      <div class="maps-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress.percent)}">
+        <div class="maps-progress-fill" style="width: ${progress.percent}%;"></div>
+      </div>
+      <div class="maps-progress-meta">
+        <span>${sizeLabel}</span>
+        <span>${storedLabel}</span>
+        <span>${filesLabel}</span>
+        <span>${etaLabel}</span>
+      </div>
+      ${progress.primaryLocation ? html`<p class="maps-progress-location">Current region: ${progress.primaryLocation}</p>` : ""}
+      <p class="maps-progress-note">${sourceLabel}</p>
+    </div>
+  `;
+}
+
 function renderGroup(group) {
   const selectedCount = selectedCountForGroup(group);
 
@@ -433,6 +523,10 @@ export function MapsManager() {
             <span class="maps-stat-value">${() => state.status.selectedCount}</span>
           </div>
           <div class="maps-stat">
+            <span class="maps-stat-label">Download Size</span>
+            <span class="maps-stat-value">${() => downloadSizeLabel()}</span>
+          </div>
+          <div class="maps-stat">
             <span class="maps-stat-label">Last Updated</span>
             <span class="maps-stat-value">${() => state.status.lastUpdate}</span>
           </div>
@@ -445,6 +539,7 @@ export function MapsManager() {
         ${() => state.status.isOnroad ? html`<p class="maps-warning">Map downloads and removal are blocked while driving.</p>` : ""}
         ${() => selectionDirty() ? html`<p class="maps-warning">You have unsaved region changes. Downloading now will use the current Galaxy selection.</p>` : ""}
         ${() => scheduleDirty() ? html`<p class="maps-warning">You have an unsaved schedule change. Downloading now will also apply it.</p>` : ""}
+        ${() => renderDownloadProgress()}
         <div class="maps-action-row">
           <button
             class="maps-btn maps-btn-primary"

@@ -10,6 +10,7 @@ import time
 
 import pyray as rl
 
+from openpilot.common.file_chunker import get_chunk_name, get_manifest_path
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.starpilot.assets.model_manager import (
   CANCEL_DOWNLOAD_PARAM,
@@ -820,19 +821,19 @@ class StarPilotDrivingModelLayout(_SettingsPage):
     default_key = self._params.get_default_value("Model") or self._params.get_default_value("DrivingModel")
     if isinstance(default_key, bytes):
       default_key = default_key.decode("utf-8", errors="ignore")
-    return canonical_model_key(str(default_key or "").strip()) or "sc2"
+    return canonical_model_key(str(default_key or "").strip()) or "rdf"
 
   def _default_model_name(self) -> str:
     default_name = self._params.get_default_value("DrivingModelName")
     if isinstance(default_name, bytes):
       default_name = default_name.decode("utf-8", errors="ignore")
-    return _clean_model_name(default_name or "") or "South Carolina"
+    return _clean_model_name(default_name or "") or "Regret Driven Framework"
 
   def _default_model_version(self) -> str:
     default_version = self._params.get_default_value("ModelVersion") or self._params.get_default_value("DrivingModelVersion")
     if isinstance(default_version, bytes):
       default_version = default_version.decode("utf-8", errors="ignore")
-    return str(default_version or "").strip() or "v11"
+    return str(default_version or "").strip() or "v15"
 
   def _current_selected_key(self) -> str:
     current_key = self._params.get("Model", encoding="utf-8") or self._params.get("DrivingModel", encoding="utf-8") or ""
@@ -844,6 +845,21 @@ class StarPilotDrivingModelLayout(_SettingsPage):
     except Exception:
       return set()
 
+  def _artifact_installed(self, filename: str, on_disk_files: set[str]) -> bool:
+    if filename in on_disk_files:
+      return True
+
+    manifest = get_manifest_path(filename)
+    if manifest not in on_disk_files:
+      return False
+
+    try:
+      num_chunks = int((self._model_dir / manifest).read_text().strip())
+    except Exception:
+      return False
+
+    return all(get_chunk_name(filename, idx, num_chunks) in on_disk_files for idx in range(num_chunks))
+
   def _is_model_installed(self, key: str, version: str = "", on_disk_files: set[str] | None = None) -> bool:
     model_key = canonical_model_key(str(key or "").strip())
     if not model_key:
@@ -853,7 +869,7 @@ class StarPilotDrivingModelLayout(_SettingsPage):
       return True
 
     files = on_disk_files if on_disk_files is not None else self._load_on_disk_files()
-    return f"{model_key}_driving_tinygrad.pkl" in files
+    return self._artifact_installed(f"{model_key}_driving_tinygrad.pkl", files)
 
   def _required_files_for_version(self, key: str, version: str) -> list[str]:
     del version

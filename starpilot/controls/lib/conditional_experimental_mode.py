@@ -64,6 +64,10 @@ class ConditionalExperimentalMode:
   TURN_STOP_LIGHT_VETO_MAX_SPEED = 15 * CV.MPH_TO_MS
   TURN_STOP_LIGHT_VETO_STEERING_ANGLE = 45.0
 
+  STOP_LIGHT_FILTER_TIME_OVERRIDES = {
+    "HYUNDAI_ELANTRA_2021": 0.25,
+  }
+
   # ===== END TUNING PARAMETERS =====
 
   # Current active values
@@ -436,6 +440,15 @@ class ConditionalExperimentalMode:
       filter_time_curves = interp(speed_mph, bp, [low_filter_time, low_filter_time, tuned_filter_time_curves])
       filter_time_leads = interp(speed_mph, bp, [low_filter_time, low_filter_time, tuned_filter_time_leads])
       filter_time_lights = interp(speed_mph, bp, [self.LOW_SPEED_LIGHT_FILTER_TIME, self.LOW_SPEED_LIGHT_FILTER_TIME, tuned_filter_time_lights])
+      try:
+        car_params = sm["carParams"]
+      except (KeyError, IndexError, TypeError, AttributeError):
+        car_params = None
+      car_fingerprint = str(getattr(car_params, "carFingerprint", ""))
+      filter_time_lights = min(
+        filter_time_lights,
+        self.STOP_LIGHT_FILTER_TIME_OVERRIDES.get(car_fingerprint, filter_time_lights),
+      )
       lead_clear_filter_time = interp(speed_mph, bp, [self.LEAD_CLEAR_FILTER_TIME_LOW, self.LEAD_CLEAR_FILTER_TIME_LOW, self.LEAD_CLEAR_FILTER_TIME_HIGH])
       light_boost = interp(speed_mph, bp, [low_boost, low_boost, tuned_boost])
       cap_factor = interp(speed_mph, bp, [low_cap_factor, low_cap_factor, tuned_cap_factor])

@@ -34,6 +34,7 @@ RADARLESS_MATCHED_FOLLOW_HEADWAY_BELOW_TARGET = 0.35
 RADARLESS_MATCHED_FOLLOW_HEADWAY_ABOVE_TARGET = 0.90
 RADARLESS_MATCHED_FOLLOW_MAX_LEAD_BRAKE = 0.35
 RADARLESS_MATCHED_FOLLOW_MIN_MODEL_PROB = 0.70
+FAR_LEAD_COAST_MIN_GAP = 3.5
 
 
 def _smoothstep(value: float, start: float, end: float) -> float:
@@ -173,4 +174,5 @@ def should_disable_far_lead_throttle(v_ego: float, lead_distance: float, desired
   gentle_closing = 0.35 < closing_speed < max(1.35, 0.05 * v_ego)
   ttc = lead_distance / max(closing_speed, 1e-3) if closing_speed > 0.1 else 1e6
 
-  return coast_window_open and coast_window_far and gentle_closing and ttc > 7.5 and lead_distance > desired_gap + 7.0
+  return (coast_window_open and coast_window_far and gentle_closing and ttc > 7.5 and
+          lead_distance > desired_gap + FAR_LEAD_COAST_MIN_GAP)

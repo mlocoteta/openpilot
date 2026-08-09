@@ -135,6 +135,8 @@ CURVATURE_HOLD_ONSET_HEADING = 10.0    # deg of plan heading change that marks t
 CURVATURE_HOLD_ONSET_NEAR = 1.5        # m; corner this close -> full pre-wind
 CURVATURE_HOLD_ONSET_FAR_GATE = 5.0    # m; corner past this -> no pre-wind yet
 CURVATURE_HOLD_ONSET_FAR = 100.0       # m; sentinel "no corner found"
+CURVATURE_HOLD_REACH_MIN = 7.0
+CURVATURE_HOLD_REACH_FULL = 12.0
 # The model counter-steers at every turn exit; an opposite-direction command is the
 # "turn is over" signal at any speed. Without this the floor converted the exit unwind
 # (-0.076) into a stuck +0.012 for 1.4 s and the driver had to unwind by hand
@@ -206,6 +208,11 @@ def get_plan_turn_onset_dist(model_v2) -> float:
     if abs(math.degrees(math.atan2(dy, dx))) > CURVATURE_HOLD_ONSET_HEADING:
       return math.hypot(xs[i], ys[i])
   return CURVATURE_HOLD_ONSET_FAR
+
+
+def get_plan_reach(model_v2) -> float:
+  xs = model_v2.position.x
+  return xs[-1] if len(xs) else 0.0
 
 
 # Turn-initiation lead. The model's action and the fixed 4/7 m probes are anchored in
@@ -299,8 +306,8 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
-    self.pm = messaging.PubMaster(['carControl', 'controlsState'])
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState'], poll='selfdriveState')
+    self.pm = messaging.PubMaster(['carControl', 'controlsState', 'starpilotLateralState'])
 
     self.steer_limited_by_safety = False
     self.curvature = 0.0
@@ -451,7 +458,8 @@ class Controls:
     if not CC.latActive:
       self.LaC.reset()
       self.lane_centering.reset()
-    if not CC.longActive:
+    tesla_pedal_override = self.CP.brand == "tesla" and bool(CS.gasPressed)
+    if not CC.longActive and not tesla_pedal_override:
       self.LoC.reset()
 
     # accel PID loop
@@ -460,7 +468,9 @@ class Controls:
     actuators.accel = float(min(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
                                                 self.starpilot_toggles, has_lead=long_plan.hasLead,
                                                 traffic_mode_enabled=self.sm['starpilotCarState'].trafficModeEnabled,
-                                                profile_max_accel=self.sm['starpilotPlan'].maxAcceleration),
+                                                profile_max_accel=self.sm['starpilotPlan'].maxAcceleration,
+                                                pedal_override=tesla_pedal_override,
+                                                leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo)),
                                 self.starpilot_toggles.max_desired_acceleration))
 
     # Steering PID loop and lateral MPC
@@ -557,7 +567,10 @@ class Controls:
           onset = get_plan_turn_onset_dist(model_v2)
           onset_w = min(max((CURVATURE_HOLD_ONSET_FAR_GATE - onset) /
                             (CURVATURE_HOLD_ONSET_FAR_GATE - CURVATURE_HOLD_ONSET_NEAR), 0.0), 1.0)
-          plan_curvature *= onset_w
+          reach = get_plan_reach(model_v2)
+          reach_w = min(max((reach - CURVATURE_HOLD_REACH_MIN) /
+                            (CURVATURE_HOLD_REACH_FULL - CURVATURE_HOLD_REACH_MIN), 0.0), 1.0)
+          plan_curvature *= onset_w * reach_w
           if plan_curvature * blinker_dir > turn_candidate * blinker_dir:
             turn_candidate = plan_curvature
         # Nudge-to-commit (see CURVATURE_HOLD_CONFIRM_*): the driver actively pushing in
@@ -623,7 +636,9 @@ class Controls:
       self.starpilot_toggles.lane_center_offset,
       self.starpilot_toggles.lane_centering_e2e_authority,
       CC.latActive,
-      bool(self.sm.all_checks(['modelV2'])))
+      bool(self.sm.all_checks(['modelV2'])),
+      self.starpilot_toggles.lane_centering_pause_on_signal,
+      bool(CS.leftBlinker or CS.rightBlinker))
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:
@@ -785,6 +800,11 @@ class Controls:
       cs.lateralControlState.torqueState = lac_log
 
     self.pm.send('controlsState', dat)
+
+    if hasattr(self.LaC, 'starpilot_lateral_state'):
+      debug_dat = messaging.new_message('starpilotLateralState')
+      debug_dat.starpilotLateralState = self.LaC.starpilot_lateral_state
+      self.pm.send('starpilotLateralState', debug_dat)
 
     # carControl
     cc_send = messaging.new_message('carControl')

@@ -13,13 +13,13 @@ def create_steering_control(packer, apply_torque, steer_req):
   return packer.make_can_msg("ES_LKAS", 0, values)
 
 
-def create_steering_control_angle(packer, apply_torque, steer_req):
+def create_steering_control_angle(packer, apply_angle, steer_req, bus=CanBus.main):
   values = {
-    "LKAS_Output": apply_torque,
+    "LKAS_Output": apply_angle,
     "LKAS_Request": steer_req,
     "SET_3": 3
   }
-  return packer.make_can_msg("ES_LKAS_ANGLE", 0, values)
+  return packer.make_can_msg("ES_LKAS_ANGLE", bus, values)
 
 
 def create_steering_status(packer):
@@ -67,7 +67,8 @@ def create_es_distance(packer, frame, es_distance_msg, bus, pcm_cancel_cmd, long
   return packer.make_can_msg("ES_Distance", bus, values)
 
 
-def create_es_lkas_state(packer, frame, es_lkas_state_msg, enabled, visual_alert, left_line, right_line, left_lane_depart, right_lane_depart):
+def create_es_lkas_state(packer, frame, es_lkas_state_msg, enabled, visual_alert, left_line, right_line, left_lane_depart, right_lane_depart,
+                         bus=CanBus.main):
   values = {s: es_lkas_state_msg[s] for s in [
     "CHECKSUM",
     "LKAS_Alert_Msg",
@@ -128,10 +129,10 @@ def create_es_lkas_state(packer, frame, es_lkas_state_msg, enabled, visual_alert
   values["LKAS_Left_Line_Visible"] = int(left_line)
   values["LKAS_Right_Line_Visible"] = int(right_line)
 
-  return packer.make_can_msg("ES_LKAS_State", CanBus.main, values)
+  return packer.make_can_msg("ES_LKAS_State", bus, values)
 
 
-def create_es_dashstatus(packer, frame, dashstatus_msg, enabled, long_enabled, long_active, lead_visible):
+def create_es_dashstatus(packer, frame, dashstatus_msg, enabled, long_enabled, long_active, lead_visible, bus=CanBus.main):
   values = {s: dashstatus_msg[s] for s in [
     "CHECKSUM",
     "PCB_Off",
@@ -177,10 +178,10 @@ def create_es_dashstatus(packer, frame, dashstatus_msg, enabled, long_enabled, l
   if values["LKAS_State_Msg"] in (2, 3):
     values["LKAS_State_Msg"] = 0
 
-  return packer.make_can_msg("ES_DashStatus", CanBus.main, values)
+  return packer.make_can_msg("ES_DashStatus", bus, values)
 
 
-def create_es_brake(packer, frame, es_brake_msg, long_enabled, long_active, brake_value):
+def create_es_brake(packer, frame, es_brake_msg, long_enabled, long_active, brake_value, bus=CanBus.main):
   values = {s: es_brake_msg[s] for s in [
     "CHECKSUM",
     "Signal1",
@@ -204,10 +205,10 @@ def create_es_brake(packer, frame, es_brake_msg, long_enabled, long_active, brak
     values["Cruise_Brake_Active"] = brake_value > 0
     values["Cruise_Brake_Lights"] = brake_value >= 70
 
-  return packer.make_can_msg("ES_Brake", CanBus.main, values)
+  return packer.make_can_msg("ES_Brake", bus, values)
 
 
-def create_es_status(packer, frame, es_status_msg, long_enabled, long_active, cruise_rpm):
+def create_es_status(packer, frame, es_status_msg, long_enabled, long_active, cruise_rpm, bus=CanBus.main):
   values = {s: es_status_msg[s] for s in [
     "CHECKSUM",
     "Signal1",
@@ -227,10 +228,10 @@ def create_es_status(packer, frame, es_status_msg, long_enabled, long_active, cr
 
     values["Cruise_Activated"] = long_active
 
-  return packer.make_can_msg("ES_Status", CanBus.main, values)
+  return packer.make_can_msg("ES_Status", bus, values)
 
 
-def create_es_infotainment(packer, frame, es_infotainment_msg, visual_alert):
+def create_es_infotainment(packer, frame, es_infotainment_msg, visual_alert, bus=CanBus.main):
   # Filter stock LKAS disabled and Keep hands on steering wheel OFF alerts
   values = {s: es_infotainment_msg[s] for s in [
     "CHECKSUM",
@@ -253,7 +254,7 @@ def create_es_infotainment(packer, frame, es_infotainment_msg, visual_alert):
   if visual_alert == VisualAlert.fcw:
     values["LKAS_State_Infotainment"] = 2
 
-  return packer.make_can_msg("ES_Infotainment", CanBus.main, values)
+  return packer.make_can_msg("ES_Infotainment", bus, values)
 
 
 def create_es_highbeamassist(packer):

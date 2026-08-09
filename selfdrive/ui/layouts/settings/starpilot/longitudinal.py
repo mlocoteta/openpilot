@@ -11,12 +11,14 @@ from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.widgets.keyboard import Keyboard
+from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.panel import _SettingsPage
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   AETHER_LIST_METRICS,
+  AetherListColors,
   COMPACT_PANEL_METRICS,
   AdjustorTogglesPanelView,
   AetherAdjustorRow,
@@ -267,13 +269,13 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
     max_speed = 150.0 if is_metric else 100.0
 
     specs = {
-      "CESpeed": {"title": tr("Below Speed"), "subtitle": tr("Switch to Experimental Mode below this speed."), "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeed"))},
-      "CESpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": tr("Switch below this speed when following a lead."), "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeedLead"))},
-      "CESignalSpeed": {"title": tr("Turn Signal Below"), "subtitle": tr("Switch when turn signal is on below this speed."), "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CESignalSpeed"))},
-      "CEModelStopTime": {"title": tr("Predicted Stop In"), "subtitle": tr("Switch when openpilot predicts a stop within time."), "min": 0, "max": 10.0, "step": 1.0, "unit": "s", "presets": [0, 3, 5, 7, 10], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CEModelStopTime"))},
-      "CCMSpeed": {"title": tr("Above Speed"), "subtitle": tr("Switch to Chill Mode on open roads above this speed."), "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeed"))},
-      "CCMSpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": tr("Switch when following a stable lead above this speed."), "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeedLead"))},
-      "CCMSetSpeedMargin": {"title": tr("Set Speed Margin"), "subtitle": tr("How far below set speed before Chill engages."), "min": 0, "max": 30.0 if is_metric else 15.0, "step": 1.0, "unit": speed_unit, "presets": [0, 5, 10, 15], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSetSpeedMargin"))},
+      "CESpeed": {"title": tr("Below Speed"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeed"))},
+      "CESpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeedLead"))},
+      "CESignalSpeed": {"title": tr("Turn Signal Below"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CESignalSpeed"))},
+      "CEModelStopTime": {"title": tr("Predicted Stop In"), "subtitle": "", "min": 0, "max": 10.0, "step": 1.0, "unit": "s", "presets": [0, 3, 5, 9, 10], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CEModelStopTime"))},
+      "CCMSpeed": {"title": tr("Above Speed"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeed"))},
+      "CCMSpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeedLead"))},
+      "CCMSetSpeedMargin": {"title": tr("Set Speed Margin"), "subtitle": "", "min": 0, "max": 30.0 if is_metric else 15.0, "step": 1.0, "unit": speed_unit, "presets": [0, 5, 10, 15], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSetSpeedMargin"))},
     }
 
     self._cem_keys = ["CESpeed", "CESpeedLead", "CESignalSpeed", "CEModelStopTime"]
@@ -304,7 +306,7 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
       "CESpeed": {"title": tr("Below Speed"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 20, 35, 55, 75]},
       "CESpeedLead": {"title": tr("Speed w/ Lead"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 20, 35, 55, 75]},
       "CESignalSpeed": {"title": tr("Turn Signal Below"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {0.0: tr("Off")}, "presets": [0, 20, 35, 55, 75]},
-      "CEModelStopTime": {"title": tr("Predicted Stop In"), "min": 0, "max": 10.0, "unit": "s", "labels": {0.0: tr("Off")}, "presets": [0, 3, 5, 7, 10]},
+      "CEModelStopTime": {"title": tr("Predicted Stop In"), "min": 0, "max": 10.0, "unit": "s", "labels": {0.0: tr("Off")}, "presets": [0, 3, 5, 9, 10]},
       "CCMSpeed": {"title": tr("Above Speed"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 35, 55, 65, 80]},
       "CCMSpeedLead": {"title": tr("Speed w/ Lead"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 35, 55, 65, 80]},
       "CCMSetSpeedMargin": {"title": tr("Set Speed Margin"), "min": 0, "max": 30.0 if is_metric else 15.0, "unit": speed_unit, "labels": {}, "presets": [0, 5, 10, 15]},
@@ -357,9 +359,10 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
 
     right_h = tiles_h
 
+    banner_overhead = 52.0
     if self._uses_two_columns(content_width):
       max_natural_h = max(left_h, right_h)
-      section_overhead = SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
+      section_overhead = banner_overhead + SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
       
       if self._scroll_rect:
         available_h = self._scroll_rect.height - section_overhead - self.TAB_HEIGHT - self.TAB_BOTTOM_GAP - 6.0
@@ -379,7 +382,7 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
     else:
       self._left_container_h = left_h
       self._tiles_container_h = right_h
-      total = left_h + SECTION_GAP + right_h + SECTION_HEADER_HEIGHT * 2 + SECTION_HEADER_GAP * 2
+      total = banner_overhead + left_h + SECTION_GAP + right_h + SECTION_HEADER_HEIGHT * 2 + SECTION_HEADER_GAP * 2
       return total + self.TAB_HEIGHT + self.TAB_BOTTOM_GAP
 
   def _draw_scroll_content(self, rect: rl.Rectangle, content_width: float):
@@ -395,14 +398,19 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
     if mode == 0:
       return
 
+    banner_text = tr("Switch to Experimental Mode") if mode == 1 else tr("Switch to Chill Mode")
+    banner_rect = rl.Rectangle(rect.x, y, content_width, 40)
+    gui_label(banner_rect, banner_text, 40, AetherListColors.HEADER, FontWeight.BOLD, alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER)
+    y += 40 + 12
+
     keys = self._cem_keys if mode == 1 else self._ccm_keys
     grid = self._toggle_grid
     
     col_width = (content_width - SECTION_GAP) / 2 if self._uses_two_columns(content_width) else content_width
 
-    draw_section_header(rl.Rectangle(rect.x, y, col_width, SECTION_HEADER_HEIGHT), tr("Values"), style=PANEL_STYLE)
+    draw_section_header(rl.Rectangle(rect.x, y, col_width, SECTION_HEADER_HEIGHT), tr("When"), style=PANEL_STYLE, title_size=38, align_center=True)
     if self._uses_two_columns(content_width):
-      draw_section_header(rl.Rectangle(rect.x + col_width + SECTION_GAP, y, col_width, SECTION_HEADER_HEIGHT), tr("Triggers"), style=PANEL_STYLE)
+      draw_section_header(rl.Rectangle(rect.x + col_width + SECTION_GAP, y, col_width, SECTION_HEADER_HEIGHT), tr("For"), style=PANEL_STYLE, title_size=38, align_center=True)
     
     y += SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
     
@@ -416,7 +424,7 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
         columns=tg_columns)
     else:
       y += self._left_container_h + SECTION_GAP
-      draw_section_header(rl.Rectangle(rect.x, y, col_width, SECTION_HEADER_HEIGHT), tr("Triggers"), style=PANEL_STYLE)
+      draw_section_header(rl.Rectangle(rect.x, y, col_width, SECTION_HEADER_HEIGHT), tr("For"), style=PANEL_STYLE, title_size=38, align_center=True)
       y += SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
       self._draw_two_column_tile_grid(
         grid, rect.x, y, col_width,
@@ -467,7 +475,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
     return self._params.get_bool("AdvancedLongitudinalTune")
 
   def _show_stop_tuning_values(self) -> bool:
-    return self._advanced_enabled() and not (starpilot_state.car_state.isToyota and self._params.get_bool("FrogsGoMoosTweak"))
+    return self._advanced_enabled()
 
   def _make_parent(self, key: str, label: str, subtitle: str = "") -> ParentToggle:
     return ParentToggle(

@@ -37,12 +37,25 @@ NAV_TURN_TARGET_SPEEDS = {
 # Smaller values pull speed down earlier on approach.
 FORCE_STOP_MODEL_APPROACH_DECEL = 0.65
 FORCE_STOP_DASH_APPROACH_DECEL = 1.0
-ACTIVATION_M = 75.0       # m — CEM/model path activates when model_length < this
+ACTIVATION_M = 100.0      # m — CEM/model path activates when model_length < this. Buys
+                          # ~1.8 s more runway inside the position constraint, which is the
+                          # only part of the approach that tracks without lag. A false arm
+                          # off a brief red blip is driver-cancellable: gas suppresses force
+                          # stop for OVERRIDE_FORCE_STOP_TIMER seconds.
+ACTIVATION_HYSTERESIS_M = 8.0  # m — release margin; absorbs model_length jitter at the gate
+LEAD_VETO_M = 75.0        # m — lead proximity that vetoes Force Stop (kept off ACTIVATION_M
+                          # so raising activation can't silently widen the veto)
 MPC_HANDOFF_M = 6.0       # m — below this, command 0 and let MPC finish the stop
+FORCE_STOP_APPROACH_DECEL = 0.65  # m/s^2 — speed ceiling before commit. LOWER = more early
+                          # braking; don't go under FORCE_STOP_MODEL_APPROACH_DECEL
 ADAS_MAX_MS = 17.88       # 40 mph — cross-street ADAS guard
 DASH_SEED_M = 27.0        # ~88 ft — typical ADAS detection distance, used to snap
                           # tracked length closer when dashboard confirms a sign
+DASH_MODEL_AGREE_M = 50.0 # m — dash arm/snap needs model_length under this; a lone dash bit
+                          # against a long model path is a phantom stop
 FT_TO_M = 0.3048
+ADJACENT_STOP_MIN_USE_M = 10.0  # m — inside this the MPC already owns the stop; a
+                                # late-arriving hint could only jerk it
 FORCE_STOP_TURN_VETO_MAX_SPEED = 18.0 * CV.MPH_TO_MS
 # Real-turn steering angle. A stop-then-turn is still ~straight on approach, so a low
 # threshold caused legit stops to be skipped when the blinker came on early. Only suppress
@@ -136,6 +149,7 @@ class StarPilotVCruise:
 
     self.override_force_stop_timer = 0
     self.force_stop_timer = 0.0
+    self.activation_gate_active = False
     self.standstill_force_stop_hold = False
     self.standstill_force_stop_clear_since = 0.0
     self.standstill_force_stop_started_at = None
@@ -189,6 +203,26 @@ class StarPilotVCruise:
     self.standstill_force_stop_clear_since = 0.0
     self.standstill_force_stop_started_at = None
     self.standstill_force_stop_reason = None
+
+  @staticmethod
+  def _get_adjacent_stop_distance(sm):
+    """dRel of a vehicle that decelerated to a stop in an adjacent lane, or None.
+
+    The model's own distance runs long on a clear-lane approach; a car stopped alongside
+    is physically at (or just behind) the stop bar. Radar-only, so it holds for any
+    driving model.
+    """
+    try:
+      radar_state = sm["starpilotRadarState"]
+    except (KeyError, IndexError, TypeError, AttributeError):
+      return None
+
+    adjacent = getattr(radar_state, "adjacentStopped", None)
+    if adjacent is None or not getattr(adjacent, "status", False):
+      return None
+
+    d_rel = float(getattr(adjacent, "dRel", 0.0))
+    return d_rel if d_rel > ADJACENT_STOP_MIN_USE_M else None
 
   @staticmethod
   def _nav_maneuver_target_speed(maneuver_type, maneuver_modifier):
@@ -296,7 +330,7 @@ class StarPilotVCruise:
     # during the filter's settling window and stay committed for the whole stop.
     lead = self.starpilot_planner.lead_one
     lead_present = (bool(getattr(lead, "status", False))
-                    and float(getattr(lead, "dRel", float("inf"))) < ACTIVATION_M
+                    and float(getattr(lead, "dRel", float("inf"))) < LEAD_VETO_M
                     and float(getattr(lead, "vLead", float("inf"))) < v_ego + 2.0)
     curved_approach_scene = (
       abs(float(getattr(self.starpilot_planner, "road_curvature", 0.0))) >= FORCE_STOP_CURVE_VETO_MAX_ROAD_CURVATURE
@@ -307,9 +341,19 @@ class StarPilotVCruise:
     # Exclude when a lead is present (raw or filtered) — the handoff_to_stopped_lead path
     # in CEM can set stop_light_detected even with a lead present, which would incorrectly
     # activate Force Stop and stop the car far behind the lead instead of letting ACC handle it.
-    cem_path = (self.starpilot_planner.starpilot_cem.stop_light_detected
+    # Schmitt trigger: model_length jitters around ACTIVATION_M and keeps resetting
+    # force_stop_timer's ramp. Scoped to a detected stop so the wider release threshold
+    # can't leak into ordinary slow driving.
+    stop_light_detected = self.starpilot_planner.starpilot_cem.stop_light_detected
+    if self.activation_gate_active and stop_light_detected:
+      model_length_active = self.starpilot_planner.model_length < ACTIVATION_M + ACTIVATION_HYSTERESIS_M
+    else:
+      model_length_active = self.starpilot_planner.model_length < ACTIVATION_M
+    self.activation_gate_active = model_length_active and stop_light_detected
+
+    cem_path = (stop_light_detected
                 and controls_enabled and starpilot_toggles.force_stops
-                and self.starpilot_planner.model_length < ACTIVATION_M
+                and model_length_active
                 and self.override_force_stop_timer <= 0
                 and not self.starpilot_planner.driving_in_curve
                 and not curved_approach_scene
@@ -323,6 +367,7 @@ class StarPilotVCruise:
     dash_active = dash_value > 0
     dash_path = (dash_active and controls_enabled and starpilot_toggles.force_stops
                  and v_ego < ADAS_MAX_MS
+                 and self.starpilot_planner.model_length < DASH_MODEL_AGREE_M
                  and self.override_force_stop_timer <= 0
                  and not self.starpilot_planner.driving_in_curve
                  and not turn_scene_active
@@ -368,6 +413,8 @@ class StarPilotVCruise:
       )
       if pedal_override:
         self.override_force_stop_timer = OVERRIDE_FORCE_STOP_TIMER
+      elif light_hold_expired:
+        self.override_force_stop_timer = OVERRIDE_FORCE_STOP_TIMER
       if (not controls_enabled) or (not standstill) or lead_present or pedal_override or light_hold_expired:
         self._clear_standstill_force_stop_hold()
       elif standstill_force_stop_scene_active:
@@ -399,6 +446,9 @@ class StarPilotVCruise:
     force_stop_enabled |= self.forcing_stop and not sm["carState"].standstill
     force_stop_enabled |= self.standstill_force_stop_hold
 
+    if self.forcing_stop and standstill and not force_stop_enabled and self.standstill_force_stop_reason != "sign":
+      self.override_force_stop_timer = OVERRIDE_FORCE_STOP_TIMER
+
     # Override: gas/accel pedal during an active force stop
     self.override_force_stop |= sm["carState"].gasPressed
     self.override_force_stop |= sm["starpilotCarState"].accelPressed
@@ -424,7 +474,13 @@ class StarPilotVCruise:
     v_ego_diff = v_ego_cluster - v_ego
 
     # FrogsGoMoo's Curve Speed Controller
-    csc_available = long_control_active and v_ego > CRUISING_SPEED and starpilot_toggles.curve_speed_controller
+    following_lead = bool(getattr(self.starpilot_planner.starpilot_following, "following_lead", False))
+    csc_available = (
+      long_control_active and
+      v_ego > CRUISING_SPEED and
+      starpilot_toggles.curve_speed_controller and
+      (not getattr(starpilot_toggles, "csc_no_lead", False) or not following_lead)
+    )
     csc_curve_detected = csc_available and self.starpilot_planner.road_curvature_detected
     if csc_curve_detected:
       self.csc.update_target(v_ego)
@@ -488,11 +544,22 @@ class StarPilotVCruise:
         # Kinematic distance estimator (also published as forcingStopLength).
         # Decay one-to-one with motion, clamp by current model_length so we adopt
         # the model's view when it regains sight, and snap closer to DASH_SEED_M
-        # whenever the dashboard signal is active.
+        # when the dashboard signal is active and the model agrees a stop is near.
         self.tracked_model_length = max(self.tracked_model_length - (v_ego * DT_MDL), 0.0)
         self.tracked_model_length = min(self.tracked_model_length, self.starpilot_planner.model_length)
         if dash_active:
-          self.tracked_model_length = min(self.tracked_model_length, DASH_SEED_M)
+          if self.starpilot_planner.model_length < DASH_MODEL_AGREE_M:
+            self.tracked_model_length = min(self.tracked_model_length, DASH_SEED_M)
+          # inside the seed the model range is the better line estimate; letting it pull
+          # tracked back up is what keeps an early snap from parking us short of the sign
+          if self.starpilot_planner.model_length < DASH_SEED_M:
+            self.tracked_model_length = self.starpilot_planner.model_length
+
+        # A car stopped in the next lane marks the stop bar better than the model does.
+        # Shortening clamp only — it can pull the stop in, never push it out.
+        adjacent_stop_d = self._get_adjacent_stop_distance(sm)
+        if adjacent_stop_d is not None:
+          self.tracked_model_length = min(self.tracked_model_length, adjacent_stop_d)
 
         # Kinematic profile with user offset. Positive offset shifts the perceived
         # line further down the road -> car rolls further before commanding 0.
@@ -538,6 +605,27 @@ class StarPilotVCruise:
         targets.append(slc_control_target)
       if self.nav_turn_target > 0.0:
         targets.append(self.nav_turn_target)
+
+      # Far-approach envelope: bleed speed off before commit so the car isn't still at
+      # cruise when the kinematic curve takes over. Same vetoes as the activation paths;
+      # no latch, recomputed each frame, releases on green.
+      if (stop_light_detected
+          and controls_enabled and starpilot_toggles.force_stops
+          and self.override_force_stop_timer <= 0
+          and not self.starpilot_planner.driving_in_curve
+          and not curved_approach_scene
+          and not turn_scene_active
+          and not self.starpilot_planner.tracking_lead
+          and not lead_present):
+        # adjacent-stopped hint caps the model distance; shorten-only, self-clearing
+        approach_d = self.starpilot_planner.model_length
+        adjacent_stop_d = self._get_adjacent_stop_distance(sm)
+        if adjacent_stop_d is not None:
+          approach_d = min(approach_d, adjacent_stop_d)
+        approach_d += offset_m
+        if approach_d > MPC_HANDOFF_M:
+          targets.append(math.sqrt(2.0 * FORCE_STOP_APPROACH_DECEL * (approach_d - MPC_HANDOFF_M)))
+
       v_cruise = min(targets)
 
     self.controls_enabled_previously = controls_enabled

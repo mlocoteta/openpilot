@@ -122,7 +122,8 @@ class Car:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
           cached_params = _cached_params
 
-      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, self.params, num_pandas, cached_params, get_starpilot_toggles())
+      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, self.params, num_pandas, cached_params,
+                        get_starpilot_toggles(read_persisted_force_params=True))
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
 
@@ -157,7 +158,11 @@ class Car:
 
       secoc_key = self.params.get("SecOCKey")
       if secoc_key is not None:
-        saved_secoc_key = bytes.fromhex(secoc_key.strip())
+        try:
+          saved_secoc_key = bytes.fromhex(secoc_key.strip())
+        except (TypeError, ValueError):
+          saved_secoc_key = b""
+
         if len(saved_secoc_key) == 16:
           self.CP.secOcKeyAvailable = True
           self.CI.CS.secoc_key = saved_secoc_key
@@ -165,6 +170,12 @@ class Car:
             self.CI.CC.secoc_key = saved_secoc_key
         else:
           cloudlog.warning("Saved SecOC key is invalid")
+
+    if self.CP.secOcRequired and not self.CP.secOcKeyAvailable:
+      self.CP.passive = True
+      safety_config = structs.CarParams.SafetyConfig()
+      safety_config.safetyModel = structs.CarParams.SafetyModel.noOutput
+      self.CP.safetyConfigs = [safety_config]
 
     # Write previous route's CarParams
     prev_cp = self.params.get("CarParamsPersistent")
@@ -190,7 +201,7 @@ class Car:
 
     self.resume_prev_button = False
 
-    self.starpilot_toggles = get_starpilot_toggles()
+    self.starpilot_toggles = get_starpilot_toggles(read_persisted_force_params=True)
 
     self.FPCP.alternativeExperience |= interface_alternative_experience
 
@@ -410,20 +421,32 @@ class Car:
     if self.redneck_cruise is None:
       return
 
-    v_target_ms, lead_present = self._get_redneck_target_speed(CS)
+    v_target_ms, lead_present = self._get_redneck_target_speed(CS, CC)
     send_button, v_target = self.redneck_cruise.run(CS, CC, v_target_ms, self.is_metric, lead_present=lead_present)
     self.CI.CS.redneck_send_button = send_button
     self.CI.CS.redneck_v_target = v_target
 
-  def _get_redneck_target_speed(self, CS: car.CarState) -> tuple[float, bool]:
+  def _get_redneck_target_speed(self, CS: car.CarState, CC: car.CarControl) -> tuple[float, bool]:
     starpilot_target_speed = 0.0
+    slc_target_speed = 0.0
+    if self.sm.seen['starpilotPlan'] and self.sm.valid['starpilotPlan']:
+      starpilot_plan = self.sm['starpilotPlan']
+      starpilot_target_speed = float(starpilot_plan.vCruise)
+      if self.starpilot_toggles.speed_limit_controller:
+        slc_target_speed = max(
+          float(starpilot_plan.slcOverriddenSpeed),
+          float(starpilot_plan.slcSpeedLimit) + float(starpilot_plan.slcSpeedLimitOffset),
+        )
+
+    # Use acceleration projection only when SLC has no resolved target.
+    if self.CP.openpilotLongitudinalControl and slc_target_speed <= 0.0:
+      return CS.vEgo * 1.01 + 3 * CC.actuators.accel, bool(CC.hudControl.leadVisible)
+
     allow_plan_decrease = False
     lead_present = False
     lead_distance_m = 0.0
     lead_rel_speed_ms = 0.0
     lookahead_points = REDNECK_DECREASE_LOOKAHEAD_POINTS
-    if self.sm.seen['starpilotPlan'] and self.sm.valid['starpilotPlan']:
-      starpilot_target_speed = float(self.sm['starpilotPlan'].vCruise)
 
     plan_speeds = []
     if self.sm.seen['longitudinalPlan'] and self.sm.valid['longitudinalPlan']:
@@ -450,6 +473,7 @@ class Car:
       lead_present=lead_present,
       lead_distance_m=lead_distance_m,
       lead_rel_speed_ms=lead_rel_speed_ms,
+      slc_target_speed_ms=slc_target_speed,
     ), lead_present
 
   def step(self):

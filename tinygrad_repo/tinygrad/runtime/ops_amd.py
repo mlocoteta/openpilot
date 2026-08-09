@@ -914,7 +914,7 @@ class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     deadline, visible = time.monotonic() + 5.0, []
     while dev_id >= len(visible) and time.monotonic() < deadline:
-      visible = hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001), "AMD")
+      visible = hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")
       if dev_id >= len(visible): time.sleep(0.1)
     if dev_id >= len(visible):
       raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")
@@ -925,7 +925,10 @@ class USBIface(PCIIface):
 
     # special regions
     self.copy_bufs = [self._dma_region(ctrl_addr=0xf000, sys_addr=0x200000, size=0x80000)]
-    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
+    # Current custom firmware reserves less of the controller SRAM header than
+    # the legacy bridge path. Keep the legacy offset for compatibility.
+    sys_next_off = 0x200 if self.pci_dev.usb.usb.is_custom else 0x800
+    self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), sys_next_off
     self.cq_buf = self._dma_region(ctrl_addr=0xb800, sys_addr=0x822000, size=0x1000)
 
   def _dma_region(self, ctrl_addr, sys_addr, size):

@@ -19,6 +19,14 @@ from openpilot.starpilot.assets.theme_manager import ThemeManager
 from openpilot.starpilot.common.starpilot_backups import backup_starpilot
 from openpilot.starpilot.common.connect_server import sync_konik_dongle_id
 from openpilot.starpilot.common.maps_catalog import normalize_schedule_value, sanitize_selected_locations_csv
+from openpilot.starpilot.common.maps_download_progress import (
+  estimate_download_bytes,
+  estimate_eta_seconds,
+  load_size_cache,
+  nonnegative_int,
+  selection_key,
+  storage_bytes,
+)
 from openpilot.starpilot.common.theme_asset_names import find_matching_theme_asset_file
 from openpilot.starpilot.common.starpilot_utilities import get_starpilot_api_info, is_FrogsGoMoo, is_url_pingable, run_cmd
 from openpilot.starpilot.common.starpilot_variables import (
@@ -202,6 +210,92 @@ def update_boot_logo(starpilot=False, stock=False, selected_logo=None):
     run_cmd(["sudo", "mount", "-o", f"remount,{mount_options}", "/"], "Successfully restored / mount options", "Failed to restore / mount options")
 
 
+MAPS_DOWNLOAD_PROGRESS_PARAM = "MapsDownloadProgress"
+MAPS_DOWNLOAD_SIZE_CACHE_PARAM = "MapsDownloadSizeCache"
+
+
+def _decode_map_param(value):
+  return value.decode("utf-8", errors="ignore") if isinstance(value, bytes) else value
+
+
+def _get_map_size_cache(params):
+  return load_size_cache(_decode_map_param(params.get(MAPS_DOWNLOAD_SIZE_CACHE_PARAM)))
+
+
+def _publish_maps_progress(
+  params_memory,
+  maps_selected,
+  baseline_storage_bytes,
+  started_at,
+  progress=None,
+  *,
+  active=None,
+  cancelled=False,
+  completed=False,
+  phase="starting",
+  cached_estimate_bytes=0,
+):
+  total_files = 0
+  downloaded_files = 0
+  progress_cancelled = False
+  primary_location = ""
+  if progress is not None:
+    total_files = int(progress.totalFiles)
+    downloaded_files = int(progress.downloadedFiles)
+    progress_cancelled = bool(progress.cancelled)
+    try:
+      if len(progress.locationDetails) > 0:
+        primary_location = str(progress.locationDetails[0].location)
+      elif len(progress.locations) > 0:
+        primary_location = str(progress.locations[0])
+    except (AttributeError, IndexError, TypeError):
+      pass
+
+  if active is None:
+    active = bool(progress.active) if progress is not None else False
+  cancelled = bool(cancelled or progress_cancelled)
+  elapsed_seconds = max(time.monotonic() - started_at, 0.0)
+  current_storage_bytes = storage_bytes(MAPS_PATH)
+  storage_delta_bytes = max(current_storage_bytes - baseline_storage_bytes, 0)
+  bytes_per_second = storage_delta_bytes / elapsed_seconds if elapsed_seconds > 0 else 0.0
+  estimated_bytes = estimate_download_bytes(storage_delta_bytes, total_files, downloaded_files)
+  estimate_source = "live_file_rate" if estimated_bytes else ""
+  if not estimated_bytes and cached_estimate_bytes:
+    estimated_bytes = int(cached_estimate_bytes)
+    estimate_source = "previous_download"
+
+  if completed:
+    percent = 100
+  elif estimated_bytes > 0:
+    percent = min(99, int(storage_delta_bytes * 100 / estimated_bytes))
+  elif total_files > 0:
+    percent = min(99, int(downloaded_files * 100 / total_files))
+  else:
+    percent = 0
+
+  payload = {
+    "active": bool(active),
+    "cancelled": cancelled,
+    "completed": bool(completed),
+    "downloadedBytes": storage_delta_bytes,
+    "downloadedFiles": downloaded_files,
+    "estimatedDownloadBytes": estimated_bytes,
+    "estimateSource": estimate_source,
+    "etaSeconds": estimate_eta_seconds(estimated_bytes, storage_delta_bytes, bytes_per_second) if not completed else 0,
+    "percent": percent,
+    "phase": phase,
+    "primaryLocation": primary_location,
+    "selectedKey": selection_key(maps_selected),
+    "selectedLocations": [location for location in maps_selected.split(",") if location],
+    "storageBytes": current_storage_bytes,
+    "totalFiles": total_files,
+    "updatedAt": time.time(),
+    "bytesPerSecond": round(bytes_per_second, 2),
+  }
+  params_memory.put(MAPS_DOWNLOAD_PROGRESS_PARAM, json.dumps(payload, separators=(",", ":")))
+  return payload
+
+
 def update_maps(now, params, params_memory, manual_update=False):
   maps_selected_raw = params.get("MapsSelected")
   maps_selected = sanitize_selected_locations_csv(maps_selected_raw)
@@ -230,6 +324,21 @@ def update_maps(now, params, params_memory, manual_update=False):
   pm = messaging.PubMaster(["mapdIn"])
   sm = messaging.SubMaster(["mapdExtendedOut"])
 
+  size_cache = _get_map_size_cache(params)
+  cached_entry = size_cache.get(selection_key(maps_selected), {})
+  cached_estimate_bytes = nonnegative_int(cached_entry.get("downloadBytes", 0)) if isinstance(cached_entry, dict) else 0
+  baseline_storage_bytes = storage_bytes(MAPS_PATH)
+  started_at = time.monotonic()
+  _publish_maps_progress(
+    params_memory,
+    maps_selected,
+    baseline_storage_bytes,
+    started_at,
+    active=True,
+    phase="starting",
+    cached_estimate_bytes=cached_estimate_bytes,
+  )
+
   time.sleep(1)
 
   msg = messaging.new_message("mapdIn")
@@ -238,6 +347,7 @@ def update_maps(now, params, params_memory, manual_update=False):
   pm.send("mapdIn", msg)
 
   started = False
+  last_progress = None
   while True:
     sm.update(1000)
 
@@ -246,18 +356,59 @@ def update_maps(now, params, params_memory, manual_update=False):
       msg.mapdIn.type = 27
       pm.send("mapdIn", msg)
 
+      _publish_maps_progress(
+        params_memory,
+        maps_selected,
+        baseline_storage_bytes,
+        started_at,
+        progress=last_progress,
+        active=False,
+        cancelled=True,
+        phase="cancelled",
+        cached_estimate_bytes=cached_estimate_bytes,
+      )
       params_memory.remove("CancelDownloadMaps")
       params_memory.remove("DownloadMaps")
       return
 
     if sm.updated["mapdExtendedOut"]:
       progress = sm["mapdExtendedOut"].downloadProgress
+      last_progress = progress
 
       if progress.active:
         started = True
 
+      _publish_maps_progress(
+        params_memory,
+        maps_selected,
+        baseline_storage_bytes,
+        started_at,
+        progress=progress,
+        phase="downloading" if progress.active else "finishing",
+        cached_estimate_bytes=cached_estimate_bytes,
+      )
+
       if not progress.active and started:
         break
+
+  final_progress = _publish_maps_progress(
+    params_memory,
+    maps_selected,
+    baseline_storage_bytes,
+    started_at,
+    progress=last_progress,
+    active=False,
+    completed=True,
+    phase="complete",
+    cached_estimate_bytes=cached_estimate_bytes,
+  )
+  if final_progress["downloadedBytes"] > 0:
+    size_cache[selection_key(maps_selected)] = {
+      "downloadBytes": final_progress["downloadedBytes"],
+      "totalFiles": final_progress["totalFiles"],
+      "updatedAt": now.isoformat(),
+    }
+    params.put(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, json.dumps(size_cache, separators=(",", ":")))
 
   params.put("LastMapsUpdate", todays_date)
   params_memory.remove("DownloadMaps")

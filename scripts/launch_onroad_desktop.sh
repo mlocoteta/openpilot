@@ -48,6 +48,7 @@ Notes:
   - --galaxy starts a local Galaxy web session with the same preview params and prints the localhost URL. It blocks replay's logged customReserved9 stream so Galaxy can own the live Testing Grounds publisher.
   - -nav injects a fake navigation demo stream and blocks replay from publishing navInstruction/navRoute.
   - --cem publishes fake CEM statuses for desktop visual review in the raylib UIs.
+  - --csc publishes a fake starpilotPlan stream that forces the CSC glow to render on desktop UI.
   - -alert blocks replay from publishing selfdriveState and fires a fake critical full-screen red alert (alertSize=full, alertStatus=critical) 20 seconds after the demo publisher starts (10s for replay route + UI to come up, plus 10s for the user to open Settings). Default alert text mimics a real controlsMismatch event; run tools/replay/fake_alert_demo.py directly to override --text1/--text2/--delay.
 EOF
 }
@@ -67,11 +68,13 @@ REPLAY_ONLY=0
 NAV_DEMO=0
 CEM_DEMO=0
 ALERT_DEMO=0
+CSC_DEMO=0
 GALAXY=0
 REPLAY_PID=""
 NAV_PID=""
 CEM_PID=""
 ALERT_PID=""
+CSC_PID=""
 GALAXY_PID=""
 GALAXY_PORT=""
 GALAXY_URL=""
@@ -115,6 +118,10 @@ parse_args() {
         ;;
       --cem|--mici-widget-demo|--widget-demo)
         CEM_DEMO=1
+        shift
+        ;;
+      --csc|--csc-demo)
+        CSC_DEMO=1
         shift
         ;;
       --galaxy)
@@ -247,6 +254,9 @@ cleanup() {
   if [[ -n "${ALERT_PID}" ]]; then
     kill "${ALERT_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${CSC_PID}" ]]; then
+    kill "${CSC_PID}" >/dev/null 2>&1 || true
+  fi
   if [[ -n "${GALAXY_PID}" ]]; then
     kill "${GALAXY_PID}" >/dev/null 2>&1 || true
   fi
@@ -267,6 +277,9 @@ cleanup() {
   fi
   if [[ -n "${ALERT_PID}" ]]; then
     wait "${ALERT_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${CSC_PID}" ]]; then
+    wait "${CSC_PID}" >/dev/null 2>&1 || true
   fi
   if [[ -n "${GALAXY_PID}" ]]; then
     wait "${GALAXY_PID}" >/dev/null 2>&1 || true
@@ -352,6 +365,10 @@ ensure_alert_demo_replay_blocklist() {
   ensure_replay_blocklist "selfdriveState"
 }
 
+ensure_csc_demo_replay_blocklist() {
+  ensure_replay_blocklist "starpilotPlan"
+}
+
 ensure_galaxy_replay_blocklist() {
   ensure_replay_blocklist "customReserved9"
 }
@@ -383,6 +400,7 @@ prepare_env() {
   export SP_ONROAD_NAV_DEMO="${NAV_DEMO}"
   export SP_CEM_DEMO="${CEM_DEMO}"
   export SP_ONROAD_ALERT_DEMO="${ALERT_DEMO}"
+  export SP_ONROAD_CSC_DEMO="${CSC_DEMO}"
 
   local generated_prefix="${PREFIX_ARG:-${OPENPILOT_PREFIX:-desktop-onroad-$$}}"
   ONROAD_TEMP_PREFIX="${generated_prefix}"
@@ -480,6 +498,18 @@ launch_alert_demo() {
   sleep 0.5
   if ! kill -0 "${ALERT_PID}" >/dev/null 2>&1; then
     wait "${ALERT_PID}"
+    return 1
+  fi
+}
+
+launch_csc_demo() {
+  echo "Starting fake CSC demo publisher..."
+  "${ROOT_DIR}/.venv/bin/python3" "${ROOT_DIR}/tools/replay/fake_csc_demo.py" &
+  CSC_PID=$!
+
+  sleep 0.5
+  if ! kill -0 "${CSC_PID}" >/dev/null 2>&1; then
+    wait "${CSC_PID}"
     return 1
   fi
 }
@@ -605,6 +635,10 @@ if [[ "${ALERT_DEMO}" == "1" ]]; then
   ensure_alert_demo_replay_blocklist
 fi
 
+if [[ "${CSC_DEMO}" == "1" ]]; then
+  ensure_csc_demo_replay_blocklist
+fi
+
 if [[ "${GALAXY}" == "1" ]]; then
   ensure_galaxy_replay_blocklist
 fi
@@ -670,6 +704,10 @@ fi
 
 if [[ "${ALERT_DEMO}" == "1" ]]; then
   launch_alert_demo
+fi
+
+if [[ "${CSC_DEMO}" == "1" ]]; then
+  launch_csc_demo
 fi
 
 if [[ ${#UI_TARGETS[@]} -eq 0 ]]; then

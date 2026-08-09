@@ -2,6 +2,8 @@ from openpilot.common.params import ParamKeyType
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_ACCEL_COUNTER,
   FAVORITE_ACTION_DISTANCE_INCREASE,
+  FAVORITE_ACTION_TRAFFIC_MODE_COUNTER,
+  FAVORITE_ACTION_TOGGLE_TRAFFIC_MODE,
   FAVORITE_SLOTS_PARAM,
   default_favorite_slots,
   load_favorite_slots,
@@ -97,3 +99,14 @@ def test_toggle_favorite_slot_action_increments_virtual_button_counter():
 
   assert toggle_favorite_slot(0, params, memory) is True
   assert memory.get_int(FAVORITE_ACTION_ACCEL_COUNTER) == 1
+
+
+def test_toggle_favorite_slot_action_increments_traffic_mode_counter():
+  params = FakeParams()
+  memory = FakeParams()
+  params.put(FAVORITE_SLOTS_PARAM, [
+    {"enabled": True, "show_onroad": True, "key": FAVORITE_ACTION_TOGGLE_TRAFFIC_MODE, "label": "Toggle Traffic Mode"},
+  ])
+
+  assert toggle_favorite_slot(0, params, memory) is True
+  assert memory.get_int(FAVORITE_ACTION_TRAFFIC_MODE_COUNTER) == 1

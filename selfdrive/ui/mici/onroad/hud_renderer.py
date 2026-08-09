@@ -122,6 +122,8 @@ class HudRenderer(Widget):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
     self._engaged: bool = False
+    self._small_model_engaged: bool = False
+    self._egpu_fade_time: float = 0.0
     self._show_speed_limit: bool = False
     self._speed_limit: float = 0.0
     self._speed_limit_offset: float = 0.0
@@ -152,11 +154,17 @@ class HudRenderer(Widget):
     self._txt_wheel: rl.Texture = gui_app.texture('icons_mici/wheel.png', 50, 50)
     self._txt_wheel_critical: rl.Texture = gui_app.texture('icons_mici/wheel_critical.png', 50, 50)
     self._txt_exclamation_point: rl.Texture = gui_app.texture('icons_mici/exclamation_point.png', 44, 44)
+    self._txt_egpu_loading: rl.Texture = gui_app.texture('icons_mici/egpu_loading.png', 60, 44)
+    self._txt_egpu_green: rl.Texture = gui_app.texture('icons_mici/egpu_green.png', 60, 44)
+    self._txt_egpu_orange: rl.Texture = gui_app.texture('icons_mici/egpu_orange.png', 60, 44)
+    self._txt_egpu_crossed: rl.Texture = gui_app.texture('icons_mici/egpu_crossed.png', 60, 52)
+    self._egpu_icon: rl.Texture | None = None
 
     self._wheel_alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
     self._wheel_y_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
 
     self._set_speed_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+    self._egpu_alpha_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
 
   def set_wheel_critical_icon(self, critical: bool):
     """Set the wheel icon to critical or normal state."""
@@ -187,6 +195,11 @@ class HudRenderer(Widget):
       controls_state.vCruiseDEPRECATED if v_cruise_cluster == 0.0 else v_cruise_cluster
     )
     engaged = sm['selfdriveState'].enabled
+    if (engaged and not self._engaged and not ui_state.usbgpu_loading and ui_state.usbgpu_active is not True and
+        sm.recv_frame['modelV2'] > ui_state.started_frame):
+      self._small_model_engaged = True
+    if engaged and not self._engaged:
+      self._egpu_fade_time = rl.get_time()
     if (set_speed != self.set_speed and engaged) or (engaged and not self._engaged):
       self._set_speed_changed_time = rl.get_time()
     self._engaged = engaged
@@ -202,7 +215,7 @@ class HudRenderer(Widget):
 
     if sm.recv_frame["starpilotPlan"] >= ui_state.started_frame:
       starpilot_plan = sm["starpilotPlan"]
-      self._show_speed_limit = ui_state.params.get_bool("ShowSpeedLimits") or ui_state.params.get_bool("SpeedLimitController")
+      self._show_speed_limit = ui_state.params.get_bool("ShowSpeedLimits")
       if self._show_speed_limit:
         dashboard_speed_limit = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
         vision_speed_limit = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.params.get_bool("VisionSpeedLimitDetection") else 0.0
@@ -269,12 +282,14 @@ class HudRenderer(Widget):
 
   def render_foreground(self) -> None:
     """Draw HUD elements that should sit above alerts."""
-    if ui_state.sm['controlsState'].lateralControlState.which() != 'angleState' and \
-       ui_state.params.get_bool("EnableTorqueBarWidget", default=True):
+    if ui_state.params.get_bool("EnableTorqueBarWidget", default=True):
       self._torque_bar.render(self._rect)
 
     if self.is_cruise_set:
       self._draw_set_speed(self._rect)
+
+    if ui_state.usbgpu and ui_state.usbgpu_compiled:
+      self._draw_model_source(self._rect)
 
     self._draw_steering_wheel(self._rect)
     self._draw_speed_limit_prompt(self._rect)
@@ -287,6 +302,50 @@ class HudRenderer(Widget):
     self.prepare(rect)
     self.render_background()
     self.render_foreground()
+
+  def _draw_model_source(self, rect: rl.Rectangle) -> None:
+    """Show which driving model is supplying on-road predictions."""
+    if ui_state.sm.recv_frame['selfdriveState'] < ui_state.started_frame:
+      return
+
+    model_seen = ui_state.sm.recv_frame['modelV2'] > ui_state.started_frame
+    model_alive = ui_state.sm.alive['modelV2'] if model_seen else True
+    big_failed = (
+      ui_state.usbgpu_active is False or
+      not ui_state.usbgpu or
+      (ui_state.usbgpu_active is True and model_seen and not model_alive)
+    )
+    self._small_model_engaged &= big_failed
+    loading = ui_state.usbgpu_loading
+
+    if loading:
+      pulse = 0.5 - 0.5 * math.cos(rl.get_time() * 6.0)
+      icon = self._txt_egpu_loading
+      opacity = 0.35 + 0.65 * pulse
+    elif self._small_model_engaged:
+      icon = self._txt_egpu_crossed
+      opacity = 0.65
+    elif big_failed:
+      icon = self._txt_egpu_orange
+      opacity = 1.0
+    else:
+      icon = self._txt_egpu_green
+      opacity = 1.0
+
+    if icon is not self._egpu_icon:
+      self._egpu_fade_time = rl.get_time()
+      self._egpu_icon = icon
+    alpha = self._egpu_alpha_filter.update(
+      loading or (0 < rl.get_time() - self._egpu_fade_time < SET_SPEED_PERSISTENCE and self._engaged)
+    )
+    if alpha < 1e-2:
+      return
+
+    pos = rl.Vector2(
+      rect.x + rect.width - 10 - icon.width,
+      rect.y + rect.height - 14 - (self._txt_wheel.height + icon.height) / 2,
+    )
+    rl.draw_texture_ex(icon, pos, 0.0, 1.0, rl.Color(255, 255, 255, int(255 * opacity * alpha)))
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel

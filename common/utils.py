@@ -5,7 +5,7 @@ import contextlib
 import subprocess
 import time
 import functools
-from subprocess import Popen, PIPE, TimeoutExpired
+from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
 import zstandard as zstd
 from openpilot.common.swaglog import cloudlog
 
@@ -87,16 +87,20 @@ def run_cmd_default(cmd: list[str], default: str = "", cwd=None, env=None) -> st
 
 @contextlib.contextmanager
 def managed_proc(cmd: list[str], env: dict[str, str]):
-  proc = Popen(cmd, env=env, stdout=PIPE, stderr=PIPE)
-  try:
-    yield proc
-  finally:
-    if proc.poll() is None:
-      proc.terminate()
+  # capture output to a temp file rather than a pipe. nothing drains the pipe while the process
+  # runs, so a long lived, chatty child would eventually fill the pipe buffer and block forever.
+  with tempfile.TemporaryFile() as log_file:
+    proc = Popen(cmd, env=env, stdout=log_file, stderr=STDOUT)
+    proc.log_file = log_file
     try:
-      proc.wait(timeout=5)
-    except TimeoutExpired:
-      proc.kill()
+      yield proc
+    finally:
+      if proc.poll() is None:
+        proc.terminate()
+      try:
+        proc.wait(timeout=5)
+      except TimeoutExpired:
+        proc.kill()
 
 
 def retry(attempts=3, delay=1.0, ignore_failure=False):

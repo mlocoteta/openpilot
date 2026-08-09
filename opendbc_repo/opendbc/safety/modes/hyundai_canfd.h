@@ -427,6 +427,11 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
   };
 
+  static const CanMsg HYUNDAI_CANFD_CCNC_ANGLE_FALLBACK_TX_MSGS[] = {
+    HYUNDAI_CANFD_LKA_STEERING_ALT_COMMON_TX_MSGS(0, 1)
+    {0x12A, 1, 16, .check_relay = false},  // LFA status
+  };
+
   static const CanMsg HYUNDAI_CANFD_LFA_STEERING_TX_MSGS[] = {
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2)
     HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0)
@@ -550,7 +555,9 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       } else {
         SET_RX_CHECKS(hyundai_canfd_lka_steering_rx_checks, ret);
       }
-      if (hyundai_canfd_lka_steering_alt) {
+      if (hyundai_ccnc && hyundai_canfd_angle_steering && hyundai_canfd_lka_steering_alt) {
+        SET_TX_MSGS(HYUNDAI_CANFD_CCNC_ANGLE_FALLBACK_TX_MSGS, ret);
+      } else if (hyundai_canfd_lka_steering_alt) {
         if (hyundai_canfd_alt_buttons) {
           SET_TX_MSGS(HYUNDAI_CANFD_LKA_STEERING_ALT_ALT_BUTTONS_TX_MSGS, ret);
         } else {

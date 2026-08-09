@@ -33,6 +33,7 @@ LATERAL_METHOD_REBRAND_MIGRATION_MARKER = ".starpilot_lateral_method_rebrand_v1"
 VISION_SPEED_LIMIT_DETECTION_MIGRATION_MARKER = ".starpilot_vision_speed_limit_detection_v1"
 DEVELOPER_METRIC_DISPLAY_MIGRATION_MARKER = ".starpilot_developer_metric_display_off_v1"
 LANE_CHANGE_SMOOTHING_MIGRATION_MARKER = ".starpilot_lane_change_smoothing_default_v1"
+SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER = ".starpilot_speed_limit_visibility_v1"
 MARKER_DIRNAME = ".starpilot_param_migrations"
 
 LATERAL_METHOD_PARAM_SUFFIXES = (
@@ -124,6 +125,10 @@ def _developer_metric_display_marker_path(params: ParamsLike) -> Path:
 
 def _lane_change_smoothing_marker_path(params: ParamsLike) -> Path:
   return _marker_dir_path(params) / LANE_CHANGE_SMOOTHING_MIGRATION_MARKER
+
+
+def _speed_limit_visibility_marker_path(params: ParamsLike) -> Path:
+  return _marker_dir_path(params) / SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER
 
 
 def _marker_dir_path(params: ParamsLike) -> Path:
@@ -270,6 +275,21 @@ def _apply_lane_change_smoothing_default_migration(params: ParamsLike, marker: P
   marker.touch()
 
 
+def _apply_speed_limit_visibility_migration(params: ParamsLike, marker: Path) -> None:
+  if marker.exists():
+    return
+
+  marker.parent.mkdir(parents=True, exist_ok=True)
+
+  # Preserve users who explicitly enabled the legacy hide control while making
+  # ShowSpeedLimits the only visibility setting used by the raylib UIs.
+  if params.get_bool("HideSpeedLimit"):
+    params.put_bool("ShowSpeedLimits", False)
+  params.put_bool("HideSpeedLimit", False)
+
+  marker.touch()
+
+
 def apply_launch_param_migrations(params: ParamsLike, marker_path: Path | None = None,
                                   branch_defaults_marker_path: Path | None = None,
                                   acceleration_profile_marker_path: Path | None = None,
@@ -277,7 +297,8 @@ def apply_launch_param_migrations(params: ParamsLike, marker_path: Path | None =
                                   lateral_method_rebrand_marker_path: Path | None = None,
                                   vision_speed_limit_detection_marker_path: Path | None = None,
                                   developer_metric_display_marker_path: Path | None = None,
-                                  lane_change_smoothing_marker_path: Path | None = None) -> None:
+                                  lane_change_smoothing_marker_path: Path | None = None,
+                                  speed_limit_visibility_marker_path: Path | None = None) -> None:
   _apply_legacy_launch_param_migrations(params, marker_path or _default_marker_path(params))
   # Keep branch-default rollout on its own marker so older installs that already
   # have the legacy marker still receive this one-time param reset.
@@ -297,6 +318,9 @@ def apply_launch_param_migrations(params: ParamsLike, marker_path: Path | None =
   )
   _apply_lane_change_smoothing_default_migration(
     params, lane_change_smoothing_marker_path or _lane_change_smoothing_marker_path(params)
+  )
+  _apply_speed_limit_visibility_migration(
+    params, speed_limit_visibility_marker_path or _speed_limit_visibility_marker_path(params)
   )
 
 

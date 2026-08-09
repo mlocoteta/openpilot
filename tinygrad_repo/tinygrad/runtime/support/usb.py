@@ -54,7 +54,7 @@ class USB3:
     self._bulk_out_buf, self._bulk_out_mv = alloc_cbuffer(4 << 20)
 
     bus_number = libusb.libusb_get_bus_number(dev)
-    self.handle = c.init_c_var(c.POINTER(libusb.struct_libusb_device_handle), lambda x: checked(libusb.libusb_open)(dev, x))
+    self.handle = c.init_c_var(ctypes.POINTER(libusb.struct_libusb_device_handle), lambda x: checked(libusb.libusb_open)(dev, x))
     libusb.libusb_unref_device(dev)
 
     # Read product string descriptor
@@ -212,7 +212,7 @@ class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 class CustomASM24Controller:
   def __init__(self, usb:USB3|None=None):
     if not usb:
-      devs = USB3.list_devices(0xADD1, 0x0001)
+      devs = USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001)
       assert len(devs), "no ASM24 controller found"
       self.usb = USB3(devs[0][0], 0x81, 0x83, 0x02, 0x04, use_bot=True)
     else: self.usb = usb
@@ -222,10 +222,11 @@ class CustomASM24Controller:
     self._f0_out_buf, self._f0_out_mv = alloc_cbuffer(0x1000) # for f0 and e4, allocate big enough for e4
     self._f0_in_buf, _ = alloc_cbuffer(8)
 
-    # Custom firmware now boots with PCIe off. Power it on before probing the link.
-    ltssm = self.read(0xB450, 1)[0]
-    if ltssm != 0x78: self.set_pcie_power(True)
-    ltssm = self.read(0xB450, 1)[0]
+    if (ltssm := self.read(0xB450, 1)[0]) != 0x78:
+      self.set_pcie_power(True)
+      grace_period = time.monotonic() + 5.0
+      while time.monotonic() < grace_period and (ltssm := self.read(0xB450, 1)[0]) != 0x78:
+        time.sleep(0.1)
     if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
 
   def set_pcie_power(self, enabled:bool, timeout:int=10000):
@@ -333,7 +334,7 @@ class CustomASM24Controller:
 class ASM24Controller:
   def __init__(self, usb:USB3|None=None):
     if not usb:
-      devs = USB3.list_devices(0xADD1, 0x0001)
+      devs = USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001)
       assert len(devs), "no ASM24 controller found"
       self.usb = USB3(devs[0][0], 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
     else: self.usb = usb

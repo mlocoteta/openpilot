@@ -515,6 +515,35 @@
   opacity: var(--disabled-opacity);
 }
 
+.ds-slider-container {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .ds-slider-container {
+    max-width: 420px;
+  }
+}
+
+.ds-slider {
+  accent-color: var(--main-fg);
+  cursor: pointer;
+  width: 100%;
+}
+
+.ds-slider:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
+.ds-slider-scale {
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-size-xs);
+  justify-content: space-between;
+  margin-top: 0.1rem;
+}
+
 /* ――― Favorite Slots ――― */
 .ds-favorites-panel {
   display: grid;
