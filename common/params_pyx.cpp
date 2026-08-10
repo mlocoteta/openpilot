@@ -9,7 +9,7 @@
         "language": "c++",
         "name": "common.params_pyx",
         "sources": [
-            "/home/mlocoteta/sp-accord-ti/common/params_pyx.pyx"
+            "/work/common/params_pyx.pyx"
         ]
     },
     "module_name": "common.params_pyx"
