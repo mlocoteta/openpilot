@@ -214,8 +214,8 @@ class MiciSidebarWidgets(Widget):
     if self._curve_speed_controller_active():
       return "curve", CEM_BLUE
 
-    conditional_experimental = ui_state.params.get_bool("ConditionalExperimental")
-    conditional_chill = ui_state.params.get_bool("ConditionalChill") and not conditional_experimental
+    conditional_experimental = ui_state.ui_params.get_bool("ConditionalExperimental")
+    conditional_chill = ui_state.ui_params.get_bool("ConditionalChill") and not conditional_experimental
     if conditional_chill:
       status = ui_state.params_memory.get_int("CCStatus", default=CCStatus["OFF"])
       if status == CCStatus["LEAD"]:

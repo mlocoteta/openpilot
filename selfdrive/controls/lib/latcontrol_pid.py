@@ -5,7 +5,12 @@ from opendbc.car.honda.carcontroller import get_civic_bosch_modified_steering_pr
 from opendbc.car.honda.values import CAR as HONDA, HondaFlags
 from openpilot.starpilot.common.testing_grounds import testing_ground
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
-from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import SUBARU_IMPREZA_CARS, get_subaru_impreza_pid_output_scale
+from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import (
+  RAV4_TSS2_CARS,
+  SUBARU_IMPREZA_CARS,
+  get_rav4_tss2_pid_output,
+  get_subaru_impreza_pid_output_scale,
+)
 from openpilot.common.pid import PIDController
 
 HONDA_PID_GAIN_SCALE_MIN = 0.1
@@ -99,6 +104,7 @@ class LatControlPID(LatControl):
     self.honda_lateral_pid_ki_scale = 1.0
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
     self.is_subaru_impreza = CP.carFingerprint in SUBARU_IMPREZA_CARS
+    self.is_rav4_tss2 = CP.carFingerprint in RAV4_TSS2_CARS
     self.prev_angle_steers_des_no_offset = 0.0
     self.modified_civic_steering_pressed_filter_s = 0.0
     self.modified_civic_steering_pressed_prev = False
@@ -163,6 +169,11 @@ class LatControlPID(LatControl):
       if self.is_subaru_impreza:
         raw_output_torque = self.pid.p + self.pid.i + self.pid.d + self.pid.f
         output_torque = raw_output_torque * get_subaru_impreza_pid_output_scale(error)
+        output_torque = float(max(min(output_torque, self.steer_max), -self.steer_max))
+
+      if self.is_rav4_tss2:
+        output_torque = get_rav4_tss2_pid_output(output_torque, self.prev_output_torque,
+                                                angle_steers_des_no_offset, CS.vEgo)
         output_torque = float(max(min(output_torque, self.steer_max), -self.steer_max))
 
       if self.is_civic_bosch_modified and civic_bosch_modified_lateral_testing_ground_active():

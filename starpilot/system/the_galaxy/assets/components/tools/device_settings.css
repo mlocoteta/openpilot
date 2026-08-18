@@ -356,6 +356,16 @@
   flex-direction: column;
 }
 
+.ds-row-text-input {
+  align-items: stretch;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.ds-row-text-input .ds-row-info {
+  margin-bottom: 0;
+}
+
 .ds-row-info {
   align-items: center;
   display: flex;
@@ -439,6 +449,19 @@
 .ds-manual-input:focus {
   border-color: var(--main-fg);
   outline: none;
+}
+
+.ds-text-input {
+  appearance: none;
+  box-sizing: border-box;
+  cursor: text;
+  min-height: 2.25rem;
+  width: 100%;
+}
+
+.ds-text-input:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
 }
 
 .ds-apply-btn {

@@ -264,6 +264,9 @@ class LongControl:
       if output_accel > starpilot_toggles.stopAccel:
         output_accel = min(output_accel, 0.0)
         output_accel -= starpilot_toggles.stoppingDecelRate * DT_CTRL
+      output_accel = self.vehicle_tuning.shape_stopping_accel(
+        output_accel, a_target, should_stop, CS.vEgo, has_lead, starpilot_toggles.stopAccel,
+      )
       output_accel = self._apply_moving_stop_target_follow(output_accel, a_target, should_stop, CS, starpilot_toggles)
       self.reset(preserve_stop_release=True)
 
@@ -286,8 +289,14 @@ class LongControl:
 
     else:  # LongCtrlState.pid
       a_target = self.vehicle_tuning.shape_gm_truck_accel_target(a_target, CS.vEgo, should_stop)
+      a_target = self.vehicle_tuning.shape_toyota_corolla_accel_target(
+        a_target, CS.vEgo, should_stop, self.last_output_accel,
+      )
       a_target = self.vehicle_tuning.shape_toyota_sienna_accel_target(
         a_target, CS.vEgo, should_stop, leads=leads,
+      )
+      a_target = self.vehicle_tuning.shape_hyundai_elantra_lead_target(
+        a_target, CS.vEgo, should_stop, leads,
       )
       error = a_target - CS.aEgo
       self.update_mpc_mode(self.experimental_mode)
@@ -321,6 +330,9 @@ class LongControl:
         should_stop,
         has_lead,
       )
+      raw_output_accel = self.vehicle_tuning.cap_hyundai_elantra_lead_output(
+        raw_output_accel, CS.vEgo, should_stop, leads,
+      )
 
       if self.transitioning and self.prev_mode == 'acc' and self.current_mode == 'blended':
         if raw_output_accel < 0 and raw_output_accel < self.last_output_accel:
@@ -335,6 +347,12 @@ class LongControl:
           output_accel = raw_output_accel
       else:
         output_accel = raw_output_accel
+
+      output_accel = self.vehicle_tuning.cap_subaru_stop_release_accel(
+        output_accel,
+        previous_long_control_state == LongCtrlState.stopping and CS.vEgo < self.CP.vEgoStarting and not should_stop,
+        should_stop,
+      )
 
     if self.pedal_override_release_frames > 0:
       self.pedal_override_release_frames -= 1

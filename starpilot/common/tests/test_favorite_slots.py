@@ -16,6 +16,8 @@ class FakeParams:
     self.store = {}
     self.types = {
       FAVORITE_SLOTS_PARAM: ParamKeyType.JSON,
+      "AlphaLongitudinalEnabled": ParamKeyType.BOOL,
+      "ForceOffroad": ParamKeyType.BOOL,
       "RedneckCruise": ParamKeyType.BOOL,
       "NotBool": ParamKeyType.INT,
     }
@@ -88,6 +90,30 @@ def test_toggle_favorite_slot_flips_bool_and_requests_refresh():
   assert toggle_favorite_slot(0, params, memory) is True
   assert params.get_bool("RedneckCruise") is True
   assert memory.get_bool("StarPilotTogglesUpdated") is True
+
+
+def test_toggle_favorite_slot_blocks_alpha_longitudinal_onroad():
+  params = FakeParams()
+  params.put("IsOnroad", True)
+  params.put("AlphaLongitudinalEnabled", False)
+  params.put(FAVORITE_SLOTS_PARAM, [
+    {"enabled": True, "show_onroad": True, "key": "AlphaLongitudinalEnabled", "label": "Alpha Longitudinal"},
+  ])
+
+  assert toggle_favorite_slot(0, params, FakeParams()) is False
+  assert params.get_bool("AlphaLongitudinalEnabled") is False
+
+
+def test_toggle_favorite_slot_leaves_force_offroad_unrestricted():
+  params = FakeParams()
+  params.put("IsOnroad", True)
+  params.put("ForceOffroad", False)
+  params.put(FAVORITE_SLOTS_PARAM, [
+    {"enabled": True, "show_onroad": True, "key": "ForceOffroad", "label": "Force Offroad"},
+  ])
+
+  assert toggle_favorite_slot(0, params, FakeParams()) is True
+  assert params.get_bool("ForceOffroad") is True
 
 
 def test_toggle_favorite_slot_action_increments_virtual_button_counter():

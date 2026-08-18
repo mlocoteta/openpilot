@@ -119,6 +119,13 @@ class DeveloperLayoutMici(NavScroller):
     super()._update_state()
     self._ssh_fetcher.update()
 
+  def show_event(self):
+    super().show_event()
+    # CarParamsPersistent can change while this panel is not visible (for
+    # example after applying a manual fingerprint). Refresh capability-gated
+    # controls when the panel is opened so stale controls are not shown.
+    self._update_toggles()
+
   def _update_toggles(self):
     ui_state.update_params()
 

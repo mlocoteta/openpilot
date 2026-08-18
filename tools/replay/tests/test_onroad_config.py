@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from openpilot.tools.replay import onroad_config
@@ -9,8 +10,14 @@ TEST_ROUTE = "344c5c15b34f2d8a/2024-01-03--09-37-12"
 
 
 class FakeParams:
-  def __init__(self):
-    self.values = {}
+  def __init__(self, values=None):
+    self.values = dict(values or {})
+
+  def get(self, key, encoding=None, default=None):
+    value = self.values.get(key, default)
+    if encoding == "utf-8" and isinstance(value, bytes):
+      return value.decode("utf-8")
+    return value
 
   def cpp2python(self, key, value):
     if key == "ShowSLCOffset":
@@ -91,3 +98,34 @@ def test_seed_onroad_params_uses_logged_disabled_bool_and_desktop_overrides(monk
   assert "AccessToken" not in params.values
   assert params.values["OpenpilotEnabledToggle"] is True
   assert params.values["NavigationUI"] is True
+  assert params.values["ForceOffroad"] is False
+  assert "MapboxSecretKey" not in params.values
+  assert "FavoriteDestinations" not in params.values
+
+
+def test_seed_nav_offroad_preview_provides_quick_start_requirements(monkeypatch):
+  monkeypatch.setenv("SP_ONROAD_NAV_DEMO", "1")
+  monkeypatch.setenv("SP_ONROAD_OFFROAD_DEMO", "1")
+  params = FakeParams()
+
+  onroad_config.seed_onroad_params(None, params)
+
+  assert params.values["ForceOffroad"] is True
+  assert params.values["ForceOnroad"] is False
+  assert params.values["MapboxSecretKey"] == onroad_config.NAV_DEMO_MAPBOX_SECRET
+  assert params.values["FavoriteDestinations"] == onroad_config.NAV_DEMO_FAVORITES
+
+
+def test_seed_nav_offroad_preview_preserves_existing_navigation_data(monkeypatch):
+  monkeypatch.setenv("SP_ONROAD_NAV_DEMO", "1")
+  monkeypatch.setenv("SP_ONROAD_OFFROAD_DEMO", "1")
+  favorites = [{"name": "Existing", "latitude": 1.0, "longitude": 2.0}]
+  params = FakeParams({
+    "MapboxSecretKey": "existing-secret",
+    "FavoriteDestinations": json.dumps(favorites),
+  })
+
+  onroad_config.seed_onroad_params(None, params)
+
+  assert params.values["MapboxSecretKey"] == "existing-secret"
+  assert json.loads(params.values["FavoriteDestinations"]) == favorites

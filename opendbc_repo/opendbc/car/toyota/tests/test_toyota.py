@@ -57,6 +57,24 @@ class TestToyotaInterfaces:
     assert forced_params.lateralTuning.torque.latAccelFactor == pytest.approx(1.7)
     assert forced_params.lateralTuning.torque.friction == pytest.approx(0.14)
 
+  def test_prius_force_torque_controller_preserves_vehicle_tune(self):
+    fingerprint = {bus: {} for bus in range(8)}
+    car_fw = [CarParams.CarFw(ecu=Ecu.eps, fwVersion=b'8965B47050\x00\x00\x00\x00\x00\x00')]
+
+    default_params = CarInterface.get_params(
+      CAR.TOYOTA_PRIUS, fingerprint, car_fw, False, False, False,
+      SimpleNamespace(force_torque_controller=False, nnff=False, nnff_lite=False),
+    )
+    forced_params = CarInterface.get_params(
+      CAR.TOYOTA_PRIUS, fingerprint, car_fw, False, False, False,
+      SimpleNamespace(force_torque_controller=True, nnff=False, nnff_lite=False),
+    )
+
+    assert default_params.lateralTuning.which() == "torque"
+    assert forced_params.lateralTuning.which() == "torque"
+    assert default_params.lateralTuning.torque.steeringAngleDeadzoneDeg == pytest.approx(0.3)
+    assert forced_params.lateralTuning.torque.steeringAngleDeadzoneDeg == pytest.approx(0.3)
+
   def test_sienna_4th_gen_uses_torque_controller(self):
     params = CarInterface.get_params(
       CAR.TOYOTA_SIENNA_4TH_GEN,
@@ -239,6 +257,43 @@ class TestToyotaInterfaces:
     assert car_params.openpilotLongitudinalControl
     assert not car_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
     assert not car_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.ALT_CRUISE.value
+
+  @pytest.mark.parametrize(("native_bus", "message"), [(1, 0x343), (0, 0x4CB)])
+  def test_late_prius_ignores_startup_bus_mirror(self, native_bus, message):
+    fingerprint = {bus: {} for bus in range(8)}
+    fingerprint[native_bus][message] = 8
+    fingerprint[2][message] = 8
+    car_fw = [CarParams.CarFw(
+      ecu=Ecu.fwdCamera,
+      address=0x750,
+      subAddress=0x6D,
+      fwVersion=b'8646F4705200\x00\x00\x00\x00',
+    )]
+
+    car_params = CarInterface.get_params(
+      CAR.TOYOTA_PRIUS,
+      fingerprint,
+      car_fw,
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=SimpleNamespace(),
+    )
+
+    assert not car_params.flags & ToyotaFlags.DSU_BYPASS.value
+    assert not car_params.openpilotLongitudinalControl
+    assert car_params.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
+
+    starpilot_params = CarInterface.get_starpilot_params(
+      CAR.TOYOTA_PRIUS, fingerprint, car_fw, car_params, SimpleNamespace(),
+    )
+    car_state = CarState(car_params, starpilot_params)
+    can_parsers = car_state.get_can_parsers(car_params)
+    car_state.update(can_parsers, SimpleNamespace(cluster_offset=1.0))
+
+    assert "PRE_COLLISION" in can_parsers[Bus.pt].vl
+    for acc_message in ("ACC_CONTROL", "PRE_COLLISION", "PCS_HUD"):
+      assert acc_message not in can_parsers[Bus.cam].vl
 
   def test_dsu_bypass_does_not_change_tss2_or_smart_dsu(self):
     fingerprint = {bus: {} for bus in range(8)}

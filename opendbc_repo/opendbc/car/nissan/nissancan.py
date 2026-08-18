@@ -1,8 +1,41 @@
 import crcmod
+from opendbc.car.can_definitions import CanData
 from opendbc.car.nissan.values import CAR
 
 # TODO: add this checksum to the CANPacker
 nissan_checksum = crcmod.mkCrcFun(0x11d, initCrc=0x00, rev=False, xorOut=0xff)
+
+
+def create_accel_command(raw_command, frame, active):
+  """Build the Leaf ADAS propulsion/regen request (0x2B0)."""
+  raw_command = int(raw_command)
+  raw12, fraction = divmod(raw_command, 4)
+  inverse = (~raw12) & 0xFFF
+
+  dat = bytes([
+    ((inverse & 0xF) << 4) | ((inverse >> 4) & 0xF),
+    (raw12 >> 4) & 0xFF,
+    (((inverse >> 8) & 0xF) << 4) | (raw12 & 0xF),
+    0xAC,  # normal ADAS ownership state; stock briefly uses 0x6C while handing control back
+    0x5B if active else 0x1B,
+    0x00,
+    ((frame & 0xF) << 4) | 0xE,
+    (fraction << 2) | ((~fraction) & 0x3),
+  ])
+  return CanData(0x2B0, dat, 1)
+
+
+def create_brake_command(pressure, frame, active, brake_mode):
+  """Build the Leaf ADAS friction-brake request (0x1C3), with pressure in 0.5-count units."""
+  pressure = int(pressure)
+  dat = bytearray(8)
+  dat[0] = (pressure >> 4) & 0x3F
+  dat[1] = (pressure & 0xF) << 4
+  dat[4] = 0x64
+  dat[5] = (0x80 if active else 0) | (0x04 if brake_mode else 0) | (frame & 0x3)
+  dat[6] = 0xFF
+  dat[7] = (0x01 + 0xC3 + sum(dat[:7])) & 0xFF
+  return CanData(0x1C3, bytes(dat), 1)
 
 
 def create_steering_control(packer, apply_torque, frame, steer_on, lkas_max_torque):

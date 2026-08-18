@@ -67,8 +67,8 @@ STARPILOT_PARAM_RENAME_MIGRATION_FLAG = Path("/data") / "starpilot_param_rename_
 STARPILOT_PARAM_CANONICALIZATION_MIGRATION_FLAG = Path("/data") / "starpilot_param_canonicalization_v1"
 STARPILOT_PC_ROOT_MIGRATION_FLAG = Path("/data") / "starpilot_pc_root_v1"
 STARPILOT_PARAMS_CACHE_MIGRATION_FLAG = Path("/data") / "starpilot_params_cache_v1"
-STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG = Path("/data") / "starpilot_default_model_rdf_v1"
-STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG = Path("/data") / "starpilot_ce_model_stop_time_v1"
+STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG = Path("/data") / "starpilot_default_model_rdf_v4"
+STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG = Path("/data") / "starpilot_ce_model_stop_time_v2"
 STARPILOT_LEGACY_CACHE_MARKER_KEYS = ("RemapCancelToDistance",)
 STARPILOT_REMOVED_PARAM_KEYS = ("CoastUpToLeads", "HumanAcceleration", "HumanFollowing", "PrioritizeSmoothFollowing")
 LEGACY_CARMODEL_MIGRATIONS = {
@@ -133,16 +133,34 @@ def get_nav_offroad_clear_timeout_seconds(params) -> int:
   return max(_get_int_param_value(params, "ClearNavOnOffroadTimeoutMinutes", 0), 0) * 60
 
 
-def update_nav_offroad_clear_state(params, started: bool, tracked_destination, tracked_started_at, now: float):
-  nav_destination = params.get("NavDestination")
-  if started or not params.get_bool("ClearNavOnOffroad") or not nav_destination:
+def update_nav_offroad_clear_state(
+  params,
+  started: bool,
+  tracked_destination,
+  tracked_started_at,
+  now: float,
+  *,
+  offroad_transition: bool,
+):
+  if started or not params.get_bool("ClearNavOnOffroad"):
     return None, None
 
-  if nav_destination != tracked_destination or tracked_started_at is None:
+  nav_destination = params.get("NavDestination")
+  if offroad_transition:
+    if not nav_destination:
+      return None, None
     tracked_destination = nav_destination
     tracked_started_at = now
+  elif tracked_destination is None or tracked_started_at is None:
+    return None, None
+
+  if nav_destination != tracked_destination:
+    return None, None
 
   if now - tracked_started_at >= get_nav_offroad_clear_timeout_seconds(params):
+    current_destination = params.get("NavDestination")
+    if current_destination != tracked_destination:
+      return None, None
     params.remove("NavDestination")
     return None, None
 
@@ -561,8 +579,8 @@ def migrate_starpilot_default_parity(params: Params, params_cache: Params) -> No
     seeded_keys.append(key)
 
   if not _has_persisted_param_file(params, "CEModelStopTime") and not _has_persisted_param_file(params_cache, "CEModelStopTime"):
-    params.put_float("CEModelStopTime", 9.0)
-    params_cache.put_float("CEModelStopTime", 9.0)
+    params.put_float("CEModelStopTime", 7.7)
+    params_cache.put_float("CEModelStopTime", 7.7)
     seeded_keys.append("CEModelStopTime")
 
   # Rebase default regression fix:
@@ -591,7 +609,7 @@ def migrate_starpilot_default_parity(params: Params, params_cache: Params) -> No
 
 
 def migrate_starpilot_default_model(params: Params, params_cache: Params) -> None:
-  """Move the old bundled South Carolina selection to the bundled RDF model once."""
+  """Move the old bundled default to the bundled RDF V4 model once."""
   if STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG.exists():
     return
 
@@ -606,19 +624,26 @@ def migrate_starpilot_default_model(params: Params, params_cache: Params) -> Non
   selected_version = persisted_text("ModelVersion") or persisted_text("DrivingModelVersion")
   selected_name = persisted_text("DrivingModelName").lower()
 
-  is_legacy_default = selected_model.lower() in {"sc", "sc2"}
-  is_legacy_metadata = (not selected_version or selected_version.lower() == "v11") and (not selected_name or selected_name.startswith("south carolina"))
+  is_legacy_default = selected_model.lower() in {"sc", "sc2", "rdf"}
+  is_legacy_metadata = (
+    not selected_version
+    or selected_version.lower() in {"v11", "v15"}
+  ) and (
+    not selected_name
+    or selected_name.startswith("south carolina")
+    or selected_name.startswith("regret driven framework")
+  )
   if is_legacy_default and is_legacy_metadata:
     for key, value in {
-      "Model": "rdf",
-      "DrivingModel": "rdf",
-      "DrivingModelName": "Regret Driven Framework",
+      "Model": "rdf43",
+      "DrivingModel": "rdf43",
+      "DrivingModelName": "Regret Driven Framework V4",
       "ModelVersion": "v15",
       "DrivingModelVersion": "v15",
     }.items():
       params.put(key, value)
       params_cache.put(key, value)
-    cloudlog.warning("Migrated the bundled default model from South Carolina to RDF")
+    cloudlog.warning("Migrated the bundled default model to RDF V4")
 
   try:
     STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG.parent.mkdir(parents=True, exist_ok=True)
@@ -628,7 +653,7 @@ def migrate_starpilot_default_model(params: Params, params_cache: Params) -> Non
 
 
 def migrate_starpilot_ce_model_stop_time(params: Params, params_cache: Params) -> None:
-  """Move the old persisted 7-second stop prediction default to 9 seconds once."""
+  """Move persisted users of the old 9-second stop prediction threshold to 7.7 once."""
   if STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG.exists():
     return
 
@@ -643,14 +668,14 @@ def migrate_starpilot_ce_model_stop_time(params: Params, params_cache: Params) -
     except Exception:
       continue
 
-    if abs(parsed_value - 7.0) < 1e-6:
+    if abs(parsed_value - 9.0) < 1e-6:
       legacy_default_detected = True
       break
 
   if legacy_default_detected:
-    params.put_float("CEModelStopTime", 9.0)
-    params_cache.put_float("CEModelStopTime", 9.0)
-    cloudlog.warning("Migrated CEModelStopTime from 7 seconds to 9 seconds")
+    params.put_float("CEModelStopTime", 7.7)
+    params_cache.put_float("CEModelStopTime", 7.7)
+    cloudlog.warning("Migrated CEModelStopTime from 9 seconds to 7.7 seconds")
 
   try:
     STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG.parent.mkdir(parents=True, exist_ok=True)
@@ -1153,7 +1178,12 @@ def manager_thread() -> None:
       params_memory.clear_all(ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)
 
     offroad_nav_destination, offroad_nav_started_at = update_nav_offroad_clear_state(
-      params, started, offroad_nav_destination, offroad_nav_started_at, time.monotonic()
+      params,
+      started,
+      offroad_nav_destination,
+      offroad_nav_started_at,
+      time.monotonic(),
+      offroad_transition=not started and started_prev,
     )
 
     ignition = any(ps.ignitionLine or ps.ignitionCan for ps in sm['pandaStates'] if ps.pandaType != log.PandaState.PandaType.unknown)

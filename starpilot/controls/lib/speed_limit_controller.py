@@ -129,7 +129,15 @@ class SpeedLimitController:
     target_with_offset = target_to_use + self.get_offset(target_to_use)
     if target_with_offset <= 0 or not self.override_mode_enabled:
       return False
-    return self.overridden_speed > target_with_offset or (gas_pressed and v_ego > target_with_offset)
+    bidirectional_set_speed = (
+      getattr(self.starpilot_toggles, "redneck_cruise", False) and
+      getattr(self.starpilot_toggles, "speed_limit_controller_override_set_speed", False)
+    )
+    return (
+      (bidirectional_set_speed and self.overridden_speed > 0) or
+      self.overridden_speed > target_with_offset or
+      (gas_pressed and v_ego > target_with_offset)
+    )
 
   def clear_override_for_source_limit(self, desired_source, desired_target, had_override):
     if desired_source == "None" or desired_target <= 0:
@@ -484,12 +492,12 @@ class SpeedLimitController:
         self.map_speed_limit = self.next_speed_limit
 
   def update_override(self, v_cruise, v_cruise_diff, v_ego, v_ego_diff, sm):
-    # A +/- press that raises the set speed is the gesture that (re)arms Max Set Speed
-    # override. Detect the rising edge on the raw set speed (button-driven, no cluster jitter);
-    # requiring a fresh edge is what makes the override clear per speed zone — once a new posted
-    # limit wipes it (clear_override_for_source_limit), a steady high set speed will not re-arm.
+    # Detect +/- changes on the raw set speed (button-driven, no cluster jitter). Requiring a
+    # fresh edge is what makes the override clear per speed zone — once a new posted limit wipes
+    # it, a steady set speed will not re-arm.
     prev_v_cruise = self._prev_v_cruise
     self._prev_v_cruise = v_cruise
+    set_speed_changed = prev_v_cruise is not None and abs(v_cruise - prev_v_cruise) > SET_SPEED_RAISE_EPS
     set_speed_raised = prev_v_cruise is not None and v_cruise > prev_v_cruise + SET_SPEED_RAISE_EPS
 
     if not sm["selfdriveState"].enabled:
@@ -508,13 +516,24 @@ class SpeedLimitController:
     target_to_use = self.target_to_use
     offset = self.get_offset(target_to_use)
     set_speed = v_cruise + v_cruise_diff
-    self.override_slc = self.override_slc and self.overridden_speed > target_to_use + offset > 0
+    bidirectional_set_speed = (
+      getattr(self.starpilot_toggles, "redneck_cruise", False) and
+      getattr(self.starpilot_toggles, "speed_limit_controller_override_set_speed", False)
+    )
+    self.override_slc = self.override_slc and (
+      (bidirectional_set_speed and self.overridden_speed > 0) or
+      self.overridden_speed > target_to_use + offset > 0
+    )
     self.override_slc |= not self.override_requires_gas_release and sm["carState"].gasPressed and v_ego > target_to_use + offset > 0
-    # Max Set Speed mode: raising the set speed (+/-) above the posted limit overrides the
-    # SLC hold directly, no gas pedal required. Only a fresh +/- press arms it, so entering a
-    # new speed zone clears the override until the driver raises the set speed again.
-    self.override_slc |= (self.starpilot_toggles.speed_limit_controller_override_set_speed
-                          and set_speed_raised and set_speed > target_to_use + offset > 0)
+    # Redneck Max Set Speed mode uses +/- as a direct, bidirectional SLC override. The normal
+    # mode retains its existing upward-only behavior for full-long cars.
+    self.override_slc |= (
+      self.starpilot_toggles.speed_limit_controller_override_set_speed and
+      target_to_use + offset > 0 and
+      set_speed > 0 and
+      ((bidirectional_set_speed and set_speed_changed) or
+       (not bidirectional_set_speed and set_speed_raised and set_speed > target_to_use + offset > 0))
+    )
 
     if self.override_slc:
       if self.starpilot_toggles.speed_limit_controller_override_manual:

@@ -25,6 +25,16 @@ DROPDOWN_MAPPING = {
 # Custom controls implemented outside the tuple vectors in Qt settings panels.
 # Inject these so regenerated galaxy layouts retain equivalent functionality.
 INJECTED_SECTION_PARAMS = {
+    "Longitudinal (Speed & Following)": [
+        {
+            "key": "CEOpenRoad",
+            "label": "Open Road",
+            "description": "Keep Experimental Mode active on an open road after reaching the set speed when no lead vehicle is detected. This can help the model anticipate braking sooner.",
+            "data_type": "bool",
+            "ui_type": "toggle",
+            "parent_key": "ConditionalExperimental",
+        },
+    ],
     "Vehicle": [
         {
             "key": "CarMake",
@@ -61,6 +71,7 @@ INJECTED_SECTION_PARAMS = {
 
 # Keys explicitly hidden from The Galaxy's generic settings UI.
 HIDDEN_KEYS = {
+    "CustomAlerts",
     "HumanAcceleration",
     "HideLeadMarker",
     "HideSpeedLimit",
@@ -199,7 +210,6 @@ PARENT_KEYS_MAPPING = {
     },
     "sounds_settings.cc": {
         "alertVolumeControlKeys": "AlertVolumeControl",
-        "customAlertsKeys": "CustomAlerts"
     },
     "theme_settings.cc": {
         "customThemeKeys": "CustomTheme"

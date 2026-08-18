@@ -39,6 +39,7 @@ from opendbc.car.toyota.values import ToyotaStarPilotFlags
 from openpilot.common.constants import CV
 from openpilot.common.params import ParamKeyFlag, ParamKeyType, Params
 from openpilot.common.realtime import DT_HW
+from openpilot.common.swaglog import cloudlog
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.hardware.hw import Paths
@@ -501,6 +502,85 @@ def _build_default_params():
 
 starpilot_default_params = _build_default_params()
 
+
+def _sentry_event_roots() -> tuple[Path, ...]:
+  roots = [Path("/data/media/0/sentryd")]
+  if PC:
+    roots.insert(0, Path(Paths.comma_home()) / "starpilot" / "data" / "sentryd")
+  return tuple(root.resolve() for root in roots)
+
+
+def _safe_sentry_image_paths(raw_paths) -> list[str]:
+  if not isinstance(raw_paths, list):
+    return []
+
+  roots = _sentry_event_roots()
+  safe_paths = []
+  for raw_path in raw_paths:
+    try:
+      path = Path(str(raw_path)).resolve()
+      if path.is_file() and any(path.is_relative_to(root) for root in roots):
+        safe_paths.append(str(path))
+    except (OSError, TypeError, ValueError):
+      continue
+  return safe_paths
+
+
+def _normalize_sentry_event(payload) -> dict | None:
+  if not isinstance(payload, dict):
+    return None
+
+  event_id = str(payload.get("eventId") or "").strip()
+  kind = str(payload.get("kind") or "").strip().lower()
+  if not event_id or kind not in {"warning", "alarm"}:
+    return None
+
+  return {
+    "eventId": event_id[:96],
+    "kind": kind,
+    "detectedAt": str(payload.get("detectedAt") or ""),
+    "message": str(payload.get("message") or "Movement detected while parked.")[:500],
+    "imagePaths": _safe_sentry_image_paths(payload.get("imagePaths")),
+  }
+
+
+def _dispatch_sentry_event(event: dict) -> None:
+  message = f"🚨 StarPilot Sentry Mode: {event['message']}"
+  webhook = (params.get("SentryModeWebhook", encoding="utf-8") or "").strip()
+  if webhook:
+    files = []
+    handles = []
+    try:
+      for image_path in event.get("imagePaths", []):
+        handle = open(image_path, "rb")
+        handles.append(handle)
+        files.append(("file", (Path(image_path).name, handle, "image/jpeg")))
+
+      body = {"content": message, "event": json.dumps(event, separators=(",", ":"))}
+      response = requests.post(webhook, data=body, files=files or None, timeout=10)
+      response.raise_for_status()
+    except Exception:
+      cloudlog.exception("Galaxy: sentry webhook notification failed")
+    finally:
+      for handle in handles:
+        try:
+          handle.close()
+        except OSError:
+          pass
+
+  ntfy_url = (params.get("SentryModeNtfyUrl", encoding="utf-8") or "").strip()
+  if ntfy_url:
+    try:
+      response = requests.post(
+        ntfy_url,
+        data=message.encode("utf-8"),
+        headers={"Title": "StarPilot Sentry Mode", "Priority": "urgent", "Tags": "warning,car"},
+        timeout=10,
+      )
+      response.raise_for_status()
+    except Exception:
+      cloudlog.exception("Galaxy: ntfy notification failed")
+
 TOGGLE_BACKUP_FORMAT = "starpilot-toggle-backup"
 TOGGLE_BACKUP_VERSION = 1
 TOGGLE_BACKUP_MAX_ENCODED_BYTES = 2_000_000
@@ -637,6 +717,7 @@ MODEL_DOWNLOAD_ALL_PARAM = "DownloadAllModels"
 MODEL_DOWNLOAD_PROGRESS_PARAM = "ModelDownloadProgress"
 MODEL_CANCEL_DOWNLOAD_PARAM = "CancelModelDownload"
 MODEL_SORT_MODE_PARAM = "ModelSortMode"
+DEFAULT_MODEL_SORT_MODE = "release_date"
 MODEL_USER_FAVORITES_PARAM = "UserFavorites"
 MAPS_DOWNLOAD_PARAM = "DownloadMaps"
 MAPS_CANCEL_DOWNLOAD_PARAM = "CancelDownloadMaps"
@@ -858,6 +939,7 @@ _fast_update_state = {
   "progressLabel": "Idle",
   "progressDetail": "",
 }
+_ROUTE_DELETE_LOCK = threading.Lock()
 
 _FACTORY_RESET_WIPE_PATHS = [
   "/data/params",
@@ -951,6 +1033,7 @@ _TROUBLESHOOT_CEM_KEYS = [
   "CELead",
   "CESlowerLead",
   "CEStoppedLead",
+  "CEOpenRoad",
   "CEModelStopTime",
   "CESignalSpeed",
   "ShowCEMStatus",
@@ -2417,6 +2500,8 @@ def _get_favorite_slot_options():
           continue
         if param_data.get("ui_type") != "toggle" or param_data.get("data_type") != "bool":
           continue
+        if key == "AlphaLongitudinalEnabled" and not _get_alpha_longitudinal_available():
+          continue
 
         seen.add(key)
         options.append({
@@ -3210,6 +3295,30 @@ def _get_has_radar():
   try:
     with car.CarParams.from_bytes(cp_bytes) as cp:
       return not bool(getattr(cp, "radarUnavailable", False))
+  except Exception:
+    return False
+
+def _get_vehicle_parked():
+  try:
+    sm = messaging.SubMaster(["carState"], poll="carState")
+    sm.update(100)
+    if not sm.seen["carState"] or not sm.alive["carState"] or not sm.valid["carState"]:
+      return False
+
+    gear_shifter = getattr(getattr(car, "CarState", None), "GearShifter", None)
+    park_value = getattr(gear_shifter, "park", None)
+    return park_value is not None and getattr(sm["carState"], "gearShifter", None) == park_value
+  except Exception:
+    return False
+
+def _get_alpha_longitudinal_available():
+  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
+  if not cp_bytes:
+    return False
+
+  try:
+    with car.CarParams.from_bytes(cp_bytes) as cp:
+      return bool(getattr(cp, "alphaLongitudinalAvailable", False))
   except Exception:
     return False
 
@@ -4031,11 +4140,13 @@ def setup(app):
   def disable_device_settings_asset_cache(response):
     if request.path in {
       "/assets/components/router.js",
+      "/assets/components/sentry_notifications.js",
       "/assets/components/home/home.js",
       "/assets/components/home/home.css",
       "/assets/components/tools/device_settings.js",
       "/assets/components/tools/device_settings.css",
       "/assets/components/tools/device_settings_layout.json",
+      "/assets/components/tools/galaxy.js",
       "/assets/components/tools/v_asm.js",
       "/assets/components/tools/v_asm.css",
       "/assets/components/tools/pip_sidecam.js",
@@ -4491,6 +4602,34 @@ def setup(app):
           "updated": updated,
         }), 200
 
+      if key == "AlphaLongitudinalEnabled":
+        if not _get_alpha_longitudinal_available():
+          return jsonify({"error": "Alpha Longitudinal is not available for the detected vehicle."}), 403
+        if params.get_bool("IsOnroad"):
+          return jsonify({"error": "Cannot change Alpha Longitudinal while driving."}), 403
+
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool(key, enabled)
+        params.put_bool("OnroadCycleRequested", True)
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"Parameter '{key}' updated successfully. The driving stack will restart shortly.",
+          "updated": {key: enabled},
+        }), 200
+
+      if key == "ForceOffroad":
+        if not _get_vehicle_parked():
+          return jsonify({"error": "Force Offroad is only available while the vehicle is in Park."}), 403
+
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool("ForceOffroad", enabled)
+        params.put_bool("ForceOnroad", False)
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"Force Offroad {'enabled' if enabled else 'disabled'}.",
+          "updated": {"ForceOffroad": enabled, "ForceOnroad": False},
+        }), 200
+
       # 1. Prevent changing the model or reboot-required toggles while the car is actively driving
       reboot_keys = {"Model", "DrivingModel", "AlwaysOnLateral", "DisableOpenpilotLongitudinal", "ForceTorqueController", "NNFF", "NNFFLite"}
       if key in reboot_keys and params.get_bool("IsOnroad"):
@@ -4860,6 +4999,8 @@ def setup(app):
         result[key] = None
 
     result["HasRadar"] = _get_has_radar()
+    result["VehicleParked"] = _get_vehicle_parked()
+    result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
 
     return jsonify(_sanitize_json_value(result)), 200
 
@@ -4958,7 +5099,7 @@ def setup(app):
   def get_or_set_models_preferences():
     if request.method == "GET":
       return jsonify({
-        "sortMode": read_legacy_param_file(MODEL_SORT_MODE_PARAM, "alphabetical"),
+        "sortMode": read_legacy_param_file(MODEL_SORT_MODE_PARAM, DEFAULT_MODEL_SORT_MODE),
         "userFavorites": [entry for entry in (params.get(MODEL_USER_FAVORITES_PARAM, encoding="utf-8") or "").split(",") if entry],
       }), 200
 
@@ -4966,7 +5107,7 @@ def setup(app):
     changed = []
 
     if "sortMode" in data:
-      sort_mode = str(data.get("sortMode") or "alphabetical").strip() or "alphabetical"
+      sort_mode = str(data.get("sortMode") or DEFAULT_MODEL_SORT_MODE).strip() or DEFAULT_MODEL_SORT_MODE
       write_legacy_param_file(MODEL_SORT_MODE_PARAM, sort_mode)
       changed.append("sort mode")
 
@@ -4994,7 +5135,7 @@ def setup(app):
 
     downloading = bool(model_to_download) or download_all
     current_model = _current_model_key()
-    sort_mode = read_legacy_param_file(MODEL_SORT_MODE_PARAM, "alphabetical")
+    sort_mode = read_legacy_param_file(MODEL_SORT_MODE_PARAM, DEFAULT_MODEL_SORT_MODE)
     terminal = progress in ("Downloaded!", "All models downloaded!") or bool(re.search(r"cancelled|exists|failed|offline|invalid|error", progress, re.IGNORECASE))
     summary = {
       "installed": sum(1 for model in models if model["installed"]),
@@ -5363,10 +5504,10 @@ def setup(app):
 
   def _default_model_key():
     default_key = _param_text(params.get_default_value("Model") or params.get_default_value("DrivingModel"))
-    return canonical_model_key(default_key) or "rdf"
+    return canonical_model_key(default_key) or "rdf43"
 
   def _default_model_name():
-    return _param_text(params.get_default_value("DrivingModelName")) or "Regret Driven Framework"
+    return _param_text(params.get_default_value("DrivingModelName")) or "Regret Driven Framework V4"
 
   def _default_model_version():
     default_version = _param_text(params.get_default_value("ModelVersion") or params.get_default_value("DrivingModelVersion"))
@@ -5506,22 +5647,43 @@ def setup(app):
           delete_file(os.path.join(footage_path, segment))
     return {"message": "Route deleted!"}, 200
 
-  @app.route("/api/routes/delete_all", methods=["DELETE"])
+  @app.route("/api/routes/delete_all", methods=["DELETE", "POST"])
   def delete_all_routes():
-    route_names = set()
-    for footage_path in FOOTAGE_PATHS:
-      if os.path.exists(footage_path):
-        for segment in os.listdir(footage_path):
-          route_names.add(segment.split("--")[0])
+    if _safe_params_get_bool("IsOnroad"):
+      return jsonify({"error": "Cannot delete driving routes while driving."}), 409
 
-    for route_name in sorted(list(route_names)):
+    if not _ROUTE_DELETE_LOCK.acquire(blocking=False):
+      return jsonify({"error": "Route deletion is already in progress."}), 409
+
+    try:
+      utilities.stop_dashboard_background_analysis()
+
+      route_paths = []
+      seen_paths = set()
       for footage_path in FOOTAGE_PATHS:
-        if os.path.exists(footage_path):
-          for segment in os.listdir(footage_path):
-            if segment.startswith(route_name):
-              delete_file(os.path.join(footage_path, segment))
+        path = str(footage_path).rstrip("/")
+        if path and path not in seen_paths:
+          seen_paths.add(path)
+          route_paths.append(path)
 
-    return {"message": "All routes deleted!"}, 200
+      for route_path in route_paths:
+        _run_factory_reset_delete(route_path)
+
+      persisted_route_count = utilities.clear_dashboard_route_history(params)
+      _STATS_RESPONSE_CACHE.update({
+        "updated_at": 0.0,
+        "payload": None,
+      })
+      return jsonify({
+        "success": True,
+        "message": "All local driving routes deleted. Saved personal records were kept.",
+        "deletedPaths": len(route_paths),
+        "clearedDashboardRoutes": persisted_route_count,
+      }), 200
+    except Exception as exception:
+      return jsonify({"error": f"Failed to delete driving routes: {exception}"}), 500
+    finally:
+      _ROUTE_DELETE_LOCK.release()
 
   @app.route("/api/routes/<name>/preserve", methods=["POST"])
   def preserve_route(name):
@@ -6535,6 +6697,38 @@ def setup(app):
       "message": "Factory reset started. Device will reboot when complete.",
       "warning": "This wipes local params, backups, themes, models, maps, and route data.",
     }), 202
+
+  @app.route("/api/sentry/status", methods=["GET"])
+  def sentry_status():
+    raw_event = params.get("SentryModeLastEvent", encoding="utf-8") or "{}"
+    raw_status = params.get("SentryModeStatus", encoding="utf-8") or "{}"
+    try:
+      last_event = json.loads(raw_event)
+    except (TypeError, ValueError, json.JSONDecodeError):
+      last_event = {}
+    try:
+      status = json.loads(raw_status)
+    except (TypeError, ValueError, json.JSONDecodeError):
+      status = {}
+
+    return jsonify({
+      "enabled": params.get_bool("SentryModeEnabled"),
+      "status": status if isinstance(status, dict) else {},
+      "lastEvent": last_event if isinstance(last_event, dict) else {},
+    })
+
+  @app.route("/api/sentry/events", methods=["POST"])
+  def sentry_event():
+    if request.remote_addr not in {None, "127.0.0.1", "::1"}:
+      return jsonify({"error": "Sentry events must originate on the device."}), 403
+
+    event = _normalize_sentry_event(request.get_json(silent=True))
+    if event is None:
+      return jsonify({"error": "Invalid sentry event."}), 400
+
+    params.put("SentryModeLastEvent", json.dumps(event, separators=(",", ":")))
+    threading.Thread(target=_dispatch_sentry_event, args=(event,), name="galaxy-sentry-notify", daemon=True).start()
+    return jsonify({"accepted": True, "eventId": event["eventId"]}), 202
 
   # ── Galaxy pairing (mirrors settings.cc L262-282) ──────────────────
   GALAXY_DIR = _get_galaxy_dir()

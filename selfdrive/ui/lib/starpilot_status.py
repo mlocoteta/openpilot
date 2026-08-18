@@ -14,6 +14,17 @@ EXPERIMENTAL_COLOR = rl.Color(218, 111, 37, 255)
 CEM_OVERRIDE_COLOR = rl.Color(255, 214, 0, 255)
 SWITCHBACK_COLOR = rl.Color(139, 108, 197, 255)
 TRAFFIC_COLOR = rl.Color(201, 34, 49, 255)
+LONGITUDINAL_ONLY_COLOR = rl.Color(255, 105, 180, 255)
+
+
+def is_longitudinal_only_active(state: UIState) -> bool:
+  """Return true when control is enabled but lateral control is inactive.
+
+  Do not use carControl.longActive here: stock-cruise cars intentionally leave
+  that field false while the vehicle's own longitudinal controller is active.
+  """
+  car_control = state.sm["carControl"]
+  return bool(state.sm["selfdriveState"].enabled and not car_control.latActive)
 
 
 def get_border_color(state: UIState):
@@ -21,6 +32,8 @@ def get_border_color(state: UIState):
   lateral_active = enabled or state.always_on_lateral_active
   if state.status == UIStatus.OVERRIDE:
     return OVERRIDE_COLOR
+  if is_longitudinal_only_active(state):
+    return LONGITUDINAL_ONLY_COLOR
   if state.switchback_mode_enabled and lateral_active:
     return SWITCHBACK_COLOR
   if state.traffic_mode_enabled and enabled:
@@ -48,6 +61,8 @@ def get_screen_edge_color(state: UIState):
   lateral_active = enabled or state.always_on_lateral_active
   if state.status == UIStatus.OVERRIDE:
     return OVERRIDE_COLOR
+  if is_longitudinal_only_active(state):
+    return LONGITUDINAL_ONLY_COLOR
   if state.switchback_mode_enabled and lateral_active:
     return SWITCHBACK_COLOR
   if state.always_on_lateral_active:

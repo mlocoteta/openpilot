@@ -1,6 +1,13 @@
 /* PiP Side Camera reuses the V-ASM tool styling. */
 @import url("./v_asm.css");
 
+.v-asm-wrapper .v-asm-btn {
+  height: auto;
+  min-height: 32px;
+  text-align: center;
+  white-space: normal;
+}
+
 .pip-zoom-control {
   margin-top: 18px;
   padding: 14px 18px;

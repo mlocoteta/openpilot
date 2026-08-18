@@ -330,6 +330,35 @@ class TestVCruiseHelper:
 
     assert self.v_cruise_helper.v_cruise_kph == initial_v_cruise_kph
 
+  def test_speed_limit_confirmation_press_release_does_not_leak_after_acceptance(self):
+    for button_type in (ButtonType.accelCruise, ButtonType.decelCruise):
+      self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)
+      initial_v_cruise_kph = self.v_cruise_helper.v_cruise_kph
+
+      pressed_cs = car.CarState(cruiseState={"available": True})
+      pressed_cs.buttonEvents = [ButtonEvent(type=button_type, pressed=True)]
+      self.v_cruise_helper.update_v_cruise(
+        pressed_cs,
+        enabled=True,
+        is_metric=False,
+        speed_limit_changed=True,
+        starpilot_toggles=self.starpilot_toggles,
+      )
+
+      # The planner may have consumed the confirmation by the time the physical
+      # button release arrives. The release must remain confirmation-only.
+      released_cs = car.CarState(cruiseState={"available": True})
+      released_cs.buttonEvents = [ButtonEvent(type=button_type, pressed=False)]
+      self.v_cruise_helper.update_v_cruise(
+        released_cs,
+        enabled=True,
+        is_metric=False,
+        speed_limit_changed=False,
+        starpilot_toggles=self.starpilot_toggles,
+      )
+
+      assert self.v_cruise_helper.v_cruise_kph == initial_v_cruise_kph
+
   def test_stale_speed_limit_change_does_adjust_cruise(self):
     self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)
     initial_v_cruise_kph = self.v_cruise_helper.v_cruise_kph

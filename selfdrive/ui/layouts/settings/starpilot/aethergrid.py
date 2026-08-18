@@ -1161,31 +1161,36 @@ class BreadcrumbController:
     if not layout:
         return
 
-    if target == "action:home":
-      while len(gui_app._nav_stack) > 1:
-        gui_app.pop_widget()
-      layout._panel_stack.clear()
-      layout._update_sub_panel_visibility()
-      layout._current_category_idx = None
-      layout._set_current_panel(StarPilotPanelType.MAIN)
-    elif target == "action:category":
-      while len(gui_app._nav_stack) > 1:
-        gui_app.pop_widget()
-      layout._panel_stack.clear()
+    nav_stack = getattr(gui_app, "_nav_stack", [])
 
-      cat = layout.CATEGORIES[layout._current_category_idx]
-      if "buttons" in cat:
-        layout._set_current_panel(StarPilotPanelType.MAIN)
-      else:
+    if target == "action:home":
+      while len(nav_stack) > 1:
+        gui_app.pop_widget()
+      layout.reset_to_root()
+    elif target.startswith("action:hub:"):
+      target_depth = int(target.split(":")[-1])
+      while len(nav_stack) > 1:
+        gui_app.pop_widget()
+      layout.navigate_to_hub_depth(target_depth)
+    elif target == "action:category":
+      # Compatibility with the former single-category breadcrumb action.
+      while len(nav_stack) > 1:
+        gui_app.pop_widget()
+      if getattr(layout, "_hub_path", None):
+        layout.navigate_to_hub_depth(1)
+      elif layout._current_panel != StarPilotPanelType.MAIN:
+        layout._panel_stack.clear()
         layout._commit_navigation()
+      else:
+        layout.reset_to_root()
     elif target == "action:panel":
-      while len(gui_app._nav_stack) > 1:
+      while len(nav_stack) > 1:
         gui_app.pop_widget()
       layout._panel_stack.clear()
       layout._commit_navigation()
     elif target.startswith("action:nav_stack:"):
       target_idx = int(target.split(":")[-1])
-      while len(gui_app._nav_stack) > target_idx + 1:
+      while len(nav_stack) > target_idx + 1:
         gui_app.pop_widget()
     elif target.startswith("action:panel_stack:"):
       target_idx = int(target.split(":")[-1])
@@ -1203,22 +1208,20 @@ class BreadcrumbController:
     if not layout:
         return path
 
-    pushed_widgets = gui_app._nav_stack[1:]
-
-    cat_title = ""
-    is_folder = False
-    if layout._current_category_idx is not None:
-      cat = layout.CATEGORIES[layout._current_category_idx]
-      cat_title = cat["title"]
-      is_folder = "buttons" in cat
-      path.append((cat_title, "action:category"))
+    hub_path = getattr(layout, "_hub_path", [])
+    for i, folder in enumerate(hub_path, start=1):
+      path.append((tr(folder["title"]), f"action:hub:{i}"))
 
     if layout._current_panel != StarPilotPanelType.MAIN:
-      panel_info = layout._panels[layout._current_panel]
-      if panel_info.name:
-        if is_folder or layout._current_category_idx is None:
-          panel_title = panel_info.name
-          path.append((panel_title, "action:panel"))
+      selected_leaf = getattr(layout, "_selected_leaf", None)
+      if selected_leaf is not None:
+        panel_title = selected_leaf["title"]
+      else:
+        panel_title = layout._panels[layout._current_panel].name
+      if panel_title:
+        path.append((tr(panel_title), "action:panel"))
+
+    pushed_widgets = getattr(gui_app, "_nav_stack", [])[1:]
 
     for i, widget in enumerate(pushed_widgets):
       if hasattr(widget, '_header_title') and widget._header_title:
@@ -5472,7 +5475,4 @@ class TileGrid(Widget):
           tile.set_parent_rect(parent_rect)
         tile.render(snap_rect(rl.Rectangle(row_x + c * (row_tile_w + self._gap), rect.y + y_offset + r * (tile_h + self._gap), row_tile_w, tile_h)))
         tile_idx += 1
-
-
-
 

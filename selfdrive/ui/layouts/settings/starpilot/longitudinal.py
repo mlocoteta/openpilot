@@ -272,7 +272,7 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
       "CESpeed": {"title": tr("Below Speed"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeed"))},
       "CESpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {}, "get": lambda: float(self._controller._params.get_int("CESpeedLead"))},
       "CESignalSpeed": {"title": tr("Turn Signal Below"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 20, 35, 55, 75], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CESignalSpeed"))},
-      "CEModelStopTime": {"title": tr("Predicted Stop In"), "subtitle": "", "min": 0, "max": 10.0, "step": 1.0, "unit": "s", "presets": [0, 3, 5, 9, 10], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_int("CEModelStopTime"))},
+      "CEModelStopTime": {"title": tr("Predicted Stop In"), "subtitle": "", "min": 0, "max": 10.0, "step": 0.1, "unit": "s", "presets": [0, 3, 5, 7.7, 10], "labels": {0.0: tr("Off")}, "get": lambda: float(self._controller._params.get_float("CEModelStopTime"))},
       "CCMSpeed": {"title": tr("Above Speed"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeed"))},
       "CCMSpeedLead": {"title": tr("Speed w/ Lead"), "subtitle": "", "min": 0, "max": max_speed, "step": 1.0, "unit": speed_unit, "presets": [0, 35, 55, 65, 80], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSpeedLead"))},
       "CCMSetSpeedMargin": {"title": tr("Set Speed Margin"), "subtitle": "", "min": 0, "max": 30.0 if is_metric else 15.0, "step": 1.0, "unit": speed_unit, "presets": [0, 5, 10, 15], "labels": {}, "get": lambda: float(self._controller._params.get_int("CCMSetSpeedMargin"))},
@@ -306,22 +306,26 @@ class ConditionalDriveModeView(AdjustorTogglesPanelView):
       "CESpeed": {"title": tr("Below Speed"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 20, 35, 55, 75]},
       "CESpeedLead": {"title": tr("Speed w/ Lead"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 20, 35, 55, 75]},
       "CESignalSpeed": {"title": tr("Turn Signal Below"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {0.0: tr("Off")}, "presets": [0, 20, 35, 55, 75]},
-      "CEModelStopTime": {"title": tr("Predicted Stop In"), "min": 0, "max": 10.0, "unit": "s", "labels": {0.0: tr("Off")}, "presets": [0, 3, 5, 9, 10]},
+      "CEModelStopTime": {"title": tr("Predicted Stop In"), "min": 0, "max": 10.0, "unit": "s", "labels": {0.0: tr("Off")}, "presets": [0, 3, 5, 7.7, 10]},
       "CCMSpeed": {"title": tr("Above Speed"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 35, 55, 65, 80]},
       "CCMSpeedLead": {"title": tr("Speed w/ Lead"), "min": 0, "max": max_speed, "unit": speed_unit, "labels": {}, "presets": [0, 35, 55, 65, 80]},
       "CCMSetSpeedMargin": {"title": tr("Set Speed Margin"), "min": 0, "max": 30.0 if is_metric else 15.0, "unit": speed_unit, "labels": {}, "presets": [0, 5, 10, 15]},
     }
     
     spec = specs[key]
-    original_val = float(self._controller._params.get_int(key))
+    is_float = key == "CEModelStopTime"
+    original_val = float(self._controller._params.get_float(key) if is_float else self._controller._params.get_int(key))
 
     def on_close(res, val):
       if res == DialogResult.CONFIRM:
-        self._controller._params.put_int(key, int(val))
+        if is_float:
+          self._controller._params.put_float(key, float(val))
+        else:
+          self._controller._params.put_int(key, int(val))
 
     gui_app.push_widget(AetherSliderDialog(
       title=spec["title"],
-      min_val=float(spec["min"]), max_val=float(spec["max"]), step=1.0,
+      min_val=float(spec["min"]), max_val=float(spec["max"]), step=0.1 if is_float else 1.0,
       current_val=original_val,
       on_close=on_close, presets=[float(p) for p in spec["presets"]],
       unit=spec["unit"], labels=spec["labels"], color=PANEL_STYLE.accent

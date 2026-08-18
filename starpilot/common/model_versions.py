@@ -30,7 +30,7 @@ def uses_combined_driving_artifacts(version: str | None) -> bool:
 
 
 def is_supported_artifact_format(artifact_format: str | None) -> bool:
-  # v22 manifests are unified by definition. Keep the explicit field optional
+  # Unified manifests are the default. Keep the explicit field optional
   # for compatibility with generated or externally hosted entries.
   return str(artifact_format or "").strip() in {"", UNIFIED_ARTIFACT_FORMAT}
 

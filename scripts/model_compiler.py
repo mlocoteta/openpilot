@@ -40,77 +40,45 @@ MEDMODEL_INPUT_SIZE = (512, 256)
 DM_INPUT_SIZE = (1440, 960)
 MODEL_RUN_FREQ = 20
 MODEL_CONTEXT_FREQ = 5
-REPOSITORY_FILE_LIMIT = 100 * 1024 * 1024
+# GitHub/GitLab advertise a 100 MB per-file limit. Use the decimal limit so
+# artifacts such as a 104.4 MB PKL are split before they reach the remote.
+REPOSITORY_FILE_LIMIT = 100_000_000
 DEFAULT_MULTIPART_SIZE = 95 * 1024 * 1024
-USBGPU_PROBE_ATTEMPTS = 3
-USBGPU_PROBE_TIMEOUT = 10
-
-
-def build_compile_env() -> dict[str, str]:
+USBGPU_PROBE_ATTEMPTS = 10
+def build_compile_env(*, supercombo: bool = False) -> dict[str, str]:
   env = os.environ.copy()
-  pythonpath = env.get("PYTHONPATH", "")
-  env["PYTHONPATH"] = f"{REPO_ROOT}:{pythonpath}" if pythonpath else str(REPO_ROOT)
-  for key, default in {
-    "DEBUG": "0",
+  existing_pythonpath = env.get("PYTHONPATH", "")
+  env["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(REPO_ROOT)
+  defaults = {
     "FLOAT16": "1",
-    "IMAGE": "2",
+    "IMAGE": "1" if supercombo else "2",
     "JIT_BATCH_SIZE": "0",
     "NOLOCALS": "1",
     "OPENPILOT_HACKS": "1",
-  }.items():
+  } | ({} if supercombo else {
+    "DEBUG": "0",
+  })
+  for key, default in defaults.items():
     try:
       int(str(env.get(key)), 0)
     except (TypeError, ValueError):
       env[key] = default
+  if supercombo:
+    # Unified supercombo artifacts must use upstream compile defaults. The
+    # legacy QCOM tuning causes a reproducible HCQ timeline failure here.
+    env.pop("QCOM_PRIORITY", None)
   return env
 
 
-def wait_for_external_gpu(compile_env: dict[str, str]) -> bool:
-  """Wait for the USB GPU's PCIe link before starting the large model build.
+def wait_for_external_gpu() -> None:
+  """Use openpilot's Chestnut link probe before starting a USB-GPU build."""
+  from openpilot.system.hardware.chestnut.flash import link_up
 
-  The dock can enumerate on USB before its PCIe link has finished training.
-  OpenPilot probes the tinygrad device in a short-lived process and retries;
-  doing the same here avoids making the model compiler lose its one chance at
-  initialization while keeping all non-GPU builds unchanged.
-  """
-  probe = [sys.executable, "-c", "from tinygrad.device import Device; Device[Device.DEFAULT]; import os; os._exit(0)"]
-  probe_env = {**compile_env, "DEV": "USB+AMD"}
-  diagnostics: list[str] = []
-
-  for attempt in range(USBGPU_PROBE_ATTEMPTS):
-    if attempt:
-      time.sleep(1)
-    try:
-      result = subprocess.run(
-        probe,
-        cwd=REPO_ROOT,
-        env=probe_env,
-        capture_output=True,
-        text=True,
-        timeout=USBGPU_PROBE_TIMEOUT,
-        check=False,
-      )
-    except subprocess.TimeoutExpired as exc:
-      partial = exc.stderr or exc.stdout or ""
-      if isinstance(partial, bytes):
-        partial = partial.decode(errors="replace")
-      partial = partial.strip()
-      diagnostics.append(
-        f"probe timed out after {USBGPU_PROBE_TIMEOUT}s" + (f": {partial[-2000:]}" if partial else "")
-      )
-      continue
-
-    if result.returncode == 0:
-      return True
-    detail = (result.stderr or result.stdout).strip()
-    diagnostics.append((detail[-2000:] if detail else f"probe exited with status {result.returncode}"))
-
-  detail = diagnostics[-1] if diagnostics else "unknown error"
-  print(
-    f"Warning: external GPU probe did not become ready after {USBGPU_PROBE_ATTEMPTS} probes: {detail}\n"
-    "  Continuing; compile_modeld will perform the authoritative link wait and initialization."
-  )
-  return False
+  for _ in range(USBGPU_PROBE_ATTEMPTS):
+    if link_up():
+      return
+    time.sleep(1)
+  raise RuntimeError("Chestnut not ready; external GPU PCIe link did not come up")
 
 
 def parse_args() -> argparse.Namespace:
@@ -517,14 +485,16 @@ def compile_driving(
 ) -> Path:
   model_type, source_args = driving_compile_args(files, input_format)
   output_path = output_dir / f"{model_key}_driving_tinygrad.pkl"
+  # A rebuild queue may compile several models into the same directory. Only
+  # replace the selected model; deleting every driving artifact here loses
+  # models that were successfully compiled earlier in the queue.
   removed = remove_paths(sorted({
     output_path,
     *multipart_output_paths(output_path, output_dir),
-    *output_dir.glob("*_driving_tinygrad.pkl"),
-    *output_dir.glob("*_driving_tinygrad.pkl.p[0-9][0-9]"),
-    *output_dir.glob("*_driving_tinygrad.pkl.sha256"),
-    *output_dir.glob("*_driving_*_tinygrad.pkl"),
-    *output_dir.glob("*_driving_*_metadata.pkl"),
+    *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl"),
+    *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl.p[0-9][0-9]"),
+    *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl.sha256"),
+    *output_dir.glob(f"{model_key}_driving_*_metadata.pkl"),
   }))
   if removed:
     print(f"  cleared {removed} existing driving output entries")
@@ -549,7 +519,7 @@ def compile_driving(
   ]
   if version:
     command += ["--behavior-version", version]
-  compile_env = build_compile_env()
+  compile_env = build_compile_env(supercombo=input_format == "supercombo")
   if external_gpu:
     for qcom_only_flag in ("IMAGE", "NOLOCALS", "OPENPILOT_HACKS"):
       compile_env.pop(qcom_only_flag, None)
@@ -563,7 +533,7 @@ def compile_driving(
       "TC_OPT": "2",
     })
     command.append("--out-of-band")
-    wait_for_external_gpu(compile_env)
+    wait_for_external_gpu()
   subprocess.run(command, cwd=REPO_ROOT, env=compile_env, check=True)
   return output_path
 
@@ -688,7 +658,7 @@ def main() -> int:
   else:
     multipart_outputs = split_oversized_artifact(output)
     if multipart_outputs:
-      print("  artifact exceeds 100 MiB; created repository-safe multipart files:")
+      print("  artifact exceeds 100 MB; created repository-safe multipart files:")
       for multipart_output in multipart_outputs:
         print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
       output.unlink()

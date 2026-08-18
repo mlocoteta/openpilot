@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 from tinygrad.device import Device
-from openpilot.system.hardware.usb import chestnut_present
+from openpilot.system.hardware.usb import chestnut_firmware_ready
 
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 TG_INPUT_DEVICES_PATH = MODELS_DIR / "tg_input_devices.json"
@@ -70,7 +70,7 @@ def modeld_pkl_path(usbgpu: bool) -> Path:
 
 
 def usbgpu_present() -> bool:
-  return chestnut_present()
+  return chestnut_firmware_ready()
 
 
 def tinygrad_dev_config(usbgpu: bool, tici: bool) -> str:

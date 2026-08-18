@@ -48,8 +48,8 @@ from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 PROCESS_NAME = "selfdrive.modeld.modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
-BUILTIN_MODEL_KEY = "rdf"
-BUILTIN_MODEL_ALIASES = {BUILTIN_MODEL_KEY}
+BUILTIN_MODEL_KEY = "rdf43"
+BUILTIN_MODEL_ALIASES = {BUILTIN_MODEL_KEY, "rdf"}
 MODEL_ID_ALIASES = {"sc": "sc2"}
 
 
@@ -120,6 +120,12 @@ def _canonical_model_id(model_id: str) -> str:
   if key in BUILTIN_MODEL_ALIASES:
     return BUILTIN_MODEL_KEY
   return MODEL_ID_ALIASES.get(key, key)
+
+
+def _select_builtin_model(params: Params) -> None:
+  params.put("Model", BUILTIN_MODEL_KEY)
+  params.put("DrivingModel", BUILTIN_MODEL_KEY)
+  params.put("DrivingModelName", "Regret Driven Framework V4")
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
@@ -448,6 +454,24 @@ class ModelState:
     return parsed
 
 
+def _load_model_state(cam_w: int, cam_h: int, selected_model: str, external_gpu_requested: bool,
+                      params: Params) -> ModelState:
+  try:
+    return ModelState(cam_w, cam_h, external_gpu_requested)
+  except Exception:
+    if selected_model == BUILTIN_MODEL_KEY:
+      raise
+
+    cloudlog.exception(f"Failed to load model {selected_model}; falling back to {BUILTIN_MODEL_KEY}")
+    _select_builtin_model(params)
+    if external_gpu_requested:
+      from tinygrad.helpers import DEV
+      device_config = tinygrad_dev_config(False, TICI)
+      DEV.value = device_config
+      os.environ["DEV"] = device_config
+    return ModelState(cam_w, cam_h, False)
+
+
 def main(demo=False):
   cloudlog.warning("modeld init")
 
@@ -500,16 +524,7 @@ def main(demo=False):
   cloudlog.warning("loading model")
   if external_gpu_requested:
     wait_usbgpu_link()
-  try:
-    model = ModelState(vipc_client_main.width, vipc_client_main.height, external_gpu_requested)
-  except Exception:
-    if not external_gpu_requested:
-      raise
-    cloudlog.exception(f"Failed to load external-GPU model {selected_model}; falling back to {BUILTIN_MODEL_KEY}")
-    device_config = tinygrad_dev_config(False, TICI)
-    DEV.value = device_config
-    os.environ["DEV"] = device_config
-    model = ModelState(vipc_client_main.width, vipc_client_main.height, False)
+  model = _load_model_state(vipc_client_main.width, vipc_client_main.height, selected_model, external_gpu_requested, params)
   external_gpu_active = model.uses_external_gpu
   params.put_bool("UsbGpuCompiled", external_model_selected and file_chunked_exists(external_artifact))
   params.put_bool("UsbGpuActive", external_gpu_active)

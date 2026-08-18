@@ -15,7 +15,6 @@ if str(REPO_ROOT) not in sys.path:
 from tinygrad.tensor import Tensor
 
 from openpilot.common.params import Params
-from openpilot.selfdrive.modeld.compile_modeld import WARP_INPUTS
 from openpilot.selfdrive.modeld.modeld import ModelState
 
 
@@ -48,16 +47,16 @@ def main() -> int:
   if "action_t" in model.npy:
     model.npy["action_t"][:] = [0.15, 0.25]
 
-  img, big_img = model.warp_enqueue(
-    **{key: model.input_queues[key] for key in WARP_INPUTS},
+  warped = model.warp_enqueue(
+    **{key: model.input_queues[key] for key in model.warp_input_keys},
     frame=frames[0],
     big_frame=frames[1],
   )
-  outputs = model.run_policy(
-    **{key: model.input_queues[key] for key in model.policy_input_keys},
-    img=img,
-    big_img=big_img,
-  )
+  policy_inputs = {key: model.input_queues[key] for key in model.policy_input_keys}
+  if model.image_history_pipeline == "policy":
+    outputs = model.run_policy(**policy_inputs, warped=warped)
+  else:
+    outputs = model.run_policy(**policy_inputs, img=warped[0], big_img=warped[1])
   arrays = [output.numpy().flatten() for output in outputs]
   if model.model_type == "supercombo":
     parsed = model.parser.parse_outputs(model.slice_outputs(arrays[0], model.output_slices))

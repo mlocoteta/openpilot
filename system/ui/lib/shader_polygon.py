@@ -189,18 +189,15 @@ def _configure_shader_color(state: ShaderState, color: Optional[rl.Color],
 def triangulate(pts: np.ndarray) -> list[tuple[float, float]]:
   """Only supports simple polygons with two chains (ribbon)."""
 
-  # TODO: consider deduping close screenspace points
   # interleave points to produce a triangle strip
-  # assert len(pts) % 2 == 0, "Interleaving expects even number of points"
   if len(pts) % 2 != 0:
     pts = pts[:-1]
 
-  tri_strip = []
-  for i in range(len(pts) // 2):
-    tri_strip.append(pts[i])
-    tri_strip.append(pts[-i - 1])
-
-  return cast(list, np.array(tri_strip).tolist())
+  half = len(pts) // 2
+  tri_strip = np.empty_like(pts)
+  tri_strip[0::2] = pts[:half]
+  tri_strip[1::2] = pts[half:][::-1]
+  return cast(list, tri_strip.tolist())
 
 
 def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
@@ -213,19 +210,21 @@ def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
   if len(points) < 3:
     return
 
-  # Initialize shader on-demand
-  state = ShaderState.get_instance()
-  state.initialize()
-
   # Ensure (N,2) float32 contiguous array
   pts = np.ascontiguousarray(points, dtype=np.float32)
   assert pts.ndim == 2 and pts.shape[1] == 2, "points must be (N,2)"
 
-  # Configure gradient shader
-  _configure_shader_color(state, color, gradient, origin_rect)
-
   # Triangulate via interleaving
   tri_strip = triangulate(pts)
+
+  if gradient is None:
+    rl.draw_triangle_strip(tri_strip, len(tri_strip), color or rl.WHITE)
+    return
+
+  state = ShaderState.get_instance()
+  state.initialize()
+
+  _configure_shader_color(state, color, gradient, origin_rect)
 
   # Draw strip, color here doesn't matter
   rl.begin_shader_mode(state.shader)

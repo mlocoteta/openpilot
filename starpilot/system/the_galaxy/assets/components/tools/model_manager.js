@@ -5,7 +5,7 @@ const state = reactive({
   refreshing: false,
   error: "",
   actionBusy: false,
-  sortMode: "alphabetical",
+  sortMode: "release_date",
   communityFavoriteFilter: "all",
   userFavoriteFilter: "all",
   models: [],
@@ -449,7 +449,7 @@ function bindDomHandlers() {
     }
 
     if (target.id === "mm-sort-mode-select") {
-      const value = safeText(target.value, "alphabetical");
+      const value = safeText(target.value, "release_date");
       state.sortMode = value === "release_date" ? "release_date" : "alphabetical";
       return;
     }

@@ -16,6 +16,27 @@ ROUNDING_PRECISION = 5
 STEP = 0.001
 
 
+def is_user_overriding_longitudinal(sm):
+  try:
+    if any(getattr(event, "overrideLongitudinal", False) for event in sm["onroadEvents"]):
+      return True
+  except (KeyError, TypeError):
+    pass
+
+  car_state = sm["carState"]
+  starpilot_car_state = sm["starpilotCarState"]
+  return bool(
+    getattr(car_state, "gasPressed", False) or
+    getattr(car_state, "brakePressed", False) or
+    getattr(starpilot_car_state, "accelPressed", False)
+  )
+
+
+def is_manual_speed_control(sm):
+  """Return whether the driver, rather than longitudinal control, owns speed."""
+  return not bool(sm["carControl"].longActive) or is_user_overriding_longitudinal(sm)
+
+
 class CurveSpeedController:
   def __init__(self, StarPilotVCruise):
     self.starpilot_planner = StarPilotVCruise.starpilot_planner
@@ -23,7 +44,9 @@ class CurveSpeedController:
     self.enable_training = False
     self.target_set = False
 
-    self.training_timer = 0
+    self.training_timer = 0.0
+    self.persistence_timer = 0.0
+    self.data_dirty = False
 
     curvature_data = self.starpilot_planner.params.get("CurvatureData")
     self.curvature_data = self._normalize_curvature_data(curvature_data)
@@ -75,54 +98,72 @@ class CurveSpeedController:
 
     return normalized
 
+  def _persist_data(self):
+    if not self.data_dirty:
+      return
+
+    progress = 0.0
+    for key in self.required_curvatures:
+      if key in self.curvature_data:
+        progress += min(self.curvature_data[key]["count"] / CALIBRATION_PROGRESS_THRESHOLD, 1.0)
+
+    self.starpilot_planner.params.put_nonblocking("CalibrationProgress", (progress / len(self.required_curvatures)) * 100)
+    self.starpilot_planner.params.put_nonblocking("CurvatureData", self.curvature_data)
+    self.data_dirty = False
+    self.persistence_timer = 0.0
+
+  def flush_data(self):
+    self._persist_data()
+
   def log_data(self, v_ego, sm):
-    self.enable_training = v_ego > CRUISING_SPEED
-    self.enable_training &= not self.starpilot_planner.tracking_lead
-    self.enable_training &= not sm["carControl"].longActive
+    eligible = (
+      v_ego > CRUISING_SPEED and
+      not self.starpilot_planner.tracking_lead and
+      is_manual_speed_control(sm)
+    )
+    self.enable_training = False
 
-    if self.enable_training:
-      self.training_timer += DT_MDL
+    if not eligible:
+      self.flush_data()
+      self.training_timer = 0.0
+      self.persistence_timer = 0.0
+      return
 
-      if self.training_timer >= PLANNER_TIME and self.starpilot_planner.driving_in_curve and not (sm["carState"].leftBlinker or sm["carState"].rightBlinker):
-        lateral_acceleration = abs(self.starpilot_planner.lateral_acceleration)
-        road_curvature = self._bucket_curvature(abs(self.starpilot_planner.road_curvature))
+    self.training_timer += DT_MDL
+    if self.data_dirty:
+      self.persistence_timer += DT_MDL
 
-        key = road_curvature
-        if key in self.curvature_data:
-          data = self.curvature_data[key]
+    in_curve = (
+      self.training_timer >= PLANNER_TIME and
+      self.starpilot_planner.driving_in_curve and
+      not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)
+    )
+    if in_curve:
+      lateral_acceleration = abs(self.starpilot_planner.lateral_acceleration)
+      road_curvature = self._bucket_curvature(abs(self.starpilot_planner.road_curvature))
 
-          average = data["average"]
-          count = data["count"]
-
-          self.curvature_data[key] = {
-            "average": ((average * count) + lateral_acceleration) / (count + 1),
-            "count": count + 1
-          }
-        else:
-          self.curvature_data[key] = {
-            "average": lateral_acceleration,
-            "count": 1
-          }
-
-        self.update_lateral_acceleration()
+      if road_curvature in self.curvature_data:
+        data = self.curvature_data[road_curvature]
+        average = data["average"]
+        count = data["count"]
+        self.curvature_data[road_curvature] = {
+          "average": ((average * count) + lateral_acceleration) / (count + 1),
+          "count": count + 1
+        }
       else:
-        self.enable_training = False
+        self.curvature_data[road_curvature] = {
+          "average": lateral_acceleration,
+          "count": 1
+        }
 
-    elif self.training_timer >= PLANNER_TIME:
-      progress = 0.0
-      for key in self.required_curvatures:
-        if key in self.curvature_data:
-          progress += min(self.curvature_data[key]["count"] / CALIBRATION_PROGRESS_THRESHOLD, 1.0)
+      self.data_dirty = True
+      self.update_lateral_acceleration()
+      self.enable_training = True
 
-      self.starpilot_planner.params.put_nonblocking("CalibrationProgress", (progress / len(self.required_curvatures)) * 100)
-      self.starpilot_planner.params.put_nonblocking("CurvatureData", self.curvature_data)
-
-      self.enable_training = False
-      self.training_timer = 0
-
-    else:
-      self.enable_training = False
-      self.training_timer = 0
+      if self.persistence_timer >= PLANNER_TIME:
+        self.flush_data()
+    elif self.data_dirty:
+      self.flush_data()
 
   def update_lateral_acceleration(self):
     if self.curvature_data:

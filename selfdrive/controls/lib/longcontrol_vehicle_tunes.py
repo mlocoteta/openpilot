@@ -1,6 +1,7 @@
 import numpy as np
 
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from openpilot.common.realtime import DT_CTRL
 from openpilot.starpilot.common.testing_grounds import testing_ground
@@ -19,13 +20,14 @@ BOLT_ACC_PEDAL_START_HANDOFF_FLOOR_V = [0.22, 0.18, 0.10]
 NEGATIVE_TARGET_CREEP_GUARD_SPEED = 0.35
 NEGATIVE_TARGET_CREEP_GUARD_DECEL = 0.40
 GM_TRUCK_TARGET_FILTER_MIN_SPEED = 12.0
-GM_TRUCK_TARGET_FILTER_UP_TAU = 0.10
-GM_TRUCK_TARGET_FILTER_DOWN_TAU = 0.06
+GM_TRUCK_TARGET_FILTER_UP_TAU = 0.20
+GM_TRUCK_TARGET_FILTER_DOWN_TAU = 0.14
 GM_TRUCK_TARGET_FILTER_BRAKE_BYPASS = -0.65
 GM_TRUCK_TARGET_FILTER_DROP_BYPASS = 0.45
 TOYOTA_SIENNA_TARGET_FILTER_MIN_SPEED = 12.0
-TOYOTA_SIENNA_TARGET_FILTER_UP_TAU = 0.18
+TOYOTA_SIENNA_TARGET_FILTER_UP_TAU = 0.32
 TOYOTA_SIENNA_TARGET_FILTER_DOWN_TAU = 0.24
+TOYOTA_SIENNA_LOW_SPEED_ACCEL_UP_TAU = 0.35
 TOYOTA_SIENNA_TARGET_FILTER_BRAKE_BYPASS = -0.75
 TOYOTA_SIENNA_TARGET_FILTER_DROP_BYPASS = 0.65
 TOYOTA_SIENNA_COMFORT_FILTER_MIN_SPEED = 5.0
@@ -34,10 +36,22 @@ TOYOTA_SIENNA_COMFORT_FILTER_MIN_TTC = 4.5
 TOYOTA_SIENNA_COMFORT_FILTER_MAX_CLOSING_SPEED = 4.0
 TOYOTA_SIENNA_COMFORT_FILTER_MAX_LEAD_BRAKE = 2.5
 TOYOTA_SIENNA_COMFORT_FILTER_BRAKE_BYPASS = -2.5
+TOYOTA_COROLLA_TARGET_FILTER_MAX_SPEED = 3.0
+TOYOTA_COROLLA_TARGET_FILTER_UP_TAU = 0.30
+TOYOTA_COROLLA_TARGET_FILTER_DOWN_TAU = 0.18
+TOYOTA_COROLLA_TARGET_FILTER_BRAKE_BYPASS = -0.75
+TOYOTA_COROLLA_TARGET_FILTER_DROP_BYPASS = 0.45
 VOLT_CRUISE_INTEGRATOR_MIN_SPEED = 8.0
 VOLT_CRUISE_INTEGRATOR_TARGET_MAX = 0.12
 VOLT_CRUISE_INTEGRATOR_ERROR_MAX = 0.12
 VOLT_CRUISE_INTEGRATOR_LEAK = 0.995
+SUBARU_IMPREZA_STOP_RELEASE_TIME = 0.75
+SUBARU_IMPREZA_STOP_RELEASE_MAX_ACCEL = 0.8
+HYUNDAI_ELANTRA_STOPPING_HOLD_TARGET_GAP = 0.25
+HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_EGO_SPEED = 2.0
+HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_SPEED = 0.5
+HYUNDAI_ELANTRA_STOPPED_LEAD_MIN_CLOSING_SPEED = 0.25
+HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_CREEP_ACCEL = 0.05
 
 
 def get_bolt_acc_pedal_friction_bias(output_accel, a_target, v_ego):
@@ -104,7 +118,18 @@ class LongControlVehicleTuning:
     )
     self.is_toyota_sienna_4g = bool(
       CP.brand == "toyota" and
-      getattr(CP, "carFingerprint", None) == TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN
+      str(getattr(CP, "carFingerprint", "")) == str(TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
+    )
+    self.is_toyota_corolla_tss2 = bool(
+      CP.brand == "toyota" and
+      getattr(CP, "carFingerprint", None) == TOYOTA_CAR.TOYOTA_COROLLA_TSS2
+    )
+    self.is_subaru_impreza_2020 = bool(
+      CP.brand == "subaru" and
+      getattr(CP, "carFingerprint", None) == SUBARU_CAR.SUBARU_IMPREZA_2020
+    )
+    self.is_hyundai_elantra_2021 = bool(
+      CP.brand == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "HYUNDAI_ELANTRA_2021"
     )
     self.is_bolt_acc_pedal_friction_car = bool(
       CP.brand == "gm" and
@@ -121,7 +146,61 @@ class LongControlVehicleTuning:
     self.gm_truck_target_filter_initialized = False
     self.toyota_sienna_filtered_a_target = 0.0
     self.toyota_sienna_target_filter_initialized = False
+    self.toyota_corolla_filtered_a_target = 0.0
+    self.toyota_corolla_target_filter_initialized = False
     self.bolt_start_handoff_frames = 0
+    self.subaru_stop_release_frames = 0
+
+  def shape_stopping_accel(self, output_accel, a_target, should_stop, v_ego, has_lead, stop_accel):
+    """Release a stale hard lead brake once the stop target has eased."""
+    if (
+      not self.is_hyundai_elantra_2021 or
+      not has_lead or not should_stop or v_ego > 2.0 or
+      a_target <= stop_accel - HYUNDAI_ELANTRA_STOPPING_HOLD_TARGET_GAP
+    ):
+      return output_accel
+    return max(float(output_accel), float(stop_accel))
+
+  def is_hyundai_elantra_closing_on_stopped_lead(self, v_ego, should_stop, leads):
+    if not self.is_hyundai_elantra_2021 or should_stop or v_ego > HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_EGO_SPEED:
+      return False
+
+    lead = leads[0] if leads else None
+    if lead is None or not bool(getattr(lead, "status", False)):
+      return False
+
+    lead_speed = max(0.0, float(getattr(lead, "vLead", 0.0)))
+    closing_speed = float(v_ego) - lead_speed
+    return (
+      lead_speed <= HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_SPEED and
+      closing_speed >= HYUNDAI_ELANTRA_STOPPED_LEAD_MIN_CLOSING_SPEED
+    )
+
+  def shape_hyundai_elantra_lead_target(self, a_target, v_ego, should_stop, leads):
+    if self.is_hyundai_elantra_closing_on_stopped_lead(v_ego, should_stop, leads):
+      return min(float(a_target), HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_CREEP_ACCEL)
+    return a_target
+
+  def cap_hyundai_elantra_lead_output(self, output_accel, v_ego, should_stop, leads):
+    if self.is_hyundai_elantra_closing_on_stopped_lead(v_ego, should_stop, leads):
+      return min(float(output_accel), HYUNDAI_ELANTRA_STOPPED_LEAD_MAX_CREEP_ACCEL)
+    return output_accel
+
+  def cap_subaru_stop_release_accel(self, output_accel, stopping_handoff, should_stop):
+    """Prevent an Impreza stop-sign handoff from stepping straight into full throttle."""
+    if not self.is_subaru_impreza_2020:
+      return output_accel
+
+    if should_stop:
+      self.subaru_stop_release_frames = 0
+    elif stopping_handoff:
+      self.subaru_stop_release_frames = int(round(SUBARU_IMPREZA_STOP_RELEASE_TIME / DT_CTRL))
+
+    if self.subaru_stop_release_frames <= 0:
+      return output_accel
+
+    self.subaru_stop_release_frames -= 1
+    return min(float(output_accel), SUBARU_IMPREZA_STOP_RELEASE_MAX_ACCEL)
 
   def apply_bolt_start_handoff_floor(self, output_accel, last_output_accel, a_target, v_ego,
                                      starting_handoff, should_stop, has_lead):
@@ -200,12 +279,22 @@ class LongControlVehicleTuning:
         lead_brake <= TOYOTA_SIENNA_COMFORT_FILTER_MAX_LEAD_BRAKE
       )
 
-    # Keep the legacy high-speed filter unchanged. The lower-speed entry is only
-    # for a centered lead with enough room to soften a comfort response.
     if v_ego < TOYOTA_SIENNA_TARGET_FILTER_MIN_SPEED and not comfort_filter_active:
+      if a_target > 0.0:
+        if not self.toyota_sienna_target_filter_initialized or self.toyota_sienna_filtered_a_target < 0.0:
+          self.toyota_sienna_filtered_a_target = 0.0
+          self.toyota_sienna_target_filter_initialized = True
+        alpha = DT_CTRL / (TOYOTA_SIENNA_LOW_SPEED_ACCEL_UP_TAU + DT_CTRL)
+        self.toyota_sienna_filtered_a_target += alpha * (
+          float(a_target) - self.toyota_sienna_filtered_a_target
+        )
+        return self.toyota_sienna_filtered_a_target
+
       self.toyota_sienna_target_filter_initialized = False
       return a_target
 
+    # Keep the legacy high-speed filter unchanged. The lower-speed entry is only
+    # for a centered lead with enough room to soften a comfort response.
     if comfort_filter_active:
       bypass_filter = a_target <= TOYOTA_SIENNA_COMFORT_FILTER_BRAKE_BYPASS
     else:
@@ -225,6 +314,31 @@ class LongControlVehicleTuning:
     alpha = DT_CTRL / (tau + DT_CTRL)
     self.toyota_sienna_filtered_a_target += alpha * (float(a_target) - self.toyota_sienna_filtered_a_target)
     return self.toyota_sienna_filtered_a_target
+
+  def shape_toyota_corolla_accel_target(self, a_target, v_ego, should_stop, last_output_accel):
+    """Smooth low-speed Corolla TSS2 stop releases without delaying hard braking."""
+    if not self.is_toyota_corolla_tss2 or should_stop or v_ego >= TOYOTA_COROLLA_TARGET_FILTER_MAX_SPEED:
+      self.toyota_corolla_target_filter_initialized = False
+      return a_target
+
+    if not self.toyota_corolla_target_filter_initialized:
+      self.toyota_corolla_filtered_a_target = float(last_output_accel)
+      self.toyota_corolla_target_filter_initialized = True
+
+    bypass_filter = (
+      a_target <= TOYOTA_COROLLA_TARGET_FILTER_BRAKE_BYPASS or
+      a_target < self.toyota_corolla_filtered_a_target - TOYOTA_COROLLA_TARGET_FILTER_DROP_BYPASS
+    )
+    if bypass_filter:
+      self.toyota_corolla_filtered_a_target = float(a_target)
+      return float(a_target)
+
+    tau = (TOYOTA_COROLLA_TARGET_FILTER_DOWN_TAU
+           if a_target < self.toyota_corolla_filtered_a_target
+           else TOYOTA_COROLLA_TARGET_FILTER_UP_TAU)
+    alpha = DT_CTRL / (tau + DT_CTRL)
+    self.toyota_corolla_filtered_a_target += alpha * (float(a_target) - self.toyota_corolla_filtered_a_target)
+    return self.toyota_corolla_filtered_a_target
 
   def get_integrator_freeze(self, last_output_accel, a_target, error, v_ego, accel_limits):
     volt_test_tune_handoff = self.is_volt and testing_ground.use_2

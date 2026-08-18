@@ -1,0 +1,13 @@
+{
+  "karnbir": {"ref": "c0fbd2b13030df95ad249b6e253156a4d7ddb7bb", "input_format": "supercombo"},
+  "karnbir2": {"ref": "682d33d0414d7cef5a7286c24298003503ea13f4", "input_format": "supercombo"},
+  "michael-rl": {"ref": "968fd3c989b993cf03187aa0e05cd2088e275551", "input_format": "supercombo"},
+  "michael-rl2": {"ref": "37b38bf738edfb1daa6875255f581e5fc9b0a258", "input_format": "supercombo"},
+  "tobyrl": {"ref": "2d4acf10e34c4c8e68043d60b9437f42d89ca746", "input_format": "supercombo"},
+  "nopp": {"ref": "c740fe5f58faefcb9184c6f9f1fb45130b83cfe8", "input_format": "supercombo"},
+  "drl": {"ref": "a881acfbd59cb9ed18c54535b835721e2bc96def", "input_format": "supercombo"},
+  "deeprl33": {"ref": "4604c98f21c9a22230e417d17d03c402b9b5f869", "input_format": "supercombo"},
+  "rl34": {"ref": "4e6b072404110056ccf9bcc232c718ac71d45478", "input_format": "supercombo"},
+  "gyhu": {"ref": "574735edc6e1aafdc2a69395f9a32e7f5cc4b62b", "input_format": "supercombo"},
+  "rdf2": {"ref": "0f8b4248a2e8bdd63b6ea4c6e1bbb32119cb2620", "input_format": "supercombo"}
+}

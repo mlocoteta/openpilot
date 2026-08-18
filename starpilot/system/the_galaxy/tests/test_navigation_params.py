@@ -85,7 +85,15 @@ def _params_client(monkeypatch, values, device_type):
   monkeypatch.setattr(
     the_galaxy,
     "_get_param_type_info",
-    lambda: ({"UseOldUI", "TryRaylibUI"}, {"UseOldUI": bool, "TryRaylibUI": bool}),
+    lambda: (
+      {"AlphaLongitudinalEnabled", "ForceOffroad", "UseOldUI", "TryRaylibUI"},
+      {
+        "AlphaLongitudinalEnabled": bool,
+        "ForceOffroad": bool,
+        "UseOldUI": bool,
+        "TryRaylibUI": bool,
+      },
+    ),
   )
   monkeypatch.setattr(the_galaxy.HARDWARE, "get_device_type", lambda: device_type)
   monkeypatch.setattr(the_galaxy.Paths, "comma_home", lambda: "/tmp/dashboard-test-home", raising=False)
@@ -302,6 +310,82 @@ def test_legacy_try_raylib_ui_payload_updates_use_old_ui(monkeypatch):
   assert fake_params.values["UseOldUI"] is False
   assert fake_params.values["TryRaylibUI"] is True
   assert fake_params.writes == [("UseOldUI", False), ("TryRaylibUI", True)]
+
+
+def test_alpha_longitudinal_toggle_writes_and_requests_offroad_cycle(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "AlphaLongitudinalEnabled": False,
+    "IsOnroad": False,
+  }, "tici")
+  monkeypatch.setattr(the_galaxy, "_get_alpha_longitudinal_available", lambda: True)
+
+  response = client.put("/api/params", json={"key": "AlphaLongitudinalEnabled", "value": True})
+
+  assert response.status_code == 200
+  assert fake_params.values["AlphaLongitudinalEnabled"] is True
+  assert fake_params.values["OnroadCycleRequested"] is True
+  assert fake_params.writes == [
+    ("AlphaLongitudinalEnabled", True),
+    ("OnroadCycleRequested", True),
+  ]
+
+
+def test_alpha_longitudinal_toggle_rejects_onroad(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "AlphaLongitudinalEnabled": False,
+    "IsOnroad": True,
+  }, "tici")
+  monkeypatch.setattr(the_galaxy, "_get_alpha_longitudinal_available", lambda: True)
+
+  response = client.put("/api/params", json={"key": "AlphaLongitudinalEnabled", "value": True})
+
+  assert response.status_code == 403
+  assert response.get_json()["error"] == "Cannot change Alpha Longitudinal while driving."
+  assert fake_params.writes == []
+
+
+def test_alpha_longitudinal_toggle_rejects_unsupported_vehicle(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "AlphaLongitudinalEnabled": False,
+    "IsOnroad": False,
+  }, "tici")
+  monkeypatch.setattr(the_galaxy, "_get_alpha_longitudinal_available", lambda: False)
+
+  response = client.put("/api/params", json={"key": "AlphaLongitudinalEnabled", "value": True})
+
+  assert response.status_code == 403
+  assert response.get_json()["error"] == "Alpha Longitudinal is not available for the detected vehicle."
+  assert fake_params.writes == []
+
+
+def test_force_offroad_toggle_requires_live_park(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "ForceOffroad": False,
+    "ForceOnroad": False,
+    "IsOnroad": True,
+  }, "tici")
+  monkeypatch.setattr(the_galaxy, "_get_vehicle_parked", lambda: True)
+
+  response = client.put("/api/params", json={"key": "ForceOffroad", "value": True})
+
+  assert response.status_code == 200
+  assert response.get_json()["updated"] == {"ForceOffroad": True, "ForceOnroad": False}
+  assert fake_params.values["ForceOffroad"] is True
+  assert fake_params.values["ForceOnroad"] is False
+
+
+def test_force_offroad_toggle_rejects_when_not_parked(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {
+    "ForceOffroad": False,
+    "IsOnroad": True,
+  }, "tici")
+  monkeypatch.setattr(the_galaxy, "_get_vehicle_parked", lambda: False)
+
+  response = client.put("/api/params", json={"key": "ForceOffroad", "value": True})
+
+  assert response.status_code == 403
+  assert response.get_json()["error"] == "Force Offroad is only available while the vehicle is in Park."
+  assert fake_params.writes == []
 
 
 def test_curve_speed_controller_reset_clears_learned_data_offroad(monkeypatch):

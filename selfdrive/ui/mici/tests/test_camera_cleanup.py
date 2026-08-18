@@ -174,6 +174,7 @@ def test_reverse_activation_cancels_mismatched_pending_switch():
   view._target_stream_type = mici_augmented_road_view.WIDE_CAM
   view._target_client = object()
   view._switching = True
+  view.available_streams = []
   view._closed = True
   view._update_reverse_driver_camera_state = lambda: True
 
@@ -204,6 +205,31 @@ def test_onroad_reentry_keeps_matching_candidate_alive():
     assert view._target_client is candidate
     assert view._target_stream_type == module.ROAD_CAM
     assert view._switching
+
+
+@pytest.mark.parametrize("module", (big_augmented_road_view, mici_augmented_road_view))
+def test_initial_camera_selection_discovers_wide_before_connecting(module):
+  view = module.AugmentedRoadView.__new__(module.AugmentedRoadView)
+  selected = []
+  view._stream_type = module.ROAD_CAM
+  view._target_stream_type = None
+  view._target_client = None
+  view._switching = False
+  view.available_streams = []
+  view._onroad_reentry_pending = False
+  view._reentry_stream_selected = False
+  view._closed = True
+  view._update_reverse_driver_camera_state = lambda: False
+  view._refresh_available_streams = lambda: view.available_streams.append(module.WIDE_CAM)
+  view.switch_stream = selected.append
+
+  sm = {
+    "selfdriveState": SimpleNamespace(experimentalMode=True),
+    "carState": SimpleNamespace(vEgo=0.0),
+  }
+  view._switch_stream_if_needed(sm, module.CAMERA_VIEW_AUTO)
+
+  assert selected == [module.WIDE_CAM]
 
 
 def test_onroad_transition_marks_camera_reentry(monkeypatch):

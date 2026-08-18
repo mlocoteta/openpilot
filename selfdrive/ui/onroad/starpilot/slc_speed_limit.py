@@ -11,6 +11,11 @@ from openpilot.selfdrive.ui.onroad.starpilot.widget_style import (
   CONTROL_BG, CONTROL_BORDER, CONTROL_BORDER_WIDTH, CONTROL_ROUNDNESS, CONTROL_SEGMENTS, SLC_HEIGHT,
   draw_control_card, roundness_for,
 )
+from openpilot.selfdrive.ui.onroad.starpilot.source_bubble_layout import (
+  enabled_source_titles, fit_source_label, source_abbreviated_value_text,
+  source_content_metrics, source_value_text, visible_source_rows,
+)
+from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
 
 _WHITE = rl.Color(255, 255, 255, 255)
 
@@ -130,7 +135,13 @@ def _get_slc_state():
   show_offset = params.get_bool("ShowSLCOffset")
 
   dashboard_sl = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
-  vision_sl = ui_state.params_memory.get_float("VisionSpeedLimit") if params.get_bool("VisionSpeedLimitDetection") else 0.0
+  vision_enabled = params.get_bool("VisionSpeedLimitDetection")
+  vision_sl = ui_state.params_memory.get_float("VisionSpeedLimit") if vision_enabled else 0.0
+  primary_priority = params.get("SLCPriority1", encoding="utf-8") or "Map Data"
+  secondary_priority = params.get("SLCPriority2", encoding="utf-8") or "None"
+  mapbox_enabled = params.get_bool("SLCMapboxFiller") and bool(
+    params.get("MapboxSecretKey", encoding="utf-8")
+  )
 
   slc_overridden_speed = plan.slcOverriddenSpeed
   # Driver override takes precedence over the planner's limit when active.
@@ -167,6 +178,15 @@ def _get_slc_state():
     'offset_str': offset_str,
     'speed_conversion': speed_conversion,
     'speed_unit': " km/h" if ui_state.is_metric else " mph",
+    'slc_abbreviated_sources': params.get_bool("SLCAbbreviatedSources"),
+    'slc_active_sources_only': params.get_bool("SLCActiveSourcesOnly"),
+    'slc_enabled_sources': enabled_source_titles(
+      primary_priority,
+      secondary_priority,
+      vision_enabled=vision_enabled,
+      mapbox_enabled=mapbox_enabled,
+      dashboard_available=starpilot_state.car_state.hasDashSpeedLimits,
+    ),
     # Per-source raw values
     'dashboard_sl': max(0.0, dashboard_sl * speed_conversion),
     'map_sl': max(0.0, plan.slcMapSpeedLimit * speed_conversion),
@@ -398,34 +418,40 @@ def _draw_sign(state: dict, rect: rl.Rectangle, *, pending: bool = False):
 
 # ── Sources Bubble (expandable overlay) ────────────────────────────────
 
-# Fixed width fits the longest source label and a three-digit speed at 26px.
+# Fixed outer footprint; the content scale adapts to the visible row count.
 _SOURCE_PANEL_WIDTH = 248
 _SOURCE_PANEL_GAP = 20
 _SOURCE_PANEL_PAD_X = 9
-_SOURCE_PANEL_PAD_Y = 4
-_SOURCE_PANEL_BG = rl.Color(0, 0, 0, 145)
-_SOURCE_PANEL_BORDER = rl.Color(196, 205, 208, 72)
-_SOURCE_DIVIDER = rl.Color(196, 205, 208, 70)
+_SOURCE_PANEL_PAD_Y = 2
+_SOURCE_PANEL_BG = rl.Color(0, 0, 0, 175)
+_SOURCE_PANEL_BORDER = rl.Color(196, 205, 208, 80)
+_SOURCE_DIVIDER = rl.Color(196, 205, 208, 100)
 _SOURCE_ACTIVE_BAR = rl.Color(CONTROL_BORDER.r, CONTROL_BORDER.g, CONTROL_BORDER.b, 230)
-_SOURCE_ICON_MUTED = rl.Color(196, 205, 208, 190)
-_SOURCE_LABEL = rl.Color(255, 255, 255, 215)
-_SOURCE_FONT = 26
-_SOURCE_ICON_TEXT_GAP = 8
-_SOURCE_ICON_SIZE = 28
-_SOURCE_ACTIVE_BAR_WIDTH = 5.0
-_SOURCE_ACTIVE_BAR_HEIGHT = 32.0
+_SOURCE_ICON_MUTED = rl.Color(196, 205, 208, 220)
+_SOURCE_LABEL = rl.Color(255, 255, 255, 235)
+_SOURCE_ACTIVE_BAR_WIDTH = 6.0
+_SOURCE_ACTIVE_BAR_HEIGHT = 36.0
 _SOURCE_ACTIVE_BAR_X = 2.0
-_SOURCE_ACTIVE_BAR_ROW_INSET = 6.0
+_SOURCE_ACTIVE_BAR_ROW_INSET = 3.0
+_SOURCE_MIN_LABEL_VALUE_GAP = 6.0
+
+_SOURCE_COMPACT_LABELS = {
+  "Dashboard": "Dash",
+  "Map Data": "OSM",
+  "Vision": "Vision",
+  "Mapbox": "Mapbox",
+  "Next": "Next",
+}
 
 
 def _draw_source_icon(icon_key: str, x: float, y: float, size: float, color: rl.Color) -> None:
   """Draw the small, intentionally simple source glyphs used by the panel."""
   cx = x + size / 2
   cy = y + size / 2
-  stroke = max(2.0, size / 12.0)
+  stroke = max(2.5, size / 12.0)
 
   if icon_key == "map":
-    map_stroke = max(2.0, size * 0.075)
+    map_stroke = max(2.5, size * 0.075)
     left = x + size * 0.12
     fold_left = x + size * 0.37
     fold_right = x + size * 0.63
@@ -462,7 +488,7 @@ def _draw_source_icon(icon_key: str, x: float, y: float, size: float, color: rl.
       0.18, 8, color,
     )
   elif icon_key == "next":
-    arrow_stroke = max(2.0, size * 0.08)
+    arrow_stroke = max(2.5, size * 0.08)
     arrow_tip = rl.Vector2(x + size * 0.88, cy)
     rl.draw_line_ex(rl.Vector2(x + size * 0.10, cy), arrow_tip, arrow_stroke, color)
     for endpoint in (
@@ -517,14 +543,24 @@ def _draw_source_icon(icon_key: str, x: float, y: float, size: float, color: rl.
 def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
   """Draw the expanded source list attached to the SLC card."""
   font_semi = _get_semi_bold()
+  font_bold = _get_bold()
   active_source = state['speed_limit_source']
+  enabled_sources = state.get('slc_enabled_sources', ())
+  active_only = state.get('slc_active_sources_only', False)
+  abbreviated = state.get('slc_abbreviated_sources', False)
 
-  rows = []
-  for title, _abbrev, value_key, panel_label, icon_key in SOURCE_DEFS:
-    value = state[value_key]
-    if value == 0 and active_source != title:
-      continue
-    rows.append((panel_label, icon_key, value, active_source == title))
+  rows = [
+    (
+      panel_label,
+      _SOURCE_COMPACT_LABELS[panel_label],
+      icon_key,
+      value,
+      is_active,
+    )
+    for panel_label, icon_key, value, is_active in visible_source_rows(
+      SOURCE_DEFS, state, active_source, enabled_sources, active_only,
+    )
+  ]
 
   if not rows:
     return
@@ -543,9 +579,13 @@ def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
   row_h = (panel_rect.height - 2 * _SOURCE_PANEL_PAD_Y) / len(rows)
   content_left = panel_rect.x + _SOURCE_PANEL_PAD_X
   content_right = panel_rect.x + panel_rect.width - _SOURCE_PANEL_PAD_X
-  label_left = content_left + _SOURCE_ICON_SIZE + _SOURCE_ICON_TEXT_GAP
+  font_size, icon_size, icon_gap = source_content_metrics(len(rows))
+  label_left = (
+    content_left + _SOURCE_ACTIVE_BAR_WIDTH + _SOURCE_MIN_LABEL_VALUE_GAP
+    if abbreviated else content_left + icon_size + icon_gap
+  )
 
-  for index, (panel_label, icon_key, value, is_active) in enumerate(rows):
+  for index, (panel_label, compact_label, icon_key, value, is_active) in enumerate(rows):
     row_y = panel_rect.y + _SOURCE_PANEL_PAD_Y + index * row_h
     if index:
       divider_y = row_y
@@ -556,14 +596,6 @@ def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
         _SOURCE_DIVIDER,
       )
 
-    text_font = font_semi
-    label_text = panel_label
-    value_text = "\u2013" if value <= 0 else str(int(round(value)))
-    font_size = _SOURCE_FONT
-    value_size = measure_text_cached(text_font, value_text, font_size)
-
-    baseline_y = row_y + (row_h - value_size.y) / 2
-    icon_y = row_y + (row_h - _SOURCE_ICON_SIZE) / 2
     if is_active:
       active_bar_height = min(
         _SOURCE_ACTIVE_BAR_HEIGHT,
@@ -577,15 +609,54 @@ def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
       )
       rl.draw_rectangle_rounded(active_bar_rect, 0.5, 4, _SOURCE_ACTIVE_BAR)
 
+    value_text = source_value_text(value)
+    if abbreviated:
+      text_font = font_bold if is_active else font_semi
+      label_text = fit_source_label(
+        f"{tr(compact_label)}-{source_abbreviated_value_text(value)}",
+        "",
+        content_right - label_left,
+        lambda text: measure_text_cached(text_font, text, font_size).x,
+      )
+      label_size = measure_text_cached(text_font, label_text, font_size)
+      baseline_y = row_y + (row_h - label_size.y) / 2
+      rl.draw_text_ex(
+        text_font,
+        label_text,
+        rl.Vector2(label_left, baseline_y),
+        font_size,
+        0,
+        _WHITE if is_active else _SOURCE_LABEL,
+      )
+      continue
+
+    compact_label = tr(compact_label)
+    full_label = compact_label
+    value_size = measure_text_cached(font_bold, value_text, font_size)
+    max_label_width = max(
+      0.0,
+      content_right - label_left - _SOURCE_MIN_LABEL_VALUE_GAP - value_size.x,
+    )
+    label_text = fit_source_label(
+      full_label,
+      compact_label,
+      max_label_width,
+      lambda text: measure_text_cached(font_semi, text, font_size).x,
+    )
+    label_size = measure_text_cached(font_semi, label_text, font_size)
+    text_height = max(label_size.y, value_size.y)
+    baseline_y = row_y + (row_h - text_height) / 2
+    icon_y = row_y + (row_h - icon_size) / 2
+
     icon_color = _WHITE if is_active else _SOURCE_ICON_MUTED
-    _draw_source_icon(icon_key, content_left, icon_y, _SOURCE_ICON_SIZE, icon_color)
+    _draw_source_icon(icon_key, content_left, icon_y, icon_size, icon_color)
 
     label_pos = rl.Vector2(label_left, baseline_y)
     value_pos = rl.Vector2(content_right - value_size.x, baseline_y)
     label_color = _WHITE if is_active else _SOURCE_LABEL
     value_color = _WHITE if is_active else _SOURCE_LABEL
-    rl.draw_text_ex(text_font, label_text, label_pos, font_size, 0, label_color)
-    rl.draw_text_ex(text_font, value_text, value_pos, font_size, 0, value_color)
+    rl.draw_text_ex(font_semi, label_text, label_pos, font_size, 0, label_color)
+    rl.draw_text_ex(font_bold, value_text, value_pos, font_size, 0, value_color)
 
 
 # ── Public API ────────────────────────────────────────────────────────

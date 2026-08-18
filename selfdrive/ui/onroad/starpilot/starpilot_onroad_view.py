@@ -105,7 +105,6 @@ class StarPilotOnroadView(AugmentedRoadView):
     rl.draw_rectangle_rounded_lines_ex(rect, 0.12, 10, border_width, rl.BLACK)
     border_rect = rl.Rectangle(rect.x + border_width, rect.y + border_width,
                                 rect.width - 2 * border_width, rect.height - 2 * border_width)
-    render_behind(border_rect, border_width)
     render_overlay(border_rect, border_width)
 
   def _render_slc(self):
@@ -147,24 +146,19 @@ class StarPilotOnroadView(AugmentedRoadView):
     """Render path features in the parent's clipped road-overlay layer."""
     mr = self.model_renderer
 
-    # Only render if we have path data
-    if not mr._path.projected_points.size:
-      return
+    if mr._path.projected_points.size:
+      # Path edges (always rendered if track_edge_vertices exist)
+      if mr._track_edge_vertices.size >= 4:
+        render_path_edges(mr)
 
-    rl.begin_scissor_mode(
-      int(round(rect.x)), int(round(rect.y)),
-      int(round(rect.width)), int(round(rect.height)),
-    )
+      # Render adjacent lanes (incorporates both adjacent path and blind spot warnings)
+      render_adjacent_lanes(mr)
 
-    # Path edges (always rendered if track_edge_vertices exist)
-    if mr._track_edge_vertices.size >= 4:
-      render_path_edges(mr)
+      # Render stopping point atop the path
+      render_stopping_point(mr, self._font_bold)
 
-    # Render adjacent lanes (incorporates both adjacent path and blind spot warnings)
-    render_adjacent_lanes(mr)
-
-    # Render stopping point atop the path
-    render_stopping_point(mr, self._font_bold)
+    # Keep the CSC glow above the camera/model/path layers, but below the HUD.
+    render_behind(rect, self._get_border_width())
 
   def _full_alert_showing(self) -> bool:
     alert_showing, _ = self.alert_renderer.will_render()

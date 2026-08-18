@@ -786,7 +786,7 @@ class LongitudinalMpc:
 
   def get_vision_follow_cruise_hold(self, prev_source, lead_one, lead_two,
                                     lead_0_obstacle, lead_1_obstacle, cruise_obstacle,
-                                    v_ego, t_follow, tracking_lead):
+                                    v_ego, t_follow, tracking_lead, *, early_follow=False):
     if not tracking_lead or prev_source not in ("lead0", "lead1"):
       return None
 
@@ -795,7 +795,24 @@ class LongitudinalMpc:
       return None
     if float(getattr(prev_lead, "modelProb", 0.0)) < VISION_FOLLOW_CRUISE_HOLD_MIN_MODEL_PROB:
       return None
-    if self.get_stable_follow_cruise_hysteresis(prev_lead, v_ego, t_follow) <= 0.0:
+    if early_follow:
+      # Silverado admits a credible centered vision lead before it reaches the
+      # normal matched-follow window. Hold that lead through the harmless
+      # cruise/lead crossover, but never through a closing or braking lead.
+      relative_speed = float(v_ego) - float(prev_lead.vLead)
+      actual_headway = float(prev_lead.dRel) / max(float(v_ego), 1e-3)
+      if (
+        float(v_ego) < 18.0 or
+        abs(relative_speed) > 2.5 or
+        actual_headway < 0.95 or
+        actual_headway > 2.35 or
+        float(prev_lead.dRel) > 130.0 or
+        abs(float(getattr(prev_lead, "yRel", 0.0))) > 1.2 or
+        max(0.0, -float(getattr(prev_lead, "aLeadK", 0.0))) > 0.35 or
+        float(getattr(prev_lead, "modelProb", 0.0)) < 0.95
+      ):
+        return None
+    elif self.get_stable_follow_cruise_hysteresis(prev_lead, v_ego, t_follow) <= 0.0:
       return None
 
     prev_lead_obstacle = float(lead_0_obstacle if prev_source == "lead0" else lead_1_obstacle)
@@ -845,7 +862,7 @@ class LongitudinalMpc:
   def update(self, radarstate, v_cruise, x, v, a, j, danger_factor, t_follow,
              personality=log.LongitudinalPersonality.standard, tracking_lead=True,
              optional_far_lead_comfort=True, smooth_duplicate_vision=False,
-             stop_x=None):
+             stop_x=None, silverado_early_follow=False):
     v_ego = self.x0[1]
     lead_one = radarstate.leadOne
     lead_two = radarstate.leadTwo
@@ -939,6 +956,7 @@ class LongitudinalMpc:
               v_ego,
               t_follow,
               tracking_lead,
+              early_follow=silverado_early_follow,
             )
       self.source = sticky_source or candidate_source
 

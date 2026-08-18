@@ -1,9 +1,9 @@
 import colorsys
+import math
 import numpy as np
 import pyray as rl
 from cereal import messaging, car
 from dataclasses import dataclass, field
-from openpilot.common.params import Params
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
@@ -89,10 +89,16 @@ class ModelRenderer(Widget):
       colors=[],
       stops=[],
     )
+    self._path_gradient = Gradient(
+      start=(0.0, 1.0),
+      end=(0.0, 0.0),
+      colors=THROTTLE_COLORS,
+      stops=[0.0, 0.5, 1.0],
+    )
     self._rainbow_path = RainbowPath()
 
     # Get longitudinal control setting from car parameters
-    self._params = Params()
+    self._params = ui_state.ui_params
     if car_params := self._params.get("CarParams"):
       cp = messaging.log_from_bytes(car_params, car.CarParams)
       self._longitudinal_control = cp.openpilotLongitudinalControl
@@ -201,13 +207,24 @@ class ModelRenderer(Widget):
   def _update_model(self, lead, path_x_array):
     """Update model visualization data based on model message"""
     model_ui_enabled = self._params.get_bool("ModelUI", default=True)
-    custom_path_width = model_ui_enabled and self._param_float_changed("PathWidth", DEFAULT_PATH_WIDTH)
-    custom_lane_line_width = model_ui_enabled and self._param_float_changed("LaneLinesWidth", DEFAULT_LANE_LINES_WIDTH)
-    custom_road_edge_width = model_ui_enabled and self._param_float_changed("RoadEdgesWidth", DEFAULT_ROAD_EDGES_WIDTH)
+    path_width = 0.9
+    lane_line_width = None
+    road_edge_width = None
+    if model_ui_enabled:
+      path_width_value = self._params.get_float("PathWidth", default=DEFAULT_PATH_WIDTH)
+      lane_line_width_value = self._params.get_float("LaneLinesWidth", default=DEFAULT_LANE_LINES_WIDTH)
+      road_edge_width_value = self._params.get_float("RoadEdgesWidth", default=DEFAULT_ROAD_EDGES_WIDTH)
+      custom_path_width = not math.isclose(path_width_value, DEFAULT_PATH_WIDTH, rel_tol=1e-5, abs_tol=1e-8)
+      custom_lane_line_width = not math.isclose(lane_line_width_value, DEFAULT_LANE_LINES_WIDTH, rel_tol=1e-5, abs_tol=1e-8)
+      custom_road_edge_width = not math.isclose(road_edge_width_value, DEFAULT_ROAD_EDGES_WIDTH, rel_tol=1e-5, abs_tol=1e-8)
 
-    path_width = self._path_width_to_half_m(self._params.get_float("PathWidth", default=DEFAULT_PATH_WIDTH)) if custom_path_width else 0.9
-    lane_line_width = self._small_distance_to_half_m(self._params.get_float("LaneLinesWidth", default=DEFAULT_LANE_LINES_WIDTH)) if custom_lane_line_width else None
-    road_edge_width = self._small_distance_to_half_m(self._params.get_float("RoadEdgesWidth", default=DEFAULT_ROAD_EDGES_WIDTH)) if custom_road_edge_width else None
+      is_metric = self._params.get_bool("IsMetric") if custom_path_width or custom_lane_line_width or custom_road_edge_width else False
+      if custom_path_width:
+        path_width = self._path_width_to_half_m(path_width_value, is_metric)
+      if custom_lane_line_width:
+        lane_line_width = self._small_distance_to_half_m(lane_line_width_value, is_metric)
+      if custom_road_edge_width:
+        road_edge_width = self._small_distance_to_half_m(road_edge_width_value, is_metric)
 
     if model_ui_enabled and self._params.get_bool("DynamicPathWidth", default=False):
       if ui_state.status == UIStatus.ENGAGED:
@@ -343,20 +360,26 @@ class ModelRenderer(Widget):
 
     return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
 
-  def _get_ll_color(self, prob: float, adjacent: bool, left: bool):
-    alpha = np.clip(prob, 0.0, 0.7)
+  def _lane_line_palette(self) -> tuple[bool, rl.Color, rl.Color]:
     stock_scheme = is_stock_color_scheme(self._params)
     line_status = UIStatus.ENGAGED if ui_state.status == UIStatus.DISENGAGED and ui_state.always_on_lateral_active else ui_state.status
+
+    edge_color = get_param_color(self._params, "PathEdgesColor", 255)
+    if edge_color is None:
+      edge_color = (LANE_LINE_COLORS.get(line_status, LANE_LINE_COLORS[UIStatus.DISENGAGED]) if stock_scheme
+                    else get_theme_color("PathEdge", rl.Color(0, 255, 64, 255)))
+
+    lane_color = get_param_color(self._params, "LaneLinesColor", STOCK_LANE_LINES_COLOR.a)
+    if lane_color is None:
+      lane_color = STOCK_LANE_LINES_COLOR if stock_scheme else get_theme_color("LaneLines", STOCK_LANE_LINES_COLOR)
+
+    return stock_scheme, edge_color, lane_color
+
+  def _get_ll_color(self, prob: float, adjacent: bool, left: bool, stock_scheme: bool,
+                    edge_color: rl.Color, lane_color: rl.Color):
+    alpha = np.clip(prob, 0.0, 0.7)
     if adjacent:
-      override = get_param_color(self._params, "PathEdgesColor", 255)
-      if override is not None:
-        color = with_alpha(override, int(alpha * override.a))
-      elif stock_scheme:
-        base_color = LANE_LINE_COLORS.get(line_status, LANE_LINE_COLORS[UIStatus.DISENGAGED])
-        color = rl.Color(base_color.r, base_color.g, base_color.b, int(alpha * 255))
-      else:
-        base_color = get_theme_color("PathEdge", rl.Color(0, 255, 64, 255))
-        color = with_alpha(base_color, int(alpha * base_color.a))
+      color = rl.Color(edge_color.r, edge_color.g, edge_color.b, int(alpha * edge_color.a))
 
       # turn adjacent lls orange if torque is high
       torque = self._torque_filter.x
@@ -368,14 +391,7 @@ class ModelRenderer(Widget):
           np.interp(abs(torque), [0.6, 0.8], [0.0, 1.0])
         )
     else:
-      lane_lines_override = get_param_color(self._params, "LaneLinesColor", STOCK_LANE_LINES_COLOR.a)
-      if lane_lines_override is not None:
-        lane_lines_color = lane_lines_override
-      elif stock_scheme:
-        lane_lines_color = STOCK_LANE_LINES_COLOR
-      else:
-        lane_lines_color = get_theme_color("LaneLines", STOCK_LANE_LINES_COLOR)
-      color = with_alpha(lane_lines_color, int(alpha * lane_lines_color.a))
+      color = rl.Color(lane_color.r, lane_color.g, lane_color.b, int(alpha * lane_color.a))
 
     if stock_scheme and ui_state.status == UIStatus.DISENGAGED and not ui_state.always_on_lateral_active:
       color = rl.Color(0, 0, 0, int(alpha * 255))
@@ -385,11 +401,13 @@ class ModelRenderer(Widget):
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
     """Two closest lines should be green (lane line or road edges)"""
+    stock_scheme, edge_color, lane_color = self._lane_line_palette()
     for i, lane_line in enumerate(self._lane_lines):
       if lane_line.projected_points.size == 0:
         continue
 
-      color = self._get_ll_color(float(self._lane_line_probs[i]), i in (1, 2), i in (0, 1))
+      color = self._get_ll_color(float(self._lane_line_probs[i]), i in (1, 2), i in (0, 1),
+                                 stock_scheme, edge_color, lane_color)
       draw_polygon(self._rect, lane_line.projected_points, color)
 
     for i, road_edge in enumerate(self._road_edges):
@@ -397,7 +415,8 @@ class ModelRenderer(Widget):
         continue
 
       # if closest lane lines are not confident, make road edges green
-      color = self._get_ll_color(float(1.0 - self._road_edge_stds[i]), float(self._lane_line_probs[i + 1]) < 0.25, i == 0)
+      color = self._get_ll_color(float(1.0 - self._road_edge_stds[i]), float(self._lane_line_probs[i + 1]) < 0.25, i == 0,
+                                 stock_scheme, edge_color, lane_color)
       draw_polygon(self._rect, road_edge.projected_points, color)
 
   def _draw_path(self, sm):
@@ -429,29 +448,19 @@ class ModelRenderer(Widget):
         blended_colors = self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor)
         if lateral_ui_active and blend_factor < 1.0:
           blended_colors = self._blend_colors(blended_colors, THROTTLE_COLORS, 0.65)
-        gradient = Gradient(
-          start=(0.0, 1.0),
-          end=(0.0, 0.0),
-          colors=blended_colors,
-          stops=[0.0, 0.5, 1.0],
-        )
+        self._path_gradient.colors = blended_colors
         if ui_state.status == UIStatus.DISENGAGED and not ui_state.always_on_lateral_active:
           draw_polygon(self._rect, self._path.projected_points, rl.Color(0, 0, 0, 90))
         else:
-          draw_polygon(self._rect, self._path.projected_points, gradient=gradient)
+          draw_polygon(self._rect, self._path.projected_points, gradient=self._path_gradient)
     else:
       path_color = get_visual_color(self._params, "PathColor", "Path", rl.Color(48, 255, 156, 255))
-      gradient = Gradient(
-        start=(0.0, 1.0),
-        end=(0.0, 0.0),
-        colors=[
-          with_alpha(path_color, path_color.a),
-          with_alpha(path_color, int(path_color.a * 0.55)),
-          with_alpha(path_color, int(path_color.a * 0.10)),
-        ],
-        stops=[0.0, 0.5, 1.0],
-      )
-      draw_polygon(self._rect, self._path.projected_points, gradient=gradient)
+      self._path_gradient.colors = [
+        with_alpha(path_color, path_color.a),
+        with_alpha(path_color, int(path_color.a * 0.55)),
+        with_alpha(path_color, int(path_color.a * 0.10)),
+      ]
+      draw_polygon(self._rect, self._path.projected_points, gradient=self._path_gradient)
 
   def _draw_lead_indicator(self):
     # Draw lead vehicles if available
@@ -578,25 +587,18 @@ class ModelRenderer(Widget):
       int(inv_t * start.a + t * end.a)
     ) for start, end in zip(begin_colors, end_colors, strict=True)]
 
-  def _small_distance_to_half_m(self, value: float) -> float:
+  @staticmethod
+  def _small_distance_to_half_m(value: float, is_metric: bool) -> float:
     if value <= 0:
       return 0.0
-    if self._params.get_bool("IsMetric"):
+    if is_metric:
       return value / 200.0
     return value * (CV.INCH_TO_CM / 100.0) / 2.0
 
-  def _path_width_to_half_m(self, value: float) -> float:
+  @staticmethod
+  def _path_width_to_half_m(value: float, is_metric: bool) -> float:
     if value <= 0:
       return 0.0
-    if self._params.get_bool("IsMetric"):
+    if is_metric:
       return value / 2.0
     return value * CV.FOOT_TO_METER / 2.0
-
-  def _param_float_changed(self, key: str, default: float) -> bool:
-    value = self._params.get(key, encoding="utf-8")
-    if value in (None, ""):
-      return False
-    try:
-      return not np.isclose(float(value), default)
-    except (TypeError, ValueError):
-      return False

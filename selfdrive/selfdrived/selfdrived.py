@@ -12,6 +12,8 @@ from msgq.visionipc import VisionIpcClient, VisionStreamType
 
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import GMFlags
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
+from opendbc.car.nissan.values import CAR as NISSAN_CAR
 
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
@@ -59,12 +61,12 @@ IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 def commanded_torque_at_max_for_saturation(CP, output: float) -> bool:
   torque_controller = (CP.steerControlType == car.CarParams.SteerControlType.torque and
                        CP.lateralTuning.which() == "torque")
-  return torque_controller and abs(output) > 0.99
+  has_controller_grace = CP.carFingerprint == HYUNDAI_CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN
+  return torque_controller and not has_controller_grace and abs(output) > 0.99
 
 
 def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles, combined_left_bsm=None, combined_right_bsm=None) -> bool:
-  if not (getattr(starpilot_toggles, "loud_blindspot_alert", False) and
-          getattr(starpilot_toggles, "loud_blindspot_alert_when_disengaged", False)):
+  if not getattr(starpilot_toggles, "loud_blindspot_alert_when_disengaged", False):
     return False
 
   combined_left_bsm = CS.leftBlindspot if combined_left_bsm is None else combined_left_bsm
@@ -94,6 +96,11 @@ def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles, combi
 def get_starpilot_alert_filters(current_alert_types: list[str], clear_event_types: set[str], starpilot_events: Events) -> tuple[list[str], set[str]]:
   starpilot_alert_types = list(current_alert_types)
   starpilot_clear_event_types = set(clear_event_types)
+
+  if int(StarPilotEventName.lkasEnable) in starpilot_events.names:
+    if ET.WARNING not in starpilot_alert_types:
+      starpilot_alert_types.append(ET.WARNING)
+    starpilot_clear_event_types.discard(ET.WARNING)
 
   # This alert is explicitly allowed while lateral is paused/off. The state
   # machine only exposes WARNING while active/AOL, so let this warning through.
@@ -217,6 +224,10 @@ class SelfdriveD:
     self.logged_comm_issue = None
     self.not_running_prev = None
     self.experimental_mode = False
+    self.ecu_disable_failed = False
+    self.ecu_disable_failed_checked = not (
+      self.CP.openpilotLongitudinalControl and self.CP.carFingerprint == NISSAN_CAR.NISSAN_LEAF
+    )
     self.safe_mode = self.params.get_bool("SafeMode")
     self.personality = log.LongitudinalPersonality.relaxed if self.safe_mode else self.params.get("LongitudinalPersonality", return_default=True)
     self.recalibrating_seen = False
@@ -270,6 +281,23 @@ class SelfdriveD:
 
     self.FPCP = messaging.log_from_bytes(self.params.get("StarPilotCarParams", block=True), custom.StarPilotCarParams)
 
+  def update_ecu_disable_failed(self):
+    if self.ecu_disable_failed_checked:
+      return
+    if self.CP.carFingerprint != NISSAN_CAR.NISSAN_LEAF:
+      self.ecu_disable_failed_checked = True
+      return
+
+    if self.params.get_bool("ControlsReady"):
+      self.ecu_disable_failed = self.params.get_bool("EcuDisableFailed")
+      self.ecu_disable_failed_checked = True
+      if self.ecu_disable_failed:
+        fallback_cp = messaging.log_from_bytes(self.params.get("CarParams"), car.CarParams)
+        fallback_fpcp = messaging.log_from_bytes(self.params.get("StarPilotCarParams"), custom.StarPilotCarParams)
+        self.CP.openpilotLongitudinalControl = fallback_cp.openpilotLongitudinalControl
+        self.CP.pcmCruise = fallback_cp.pcmCruise
+        self.FPCP = fallback_fpcp
+
   def clear_longitudinal_excessive_actuation_alert(self):
     alert = self.params.get("Offroad_ExcessiveActuation")
     if not alert:
@@ -299,6 +327,7 @@ class SelfdriveD:
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
+    self.update_ecu_disable_failed()
     self.events.clear()
     self.starpilot_events.clear()
 

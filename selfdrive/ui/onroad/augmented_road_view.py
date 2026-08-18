@@ -197,9 +197,9 @@ class AugmentedRoadView(CameraView):
   @staticmethod
   def _camera_view() -> int:
     params = ui_state.ui_params
-    camera_view = params.get_int("CameraView", return_default=True, default=CAMERA_VIEW_WIDE)
+    camera_view = params.get_int("CameraView", return_default=True, default=CAMERA_VIEW_STANDARD)
     if camera_view not in (CAMERA_VIEW_AUTO, CAMERA_VIEW_DRIVER, CAMERA_VIEW_STANDARD, CAMERA_VIEW_WIDE, CAMERA_VIEW_NONE):
-      return CAMERA_VIEW_WIDE
+      return CAMERA_VIEW_STANDARD
     return camera_view
 
   def _switch_stream_if_needed(self, sm, camera_view: int):
@@ -211,28 +211,31 @@ class AugmentedRoadView(CameraView):
 
     reentry_selection_pending = (getattr(self, "_onroad_reentry_pending", False) and
                                  not getattr(self, "_reentry_stream_selected", False))
-    if reentry_selection_pending:
-      self._refresh_available_streams()
-
     if self._update_reverse_driver_camera_state():
       target = DRIVER_CAM
-    elif camera_view == CAMERA_VIEW_DRIVER:
-      target = DRIVER_CAM
-    elif camera_view == CAMERA_VIEW_STANDARD:
-      target = ROAD_CAM
-    elif camera_view == CAMERA_VIEW_WIDE:
-      target = WIDE_CAM if WIDE_CAM in self.available_streams else ROAD_CAM
-    elif sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
-      v_ego = sm['carState'].vEgo
-      if v_ego < WIDE_CAM_MAX_SPEED:
-        target = WIDE_CAM
-      elif v_ego > ROAD_CAM_MIN_SPEED:
-        target = ROAD_CAM
-      else:
-        # Hysteresis zone - keep current road camera selection.
-        target = WIDE_CAM if self.stream_type == WIDE_CAM else ROAD_CAM
     else:
-      target = ROAD_CAM
+      if reentry_selection_pending or not self.available_streams:
+        self._refresh_available_streams()
+
+      if camera_view == CAMERA_VIEW_DRIVER:
+        target = DRIVER_CAM
+      elif camera_view == CAMERA_VIEW_STANDARD:
+        target = ROAD_CAM
+      elif camera_view == CAMERA_VIEW_WIDE:
+        target = WIDE_CAM if WIDE_CAM in self.available_streams else ROAD_CAM
+      elif sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
+        v_ego = sm['carState'].vEgo
+        if v_ego < WIDE_CAM_MAX_SPEED:
+          target = WIDE_CAM
+        elif v_ego > ROAD_CAM_MIN_SPEED:
+          target = ROAD_CAM
+        else:
+          # Hysteresis zone - keep the current or pending road camera selection.
+          current_road_stream = (self._target_stream_type if self._switching and
+                                 self._target_stream_type in (ROAD_CAM, WIDE_CAM) else self.stream_type)
+          target = WIDE_CAM if current_road_stream == WIDE_CAM else ROAD_CAM
+      else:
+        target = ROAD_CAM
 
     if (reentry_selection_pending or
         self.stream_type != target or (self._switching and self._target_stream_type != target)):

@@ -291,11 +291,8 @@ StarPilotLongitudinalPanel::StarPilotLongitudinalPanel(StarPilotSettingsWindow *
     } else if (param == "CCMSetSpeedMargin") {
       longitudinalToggle = new StarPilotParamValueControl(param, title, desc, icon, 0, 15, tr(" mph"), std::map<float, QString>(), 1, true, 175);
     } else if (param == "CEModelStopTime") {
-      std::map<float, QString> stopTimeLabels;
-      for (int i = 0; i <= 10; ++i) {
-        stopTimeLabels[i] = i == 0 ? tr("Off") : i == 1 ? QString::number(i) + tr(" second") : QString::number(i) + tr(" seconds");
-      }
-      longitudinalToggle = new StarPilotParamValueControl(param, title, desc, icon, 0, 9, QString(), stopTimeLabels);
+      std::map<float, QString> stopTimeLabels{{0.0f, tr("Off")}};
+      longitudinalToggle = new StarPilotParamValueControl(param, title, desc, icon, 0, 9, tr(" seconds"), stopTimeLabels, 0.1);
     } else if (param == "CESignalSpeed") {
       std::vector<QString> ceSignalToggles{"CESignalLaneDetection"};
       std::vector<QString> ceSignalToggleNames{tr("Not For Detected Lanes")};

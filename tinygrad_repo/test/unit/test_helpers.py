@@ -1,14 +1,7 @@
-import hashlib
-from pathlib import Path
-import tempfile
-import unittest
-from unittest import mock
-
+import unittest, gc
 import numpy as np
-import zstandard
-import tinygrad.helpers
-from tinygrad.helpers import _decompress_zstd, fetch_fw, polyN, is_numpy_ndarray
-from tinygrad.tensor import Tensor
+from tinygrad.helpers import polyN, disable_gc
+from tinygrad.tensor import Tensor, is_numpy_ndarray
 
 class TestPolyN(unittest.TestCase):
   def test_tensor(self):
@@ -18,21 +11,19 @@ class TestIsNumpyNdarray(unittest.TestCase):
   def test_tensor_numpy(self):
     self.assertTrue(is_numpy_ndarray(Tensor([1, 2, 3]).numpy()))
 
-class TestZstd(unittest.TestCase):
-  def test_decompress(self):
-    payload = b"local firmware payload"
-    compressed = zstandard.ZstdCompressor().compress(payload)
-    self.assertEqual(_decompress_zstd(compressed), payload)
-
-  def test_fetch_fw_uses_local_zstd(self):
-    payload = b"local firmware payload"
-    with tempfile.TemporaryDirectory() as tmp:
-      firmware = Path(tmp) / "firmware.bin.zst"
-      firmware.write_bytes(zstandard.ZstdCompressor().compress(payload))
-      with mock.patch.object(tinygrad.helpers.pathlib, "Path", return_value=firmware), \
-           mock.patch.object(tinygrad.helpers, "fetch") as remote_fetch:
-        self.assertEqual(fetch_fw("amdgpu", "firmware.bin", hashlib.sha256(payload).hexdigest()), payload)
-        remote_fetch.assert_not_called()
+class TestDisableGC(unittest.TestCase):
+  def test_recursive_decorator(self):
+    was_enabled = gc.isenabled()
+    @disable_gc()
+    def recurse(depth:int):
+      self.assertFalse(gc.isenabled())
+      if depth: recurse(depth-1)
+      self.assertFalse(gc.isenabled())
+    try:
+      recurse(2)
+      self.assertEqual(gc.isenabled(), was_enabled)
+    finally:
+      (gc.enable if was_enabled else gc.disable)()
 
 if __name__ == '__main__':
   unittest.main()

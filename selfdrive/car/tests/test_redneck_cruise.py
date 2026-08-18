@@ -170,8 +170,8 @@ class TestRedneckCruise(unittest.TestCase):
     )
     self.assertAlmostEqual(104.4 * CV.KPH_TO_MS, target_speed)
 
-  def test_target_speed_follows_resolved_slc_target(self):
-    for internal_mph, slc_mph in ((55.0, 65.0), (65.0, 55.0)):
+  def test_target_speed_respects_manual_lower_set_speed_with_slc(self):
+    for internal_mph, slc_mph, expected_mph in ((55.0, 65.0, 55.0), (65.0, 55.0, 55.0)):
       with self.subTest(internal_mph=internal_mph, slc_mph=slc_mph):
         target_speed = select_redneck_target_speed(
           internal_mph * CV.MPH_TO_KPH,
@@ -182,7 +182,20 @@ class TestRedneckCruise(unittest.TestCase):
           allow_plan_decrease=False,
           slc_target_speed_ms=slc_mph * CV.MPH_TO_MS,
         )
-        self.assertAlmostEqual(slc_mph * CV.MPH_TO_MS, target_speed)
+        self.assertAlmostEqual(expected_mph * CV.MPH_TO_MS, target_speed)
+
+  def test_target_speed_keeps_slc_limit_when_manual_set_speed_is_higher(self):
+    target_speed = select_redneck_target_speed(
+      75.0 * CV.MPH_TO_KPH,
+      65.0 * CV.MPH_TO_MS,
+      0.0,
+      [],
+      10,
+      allow_plan_decrease=False,
+      slc_target_speed_ms=65.0 * CV.MPH_TO_MS,
+    )
+
+    self.assertAlmostEqual(65.0 * CV.MPH_TO_MS, target_speed)
 
   def test_card_target_speed_uses_longitudinal_acceleration(self):
     sm = MagicMock()
@@ -233,6 +246,41 @@ class TestRedneckCruise(unittest.TestCase):
     target_speed, lead_present = Car._get_redneck_target_speed(card, car_state, car_control)
 
     self.assertAlmostEqual(slc_target, target_speed)
+    self.assertFalse(lead_present)
+
+  def test_card_target_speed_honors_lower_redneck_slc_override(self):
+    starpilot_plan = SimpleNamespace(
+      vCruise=65.0 * CV.KPH_TO_MS,
+      slcOverriddenSpeed=55.0 * CV.KPH_TO_MS,
+      slcSpeedLimit=65.0 * CV.KPH_TO_MS,
+      slcSpeedLimitOffset=0.0,
+    )
+    sm = MagicMock()
+    sm.seen = {"starpilotPlan": True, "longitudinalPlan": False, "radarState": False}
+    sm.valid = sm.seen.copy()
+    sm.__getitem__.side_effect = {"starpilotPlan": starpilot_plan}.__getitem__
+    card = SimpleNamespace(
+      CP=SimpleNamespace(openpilotLongitudinalControl=True),
+      sm=sm,
+      starpilot_toggles=SimpleNamespace(
+        speed_limit_controller=True,
+        redneck_cruise=True,
+        speed_limit_controller_override_set_speed=True,
+      ),
+    )
+    car_state = SimpleNamespace(
+      vEgo=60.0 * CV.KPH_TO_MS,
+      vCruise=65.0,
+      cruiseState=SimpleNamespace(speedCluster=65.0 * CV.KPH_TO_MS),
+    )
+    car_control = SimpleNamespace(
+      actuators=SimpleNamespace(accel=0.0),
+      hudControl=SimpleNamespace(leadVisible=False),
+    )
+
+    target_speed, lead_present = Car._get_redneck_target_speed(card, car_state, car_control)
+
+    self.assertAlmostEqual(55.0 * CV.KPH_TO_MS, target_speed)
     self.assertFalse(lead_present)
 
   def test_target_speed_returns_plan_minimum_when_slowing_down(self):

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.controls.starpilot_planner import StarPilotPlanner, get_force_stop_jerk_scale
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_lead_follow_jerk_scale
 import openpilot.starpilot.controls.starpilot_planner as starpilot_planner_module
 
 
@@ -34,8 +35,13 @@ def make_toggles(**overrides):
 
 
 def test_force_stop_jerk_scale_is_platform_specific():
-  assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="HYUNDAI_ELANTRA_2021")) == 0.60
+  assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="HYUNDAI_ELANTRA_2021")) == 0.80
   assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="OTHER_CAR")) == 0.32
+
+
+def test_lead_follow_jerk_scale_is_platform_specific():
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")) == 1.25
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="other", carFingerprint="OTHER_CAR")) == 1.0
 
 
 def make_sm(planner, *, frame: int, v_ego: float, left_blinker: bool, right_blinker: bool = False, standstill: bool = False):

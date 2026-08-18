@@ -13,16 +13,13 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # define GLOBAL/VAR are ptrs to outside the Kernel
-  DEFINE_VAR = auto(); BIND = auto()
+  # BIND pairs a symbolic PARAM with a concrete value
+  BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # define LOCAL/REG allocate things
-  DEFINE_LOCAL = auto(); DEFINE_REG = auto()
-
-  # BUFFER is the new LOCAL/REG
+  # BUFFER allocates global/local/register storage depending on its addrspace
   BUFFER = auto()
 
   # ** 2 -- non op uops **
@@ -41,7 +38,7 @@ class Ops(FastEnum):
   SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
-  GEP = auto(); STACK = auto()
+  STACK = auto()
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()
@@ -60,7 +57,7 @@ class Ops(FastEnum):
   # ** 4 -- math **
 
   # tensor core math op, not elementwise
-  WMMA = auto(); SHAPED_WMMA = auto()
+  WMMA = auto()
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
@@ -92,12 +89,6 @@ class Ops(FastEnum):
 
   # ** 6 -- ops that don't exist in programs **
 
-  # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto()
-
-  # local unique
-  LUNIQUE = auto()
-
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
@@ -106,13 +97,14 @@ class Ops(FastEnum):
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); FLIP = auto()
-  MULTI = auto()  # MULTI is really a movement op
+  UNSHARD = auto()  # UNSHARD is really a movement op
 
   # reduce
   REDUCE = auto(); ALLREDUCE = auto()
 
-  # expander ops
-  UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()
+  # ** 7 -- pattern compiler IR (used in upat.py) **
+  # PYLITERAL carries a Python literal as an arg for CUSTOM predicates
+  PYLITERAL = auto()
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
@@ -120,14 +112,14 @@ class GroupOp:
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
-  Broadcastable = set.union(Binary, Ternary, {Ops.GROUP})
+  Broadcastable = set.union(Binary, Ternary)
 
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
-  Defines = {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
+  Defines = {Ops.PARAM, Ops.BUFFER}
 
-  Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
+  Irreducible = {Ops.CONST, Ops.SPECIAL, Ops.RANGE, Ops.PARAM, Ops.GETADDR}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
   # BinaryOps that can be flipped
@@ -138,6 +130,9 @@ class GroupOp:
 
   # BinaryOps that satisfy f(x,x)=x see https://en.wikipedia.org/wiki/Idempotence
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
+
+  # ALU ops valid as the reduce op in REDUCE/ALLREDUCE arg
+  Reduce = {Ops.ADD, Ops.MUL, Ops.MAX}
 
   # These can change the dtype to bool
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}

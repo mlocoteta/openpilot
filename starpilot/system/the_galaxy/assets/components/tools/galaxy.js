@@ -1,6 +1,7 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { isGalaxyTunnel } from "/assets/js/utils.js"
 import { Modal } from "/assets/components/modal.js"
+import { requestSentryNotificationPermission } from "/assets/components/sentry_notifications.js"
 
 const state = reactive({
   paired: false,
@@ -114,6 +115,15 @@ export function GalaxyPairing() {
               <a class="galaxy-url" href="${state.url}" target="_blank" rel="noopener">
                 ${state.url}
               </a>
+              <button
+                class="galaxy-button"
+                @click="${async () => {
+                  const permission = await requestSentryNotificationPermission()
+                  showSnackbar(permission === "granted" ? "Browser sentry notifications enabled." : "Browser notifications were not enabled.")
+                }}"
+              >
+                Enable browser alerts
+              </button>
               <button
                 class="galaxy-button galaxy-button-danger"
                 @click="${() => { state.showUnpairModal = true }}"

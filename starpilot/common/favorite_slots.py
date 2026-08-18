@@ -196,6 +196,9 @@ def toggle_favorite_slot(slot_index: int, params: Params | None = None, params_m
   if not is_bool_param(params, key):
     return False
 
+  if key == "AlphaLongitudinalEnabled" and params.get_bool("IsOnroad"):
+    return False
+
   next_value = not params.get_bool(key)
   put_bool = getattr(params, "put_bool_nonblocking", None) or getattr(params, "put_bool", None)
   if put_bool is None:

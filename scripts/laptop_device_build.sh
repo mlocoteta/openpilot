@@ -166,7 +166,12 @@ expected_capnp_version() {
 
 image_capnp_version() {
   local engine="$1"
-  "${engine}" run --rm --platform linux/arm64 "${IMAGE_NAME}" bash -lc "capnp --version | awk '{print \$4}'" 2>/dev/null || true
+  local version_output=""
+
+  version_output="$("${engine}" run --rm --platform linux/arm64 "${IMAGE_NAME}" capnp --version 2>&1 || true)"
+  printf '%s\n' "${version_output}" \
+    | sed -nE 's/.*version[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' \
+    | head -n 1
 }
 
 ensure_image_capnp_version() {

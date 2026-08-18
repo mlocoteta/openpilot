@@ -68,7 +68,16 @@ def test_galaxy_layout_contains_basic_mode_controls():
   } <= sections["Longitudinal (Speed & Following)"].keys()
   assert "RedneckCruise" not in sections["Longitudinal (Speed & Following)"].keys()
   assert sections["Developer"]["RedneckCruise"]["parent_key"] == "GalaxyDeveloperMode"
-  assert {"GalaxyDeveloperMode", "UseOldUI"} <= sections["Developer"].keys()
+  assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode", "UseOldUI"} <= sections["Developer"].keys()
+
+
+def test_device_shutdown_uses_literal_hours():
+  device_shutdown = _params_by_section(_layout())["Device & Data"]["DeviceShutdown"]
+
+  assert _declared_default("DeviceShutdown") == "6"
+  assert device_shutdown["min"] == 1
+  assert device_shutdown["max"] == 30
+  assert device_shutdown["step"] == 1
 
 
 def test_curve_speed_controller_no_lead_toggle_is_nested_under_csc():
@@ -133,6 +142,7 @@ def test_requested_simple_and_advanced_settings_tiers():
     "QOLLongitudinal",
   ):
     assert longitudinal[key]["settings_tier"] == "simple"
+  assert sections["Longitudinal (Speed & Following)"]["CEOpenRoad"]["settings_tier"] == "simple"
   for key in (
     "AdvancedLongitudinalTune",
     "CustomPersonalities",
@@ -145,6 +155,12 @@ def test_requested_simple_and_advanced_settings_tiers():
     assert longitudinal[key]["settings_tier"] == "advanced"
 
   assert developer["GalaxyDeveloperMode"]["settings_tier"] == "simple"
+  assert developer["AlphaLongitudinalEnabled"]["parent_key"] == "GalaxyDeveloperMode"
+  assert developer["AlphaLongitudinalEnabled"]["requires_offroad"] is True
+  assert developer["AlphaLongitudinalEnabled"]["settings_tier"] == "advanced"
+  assert developer["ForceOffroad"]["parent_key"] == "GalaxyDeveloperMode"
+  assert developer["ForceOffroad"]["requires_parked"] is True
+  assert developer["ForceOffroad"]["settings_tier"] == "advanced"
   assert developer["UseOldUI"]["settings_tier"] == "simple"
   assert developer["DeveloperUI"]["settings_tier"] == "advanced"
   assert developer["RedneckCruise"]["settings_tier"] == "advanced"
@@ -156,6 +172,7 @@ def test_hidden_feature_defaults_remain_enabled():
   assert _declared_default("NavDesiresAllowed") == "1"
   assert _declared_default("NavLanePositioningAllowed") == "0"
   assert _declared_default("NavLongitudinalAllowed") == "1"
+  assert _declared_default("CEOpenRoad") == "0"
 
   for key in (
     "TrafficPersonalityProfile",

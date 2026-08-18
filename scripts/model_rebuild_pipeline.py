@@ -14,14 +14,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "scripts") not in sys.path:
   sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from model_compiler import split_oversized_artifact
+from model_compiler import REPOSITORY_FILE_LIMIT, split_oversized_artifact
 
 DEFAULT_OPENPILOT = Path.home() / "openpilot"
 DEFAULT_WORKSPACE = Path("/Volumes/T5/StarPilot-Model-Rebuild-2026-06-22")
 DEFAULT_SOURCE_MAP = REPO_ROOT / "scripts/model_source_map_v22.json"
 DEFAULT_MANIFEST = DEFAULT_WORKSPACE / "manifests/model_names_v22.json"
-REMOTE = "comma@192.168.3.110"
+REMOTE = os.environ.get("STAR_PILOT_MODEL_REMOTE", "comma@192.168.3.109")
 REMOTE_ROOT = Path("/data/openpilot")
+SSH_OPTIONS = ("-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1")
 
 MODEL_FILENAMES = (
   "driving_supercombo.onnx",
@@ -100,7 +101,17 @@ def resolve_lfs(repo: Path, pointer_path: Path, ref: str, git_path: str) -> None
   oid, expected_size = pointer
   object_path = git_object_path(repo, oid)
   if not object_path.is_file():
-    run(["git", "-C", str(repo), "lfs", "fetch", "origin", ref, "--include", git_path])
+    fetch_refs = [ref]
+    if not ref.startswith("refs/"):
+      fetch_refs.extend((f"refs/remotes/origin/{ref}", f"refs/heads/{ref}"))
+    for fetch_ref in fetch_refs:
+      result = subprocess.run(
+        ["git", "-C", str(repo), "lfs", "fetch", "origin", fetch_ref, "--include", git_path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+      )
+      if result.returncode == 0 and object_path.is_file():
+        break
   if not object_path.is_file():
     raise FileNotFoundError(f"Missing LFS object {oid} for {ref}:{git_path}")
   if object_path.stat().st_size != expected_size or sha256_file(object_path) != oid:
@@ -198,7 +209,7 @@ def extract_model(model_id: str, source: dict, repo: Path, workspace: Path) -> d
 
 def remote(command: str, *, capture: bool = False):
   result = subprocess.run(
-    ["ssh", REMOTE, command],
+    ["ssh", *SSH_OPTIONS, REMOTE, command],
     check=False,
     text=capture,
     capture_output=capture,
@@ -221,6 +232,38 @@ def stage_ready_artifact(artifact: Path, workspace: Path) -> None:
     ready_path.chmod(0o644)
 
 
+def pull_remote_artifact(remote_output: str, local_output: Path) -> None:
+  """Pull either a single artifact or the compiler's repository-safe parts."""
+  local_output.unlink(missing_ok=True)
+  for stale in local_output.parent.glob(f"{local_output.name}.p[0-9][0-9]"):
+    stale.unlink()
+  local_output.parent.joinpath(f"{local_output.name}.sha256").unlink(missing_ok=True)
+  local_output.parent.mkdir(parents=True, exist_ok=True)
+  run(["rsync", "-az", "-e", "ssh -o ConnectTimeout=10 -o ConnectionAttempts=1", f"{REMOTE}:{remote_output}*", f"{local_output.parent}/"])
+
+  parts = sorted(local_output.parent.glob(f"{local_output.name}.p[0-9][0-9]"))
+  if local_output.is_file():
+    for part in parts:
+      part.unlink()
+    local_output.parent.joinpath(f"{local_output.name}.sha256").unlink(missing_ok=True)
+    return
+  checksum_path = local_output.parent / f"{local_output.name}.sha256"
+  if not parts or not checksum_path.is_file():
+    raise FileNotFoundError(f"Remote compiler returned neither {local_output.name} nor verified parts")
+  with open(local_output, "wb") as destination:
+    for part in parts:
+      with open(part, "rb") as source:
+        shutil.copyfileobj(source, destination, length=1024 * 1024)
+  expected = checksum_path.read_text().split()[0]
+  actual = sha256_file(local_output)
+  if actual != expected:
+    local_output.unlink(missing_ok=True)
+    raise ValueError(f"Reassembled {local_output.name} checksum mismatch: {actual} != {expected}")
+  for part in parts:
+    part.unlink()
+  checksum_path.unlink()
+
+
 def compile_model(model_id: str, source: dict, version: str, workspace: Path, force: bool) -> dict:
   local_output = workspace / "compiled" / f"{model_id}_driving_tinygrad.pkl"
   if local_output.is_file() and not force:
@@ -233,7 +276,7 @@ def compile_model(model_id: str, source: dict, version: str, workspace: Path, fo
   remote_input = f"{REMOTE_ROOT}/uncompiledmodels/{model_id}"
   remote_output = f"{REMOTE_ROOT}/compiledmodels/{model_id}_driving_tinygrad.pkl"
   remote(f"rm -rf {remote_input} && mkdir -p {remote_input} {REMOTE_ROOT}/compiledmodels")
-  run(["rsync", "-az", "--exclude=._*", f"{source_dir}/", f"{REMOTE}:{remote_input}/"])
+  run(["rsync", "-az", "-e", "ssh -o ConnectTimeout=10 -o ConnectionAttempts=1", "--exclude=._*", f"{source_dir}/", f"{REMOTE}:{remote_input}/"])
 
   log_path = workspace / "logs" / f"{model_id}.log"
   command_parts = [
@@ -245,11 +288,11 @@ def compile_model(model_id: str, source: dict, version: str, workspace: Path, fo
     command_parts.append("--external-gpu")
   command = " ".join(command_parts)
   with open(log_path, "wb") as log_file:
-    process = subprocess.run(["ssh", REMOTE, command], stdout=log_file, stderr=subprocess.STDOUT)
+    process = subprocess.run(["ssh", *SSH_OPTIONS, REMOTE, command], stdout=log_file, stderr=subprocess.STDOUT)
   if process.returncode != 0:
     raise RuntimeError(f"Compilation failed for {model_id}; see {log_path}")
 
-  run(["rsync", "-az", f"{REMOTE}:{remote_output}", str(local_output)])
+  pull_remote_artifact(remote_output, local_output)
   local_output.chmod(0o644)
   stage_ready_artifact(local_output, workspace)
   result = artifact_result(model_id, local_output, "compiled")
@@ -264,7 +307,7 @@ def artifact_result(model_id: str, path: Path, status: str) -> dict:
     "path": str(path),
     "size": path.stat().st_size,
     "sha256": sha256_file(path),
-    "multipart": path.stat().st_size > 100 * 1024 * 1024,
+    "multipart": path.stat().st_size > REPOSITORY_FILE_LIMIT,
   }
 
 
@@ -272,10 +315,11 @@ def validate_model(model_id: str, version: str, workspace: Path) -> dict:
   artifact = workspace / "compiled" / f"{model_id}_driving_tinygrad.pkl"
   if not artifact.is_file():
     raise FileNotFoundError(artifact)
-  run(["rsync", "-az", str(artifact), f"{REMOTE}:/data/models/{artifact.name}"])
+  run(["rsync", "-az", "-e", "ssh -o ConnectTimeout=10 -o ConnectionAttempts=1", str(artifact), f"{REMOTE}:/data/models/{artifact.name}"])
   run([
     "rsync",
     "-az",
+    "-e", "ssh -o ConnectTimeout=10 -o ConnectionAttempts=1",
     str(REPO_ROOT / "scripts/validate_model_artifact.py"),
     f"{REMOTE}:{REMOTE_ROOT}/scripts/validate_model_artifact.py",
   ])
@@ -313,7 +357,7 @@ def update_manifest(base_manifest: Path, workspace: Path, source_map: dict) -> d
     model.pop("artifact_size", None)
     model.pop("artifact_sha256", None)
     model.pop("artifact_urls", None)
-    if not artifact.is_file() or artifact.stat().st_size <= 100 * 1024 * 1024:
+    if not artifact.is_file() or artifact.stat().st_size <= REPOSITORY_FILE_LIMIT:
       model.pop("artifact_url", None)
     else:
       multipart_handoff.append({

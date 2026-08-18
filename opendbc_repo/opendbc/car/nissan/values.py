@@ -22,12 +22,27 @@ class CarControllerParams:
   LKAS_MAX_TORQUE = 1               # A value of 1 is easy to overpower
   STEER_THRESHOLD = 1.0
 
+  # 2025 Leaf ProPILOT longitudinal command limits. The propulsion request has
+  # 2048 counts per m/s^2 around a 6144-count zero point. Friction braking is
+  # blended in below -1 m/s^2 using the stock pressure range seen in logs.
+  ACCEL_MIN = -3.5
+  ACCEL_MAX = 2047 / 2048
+  PROPILOT_ACCEL_MIN = -1.0
+  PROPILOT_ACCEL_MAX = ACCEL_MAX
+  PROPILOT_ACCEL_OFFSET = 6144
+  PROPILOT_ACCEL_SCALE = 2048
+  PROPILOT_INACTIVE_RAW = 5320
+  PROPILOT_BRAKE_RAW = 2518
+  BRAKE_MAX = 659       # 0.5 pressure-count units; stock peak is 329.5
+  BRAKE_GAIN = 264.0
+
   def __init__(self, CP):
     pass
 
 
 class NissanSafetyFlags(IntFlag):
   ALT_EPS_BUS = 1
+  LONG_CONTROL = 2
 
 
 class Footnote(Enum):
@@ -60,13 +75,13 @@ class CAR(Platforms):
     NissanCarSpecs(mass=1610, wheelbase=2.705)
   )
   NISSAN_LEAF = NissanPlatformConfig(
-    [NissanCarDocs("Nissan Leaf 2018-23", video="https://youtu.be/vaMbtAh_0cY")],
+    [NissanCarDocs("Nissan Leaf 2018-25", video="https://youtu.be/vaMbtAh_0cY")],
     NissanCarSpecs(mass=1610, wheelbase=2.705),
     {Bus.pt: 'nissan_leaf_2018_generated'},
   )
   # Leaf with ADAS ECU found behind instrument cluster instead of glovebox
   # Currently the only known difference between them is the inverted seatbelt signal.
-  NISSAN_LEAF_IC = NISSAN_LEAF.override(car_docs=[NissanCarDocs("Nissan Leaf Instrument Cluster 2018-23", video=NISSAN_LEAF.car_docs[0].video)])
+  NISSAN_LEAF_IC = NISSAN_LEAF.override(car_docs=[NissanCarDocs("Nissan Leaf Instrument Cluster 2018-25", video=NISSAN_LEAF.car_docs[0].video)])
   NISSAN_ROGUE = NissanPlatformConfig(
     [NissanCarDocs("Nissan Rogue 2018-20")],
     NissanCarSpecs(mass=1610, wheelbase=2.705)

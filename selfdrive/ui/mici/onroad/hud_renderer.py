@@ -215,18 +215,18 @@ class HudRenderer(Widget):
 
     if sm.recv_frame["starpilotPlan"] >= ui_state.started_frame:
       starpilot_plan = sm["starpilotPlan"]
-      self._show_speed_limit = ui_state.params.get_bool("ShowSpeedLimits")
+      self._show_speed_limit = ui_state.ui_params.get_bool("ShowSpeedLimits")
       if self._show_speed_limit:
         dashboard_speed_limit = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
-        vision_speed_limit = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.params.get_bool("VisionSpeedLimitDetection") else 0.0
-        self._show_speed_limit_offset = ui_state.params.get_bool("ShowSLCOffset")
-        primary_priority = ui_state.params.get("SLCPriority1", encoding='utf-8') or "Map Data"
-        secondary_priority = ui_state.params.get("SLCPriority2", encoding='utf-8') or "None"
+        vision_speed_limit = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.ui_params.get_bool("VisionSpeedLimitDetection") else 0.0
+        self._show_speed_limit_offset = ui_state.ui_params.get_bool("ShowSLCOffset")
+        primary_priority = ui_state.ui_params.get("SLCPriority1", encoding='utf-8') or "Map Data"
+        secondary_priority = ui_state.ui_params.get("SLCPriority2", encoding='utf-8') or "None"
         source_limits = {
           "Dashboard": dashboard_speed_limit,
           "Map Data": starpilot_plan.slcMapSpeedLimit,
           "Vision": vision_speed_limit,
-          "Mapbox": starpilot_plan.slcMapboxSpeedLimit if ui_state.params.get_bool("SLCMapboxFiller") else 0.0,
+          "Mapbox": starpilot_plan.slcMapboxSpeedLimit if ui_state.ui_params.get_bool("SLCMapboxFiller") else 0.0,
         }
         resolved_speed_limit = resolve_display_speed_limit_ms(
           slc_speed_limit=starpilot_plan.slcSpeedLimit,
@@ -282,7 +282,7 @@ class HudRenderer(Widget):
 
   def render_foreground(self) -> None:
     """Draw HUD elements that should sit above alerts."""
-    if ui_state.params.get_bool("EnableTorqueBarWidget", default=True):
+    if ui_state.ui_params.get_bool("EnableTorqueBarWidget", default=True):
       self._torque_bar.render(self._rect)
 
     if self.is_cruise_set:
@@ -516,7 +516,7 @@ class HudRenderer(Widget):
       return
 
     sign_alpha = 72 if self._speed_limit_overridden and self._pending_speed_limit <= 0 else 255
-    use_vienna_speed_limit = ui_state.params.get_bool("UseVienna")
+    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
     speed_text = str(round(display_speed))
     offset_text = ""
     if self._show_speed_limit_offset and not self._speed_limit_overridden:
@@ -584,7 +584,7 @@ class HudRenderer(Widget):
       self._prompt_accept_rect = rl.Rectangle(0, 0, 0, 0)
       return
 
-    use_vienna_speed_limit = ui_state.params.get_bool("UseVienna")
+    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
     sign_width = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_WIDTH
     sign_height = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_HEIGHT
     button_size = SPEED_LIMIT_PROMPT_BUTTON_SIZE
@@ -648,7 +648,7 @@ class HudRenderer(Widget):
     title_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - title_size.x / 2, card_rect.y + 18)
     rl.draw_text_ex(self._font_semi_bold, title_text, title_pos, 28, 0, rl.Color(255, 255, 255, 235))
 
-    use_vienna_speed_limit = ui_state.params.get_bool("UseVienna")
+    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
     speed_text = str(round(self._pending_speed_limit))
     sign_rect = self._prompt_sign_rect
 

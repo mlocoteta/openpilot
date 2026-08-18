@@ -18,6 +18,8 @@ from openpilot.starpilot.common.favorite_slots import FAVORITE_ACTION_TRAFFIC_MO
 from openpilot.starpilot.common.starpilot_utilities import is_FrogsGoMoo
 from openpilot.starpilot.common.starpilot_variables import ERROR_LOGS_PATH, GearShifter, NON_DRIVING_GEARS
 
+HYUNDAI_MAIN_CRUISE_AOL_CONFIRM_TIMEOUT_FRAMES = 100
+
 
 class StarPilotCard:
   @staticmethod
@@ -44,6 +46,9 @@ class StarPilotCard:
       self.CP.brand == "hyundai" and not (hyundai_flags & HyundaiFlags.CANFD) and not hyundai_aol_before_engagement
     )
     self.hyundai_aol_ready = False
+    self.g70_main_cruise_aol_pending = False
+    self.g70_main_cruise_aol_pending_frames = 0
+    self.prev_cruise_available = None
     self.prev_active = False
     self.prev_cruise_enabled = False
     self.decel_pressed = False
@@ -130,6 +135,15 @@ class StarPilotCard:
     button_event_types = [self._button_type_raw(be) for be in carState.buttonEvents]
     button_aol_supported = self.CP.brand == "hyundai" or starpilot_toggles.lkas_allowed_for_aol
     button_managed_aol = starpilot_toggles.always_on_lateral_lkas or (button_aol_supported and starpilot_toggles.main_cruise_aol_toggle)
+    g70_main_cruise_aol_managed = (
+      getattr(self.CP, "carFingerprint", None) == HYUNDAI_CAR.GENESIS_G70_2020
+      and starpilot_toggles.main_cruise_aol_toggle
+    )
+
+    if carState.gearShifter in NON_DRIVING_GEARS or not g70_main_cruise_aol_managed:
+      self.g70_main_cruise_aol_pending = False
+      self.g70_main_cruise_aol_pending_frames = 0
+
     hyundai_aol_needs_engagement = self.hyundai_aol_needs_engagement and not starpilot_toggles.always_on_lateral_lkas
 
     if hyundai_aol_needs_engagement:
@@ -153,9 +167,27 @@ class StarPilotCard:
           if starpilot_toggles.main_cruise_aol_toggle:
             if hyundai_aol_needs_engagement:
               self.hyundai_aol_ready = True
-            self.always_on_lateral_allowed = not self.always_on_lateral_allowed
+            if g70_main_cruise_aol_managed:
+              # The G70 reports the main-cruise transition after the button press.
+              # Wait for that state change before sending active LKAS11 torque.
+              self.g70_main_cruise_aol_pending = True
+              self.g70_main_cruise_aol_pending_frames = 0
+            else:
+              self.always_on_lateral_allowed = not self.always_on_lateral_allowed
           elif starpilot_toggles.main_cruise_slc_adopt and starpilot_toggles.speed_limit_controller:
             self.params_memory.put_bool("SLCAdoptSpeedLimit", True)
+
+    cruise_available_changed = self.prev_cruise_available is not None and carState.cruiseState.available != self.prev_cruise_available
+    if self.g70_main_cruise_aol_pending:
+      if cruise_available_changed:
+        self.always_on_lateral_allowed = carState.cruiseState.available
+        self.g70_main_cruise_aol_pending = False
+        self.g70_main_cruise_aol_pending_frames = 0
+      else:
+        self.g70_main_cruise_aol_pending_frames += 1
+        if self.g70_main_cruise_aol_pending_frames >= HYUNDAI_MAIN_CRUISE_AOL_CONFIRM_TIMEOUT_FRAMES:
+          self.g70_main_cruise_aol_pending = False
+          self.g70_main_cruise_aol_pending_frames = 0
 
     if starpilot_toggles.always_on_lateral_main and not button_managed_aol:
       car_fingerprint = getattr(self.CP, "carFingerprint", None)
@@ -179,6 +211,7 @@ class StarPilotCard:
 
     self.prev_active = sm["selfdriveState"].active
     self.prev_cruise_enabled = carState.cruiseState.enabled
+    self.prev_cruise_available = carState.cruiseState.available
 
     self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
     self.always_on_lateral_enabled &= carState.gearShifter not in NON_DRIVING_GEARS

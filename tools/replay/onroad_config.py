@@ -4,17 +4,26 @@ from __future__ import annotations
 import os
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.version import terms_version, training_version
 from openpilot.tools.lib.logreader import LogReader, ReadMode, parse_direct, parse_indirect
 from openpilot.tools.lib.route import SegmentRange
+from openpilot.starpilot.navigation.destination_store import FAVORITE_DESTINATIONS_KEY, load_favorite_destinations
 
 
 DEMO_ROUTE = "a2a0ccea32023010|2023-07-27--13-01-19"
+NAV_DEMO_MAPBOX_SECRET = "desktop-nav-demo-placeholder"
+NAV_DEMO_FAVORITES = [{
+  "name": "Demo Home",
+  "latitude": 0.01,
+  "longitude": 0.02,
+  "is_home": True,
+}]
 
 _VALUE_OPTIONS = {
   "-a", "--allow",
@@ -120,7 +129,7 @@ def first_segment_identifier(route: str) -> str:
   parsed = parse_indirect(route)
   direct = parse_direct(parsed)
   if direct is not None:
-    return direct
+    return str(direct)
 
   sr = SegmentRange(parsed)
   selector = sr.selector or "a"
@@ -238,6 +247,16 @@ def seed_logged_params(init_data: Any | None, params: Params) -> int:
   return seeded
 
 
+def seed_nav_offroad_preview(params: Params) -> None:
+  secret = params.get("MapboxSecretKey", encoding="utf-8") or ""
+  if not str(secret).strip():
+    params.put("MapboxSecretKey", NAV_DEMO_MAPBOX_SECRET)
+
+  raw_favorites = params.get(FAVORITE_DESTINATIONS_KEY, encoding="utf-8")
+  if not load_favorite_destinations(raw_favorites):
+    params.put(FAVORITE_DESTINATIONS_KEY, NAV_DEMO_FAVORITES)
+
+
 def seed_desktop_overrides(params: Params) -> None:
   params.put("HasAcceptedTerms", terms_version)
   params.put("CompletedTrainingVersion", training_version)
@@ -247,6 +266,9 @@ def seed_desktop_overrides(params: Params) -> None:
   params.put_bool("ForceOffroad", False)
   if _truthy_env("SP_ONROAD_NAV_DEMO"):
     params.put_bool("NavigationUI", True)
+    if _truthy_env("SP_ONROAD_OFFROAD_DEMO"):
+      params.put_bool("ForceOffroad", True)
+      seed_nav_offroad_preview(params)
 
 
 def seed_onroad_params(init_data: Any | None, params: Params | None = None) -> int:

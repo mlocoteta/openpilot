@@ -3,10 +3,13 @@ from pathlib import Path
 from openpilot.system.manager.launch_param_migrations import (
   ACCELERATION_PROFILE_MIGRATION_MARKER,
   BRANCH_DEFAULTS_MIGRATION_MARKER,
+  CAMERA_VIEW_DEFAULT_MIGRATION_MARKER,
+  DEFAULT_CAMERA_VIEW,
   DEVELOPER_METRIC_DISPLAY_KEYS,
   DEVELOPER_METRIC_DISPLAY_MIGRATION_MARKER,
   DEFAULT_LANE_CHANGE_SMOOTHING,
   DEFAULT_STEER_KP,
+  DEVICE_SHUTDOWN_HOURS_MIGRATION_MARKER,
   LANE_CHANGE_SMOOTHING_MIGRATION_MARKER,
   LAUNCH_PARAM_MIGRATION_MARKER,
   LATERAL_METHOD_REBRAND_MIGRATION_MARKER,
@@ -141,6 +144,54 @@ def test_apply_launch_param_migrations_preserves_speed_limit_visibility_choice(t
   params.put_bool("ShowSpeedLimits", True)
   apply_launch_param_migrations(params)
   assert params.get_bool("ShowSpeedLimits")
+
+
+def test_apply_launch_param_migrations_converts_device_shutdown_index_to_hours(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_int("DeviceShutdown", 9)
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_int("DeviceShutdown") == 6
+  assert marker_path(tmp_path, DEVICE_SHUTDOWN_HOURS_MIGRATION_MARKER).is_file()
+
+
+def test_apply_launch_param_migrations_rounds_legacy_minute_shutdown_up_to_one_hour(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_int("DeviceShutdown", 2)
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_int("DeviceShutdown") == 1
+
+
+def test_apply_launch_param_migrations_does_not_reapply_device_shutdown_conversion(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_int("DeviceShutdown", 9)
+  marker_path(tmp_path, DEVICE_SHUTDOWN_HOURS_MIGRATION_MARKER).touch()
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_int("DeviceShutdown") == 9
+
+
+def test_apply_launch_param_migrations_updates_legacy_camera_view_default_once(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_int("CameraView", 3)
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_int("CameraView") == DEFAULT_CAMERA_VIEW
+  assert marker_path(tmp_path, CAMERA_VIEW_DEFAULT_MIGRATION_MARKER).is_file()
+
+
+def test_apply_launch_param_migrations_preserves_custom_camera_view(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_int("CameraView", 0)
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_int("CameraView") == 0
 
 
 def test_apply_launch_param_migrations_applies_branch_defaults_for_existing_installs(tmp_path):

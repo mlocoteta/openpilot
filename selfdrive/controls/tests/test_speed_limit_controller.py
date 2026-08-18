@@ -49,6 +49,7 @@ def make_toggles(**overrides):
     "speed_limit_confirmation_lower": False,
     "speed_limit_controller_override_manual": True,
     "speed_limit_controller_override_set_speed": False,
+    "redneck_cruise": False,
     "speed_limit_filler": False,
     "speed_limit_offset1": 0.0,
     "speed_limit_offset2": 0.0,
@@ -483,6 +484,30 @@ def test_set_speed_override_clears_on_new_speed_zone():
     controller.update_override(mph(65), 0.0, mph(35), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(65))
+  finally:
+    controller.shutdown()
+
+
+def test_redneck_set_speed_mode_overrides_in_both_directions():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+    redneck_cruise=True,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.last_valid_limit = mph(45)
+
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(60))
+
+    # A manual decrease below the posted limit must become the new redneck target.
+    controller.update_override(mph(35), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(35))
   finally:
     controller.shutdown()
 

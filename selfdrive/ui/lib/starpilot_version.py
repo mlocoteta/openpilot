@@ -1,4 +1,4 @@
-STARPILOT_DISPLAY_VERSION = "6.7.4"
+STARPILOT_DISPLAY_VERSION = "6.7.5"
 
 
 def starpilot_display_description(description: str | None) -> str:

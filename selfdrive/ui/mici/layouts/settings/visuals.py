@@ -16,12 +16,12 @@ class CameraViewBigButton(BigButton):
     self.refresh()
 
   def refresh(self):
-    current_idx = self._params.get_int("CameraView", return_default=True, default=3)
+    current_idx = self._params.get_int("CameraView", return_default=True, default=2)
     current_idx = max(0, min(current_idx, len(CAMERA_VIEW_LABELS) - 1))
     self.set_value(CAMERA_VIEW_LABELS[current_idx].lower())
 
   def _show_selector(self):
-    current_idx = self._params.get_int("CameraView", return_default=True, default=3)
+    current_idx = self._params.get_int("CameraView", return_default=True, default=2)
     current_idx = max(0, min(current_idx, len(CAMERA_VIEW_LABELS) - 1))
     dialog_holder: dict[str, BigMultiOptionDialog] = {}
 

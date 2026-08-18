@@ -49,6 +49,15 @@ def calculate_canfd_speed_limit(CP, FPCP, cp, cp_cam, speed_factor):
     return 0.0
 
 
+def get_canfd_cruise_available(CP, cp, scc_available: bool) -> bool:
+  # The EV9 fallback keeps stock ACC active when ECU disable is skipped. Its
+  # SCC status remains inactive in that mode, while TCS still reports whether
+  # ACC is fault-free and available.
+  if CP.carFingerprint == CAR.KIA_EV9 and not CP.openpilotLongitudinalControl:
+    return cp.vl["TCS"]["ACCEnable"] == 0
+  return scc_available
+
+
 def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
   state_int = int(state)
   return bool(state_int & IONIQ_6_BLINDSPOT_LEFT_MASK), bool(state_int & IONIQ_6_BLINDSPOT_RIGHT_MASK)
@@ -226,13 +235,12 @@ class CarState(CarStateBase):
   def create_lkas_button_events(self, cp: CANParser, prev_lda_button: int) -> list[structs.CarState.ButtonEvent]:
     if self.CP.carFingerprint == CAR.HYUNDAI_SONATA_HYBRID:
       self.lda_button = self.get_sonata_hybrid_lkas_button_state(cp)
-    # Some classic HKG platforms publish the LKAS button on the cluster bus instead of BCM_PO_11.
-    elif cp.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0:
-      self.lda_button = int(cp.vl["CLU13"]["CF_Clu_LdwsLkasSW"])
-    elif cp.ts_nanos["BCM_PO_11"]["LDA_BTN"] > 0:
-      self.lda_button = int(cp.vl["BCM_PO_11"]["LDA_BTN"])
     else:
-      self.lda_button = 0
+      source_states = (
+        int(cp.vl["CLU13"]["CF_Clu_LdwsLkasSW"]) if cp.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0 else 0,
+        int(cp.vl["BCM_PO_11"]["LDA_BTN"]) if cp.ts_nanos["BCM_PO_11"]["LDA_BTN"] > 0 else 0,
+      )
+      self.lda_button = int(any(source_states))
 
     return create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})
 
@@ -522,7 +530,8 @@ class CarState(CarStateBase):
       ret.cruiseState.standstill = False
     else:
       cp_cruise_info = cp_cam if self.CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else cp
-      ret.cruiseState.available = cp_cruise_info.vl["SCC_CONTROL"]["MainMode_ACC"] == 1
+      ret.cruiseState.available = get_canfd_cruise_available(
+        self.CP, cp, cp_cruise_info.vl["SCC_CONTROL"]["MainMode_ACC"] == 1)
       ret.cruiseState.enabled = cp_cruise_info.vl["SCC_CONTROL"]["ACCMode"] in (1, 2)
       ret.cruiseState.standstill = cp_cruise_info.vl["SCC_CONTROL"]["CRUISE_STANDSTILL"] == 1
       ret.cruiseState.speed = cp_cruise_info.vl["SCC_CONTROL"]["VSetDis"] * speed_factor
@@ -603,13 +612,15 @@ class CarState(CarStateBase):
     msgs = []
     cam_msgs = []
     if not (CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS):
-      # TODO: this can be removed once we add dynamic support to vl_all
+      # The EV9 can stop publishing this during the non-ECU-disabled startup
+      # state. Keep decoding it when present without making CAN invalid.
       msgs += [
-        # this message is 50Hz but the ECU frequently stops transmitting for ~0.5s
-        ("CRUISE_BUTTONS", 1)
+        ("CRUISE_BUTTONS", 0 if CP.carFingerprint == CAR.KIA_EV9 else 1)
       ]
     if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
-      msgs.append(("FR_CMR_02_100ms", 10))
+      # EV9 camera status can disappear for an extended period when the
+      # documented ECU startup sequence is skipped.
+      msgs.append(("FR_CMR_02_100ms", 0 if CP.carFingerprint == CAR.KIA_EV9 else 10))
       msgs.append(("FR_CMR_03_50ms", 0))
       cam_msgs.append(("LKAS_ALT" if CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT else "LKAS", 0))
     else:

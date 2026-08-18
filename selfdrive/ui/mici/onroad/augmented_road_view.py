@@ -153,6 +153,7 @@ class BookmarkIcon(Widget):
 
 class FavoriteSlotsOverlay(Widget):
   SLOT_COUNT = 3
+  SLOTS_REFRESH_INTERVAL = 1.0
   MAX_TAP_TRAVEL = 24
   COLOR_TRANSITION_SECONDS = 0.65
   FADE_START_SECONDS = 2.0
@@ -169,17 +170,25 @@ class FavoriteSlotsOverlay(Widget):
     self._feedback_started_at = -self.FEEDBACK_DURATION_SECONDS
     self._feedback_value: bool | None = None
     self._interacting = False
+    self._visible_slots_cache: list[tuple[int, dict]] = []
+    self._visible_slots_cached_at = float("-inf")
 
   def interacting(self):
     interacting, self._interacting = self._interacting, False
     return interacting
 
-  def _visible_slots(self) -> list[tuple[int, dict]]:
+  def _visible_slots(self, force: bool = False) -> list[tuple[int, dict]]:
+    now = time.monotonic()
+    if not force and now - self._visible_slots_cached_at < self.SLOTS_REFRESH_INTERVAL:
+      return self._visible_slots_cache
+
     visible = []
-    for index, slot in enumerate(load_favorite_slots(ui_state.params)):
+    for index, slot in enumerate(load_favorite_slots(ui_state.ui_params)):
       if slot.get("enabled") and slot.get("show_onroad") and slot.get("key"):
         visible.append((index, slot))
-    return visible
+    self._visible_slots_cache = visible
+    self._visible_slots_cached_at = now
+    return self._visible_slots_cache
 
   def _slot_rects(self, rect: rl.Rectangle, slots: list[tuple[int, dict]]) -> list[tuple[int, rl.Rectangle]]:
     slot_width = rect.width / self.SLOT_COUNT
@@ -310,7 +319,7 @@ class FavoriteSlotsOverlay(Widget):
       self._feedback_started_at = rl.get_time()
       slot = dict(self._visible_slots()).get(self._pressed_slot, {})
       key = slot.get("key")
-      self._feedback_value = None if is_favorite_action_key(key) else (not ui_state.params.get_bool(key) if key else None)
+      self._feedback_value = None if is_favorite_action_key(key) else (not ui_state.ui_params.get_bool(key) if key else None)
       self._interacting = True
 
   def _handle_mouse_event(self, mouse_event: MouseEvent):
@@ -326,7 +335,7 @@ class FavoriteSlotsOverlay(Widget):
       released_slot == self._pressed_slot and
       self._max_tap_travel <= self.MAX_TAP_TRAVEL
     )
-    if valid_tap and toggle_favorite_slot(self._pressed_slot, ui_state.params, ui_state.params_memory):
+    if valid_tap and toggle_favorite_slot(self._pressed_slot, ui_state.ui_params, ui_state.params_memory):
       self._feedback_slot = self._pressed_slot
       self._feedback_started_at = rl.get_time()
       self._interacting = True
@@ -478,7 +487,7 @@ class StandstillTimerOverlay:
       self._reset()
       return
 
-    if in_reverse or not ui_state.params.get_bool("StoppedTimer"):
+    if in_reverse or not ui_state.ui_params.get_bool("StoppedTimer"):
       self._reset()
       return
 
@@ -545,9 +554,7 @@ class AugmentedRoadView(CameraView):
     self.view_from_calib = view_frame_from_device_frame.copy()
     self.view_from_wide_calib = view_frame_from_device_frame.copy()
 
-    self._last_calib_time: float = 0
-    self._last_rect_dims = (0.0, 0.0)
-    self._last_stream_type = stream_type
+    self._matrix_cache_key: tuple | None = None
     self._cached_matrix: np.ndarray | None = None
     self._content_rect = rl.Rectangle()
     self._last_click_time = 0.0
@@ -582,7 +589,7 @@ class AugmentedRoadView(CameraView):
     return ui_state.sm.recv_frame["selfdriveState"] >= ui_state.started_frame
 
   def _update_reverse_driver_camera_state(self) -> bool:
-    should_force_driver = ui_state.started and ui_state.params.get_bool("DriverCamera") and self._is_in_reverse()
+    should_force_driver = ui_state.started and ui_state.ui_params.get_bool("DriverCamera") and self._is_in_reverse()
     if not should_force_driver:
       self._reverse_driver_camera_frames = 0
       self._reverse_driver_camera_active = False
@@ -616,20 +623,20 @@ class AugmentedRoadView(CameraView):
     )
 
   def _sidebar_widgets_visible(self) -> bool:
-    return not ui_state.params.get_bool("StockConfidenceBallWidget") or self._sidebar_widgets.demo_active
+    return not ui_state.ui_params.get_bool("StockConfidenceBallWidget") or self._sidebar_widgets.demo_active
 
   def _sidebar_personality_touch_enabled(self) -> bool:
     return (
       ui_state.started and
       self._sidebar_widgets_visible() and
-      not ui_state.params.get_bool("SafeMode")
+      not ui_state.ui_params.get_bool("SafeMode")
     )
 
   def _touch_in_sidebar(self, mouse_pos: MousePos) -> bool:
     return rl.check_collision_point_rec(mouse_pos, self._sidebar_rect())
 
   def _cycle_personality_profile(self) -> None:
-    current = ui_state.params.get_int("LongitudinalPersonality", return_default=True, default=int(log.LongitudinalPersonality.standard))
+    current = ui_state.ui_params.get_int("LongitudinalPersonality", return_default=True, default=int(log.LongitudinalPersonality.standard))
     profiles = (
       int(log.LongitudinalPersonality.aggressive),
       int(log.LongitudinalPersonality.standard),
@@ -640,7 +647,7 @@ class AugmentedRoadView(CameraView):
     except ValueError:
       current_idx = 1
     next_personality = profiles[(current_idx + 1) % len(profiles)]
-    ui_state.params.put_int("LongitudinalPersonality", next_personality)
+    ui_state.ui_params.put_int("LongitudinalPersonality", next_personality)
     ui_state.personality = next_personality
 
   def _handle_mouse_press(self, mouse_pos: MousePos):
@@ -694,7 +701,9 @@ class AugmentedRoadView(CameraView):
     if camera_view_none:
       rl.draw_rectangle_rec(self._content_rect, rl.BLACK)
     else:
+      gui_app.mark_progress("mici.onroad.before_camera")
       super()._render(self._content_rect)
+      gui_app.mark_progress("mici.onroad.after_camera")
 
     waiting_for_controls = ui_state.started and not self._controls_ready()
     if waiting_for_controls:
@@ -719,7 +728,9 @@ class AugmentedRoadView(CameraView):
 
     # Draw all UI overlays
     if draw_road_overlays:
+      gui_app.mark_progress("mici.onroad.before_model")
       self._model_renderer.render(self._content_rect)
+      gui_app.mark_progress("mici.onroad.after_model")
 
     # Fade out bottom of overlays for looks
     rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
@@ -743,7 +754,9 @@ class AugmentedRoadView(CameraView):
     if ui_state.started:
       self._alert_renderer.render(self._content_rect)
     if draw_hud_controls:
+      gui_app.mark_progress("mici.onroad.before_hud")
       self._hud_renderer.render_foreground()
+      gui_app.mark_progress("mici.onroad.after_hud")
     rendered_standstill_timer = False
     if draw_hud_controls:
       rendered_standstill_timer = self._standstill_timer.render(self._content_rect, in_reverse)
@@ -756,10 +769,12 @@ class AugmentedRoadView(CameraView):
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
     if draw_road_overlays:
-      if ui_state.params.get_bool("StockConfidenceBallWidget") and not self._sidebar_widgets.demo_active:
+      gui_app.mark_progress("mici.onroad.before_sidebar")
+      if ui_state.ui_params.get_bool("StockConfidenceBallWidget") and not self._sidebar_widgets.demo_active:
         self._confidence_ball.render(self.rect)
       else:
         self._sidebar_widgets.render(self.rect)
+      gui_app.mark_progress("mici.onroad.after_sidebar")
     if draw_hud_controls and (camera_view_none or is_driver_stream or not in_reverse):
       self._favorite_slots.render(self._content_rect)
     if camera_view_none or is_driver_stream or not in_reverse:
@@ -797,7 +812,7 @@ class AugmentedRoadView(CameraView):
     rl.end_scissor_mode()
 
   def _get_border_width(self) -> int:
-    return get_border_width(8, ui_state.params)
+    return get_border_width(8, ui_state.ui_params)
 
   @staticmethod
   def _is_in_reverse() -> bool:
@@ -823,9 +838,9 @@ class AugmentedRoadView(CameraView):
 
   @staticmethod
   def _camera_view() -> int:
-    camera_view = ui_state.params.get_int("CameraView", return_default=True, default=CAMERA_VIEW_WIDE)
+    camera_view = ui_state.ui_params.get_int("CameraView", return_default=True, default=CAMERA_VIEW_STANDARD)
     if camera_view not in (CAMERA_VIEW_AUTO, CAMERA_VIEW_DRIVER, CAMERA_VIEW_STANDARD, CAMERA_VIEW_WIDE, CAMERA_VIEW_NONE):
-      return CAMERA_VIEW_WIDE
+      return CAMERA_VIEW_STANDARD
     return camera_view
 
   def _switch_stream_if_needed(self, sm, camera_view: int):
@@ -837,12 +852,12 @@ class AugmentedRoadView(CameraView):
 
     reentry_selection_pending = (getattr(self, "_onroad_reentry_pending", False) and
                                  not getattr(self, "_reentry_stream_selected", False))
-    if reentry_selection_pending:
-      self._refresh_available_streams()
-
     if self._update_reverse_driver_camera_state():
       self.switch_stream(DRIVER_CAM)
       return
+
+    if reentry_selection_pending or not self.available_streams:
+      self._refresh_available_streams()
 
     wide_available = WIDE_CAM in self.available_streams
     if camera_view == CAMERA_VIEW_DRIVER:
@@ -858,8 +873,10 @@ class AugmentedRoadView(CameraView):
       elif v_ego > ROAD_CAM_MIN_SPEED:
         target = ROAD_CAM
       else:
-        # Hysteresis zone - keep the current road camera selection.
-        target = WIDE_CAM if self.stream_type == WIDE_CAM and wide_available else ROAD_CAM
+        # Hysteresis zone - keep the current or pending road camera selection.
+        current_road_stream = (self._target_stream_type if self._switching and
+                               self._target_stream_type in (ROAD_CAM, WIDE_CAM) else self.stream_type)
+        target = WIDE_CAM if current_road_stream == WIDE_CAM and wide_available else ROAD_CAM
     else:
       target = ROAD_CAM
 
@@ -898,10 +915,20 @@ class AugmentedRoadView(CameraView):
       base[1, 1] *= driver_view_ratio
       return base
 
+    cache_key = (
+      ui_state.sm.recv_frame['liveCalibration'],
+      int(self._content_rect.x),
+      int(self._content_rect.y),
+      int(self._content_rect.width),
+      int(self._content_rect.height),
+      self.stream_type,
+      round(float(ui_state.sm['carState'].vEgo), 1),
+      id(self.device_camera),
+    )
+    if cache_key == self._matrix_cache_key and self._cached_matrix is not None:
+      return self._cached_matrix
+
     # Get camera configuration
-    # TODO: cache with vEgo?
-    calib_time = ui_state.sm.recv_frame['liveCalibration']
-    current_dims = (self._content_rect.width, self._content_rect.height)
     device_camera = self.device_camera or DEFAULT_DEVICE_CAMERA
     is_wide_camera = self.stream_type == WIDE_CAM
     intrinsic = device_camera.ecam.intrinsics if is_wide_camera else device_camera.fcam.intrinsics
@@ -939,10 +966,7 @@ class AugmentedRoadView(CameraView):
     except (ZeroDivisionError, OverflowError):
       x_offset, y_offset = 0, 0
 
-    # Cache the computed transformation matrix to avoid recalculations
-    self._last_calib_time = calib_time
-    self._last_rect_dims = current_dims
-    self._last_stream_type = self.stream_type
+    self._matrix_cache_key = cache_key
     self._cached_matrix = np.array([
       [zoom * 2 * cx / w, 0, -x_offset / w * 2],
       [0, zoom * 2 * cy / h, -y_offset / h * 2],

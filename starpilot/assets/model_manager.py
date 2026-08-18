@@ -23,15 +23,22 @@ from openpilot.starpilot.common.model_versions import (
 from openpilot.starpilot.common.starpilot_utilities import delete_file
 from openpilot.starpilot.common.starpilot_variables import MODELS_PATH
 
-MANIFEST_CANDIDATES = ("v22",)
-DEFAULT_MODEL_KEY = "rdf"
+MANIFEST_CANDIDATES = ("v23",)
+MODEL_NAMESPACE_SUFFIX = "3"
+DEFAULT_MODEL_KEY = "rdf43"
 LOCAL_MODEL_PREFIX = "local-"
 LOCAL_MODEL_SERIES = "Local Series"
 ARTIFACT_URLS_CACHE = ".model_artifact_urls.json"
 ARTIFACT_METADATA_CACHE = ".model_artifacts.json"
 MODEL_KEY_CANONICAL_MAP = {
   "sc": "sc2",
+  # The original bundled RDF key remains valid after the bundled default moves
+  # to the v23 RDF V4 artifact.
+  "rdf": DEFAULT_MODEL_KEY,
 }
+LEGACY_DRIVING_PREFIXES = (
+  "driving_",
+)
 
 CANCEL_DOWNLOAD_PARAM = "CancelModelDownload"
 DOWNLOAD_PROGRESS_PARAM = "ModelDownloadProgress"
@@ -56,6 +63,11 @@ def is_builtin_model_key(model_key: str) -> bool:
 def is_local_model_key(model_key: str) -> bool:
   """Hand-installed models live outside the manifest and are never downloaded or pruned."""
   return canonical_model_key(model_key).startswith(LOCAL_MODEL_PREFIX)
+
+
+def is_driving_artifact_file(filename: str) -> bool:
+  """Match both namespaced unified artifacts and pre-v23 split driving files."""
+  return "_driving_" in filename or filename.startswith(LEGACY_DRIVING_PREFIXES)
 
 
 def model_key_aliases(model_key: str) -> list[str]:
@@ -161,10 +173,7 @@ class ModelManager:
 
   @staticmethod
   def _manifest_paths(manifest_version: str) -> tuple[str, ...]:
-    return (
-      f"Versions/model_names_{manifest_version}.json",
-      f"model_names_{manifest_version}.json",
-    )
+    return (f"Models/model_names_{manifest_version}.json",)
 
   def _set_model_param_keys(self, model_key: str | None = None, model_name: str | None = None, model_version: str | None = None):
     if model_key is not None and model_key != "":
@@ -207,6 +216,18 @@ class ModelManager:
       for index, model_key in enumerate(self.available_models)
       if index < len(self.artifact_formats) and model_key
     }
+
+  def _resolve_manifest_model_key(self, model_key: str) -> str:
+    """Resolve an old manifest ID to its namespaced v23 replacement."""
+    canonical_key = self._canonical_model_key(model_key)
+    if canonical_key in self.available_models or is_builtin_model_key(canonical_key):
+      return canonical_key
+
+    for alias in self._model_key_aliases(canonical_key):
+      candidate = f"{alias}{MODEL_NAMESPACE_SUFFIX}"
+      if candidate in self.available_models:
+        return candidate
+    return canonical_key
 
   def _blacklisted_model_keys(self) -> set[str]:
     return {
@@ -448,11 +469,11 @@ class ModelManager:
 
   def _remove_stale_model_files(self):
     valid_keys = set(self.available_models)
-    for model_file in MODELS_PATH.glob("*_driving_*"):
-      model_key = model_file.name.split("_driving_", 1)[0]
-      if is_local_model_key(model_key):
+    for model_file in MODELS_PATH.iterdir():
+      if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
         continue
-      if model_key not in valid_keys:
+      model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
+      if not model_key or not is_local_model_key(model_key) and model_key not in valid_keys:
         delete_file(model_file, print_error=False)
 
     for temp_file in MODELS_PATH.glob("tmp*"):
@@ -463,6 +484,17 @@ class ModelManager:
       return
 
     selected = self._selected_model()
+    if is_builtin_model_key(selected):
+      self._sync_selected_model_version()
+      return
+
+    resolved_selected = self._resolve_manifest_model_key(selected)
+    if resolved_selected != selected:
+      selected_index = self.available_models.index(resolved_selected)
+      selected_name = self.available_model_names[selected_index] if selected_index < len(self.available_model_names) else resolved_selected
+      self._set_model_param_keys(resolved_selected, selected_name, None)
+      selected = resolved_selected
+
     aliases = self._model_key_aliases(selected)
     if any(alias in self.available_models for alias in aliases):
       self._sync_selected_model_version()
@@ -568,14 +600,17 @@ class ModelManager:
 
   def _migrate_to_unified_artifacts(self, selected_model: str):
     removed = 0
-    for model_file in MODELS_PATH.glob("*_driving_*"):
-      if is_local_model_key(model_file.name.split("_driving_", 1)[0]):
+    for model_file in MODELS_PATH.iterdir():
+      if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
+        continue
+      model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
+      if model_key and is_local_model_key(model_key):
         continue
       if model_file.is_file() or model_file.is_symlink():
         delete_file(model_file, print_error=False)
         removed += 1
     if removed:
-      print(f"Removed {removed} incompatible pre-v22 model artifacts.")
+      print(f"Removed {removed} incompatible model artifacts during manifest migration.")
 
     if selected_model and not is_builtin_model_key(selected_model):
       self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, f"Downloading selected model \"{selected_model}\"...")
@@ -590,7 +625,7 @@ class ModelManager:
         default_name = (
           self.available_model_names[default_index]
           if default_index is not None and default_index < len(self.available_model_names)
-          else "Regret Driven Framework"
+          else "Regret Driven Framework V4"
         )
         default_version = (
           self.model_versions[default_index]
@@ -618,6 +653,13 @@ class ModelManager:
     previous_manifest = self._param_text("ModelManifestVersion")
     resolved_manifest = manifest_version or "unknown"
     self.update_model_params(model_info, resolved_manifest)
+    migrated_model = self._resolve_manifest_model_key(selected_model)
+    if migrated_model != selected_model:
+      migrated_index = self.available_models.index(migrated_model)
+      migrated_name = self.available_model_names[migrated_index] if migrated_index < len(self.available_model_names) else migrated_model
+      migrated_version = self.model_versions[migrated_index] if migrated_index < len(self.model_versions) else ""
+      self._set_model_param_keys(migrated_model, migrated_name, migrated_version)
+      selected_model = migrated_model
     if previous_manifest != resolved_manifest:
       self._migrate_to_unified_artifacts(selected_model)
     self.check_models(boot_run)
@@ -762,8 +804,11 @@ class ModelManager:
     # This branch ships tinygrad runtime in-tree. "Update" here refreshes local model files.
     self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Updating...")
 
-    for model_file in MODELS_PATH.glob("*_driving_*"):
-      if is_local_model_key(model_file.name.split("_driving_", 1)[0]):
+    for model_file in MODELS_PATH.iterdir():
+      if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
+        continue
+      model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
+      if model_key and is_local_model_key(model_key):
         continue
       if model_file.is_file():
         delete_file(model_file, print_error=False)

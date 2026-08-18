@@ -82,10 +82,108 @@ def make_update_toggles():
     conditional_curves=False,
     conditional_curves_lead=False,
     conditional_lead=False,
+    conditional_open_road=False,
     conditional_model_stop_time=7.0,
     conditional_slower_lead=False,
     conditional_stopped_lead=False,
   )
+
+
+def test_open_road_triggers_at_set_speed_without_a_lead():
+  cem = make_cem(model_length=80.0)
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+
+  triggered = cem.check_conditions(
+    57 * CV.MPH_TO_MS,
+    make_sm(),
+    toggles,
+    v_cruise=57 * CV.MPH_TO_MS,
+  )
+
+  assert triggered
+  assert cem.status_value == conditional_experimental_mode_module.CEStatus["SPEED"]
+
+
+def test_open_road_does_not_trigger_below_or_far_above_set_speed():
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+
+  too_far_below = make_cem(model_length=80.0)
+  above_set_speed = make_cem(model_length=80.0)
+
+  assert not too_far_below.check_conditions(
+    56 * CV.MPH_TO_MS, make_sm(), toggles, v_cruise=57 * CV.MPH_TO_MS,
+  )
+  assert not above_set_speed.check_conditions(
+    59 * CV.MPH_TO_MS, make_sm(), toggles, v_cruise=57 * CV.MPH_TO_MS,
+  )
+
+
+def test_open_road_requires_a_set_speed():
+  cem = make_cem(model_length=80.0)
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+
+  assert not cem.check_conditions(55 * CV.MPH_TO_MS, make_sm(), toggles)
+
+
+def test_open_road_requires_no_lead_vehicle():
+  cem = make_cem(model_length=80.0, lead_status=True, lead_d_rel=60.0, lead_v_lead=55 * CV.MPH_TO_MS)
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+
+  assert not cem.check_conditions(
+    55 * CV.MPH_TO_MS, make_sm(), toggles, v_cruise=57 * CV.MPH_TO_MS,
+  )
+
+
+def test_open_road_holds_exp_briefly_for_safe_lead_handoff(monkeypatch):
+  cem = make_cem(model_length=80.0)
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+  sm = make_update_sm(standstill=False)
+  monkeypatch.setattr(cem, "update_conditions", lambda *args: None)
+
+  now = [100.0]
+  monkeypatch.setattr(conditional_experimental_mode_module.time, "monotonic", lambda: now[0])
+
+  cem.update(57 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+  assert cem.experimental_mode
+
+  cem.starpilot_planner.lead_one.status = True
+  cem.starpilot_planner.lead_one.dRel = 60.0
+  cem.starpilot_planner.lead_one.vLead = 55 * CV.MPH_TO_MS
+  now[0] = 100.6
+  cem.update(55 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+  assert cem.experimental_mode
+  assert cem.status_value == conditional_experimental_mode_module.CEStatus["SPEED"]
+
+  now[0] = 101.4
+  cem.update(55 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+  assert not cem.experimental_mode
+
+
+def test_open_road_does_not_delay_urgent_lead_handoff(monkeypatch):
+  cem = make_cem(model_length=80.0)
+  toggles = make_update_toggles()
+  toggles.conditional_open_road = True
+  sm = make_update_sm(standstill=False)
+  monkeypatch.setattr(cem, "update_conditions", lambda *args: None)
+
+  now = [100.0]
+  monkeypatch.setattr(conditional_experimental_mode_module.time, "monotonic", lambda: now[0])
+
+  cem.update(57 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+  cem.starpilot_planner.lead_one.status = True
+  cem.starpilot_planner.lead_one.dRel = 20.0
+  cem.starpilot_planner.lead_one.vLead = 0.0
+  now[0] = 101.6
+  cem.update(55 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+  now[0] = 101.9
+  cem.update(55 * CV.MPH_TO_MS, sm, toggles, v_cruise=57 * CV.MPH_TO_MS)
+
+  assert not cem.experimental_mode
 
 
 def test_low_speed_cruise_does_not_trigger_stop_light_from_model_stopped():
@@ -1083,8 +1181,9 @@ def test_starpilot_planner_updates_cem_with_current_frame_state(monkeypatch):
 
     seen = {}
 
-    def cem_update(v_ego, sm, starpilot_toggles):
+    def cem_update(v_ego, sm, starpilot_toggles, v_cruise):
       seen.update({
+        "v_cruise": v_cruise,
         "tracking_lead": planner.tracking_lead,
         "following_lead": planner.starpilot_following.following_lead,
         "slower_lead": planner.starpilot_following.slower_lead,
@@ -1129,6 +1228,7 @@ def test_starpilot_planner_updates_cem_with_current_frame_state(monkeypatch):
       planner.update(0.0, False, sm, starpilot_toggles)
 
       assert seen == {
+        "v_cruise": 50.0 * CV.KPH_TO_MS,
         "tracking_lead": True,
         "following_lead": True,
         "slower_lead": True,

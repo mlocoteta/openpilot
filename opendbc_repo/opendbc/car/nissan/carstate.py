@@ -26,6 +26,9 @@ class CarState(CarStateBase):
     self.distance_button = 0
 
     self.lkas_button = 0
+    self.set_button = 0
+    self.res_button = 0
+    self.cancel_button = 0
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -130,6 +133,17 @@ class CarState(CarStateBase):
       self.lkas_hud_info_msg = copy.copy(cp_adas.vl["PROPILOT_HUD_INFO_MSG"])
 
     buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    if self.CP.openpilotLongitudinalControl and self.CP.carFingerprint == CAR.NISSAN_LEAF:
+      prev_set_button = self.set_button
+      prev_res_button = self.res_button
+      prev_cancel_button = self.cancel_button
+      self.set_button = int(cp.vl["CRUISE_THROTTLE"]["SET_BUTTON"])
+      self.res_button = int(cp.vl["CRUISE_THROTTLE"]["RES_BUTTON"])
+      self.cancel_button = int(cp.vl["CRUISE_THROTTLE"]["CANCEL_BUTTON"])
+      buttonEvents += create_button_events(self.set_button, prev_set_button, {1: ButtonType.decelCruise})
+      buttonEvents += create_button_events(self.res_button, prev_res_button, {1: ButtonType.accelCruise})
+      buttonEvents += create_button_events(self.cancel_button, prev_cancel_button, {1: ButtonType.cancel})
 
     fp_ret = custom.StarPilotCarState.new_message()
 

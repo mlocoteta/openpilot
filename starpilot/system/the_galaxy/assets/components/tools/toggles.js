@@ -7,7 +7,9 @@ const FACTORY_RESET_STATUS_POLL_INTERVAL_MS = 1000
 const state = reactive({
   showResetDefaultModal: false,
   showSaveMeModal: false,
+  showDeleteRoutesModal: false,
   factoryResetBusy: false,
+  routeDeleteBusy: false,
   factoryResetStatus: null,
 })
 
@@ -199,6 +201,29 @@ export function ToggleControl() {
     state.showSaveMeModal = true;
   }
 
+  function confirmDeleteRoutes() {
+    state.showDeleteRoutesModal = true;
+  }
+
+  async function deleteAllRoutes() {
+    if (state.routeDeleteBusy || state.factoryResetBusy) return
+
+    state.showDeleteRoutesModal = false
+    state.routeDeleteBusy = true
+    try {
+      const response = await fetch("/api/routes/delete_all", { method: "POST" })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(payload.error || response.statusText || "Failed to delete driving routes")
+      }
+      showSnackbar(payload.message || "All local driving routes deleted.")
+    } catch (error) {
+      showSnackbar(error?.message || "Failed to delete driving routes.", "error")
+    } finally {
+      state.routeDeleteBusy = false
+    }
+  }
+
   async function runFactoryReset() {
     if (state.factoryResetBusy) return
 
@@ -262,6 +287,15 @@ export function ToggleControl() {
             disabled="${() => state.factoryResetBusy}">
             ${() => state.factoryResetBusy ? "Starting..." : "SAVE ME"}
           </button>
+          <p class="toggle-control-danger-text">
+            Delete local route recordings without changing settings or rebooting the device.
+          </p>
+          <button
+            class="toggle-control-button toggle-control-button-danger"
+            @click="${confirmDeleteRoutes}"
+            disabled="${() => state.factoryResetBusy || state.routeDeleteBusy}">
+            ${() => state.routeDeleteBusy ? "Deleting Routes..." : "Delete All Driving Routes"}
+          </button>
           ${() => state.factoryResetStatus ? html`
             <div class="toggle-control-status ${state.factoryResetStatus.stage === "error" ? "error" : ""}">
               <div class="toggle-control-status-title">Factory Reset Status</div>
@@ -296,6 +330,13 @@ export function ToggleControl() {
     onConfirm: runFactoryReset,
     onCancel: () => { state.showSaveMeModal = false; },
     confirmText: "Factory Reset"
+  }) : ""}
+    ${() => state.showDeleteRoutesModal ? Modal({
+    title: "Delete All Driving Routes",
+    message: "This permanently deletes all local routes from standard, high-resolution, and alternate footage storage. It does not reset settings or reboot the device. Saved personal records and model history will be kept.",
+    onConfirm: deleteAllRoutes,
+    onCancel: () => { state.showDeleteRoutesModal = false; },
+    confirmText: "Delete Routes"
   }) : ""}
   `
 }

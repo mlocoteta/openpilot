@@ -26,6 +26,7 @@ import { ToggleControl } from "/assets/components/tools/toggles.js"
 import { VASMAnnotations } from "/assets/components/tools/v_asm.js"
 import { PipSideCamera } from "/assets/components/tools/pip_sidecam.js"
 import { UpdateManager } from "/assets/components/tools/update_manager.js"
+import { startSentryNotifications } from "/assets/components/sentry_notifications.js"
 
 let router, routerState
 
@@ -187,3 +188,5 @@ if (document.readyState === "loading") {
 } else {
   mountRouterWhenReady()
 }
+
+startSentryNotifications()

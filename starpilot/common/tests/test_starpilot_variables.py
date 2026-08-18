@@ -198,6 +198,12 @@ def test_missing_bounded_value_uses_explicit_default():
   assert value == 1.0
 
 
+def test_device_shutdown_hours_convert_directly_to_seconds():
+  assert spv.device_shutdown_seconds(6) == 6 * 60 * 60
+  assert spv.device_shutdown_seconds(0) == 60 * 60
+  assert spv.device_shutdown_seconds(31) == 30 * 60 * 60
+
+
 def test_favorite_button_flags_map_to_three_slots():
   toggle = SimpleNamespace()
 

@@ -18,6 +18,7 @@ from openpilot.selfdrive.controls.lib.lead_behavior import (
   should_track_lead,
 )
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_lead_follow_jerk_scale
 
 from openpilot.starpilot.common.starpilot_utilities import calculate_lane_width, calculate_road_curvature
 from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME, THRESHOLD
@@ -32,7 +33,11 @@ from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
 RADARLESS_TRACK_HOLD_TIME = 0.45
 FORCE_STOP_JERK_SCALE = 0.32  # accel-change cost multiplier while forcing_stop (125 -> ~40)
 FORCE_STOP_JERK_SCALE_OVERRIDES = {
-  "HYUNDAI_ELANTRA_2021": 0.60,
+  # The Elantra's current force-stop ramp is smooth, but it waits too long
+  # before building decel and then arrives at the initial brake too abruptly.
+  # Increase the accel-change cost to spread the same stop over more time;
+  # this does not alter the force-stop distance.
+  "HYUNDAI_ELANTRA_2021": 0.80,
 }
 
 
@@ -104,6 +109,7 @@ class StarPilotPlanner:
     self.radarless_follow_hold_until = 0.0
 
   def shutdown(self):
+    self.starpilot_vcruise.csc.flush_data()
     self.starpilot_vcruise.slc.shutdown()
     self.starpilot_weather.executor.shutdown(wait=False, cancel_futures=True)
 
@@ -222,7 +228,7 @@ class StarPilotPlanner:
     conditional_tracking_active = controls_enabled or sm["starpilotCarState"].alwaysOnLateralEnabled
     if conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_experimental_mode", False)):
       # Keep CEM's filters warm in AOL so engagement can inherit the current scene.
-      self.starpilot_cem.update(v_ego, sm, starpilot_toggles)
+      self.starpilot_cem.update(v_ego, sm, starpilot_toggles, v_cruise)
       self.starpilot_ccm.experimental_mode = True
     elif conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_chill_mode", False)):
       self.starpilot_ccm.update(v_ego, v_cruise, sm, starpilot_toggles)
@@ -295,12 +301,19 @@ class StarPilotPlanner:
 
     # While committed to a Force Stop, cut the MPC's accel-change penalty so terminal
     # braking can ramp faster. 0.32 lands near 40, what long_mpc uses in blended mode.
+    try:
+      car_params = sm["carParams"]
+    except (KeyError, IndexError, TypeError, AttributeError):
+      car_params = None
+
     if self.starpilot_vcruise.forcing_stop:
-      try:
-        car_params = sm["carParams"]
-      except (KeyError, IndexError, TypeError, AttributeError):
-        car_params = None
       jerk_scale = get_force_stop_jerk_scale(car_params)
+    elif self.tracking_lead:
+      # Elantra vision leads can hand off from cruise to lead0 while closing
+      # quickly. A slightly higher accel-change cost makes that handoff begin
+      # earlier instead of arriving as a sharp brake request, without changing
+      # the safety stop distance or the force-stop path.
+      jerk_scale = get_lead_follow_jerk_scale(car_params)
     else:
       jerk_scale = 1.0
     starpilotPlan.accelerationJerk = float(A_CHANGE_COST * self.starpilot_following.acceleration_jerk * jerk_scale)

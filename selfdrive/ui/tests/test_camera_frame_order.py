@@ -1,5 +1,4 @@
 from types import SimpleNamespace
-
 import pytest
 
 from openpilot.selfdrive.ui.mici.onroad import cameraview as mici_cameraview

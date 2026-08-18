@@ -398,7 +398,7 @@ class StarPilotAppearanceLayout(_SettingsPage):
         self._system_rows = [
             SettingRow("CameraView", "value", tr_noop("Camera View"),
                        subtitle="",
-                       get_value=lambda: tr(CAMERA_VIEWS[self._params.get_int("CameraView")]),
+                       get_value=lambda: tr(CAMERA_VIEWS[self._params.get_int("CameraView", return_default=True, default=2)]),
                        on_click=self._show_camera_view_selector),
             SettingRow("DriverCamera", "toggle", tr_noop("Driver Camera"),
                        subtitle="",
@@ -605,7 +605,7 @@ class StarPilotAppearanceLayout(_SettingsPage):
     # ── Camera view ──
 
     def _show_camera_view_selector(self):
-        current = self._params.get_int("CameraView")
+        current = self._params.get_int("CameraView", return_default=True, default=2)
 
         def on_select(res):
             if res == DialogResult.CONFIRM and dialog.selection:

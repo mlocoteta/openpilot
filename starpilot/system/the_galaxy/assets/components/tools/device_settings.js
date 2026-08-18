@@ -106,6 +106,7 @@ function isSettingVisible(section, param) {
   // This policy controls Galaxy rendering only; hidden params retain their stored values.
   if (HIDDEN_SETTING_KEYS.has(param.key) || !isVehicleSettingVisible(section, param)) return false
   if (RADAR_REQUIRED_KEYS.has(param.key) && !state.values.HasRadar) return false
+  if (param.key === "AlphaLongitudinalEnabled" && !state.values.AlphaLongitudinalAvailable) return false
   if (state.values[GALAXY_DEVELOPER_MODE_KEY]) return true
   return section.name === "Favorites" || param.settings_tier === "simple"
 }
@@ -269,6 +270,11 @@ function syncInputs() {
     const param = state.paramMetaByKey[key]
     if (!param) continue
     el.value = resolveColorInputValue(param)
+  }
+
+  for (const el of document.querySelectorAll("input.ds-text-input[id^='ds-']")) {
+    if (document.activeElement === el) continue
+    el.value = toSelectValue(state.values[el.id.slice(3)])
   }
 
   // Sync selects — hydrate options + set value
@@ -437,6 +443,10 @@ function formatSliderValue(val, stepStr, precisionInt, key) {
   if (key === "SwitchbackModeCooldown") {
     if (v === 0) return "Off"
     return v === 1 ? "1 min" : `${v} min`
+  }
+
+  if (key === "DeviceShutdown") {
+    return v === 1 ? "1 hour" : `${v} hours`
   }
 
   const volumeKeys = [
@@ -1097,6 +1107,11 @@ async function updateParam(key, elType) {
     return
   }
 
+  if (elType === "checkbox" && formattedVal && param.confirm_message && !window.confirm(param.confirm_message)) {
+    revertInput(key, current, elType)
+    return
+  }
+
   try {
     const res = await fetch("/api/params", {
       method: "PUT",
@@ -1227,6 +1242,12 @@ function clearSearchFilter() {
 const cancelButtonKeys = new Set(["CancelButtonControl", "LongCancelButtonControl", "VeryLongCancelButtonControl"])
 
 function getSettingLockReason(param) {
+  if (param?.requires_offroad && state.values.IsOnroad) {
+    return "This setting can only be changed while parked."
+  }
+  if (param?.requires_parked && !state.values.VehicleParked) {
+    return "This setting can only be changed while the vehicle is in Park."
+  }
   if (param?.disabled_when_key_true && state.values[param.disabled_when_key_true]) {
     return param.disabled_reason || "Disabled by another setting."
   }
@@ -1459,6 +1480,7 @@ function renderSettingRow(p) {
 
   const isNumeric = p.ui_type === "numeric"
   const isSlider = isNumeric && p.control === "slider"
+  const isText = p.ui_type === "text"
   const isColor = p.ui_type === "color"
   const isAction = p.ui_type === "action"
   const isGroup = isGroupParam(p)
@@ -1529,7 +1551,7 @@ function renderSettingRow(p) {
         ? formatSliderValue(defaultNumeric, String(bounds.step), p.precision, p.key)
         : "N/A"
       const canReset = !updating && defaultNumeric !== null && Math.abs(defaultNumeric - currentNumeric) > epsilon
-      const stepLabel = formatStepValue(bounds.step, precision)
+      const stepLabel = p.key === "DeviceShutdown" ? "1 hour" : formatStepValue(bounds.step, precision)
       return html`
             <div class="ds-stepper">
               <button
@@ -1584,6 +1606,17 @@ function renderSettingRow(p) {
         <option value="">Loading...</option>
       </select>
     `
+  } else if (isText) {
+    rowControl = html`
+      <input
+        type="${p.input_type || "text"}"
+        class="ds-manual-input ds-text-input"
+        id="ds-${p.key}"
+        value="${() => toSelectValue(state.values[p.key])}"
+        placeholder="${p.placeholder || ""}"
+        disabled="${() => isLocked()}"
+        @change="${() => updateParam(p.key, "text")}" />
+    `
   } else if (p.ui_type === "color") {
     rowControl = html`
       <div style="display:flex; align-items:center; gap:0.75rem;">
@@ -1629,7 +1662,7 @@ function renderSettingRow(p) {
   }
 
   return html`
-    <div class="ds-row ${isNumeric ? "ds-row-numeric" : ""} ${isChild}">
+    <div class="ds-row ${isNumeric ? "ds-row-numeric" : ""} ${isText ? "ds-row-text-input" : ""} ${isChild}">
       <div class="ds-row-info">
         <div class="ds-row-text">
           <div class="ds-row-heading">

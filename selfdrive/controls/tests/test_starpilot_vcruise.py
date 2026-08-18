@@ -4,11 +4,13 @@ import pytest
 
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
 from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_MAX_DECEL_RATE, CurveSpeedController
 from openpilot.starpilot.controls.lib.starpilot_vcruise import (
   FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME,
   StarPilotVCruise,
   get_active_slc_control_target,
+  get_lead_veto_distance,
   get_slc_lead_drop_relaxed_target,
 )
 from types import SimpleNamespace
@@ -17,6 +19,7 @@ from types import SimpleNamespace
 class FakeParams:
   def __init__(self, values=None):
     self.values = dict(values or {})
+    self.writes = []
 
   def get(self, *args, **kwargs):
     key = args[0] if args else None
@@ -25,8 +28,9 @@ class FakeParams:
   def get_float(self, *args, **kwargs):
     return 0.0
 
-  def put_nonblocking(self, *args, **kwargs):
-    pass
+  def put_nonblocking(self, key, value):
+    self.values[key] = value
+    self.writes.append((key, value))
 
 
 def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False, nav_state=None, road_curvature=0.0):
@@ -56,6 +60,7 @@ def make_sm(*, standstill=True, min_steer_speed=0.0):
     "carState": SimpleNamespace(
       standstill=standstill,
       gasPressed=False,
+      brakePressed=False,
       vCruiseCluster=0.0,
       vEgoCluster=0.0,
       leftBlinker=False,
@@ -64,6 +69,7 @@ def make_sm(*, standstill=True, min_steer_speed=0.0):
     ),
     "carParams": SimpleNamespace(minSteerSpeed=min_steer_speed),
     "starpilotCarState": SimpleNamespace(accelPressed=False, dashboardStopSign=0, dashboardSpeedLimit=0),
+    "onroadEvents": [],
   }
 
 
@@ -103,6 +109,11 @@ def test_active_slc_control_target_does_not_require_set_speed_limit():
   )
 
   assert target == pytest.approx((48.0 * CV.MPH_TO_MS) - 0.4)
+
+
+def test_elantra_gets_lead_veto_margin_before_force_stop():
+  assert get_lead_veto_distance(SimpleNamespace(carFingerprint="HYUNDAI_ELANTRA_2021")) == pytest.approx(90.0)
+  assert get_lead_veto_distance(SimpleNamespace(carFingerprint="OTHER_CAR")) == pytest.approx(75.0)
 
 
 def test_curve_speed_controller_holds_target_through_brief_detector_dropout():
@@ -196,6 +207,46 @@ def test_curve_speed_controller_stays_enabled_with_a_lead_by_default():
   assert vcruise.csc_controlling_speed
 
 
+@pytest.mark.parametrize(
+  ("long_active", "gas_pressed"),
+  [(False, False), (True, True)],
+)
+def test_curve_speed_controller_learns_when_speed_is_manually_controlled(long_active, gas_pressed):
+  planner, vcruise = make_vcruise(road_curvature=0.02)
+  sm = make_sm(standstill=False)
+  sm["carControl"].longActive = long_active
+  sm["carState"].gasPressed = gas_pressed
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+  planner.driving_in_curve = True
+  planner.road_curvature_detected = True
+  planner.lateral_acceleration = 2.4
+  vcruise.csc.training_timer = PLANNER_TIME
+
+  update_vcruise(vcruise, sm, toggles, now=50.0, v_ego=20.0)
+
+  assert vcruise.csc.enable_training
+  assert vcruise.csc.curvature_data["0.02"]["count"] == 1
+  assert not vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_persists_data_after_leaving_curve():
+  planner, vcruise = make_vcruise(road_curvature=0.02)
+  sm = make_sm(standstill=False)
+  sm["carControl"].longActive = False
+  planner.driving_in_curve = True
+  planner.lateral_acceleration = 2.4
+  vcruise.csc.training_timer = PLANNER_TIME
+
+  vcruise.csc.log_data(20.0, sm)
+  assert not any(key == "CurvatureData" for key, _ in planner.params.writes)
+
+  planner.driving_in_curve = False
+  vcruise.csc.log_data(20.0, sm)
+
+  assert any(key == "CurvatureData" for key, _ in planner.params.writes)
+
+
 def test_curve_speed_controller_ramps_toward_curve_speed_at_bounded_rate():
   planner = SimpleNamespace(
     params=FakeParams(),
@@ -242,6 +293,20 @@ def test_active_slc_control_target_applies_offset_and_cluster_diff():
   )
 
   assert target == pytest.approx((48.0 * CV.MPH_TO_MS) - 0.4)
+
+
+def test_active_slc_control_target_allows_lower_redneck_override():
+  target = get_active_slc_control_target(
+    speed_limit_controller=True,
+    set_speed_limit=False,
+    slc_target=65.0 * CV.MPH_TO_MS,
+    slc_offset=0.0,
+    overridden_speed=35.0 * CV.MPH_TO_MS,
+    v_ego_diff=0.4,
+    allow_lower_override=True,
+  )
+
+  assert target == pytest.approx((35.0 * CV.MPH_TO_MS) - 0.4)
 
 
 def test_slc_lead_drop_relaxed_target_softens_map_stepdown_for_harmless_lead():

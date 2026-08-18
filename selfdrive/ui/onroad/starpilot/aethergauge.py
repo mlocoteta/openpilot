@@ -44,9 +44,7 @@ CHEVRON_COUNT = 6
 CHEVRON_SPACING = 0.3
 CHEVRON_STEP = 0.05
 
-CEM_STATUS_CURVE = 3
-CEM_STATUS_LEAD = 4
-CEM_STATUS_STOP_LIGHT = 8
+CEM_STATUS_CURVE = CEStatus["CURVATURE"]
 
 LEAD_STOPPED_SPEED_THRESHOLD = 1.0
 
@@ -250,12 +248,24 @@ def _curve_speed_data() -> AetherGaugeData:
   return _build_curve_gauge_data(state['curvature'], csc_speed, v_cruise)
 
 
-# --- CEM: Curvature (non-CSC) ---
+# --- CEM-selected curvature ---
 
-def _is_curvature() -> bool:
-  return _get_val("starpilotPlan", "experimentalMode", False) and abs(_get_val("starpilotPlan", "roadCurvature", 0.0)) > 0.0012
+def _is_cem_curvature() -> bool:
+  # CEM owns detection; the UI consumes its selected reason while tracking is active.
+  toggles = getattr(ui_state, "starpilot_toggles", {})
+  tracking_active = (
+    _get_val("selfdriveState", "enabled", False) or
+    _get_val("starpilotCarState", "alwaysOnLateralEnabled", False)
+  )
+  return (
+    bool(toggles.get("conditional_experimental_mode", False))
+    and bool(toggles.get("conditional_curves", False))
+    and tracking_active
+    and _get_val("starpilotPlan", "experimentalMode", False)
+    and ui_state.conditional_status == CEM_STATUS_CURVE
+  )
 
-def _curvature_data() -> AetherGaugeData:
+def _cem_curvature_data() -> AetherGaugeData:
   csc_speed = _get_val("starpilotPlan", "cscSpeed", 0.0)
   v_ego = _get_val("carState", "vEgo", 0.0)
   v_cruise = _get_val("starpilotPlan", "vCruise", v_ego)
@@ -397,7 +407,7 @@ class AetherGauge:
       (_is_force_stop, _force_stop_data),
       (_is_stop_light, _stop_light_data),
       (_is_curve_speed, _curve_speed_data),
-      (_is_curvature, _curvature_data),
+      (_is_cem_curvature, _cem_curvature_data),
       (_is_lead, _lead_data),
     ]
     if TEST_CYCLE:
@@ -424,13 +434,13 @@ class AetherGauge:
     now = rl.get_time()
     best_priority = 999
     new_data = None
-    
+
     for i, (is_active, get_data) in enumerate(self._sources):
       if is_active():
         best_priority = i
         new_data = get_data()
         break
-        
+
     # Treat None as a priority 999 state: switch immediately if higher/equal priority,
     # or wait for cooldown to downgrade/hide.
     if best_priority <= self._active_priority or (now - self._last_active_time > self._cooldown):
@@ -440,7 +450,8 @@ class AetherGauge:
 
     return self._cached_data
 
-  def render(self, rect: rl.Rectangle, font_bold: rl.Font, font_medium: rl.Font, current_speed: float, cx: float | None = None, bottom: float | None = None, alpha: float = 1.0):
+  def render(self, rect: rl.Rectangle, font_bold: rl.Font, font_medium: rl.Font, current_speed: float,
+             cx: float | None = None, bottom: float | None = None, alpha: float = 1.0):
     data = self.get_active_data()
     if not data:
       return

@@ -38,11 +38,17 @@ TOUCH_HISTORY_TIMEOUT = 3.0  # Seconds before touch points fade out
 BIG_UI = os.getenv("BIG", "0") == "1"
 MACOS = platform.system() == "Darwin"
 ENABLE_VSYNC = os.getenv("ENABLE_VSYNC", "0") == "1"
-MICI_FORCE_RENDER_TEXTURE = os.getenv("MICI_FORCE_RENDER_TEXTURE", "1" if DEVICE_TYPE == "mici" else "0") == "1"
+MICI_FORCE_RENDER_TEXTURE = os.getenv("MICI_FORCE_RENDER_TEXTURE", "0") == "1"
 BURN_IN_PREVENTION = os.getenv("BURN_IN_PREVENTION", "0" if PC else "1") == "1"
 BURN_IN_SHIFT_INTERVAL = max(1.0, float(os.getenv("BURN_IN_SHIFT_INTERVAL", "180")))
 BURN_IN_SHIFT_PIXELS = max(0, int(os.getenv("BURN_IN_SHIFT_PIXELS", "2")))
-WHITE_LUMINANCE_CAP = min(1.0, max(0.0, float(os.getenv("WHITE_LUMINANCE_CAP", "0.95" if BURN_IN_PREVENTION else "1.0"))))
+BURN_IN_SHIFT_TRANSITION_SECONDS = min(
+  BURN_IN_SHIFT_INTERVAL,
+  max(0.1, float(os.getenv("BURN_IN_SHIFT_TRANSITION_SECONDS", "1"))),
+)
+WHITE_LUMINANCE_CAP = min(1.0, max(0.0, float(os.getenv(
+  "WHITE_LUMINANCE_CAP", "1.0"
+))))
 SHOW_FPS = os.getenv("SHOW_FPS") == "1"
 SHOW_TOUCHES = os.getenv("SHOW_TOUCHES") == "1"
 STRICT_MODE = os.getenv("STRICT_MODE") == "1"
@@ -56,6 +62,10 @@ RECORD_QUALITY = int(os.getenv("RECORD_QUALITY", "23"))  # Dynamic bitrate quali
 RECORD_BITRATE = os.getenv("RECORD_BITRATE", "")  # Target bitrate e.g. "2000k" (overrides RECORD_QUALITY when set)
 RECORD_SPEED = int(os.getenv("RECORD_SPEED", "1"))  # Speed multiplier
 OFFSCREEN = os.getenv("OFFSCREEN") == "1"  # Disable FPS limiting for fast offline rendering
+
+
+def _raylib_target_fps(fps: int) -> int:
+  return 0 if OFFSCREEN else fps
 
 GL_VERSION = """
 #version 300 es
@@ -551,7 +561,7 @@ class GuiApplication:
     fps = max(1, int(fps))
     if fps == self._target_fps:
       return
-    rl.set_target_fps(0 if OFFSCREEN else fps)
+    rl.set_target_fps(_raylib_target_fps(fps))
     self._target_fps = fps
 
   def configure_adaptive_rendering(self, enabled: bool, idle_fps: int | None = None) -> None:
@@ -614,8 +624,12 @@ class GuiApplication:
       self._render_texture_width = max(1, int(round(self._scaled_width * self._pixel_scale_x)))
       self._render_texture_height = max(1, int(round(self._scaled_height * self._pixel_scale_y)))
 
+      # Keep raybig burn-in movement in final-frame composition. Translating the live EGL
+      # camera/widget pass can corrupt the camera presentation instead of shifting the UI.
       needs_render_texture = ((self._scale != 1.0 and not PC) or BURN_IN_MODE or RECORD or
-                              MICI_FORCE_RENDER_TEXTURE or BURN_IN_PREVENTION or WHITE_LUMINANCE_CAP < 1.0)
+                              MICI_FORCE_RENDER_TEXTURE or
+                              (BURN_IN_PREVENTION and DEVICE_TYPE != "mici") or
+                              WHITE_LUMINANCE_CAP < 1.0)
       if PC and self._scale != 1.0:
         rl.set_mouse_scale(1 / self._scale, 1 / self._scale)
       if PC:
@@ -657,8 +671,7 @@ class GuiApplication:
         self._ffmpeg_thread = threading.Thread(target=self._ffmpeg_writer_thread, daemon=True)
         self._ffmpeg_thread.start()
 
-      # OFFSCREEN disables FPS limiting for fast offline rendering (e.g. clips)
-      rl.set_target_fps(0 if OFFSCREEN else fps)
+      rl.set_target_fps(_raylib_target_fps(fps))
 
       self._full_target_fps = fps
       self._target_fps = fps
@@ -803,6 +816,10 @@ class GuiApplication:
   def _mark_progress(self, phase: str) -> None:
     if self._progress_hook is not None:
       self._progress_hook(phase)
+
+  def mark_progress(self, phase: str) -> None:
+    """Expose lightweight phase markers to complex widgets."""
+    self._mark_progress(phase)
 
   def set_should_render(self, should_render: bool):
     self._should_render = should_render
@@ -1047,9 +1064,14 @@ class GuiApplication:
         render_scale_x = self._scale * (self._pixel_scale_x if self._render_texture else 1.0)
         render_scale_y = self._scale * (self._pixel_scale_y if self._render_texture else 1.0)
         needs_render_scale = render_scale_x != 1.0 or render_scale_y != 1.0
-        if needs_render_scale:
+        direct_burn_in_shift = self._burn_in_shift() if self._render_texture is None else (0, 0)
+        needs_render_transform = needs_render_scale or direct_burn_in_shift != (0, 0)
+        if needs_render_transform:
           rl.rl_push_matrix()
-          rl.rl_scalef(render_scale_x, render_scale_y, 1.0)
+          if needs_render_scale:
+            rl.rl_scalef(render_scale_x, render_scale_y, 1.0)
+          if direct_burn_in_shift != (0, 0):
+            rl.rl_translatef(direct_burn_in_shift[0], direct_burn_in_shift[1], 0.0)
 
         # Allow a Widget to still run a function regardless of the stack depth
         self._mark_progress("gui_app.before_nav_ticks")
@@ -1066,7 +1088,7 @@ class GuiApplication:
         self._mark_progress("gui_app.frame_ready")
         yield True
 
-        if needs_render_scale:
+        if needs_render_transform:
           rl.rl_pop_matrix()
 
         if self._render_texture:
@@ -1126,13 +1148,25 @@ class GuiApplication:
     except KeyboardInterrupt:
       pass
 
-  def _burn_in_shift(self, now: float | None = None) -> tuple[int, int]:
+  def _burn_in_shift(self, now: float | None = None) -> tuple[float, float]:
     if not BURN_IN_PREVENTION or BURN_IN_SHIFT_PIXELS == 0:
-      return 0, 0
+      return 0.0, 0.0
 
     elapsed = (time.monotonic() if now is None else now) - self._burn_in_start_time
-    pattern_index = int(max(0.0, elapsed) // BURN_IN_SHIFT_INTERVAL) % len(BURN_IN_SHIFT_PATTERN)
-    x, y = BURN_IN_SHIFT_PATTERN[pattern_index]
+    elapsed = max(0.0, elapsed)
+    pattern_count = len(BURN_IN_SHIFT_PATTERN)
+    cycle_elapsed = elapsed % (BURN_IN_SHIFT_INTERVAL * pattern_count)
+    pattern_index = int(cycle_elapsed // BURN_IN_SHIFT_INTERVAL)
+    segment_elapsed = cycle_elapsed - pattern_index * BURN_IN_SHIFT_INTERVAL
+
+    # Blend into the next position at the end of each interval. This keeps the
+    # burn-in protection active without teleporting the entire UI by two pixels.
+    transition_start = BURN_IN_SHIFT_INTERVAL - BURN_IN_SHIFT_TRANSITION_SECONDS
+    transition = min(1.0, max(0.0, (segment_elapsed - transition_start) / BURN_IN_SHIFT_TRANSITION_SECONDS))
+    start_x, start_y = BURN_IN_SHIFT_PATTERN[pattern_index]
+    end_x, end_y = BURN_IN_SHIFT_PATTERN[(pattern_index + 1) % pattern_count]
+    x = start_x + (end_x - start_x) * transition
+    y = start_y + (end_y - start_y) * transition
     return x * BURN_IN_SHIFT_PIXELS, y * BURN_IN_SHIFT_PIXELS
 
   def font(self, font_weight: FontWeight = FontWeight.NORMAL) -> rl.Font:

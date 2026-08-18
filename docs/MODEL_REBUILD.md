@@ -4,8 +4,8 @@ This workflow rebuilds StarPilot driving and driver-monitoring artifacts for the
 
 ## Safety
 
-- The supported build device is `comma@192.168.3.110`.
-- Never run these commands against `192.168.3.109`.
+- The supported build device is `comma@192.168.3.109`.
+- Never run these commands against `192.168.3.110`.
 - Normal artifacts target QCOM. External-GPU artifacts must be compiled explicitly and tagged in the manifest.
 - Keep source ONNX files and compiled PKLs on the T5 workspace, not the comma.
 
@@ -26,7 +26,8 @@ Important directories:
 - Oversized models are represented by repository-safe `.p00`, `.p01`, and `.sha256` files in `ready-for-resources/`.
 - `logs/`: one remote compilation log per model.
 - `results/`: source and artifact checksum records.
-- `manifests/`: generated `model_names_v22.json`.
+- `manifests/`: source `model_names_v22.json` and namespaced release `model_names_v23.json`.
+- The v23 manifest and compiled artifacts are published together in the resource repository's `Models` branch.
 
 ## Initialize And Extract
 
@@ -46,7 +47,10 @@ python3 scripts/model_rebuild_pipeline.py extract \
   --base-manifest /path/to/model_names_v21.json
 ```
 
-Source commits are defined in `scripts/model_source_map_v22.json`.
+The original catalog sources are defined in `scripts/model_source_map_v22.json`.
+Recovered late-model and supercombo sources, including RDF2, are defined in
+`scripts/model_source_map_v23.json`. The v23 map is intentionally separate so
+adding a recovered iteration cannot alter the older model source history.
 
 ## Compile
 
@@ -65,7 +69,7 @@ python3 scripts/model_rebuild_pipeline.py compile \
   --base-manifest /path/to/model_names_v21.json
 ```
 
-Existing artifacts are skipped unless `--force` is passed. Each model is staged in its own remote input directory, compiled on `.110`, copied back to the T5, hashed, and copied into `ready-for-resources/`. Failures are written to `results/<id>_failure.json`; rerunning the same command resumes incomplete models.
+Existing artifacts are skipped unless `--force` is passed. Each model is staged in its own remote input directory, compiled on `.109`, copied back to the T5, hashed, and copied into `ready-for-resources/`. Failures are written to `results/<id>_failure.json`; rerunning the same command resumes incomplete models.
 
 Validate one or all completed artifacts with synthetic camera inputs on QCOM:
 
@@ -155,15 +159,37 @@ All four files must be updated together.
 
 ## Manifest
 
-Generate v22 after compilation:
+Generate the base manifest after compilation, then namespace the release artifacts as v23:
 
 ```bash
 python3 scripts/model_rebuild_pipeline.py manifest \
   --base-manifest /path/to/model_names_v21.json
 ```
 
-The generator preserves existing IDs and behavioral metadata and adds
-`deeprl3v2`. Manifest v22 implies the unified single-PKL runtime layout.
+```bash
+python3 scripts/namespace_model_artifacts.py \
+  --workspace /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22 \
+  --base-manifest /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22/manifests/model_names_v22.json \
+  --manifest-version v23 --suffix 3
+```
+
+The namespace command changes IDs such as `tr1422` to `tr14223`, renames the
+compiled and upload-ready files, and writes an ID map. It preserves display
+names and behavioral versions. The current model manager requests v23 only;
+the manifest is fetched from `Models/model_names_v23.json`, while v22 remains
+available for devices that have not updated yet.
+
+After importing newly compiled sources, normalize the release namespace before
+copying files into either resource repository:
+
+```bash
+python3 scripts/reconcile_v23_artifacts.py \
+  --workspace /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22
+```
+
+This maps recovered source IDs to their v23 release IDs, removes duplicate
+macOS metadata files, and adds `rdf23` for Regret Driven Framework V2. It does
+not overwrite a conflicting artifact.
 Repository-hosted multipart files are discovered by naming convention, so no
 size, hash, format, or part-count metadata is required.
 
@@ -179,4 +205,4 @@ Compilation validates JIT capture/replay, pickle round-trip, finite outputs, met
 4. Confirm `driverStateV2` on both supported camera resolutions.
 5. Test download, selection, deletion, randomization, migration, and fallback in QT, raylib/mici, and Galaxy.
 
-The built-in South Carolina artifact is `selfdrive/modeld/models/driving_tinygrad.pkl`. If migration cannot download the selected v22 artifact, StarPilot switches to that built-in model.
+The built-in RDF artifact is `selfdrive/modeld/models/driving_tinygrad.pkl`. If migration cannot download the selected v23 artifact, StarPilot switches to that built-in model.

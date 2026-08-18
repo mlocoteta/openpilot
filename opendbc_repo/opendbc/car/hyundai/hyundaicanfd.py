@@ -63,6 +63,61 @@ def _update_checksum(packer, address: int, dat: bytearray) -> None:
   _set_value(dat, sig_checksum, checksum)
 
 
+def _set_little_endian_bits(dat: bytearray, lsb: int, size: int, value: int) -> None:
+  """Write the legacy HDA-II field layout without changing the generated DBC aliases."""
+  value &= (1 << size) - 1
+  bit = lsb
+  remaining = size
+  while remaining:
+    byte = bit // 8
+    shift = bit % 8
+    chunk_size = min(remaining, 8 - shift)
+    mask = ((1 << chunk_size) - 1) << shift
+    dat[byte] = (dat[byte] & ~mask) | ((value & ((1 << chunk_size) - 1)) << shift)
+    value >>= chunk_size
+    bit += chunk_size
+    remaining -= chunk_size
+
+
+def _create_gv70_lka_status_msg(packer, CAN, message_name: str, bus: int, enabled: bool,
+                                lat_active: bool, apply_torque: int):
+  values = {
+    "LKA_MODE": 2,
+    "LKA_ICON": 2 if enabled else 1,
+    "TORQUE_REQUEST": apply_torque,
+    "STEER_REQ": 1 if lat_active else 0,
+    "LKA_ASSIST": 0,
+    "STEER_MODE": 0,
+    "DAMP_FACTOR": 100,
+  }
+  address, raw, _ = packer.make_can_msg(message_name, bus, values)
+  dat = bytearray(raw)
+
+  legacy_fields = (
+    (24, 3, 2),
+    (27, 3, 0),
+    (30, 2, 0),
+    (32, 2, 0),
+    (34, 2, 0),
+    (36, 2, 0),
+    (38, 3, 2 if enabled else 1),
+    (52, 2, 1 if lat_active else 0),
+    (54, 2, 0),
+    (56, 1, 0),
+    (60, 4, 0),
+    (80, 2, 0),
+  )
+  for lsb, size, value in legacy_fields:
+    _set_little_endian_bits(dat, lsb, size, value)
+
+  _set_little_endian_bits(dat, 64 if message_name == "LKAS" else 104, 8, 100)
+  if message_name == "LKAS":
+    _set_little_endian_bits(dat, 84, 3, 0)
+
+  _update_checksum(packer, address, dat)
+  return address, bytes(dat), bus
+
+
 def _create_angle_lfa_msg(packer, CAN, values, apply_angle: float, lat_active: bool, torque_reduction_gain: float):
   address = packer.dbc.name_to_msg["LFA"].address
   dat = packer.pack(address, values)
@@ -101,6 +156,16 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
                              send_lfa_status=False, lfa_only=False):
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
+
+  if CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN and CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+    ret = []
+    if CP.openpilotLongitudinalControl or send_lfa_status:
+      ret.append(_create_gv70_lka_status_msg(packer, CAN, "LFA", CAN.ECAN, enabled, lat_active, apply_torque))
+    if lfa_only:
+      return ret
+    ret.append(_create_gv70_lka_status_msg(packer, CAN, "LKAS", CAN.ACAN, enabled, lat_active, apply_torque))
+    return ret
+
   angle_lkas_alt = CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT
 
   control_values = {

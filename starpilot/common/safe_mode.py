@@ -117,6 +117,7 @@ SAFE_MODE_MANAGED_KEYS = (
   "CELead",
   "CESlowerLead",
   "CEStoppedLead",
+  "CEOpenRoad",
   "CESpeed",
   "CESpeedLead",
   "CCMLead",

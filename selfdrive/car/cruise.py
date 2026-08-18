@@ -49,6 +49,9 @@ class VCruiseHelper:
     }
     self.button_hard_states = dict.fromkeys(self.button_timers, False)
     self.button_change_states = {btn: {"standstill": False, "enabled": False} for btn in self.button_timers}
+    # Keep the confirmation button from leaking into cruise-speed handling when the
+    # planner clears the confirmation state between the press and release events.
+    self.confirmation_button_suppressed = set()
 
     self.gm_cc_only = self.CP.carFingerprint in CC_ONLY_CAR and self.CP.flags & GMFlags.CC_LONG.value
     self.redneck_non_pcm = bool(FPCP is not None and
@@ -121,6 +124,15 @@ class VCruiseHelper:
     v_cruise_delta = 1. if is_metric else IMPERIAL_INCREMENT
 
     for b in CS.buttonEvents:
+      event_button_type = b.type.raw
+      if event_button_type in self.button_timers:
+        if speed_limit_changed and b.pressed:
+          self.confirmation_button_suppressed.add(event_button_type)
+        elif not b.pressed and event_button_type in self.confirmation_button_suppressed:
+          self.confirmation_button_suppressed.remove(event_button_type)
+          return
+
+    for b in CS.buttonEvents:
       if b.type.raw in self.button_timers and not b.pressed:
         if self.button_timers[b.type.raw] > CRUISE_LONG_PRESS:
           return  # end long press
@@ -136,6 +148,9 @@ class VCruiseHelper:
           break
 
     if button_type is None:
+      return
+
+    if button_type in self.confirmation_button_suppressed:
       return
 
     # Don't adjust speed when pressing to confirm or deny speed limit changes

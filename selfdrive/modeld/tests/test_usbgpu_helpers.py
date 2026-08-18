@@ -1,5 +1,4 @@
 import io
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -24,32 +23,14 @@ def test_out_of_band_artifact_round_trip():
   np.testing.assert_array_equal(restored["weights"], artifact["weights"])
 
 
-def test_external_gpu_probe_retries_until_pcie_is_ready(monkeypatch):
-  results = [SimpleNamespace(returncode=1, stdout="", stderr="LTSSM=0x00"),
-             SimpleNamespace(returncode=0, stdout="", stderr="")]
+def test_external_gpu_probe_matches_upstream_retry_loop(monkeypatch):
+  from openpilot.system.hardware.chestnut import flash
+
   calls = []
-  monkeypatch.setattr(
-    model_compiler.subprocess,
-    "run",
-    lambda *args, **kwargs: calls.append((args, kwargs)) or results.pop(0),
-  )
+  results = iter((False, False, True))
+  monkeypatch.setattr(flash, "link_up", lambda: calls.append("probe") or next(results))
   monkeypatch.setattr(model_compiler.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
 
-  model_compiler.wait_for_external_gpu({"PYTHONPATH": "/tmp/openpilot"})
+  model_compiler.wait_for_external_gpu()
 
-  assert len(calls) == 3
-  assert calls[0][1]["env"]["DEV"] == "USB+AMD"
-  assert calls[1] == ("sleep", 1)
-
-
-def test_external_gpu_probe_reports_failure(monkeypatch):
-  result = SimpleNamespace(returncode=1, stdout="", stderr="link unavailable")
-  monkeypatch.setattr(model_compiler.subprocess, "run", lambda *args, **kwargs: result)
-  monkeypatch.setattr(model_compiler.time, "sleep", lambda _: None)
-
-  try:
-    model_compiler.wait_for_external_gpu({})
-  except RuntimeError as error:
-    assert "link unavailable" in str(error)
-  else:
-    raise AssertionError("external GPU probe unexpectedly succeeded")
+  assert calls == ["probe", ("sleep", 1), "probe", ("sleep", 1), "probe"]

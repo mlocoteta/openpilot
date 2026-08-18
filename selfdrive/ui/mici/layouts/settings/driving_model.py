@@ -723,10 +723,12 @@ class DrivingModelBigButton(BigButton):
       default_key = default_key.decode("utf-8", errors="ignore")
     default_key = str(default_key or "").strip()
     if not default_key:
-      default_key = "rdf"
+      default_key = "rdf43"
 
     # Keep the built-in model selectable even when the manifest omits it.
     if key == default_key:
+      return True
+    if default_key == "rdf43" and key == "rdf":
       return True
     if default_key.endswith("2") and key == default_key[:-1]:
       return True

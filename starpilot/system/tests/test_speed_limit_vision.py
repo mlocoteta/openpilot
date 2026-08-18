@@ -96,6 +96,39 @@ def test_debug_storage_failure_does_not_crash_detection(monkeypatch):
   assert not daemon._start_debug_session()
 
 
+@pytest.mark.skipif(not hasattr(slv, "memory_pressure_level"), reason="host runtime predates memory pressure governor")
+@pytest.mark.parametrize(
+  ("available_kb", "usage_percent", "expected"),
+  (
+    (None, None, "normal"),
+    (512 * 1024 + 1, None, "normal"),
+    (512 * 1024, None, "pressure"),
+    (256 * 1024, None, "critical"),
+    (None, 88, "pressure"),
+    (None, 94, "critical"),
+  ),
+)
+def test_memory_pressure_level(available_kb, usage_percent, expected):
+  assert slv.memory_pressure_level(available_kb, usage_percent) == expected
+
+
+def test_inference_interval_backs_off_after_expensive_inference():
+  daemon = SpeedLimitVisionDaemon.__new__(SpeedLimitVisionDaemon)
+  daemon.followup_until = 0.0
+  daemon.last_live_pose_inputs_not_ok_at = -float("inf")
+  daemon.last_frame_process_duration_s = 0.4
+  daemon.memory_pressure_state = "normal"
+  daemon.coexistence_mode = False
+  daemon.last_cpu_busy = False
+  daemon._update_memory_pressure = lambda: "normal"
+  daemon._device_cpu_busy = lambda: False
+
+  interval = daemon._inference_interval(10.0)
+
+  assert interval == pytest.approx(1.0)
+  assert daemon.last_inference_interval_reason == "processing_cost"
+
+
 def test_disconnect_camera_releases_client_state():
   daemon = SpeedLimitVisionDaemon.__new__(SpeedLimitVisionDaemon)
   daemon.client = object()

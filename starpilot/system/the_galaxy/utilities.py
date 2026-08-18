@@ -1671,6 +1671,35 @@ def _invalidate_dashboard_cache():
   })
 
 
+def clear_dashboard_route_history(params_obj):
+  """Remove route-backed dashboard history while keeping durable records."""
+  stats = _load_dashboard_persistent_stats(params_obj)
+  route_count = len(stats.get("routes", {}))
+  stats["routes"] = {}
+  stats["ignoredRoutes"] = []
+  serialized = json.dumps(stats, separators=(",", ":"))
+
+  persisted_to_params = False
+  if params_obj is not None:
+    try:
+      params_obj.put(DASHBOARD_PERSISTENT_STATS_PARAM, serialized)
+      persisted_to_params = True
+    except Exception:
+      pass
+
+  fallback_path = _dashboard_param_file_path(DASHBOARD_PERSISTENT_STATS_PARAM)
+  if persisted_to_params:
+    try:
+      fallback_path.unlink()
+    except (FileNotFoundError, OSError):
+      pass
+  elif not _write_dashboard_param_file(DASHBOARD_PERSISTENT_STATS_PARAM, serialized):
+    raise RuntimeError("Unable to clear persisted dashboard route history.")
+
+  _invalidate_dashboard_cache()
+  return route_count
+
+
 def warm_dashboard_stats(footage_paths=None):
   params_obj = params
   if params_obj.get_bool("IsOnroad"):

@@ -12,6 +12,7 @@ from openpilot.common.swaglog import cloudlog
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import CAR as GM_CAR
+from opendbc.car.nissan.values import CAR as NISSAN_CAR
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import MAX_LATERAL_JERK, clip_curvature, get_lateral_active
 from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
@@ -394,11 +395,12 @@ class Controls:
     if self.ecu_disable_failed_checked:
       return
 
-    # ControlsReady is set after CarInterface.init(), where Hyundai ECU disable
-    # writes EcuDisableFailed. Once init has completed, the value is stable.
     if self.params.get_bool("ControlsReady"):
       self.ecu_disable_failed = self.params.get_bool("EcuDisableFailed")
       self.ecu_disable_failed_checked = True
+      if self.ecu_disable_failed and self.CP.carFingerprint == NISSAN_CAR.NISSAN_LEAF:
+        self.CP.openpilotLongitudinalControl = False
+        self.CP.pcmCruise = True
 
   def state_control(self):
     CS = self.sm['carState']

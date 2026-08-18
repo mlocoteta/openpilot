@@ -37,18 +37,25 @@ FW_VERSIONS = {
   CAR.SUBARU_ASCENT_2023: {
     (Ecu.abs, 0x7b0, None): [
       b'\xa5 #\x03\x00',
+      b'\xa5 %\x03\x01',
     ],
     (Ecu.eps, 0x746, None): [
       b'%\xc0\xd0\x11',
+      b'\x55\xc0\xd0\x10',
     ],
     (Ecu.fwdCamera, 0x787, None): [
       b'\x05!\x08\x1dK\x05!\x08\x01/',
+      b'\x17!\x08\x01A\x12!\x08\x00;',
+      b'\x17!\x08\x01A\x00\x00\x00\x00\x00',
+      b'\x20\x02\x0e',
     ],
     (Ecu.engine, 0x7a2, None): [
       b'\xe5,\xa0P\x07',
+      b'\x11,\xa00\x07',
     ],
     (Ecu.transmission, 0x7a3, None): [
       b'\x04\xfe\xf3\x00\x00',
+      b'\x05\xfe\xe7\x00\x00',
     ],
   },
   CAR.SUBARU_LEGACY: {
@@ -603,6 +610,7 @@ FW_VERSIONS = {
     ],
     (Ecu.fwdCamera, 0x787, None): [
       b'\x1a!\x08\x00C\x0e!\x08\x018',
+      b'\x20\x02\x0e',
     ],
     (Ecu.engine, 0x7a2, None): [
       b'\x08,\xa0p\x07',

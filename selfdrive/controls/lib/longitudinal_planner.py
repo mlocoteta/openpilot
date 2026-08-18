@@ -20,7 +20,9 @@ from openpilot.selfdrive.controls.lib.lead_follow_policy import apply as apply_f
 from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_duplicate_vision_follow
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_far_follow_output_slew_rates,
+  get_follow_prebrake_min_headway,
   is_gm_silverado_early_follow_lead,
+  is_toyota_rav4_tss2_post_departure_tune,
   get_toyota_sienna_post_departure_restop_cap,
   get_untracked_slow_lead_decel_scale,
 )
@@ -2183,7 +2185,8 @@ class LongitudinalPlanner:
                     personality=personality, tracking_lead=lead_control_active,
                     optional_far_lead_comfort=True,
                     smooth_duplicate_vision=nonurgent_duplicate_vision_follow and not panic_bypass,
-                    stop_x=force_stop_x)
+                    stop_x=force_stop_x,
+                    silverado_early_follow=early_truck_follow)
 
     self.a_desired_trajectory_full = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
@@ -2212,7 +2215,7 @@ class LongitudinalPlanner:
     if lead_one_active:
       rel_v = max(0.0, v_ego - self.lead_one.vLead)
       # dynamic time headway adds a small buffer when uncertainty is elevated
-      base_th = max(1.6, effective_t_follow)
+      base_th = get_follow_prebrake_min_headway(self.CP, effective_t_follow)
       th = base_th + 0.6 * max(0.0, uncertainty - 0.42)
       desired_gap = th * v_ego
       if (self.lead_dist_f is not None and self.lead_dist_f < desired_gap and rel_v > 0.5):
@@ -2655,6 +2658,12 @@ class LongitudinalPlanner:
     post_departure_active = self.post_departure_follow_settle_active(
       policy_lead, scene_v_ego, effective_t_follow,
     )
+    # The RAV4's post-departure path used to bypass the ordinary follow cap for
+    # the entire settle latch. When a slow lead changed lanes, that let the
+    # cruise branch request full acceleration before the next lead was stable.
+    # Keep the normal catch-up cap on this car; urgent braking remains outside
+    # this comfort policy and is still allowed through unchanged.
+    post_departure_bypass = post_departure_active and not is_toyota_rav4_tss2_post_departure_tune(self.CP)
     follow_result = apply_follow_policy(
       self.lead_one,
       self.lead_two,
@@ -2665,7 +2674,7 @@ class LongitudinalPlanner:
       previous_target=prev_output_a_target,
       raw_target=output_a_target,
       tracking=tracking_lead,
-      post_departure=post_departure_active,
+      post_departure=post_departure_bypass,
       blocked=bool(output_should_stop or vision_low_speed_stop_active or close_lead_caps),
       panic_bypass=panic_bypass,
     )
@@ -2856,7 +2865,10 @@ class LongitudinalPlanner:
     longitudinalPlan.accels = self.a_desired_trajectory.tolist()
     longitudinalPlan.jerks = self.j_desired_trajectory.tolist()
 
-    longitudinalPlan.hasLead = sm['radarState'].leadOne.status
+    # LongControl needs to know about whichever lead MPC is following. Using
+    # leadOne only leaves the stop-release guard blind when source=lead1.
+    selected_lead = sm['radarState'].leadTwo if self.mpc.source == "lead1" else sm['radarState'].leadOne
+    longitudinalPlan.hasLead = bool(selected_lead.status)
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
     longitudinalPlan.fcw = self.fcw
 
