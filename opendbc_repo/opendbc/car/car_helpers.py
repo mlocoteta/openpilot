@@ -49,6 +49,9 @@ interfaces = load_interfaces(interface_names)
 # params from selecting a removed platform name and crashing detection.
 LEGACY_FORCED_CANDIDATE_MAP = {
   "CHEVROLET_BOLT_CC_2019_2021": "CHEVROLET_BOLT_CC_2018_2021",
+  # FrogPilot 9G Accord was CAR.HONDA_ACCORD_2016; StarPilot uses HONDA_ACCORD_9G.
+  # Normalize a stale forced CarModel so migrating from that branch doesn't crash card.
+  "HONDA_ACCORD_2016": "HONDA_ACCORD_9G",
 }
 
 GM_CANDIDATE_PREFIXES = ("CHEVROLET_", "GMC_", "CADILLAC_", "BUICK_", "HOLDEN_")
@@ -286,6 +289,20 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   stored_candidate = _normalize_forced_candidate(params.get("CarModel"))
   cached_candidate = _normalize_forced_candidate(getattr(cached_params, "carFingerprint", None))
 
+  # Race-proof forced fingerprint: starpilot_toggles is derived from starpilotPlan,
+  # which card may read before starpilot_process has published it (toggles then
+  # default force_fingerprint=False). For a car that can't self-fingerprint (e.g. the
+  # TI-equipped 9G Accord, whose aftermarket board changes the CAN set) that dropped it
+  # to MOCK/"unrecognized". Honor the ForceFingerprint param directly as a fallback,
+  # but only when a valid CarModel is stored (matches the toggle's own guard).
+  force_fp = bool(getattr(starpilot_toggles, "force_fingerprint", False))
+  forced_model = getattr(starpilot_toggles, "car_model", None)
+  if not force_fp and params.get_bool("ForceFingerprint"):
+    cm = _normalize_forced_candidate(params.get("CarModel"))
+    if cm and cm in interfaces:
+      force_fp = True
+      forced_model = cm
+
   if candidate is None:
     gm_fallback_candidate = _get_gm_stored_candidate_fallback(fingerprints, stored_candidate, cached_candidate)
     if gm_fallback_candidate is not None:
@@ -297,9 +314,9 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
       })
       candidate = gm_fallback_candidate
 
-  if candidate is None or starpilot_toggles.force_fingerprint:
-    if starpilot_toggles.force_fingerprint:
-      forced_candidate = _normalize_forced_candidate(starpilot_toggles.car_model)
+  if candidate is None or force_fp:
+    if force_fp:
+      forced_candidate = _normalize_forced_candidate(forced_model)
       candidate = forced_candidate
       if candidate not in interfaces and fingerprinted_candidate in interfaces:
         carlog.error({

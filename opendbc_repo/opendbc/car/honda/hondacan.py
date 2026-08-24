@@ -126,6 +126,19 @@ def create_steering_control(packer, CAN, apply_torque, lkas_active, tja_control)
   return packer.make_can_msg("STEERING_CONTROL", CAN.lkas, values)
 
 
+def create_ti_steering_control(packer, apply_steer):
+  # Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
+  # CHKSUM/KEY are sent verbatim (DBC signals are named CHKSUM with no COUNTER,
+  # so the packer/parser perform no checksum/counter validation -> no canError).
+  key = 3294744160
+  values = {
+    "LKAS_REQUEST": apply_steer,
+    "CHKSUM": apply_steer,
+    "KEY": key,
+  }
+  return packer.make_can_msg("TI_STEERING_CONTROL", 0, values)
+
+
 def create_bosch_supplemental_1(packer, CAN):
   # non-active params
   values = {

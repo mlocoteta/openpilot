@@ -326,6 +326,56 @@ class StarPilotLateralLayout(_SettingsPage):
         on_click=lambda: self._show_slider("SteerRatio", max(0.01, cs.steerRatio) * 0.5, max(0.01, cs.steerRatio) * 1.5, step=0.01, value_type="float"),
         visible=lambda: alt_on() and cs.steerRatio != 0,
       ),
+      # ── Honda 9G Accord Torque Interceptor (TI) ──
+      SettingRow(
+        "TorqueInterceptorEnabled", "toggle", tr_noop("Torque Interceptor (TI)"),
+        subtitle=tr_noop("Steer via the aftermarket Torque Interceptor board with a sigmoid tune. Leave OFF for stock LKAS. Restart to apply."),
+        get_state=lambda: p.get_bool("TorqueInterceptorEnabled"),
+        set_state=lambda s: p.put_bool("TorqueInterceptorEnabled", s),
+        visible=lambda: alt_on(),
+      ),
+      SettingRow(
+        "TISigmoidEnabled", "toggle", tr_noop("TI Sigmoid Curve"),
+        subtitle=tr_noop("Nonlinear sigmoid+linear torque model. Off = linear torque."),
+        get_state=lambda: p.get_bool("TISigmoidEnabled"),
+        set_state=lambda s: p.put_bool("TISigmoidEnabled", s),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
+      SettingRow(
+        "TISigmoidLive", "toggle", tr_noop("TI Live Sigmoid Update"),
+        subtitle=tr_noop("Apply sigmoid a/b/c changes live without a restart."),
+        get_state=lambda: p.get_bool("TISigmoidLive"),
+        set_state=lambda s: p.put_bool("TISigmoidLive", s),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
+      SettingRow(
+        "TISigmoidA", "value", tr_noop("Sigmoid Steepness (a)"),
+        subtitle=tr_noop("Transition sharpness near center. Higher = sharper."),
+        get_value=lambda: f"{(p.get_float('TISigmoidA') or 15.0):.1f}",
+        on_click=lambda: self._show_slider("TISigmoidA", 1.0, 15.0, step=0.1, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TISigmoidEnabled"),
+      ),
+      SettingRow(
+        "TISigmoidB", "value", tr_noop("Sigmoid Scale (b)"),
+        subtitle=tr_noop("Overall nonlinear magnitude."),
+        get_value=lambda: f"{(p.get_float('TISigmoidB') or 0.72):.2f}",
+        on_click=lambda: self._show_slider("TISigmoidB", 0.1, 3.0, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TISigmoidEnabled"),
+      ),
+      SettingRow(
+        "TISigmoidC", "value", tr_noop("Linear Component (c)"),
+        subtitle=tr_noop("Base linear response at all lateral accelerations."),
+        get_value=lambda: f"{(p.get_float('TISigmoidC') or 0.16):.2f}",
+        on_click=lambda: self._show_slider("TISigmoidC", 0.01, 1.0, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TISigmoidEnabled"),
+      ),
+      SettingRow(
+        "TISteerKp", "value", tr_noop("TI Steer Kp"),
+        subtitle=tr_noop("Proportional gain. Lower = smoother, higher = tighter."),
+        get_value=lambda: f"{(p.get_float('TISteerKp') or 0.3):.2f}",
+        on_click=lambda: self._show_slider("TISteerKp", 0.3, 3.0, step=0.05, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
     ]
 
     # ── 4. Ford Lateral Tuning ──

@@ -59,6 +59,25 @@ class HondaSafetyFlags(IntFlag):
   GAS_INTERCEPTOR = 32
 
 
+class TI_LIMITS:
+  # Honda 9G Accord Torque Interceptor steering limits (separate CAN device).
+  TI_STEER_MAX = 575                 # theoretical max_steer 2047
+  TI_STEER_DELTA_UP = 15             # torque increase per refresh
+  TI_STEER_DELTA_DOWN = 15           # torque decrease per refresh
+  TI_STEER_DRIVER_ALLOWANCE = 5      # allowed driver torque before start limiting
+  TI_STEER_DRIVER_MULTIPLIER = 40    # weight driver torque
+  TI_STEER_DRIVER_FACTOR = 1         # from dbc
+  TI_STEER_ERROR_MAX = 350           # max delta between torque cmd and torque motor
+  TI_STEER_THRESHOLD = 15            # steeringPressed threshold on the TI torque sensor
+
+
+class TI_STATE:
+  DISCOVER = 0
+  OFF = 1
+  DRIVER_OVER = 2
+  RUN = 3
+
+
 class HondaFlags(IntFlag):
   # Detected flags
   # Bosch models with alternate set of LKAS_HUD messages
@@ -429,7 +448,10 @@ class CAR(Platforms):
       HondaCarDocs("Honda Accord Hybrid 2017", "All"),
     ],
     CarSpecs(mass=3343 * CV.LB_TO_KG, wheelbase=2.78, steerRatio=17.5, centerToFrontRatio=0.37),
-    radar_dbc_dict('honda_accord_2017_can_ext_generated'),
+    # 9G Accord (Nidec). Uses the honda_accord_2017 DBC (built from mvl-boston's
+    # 0111-op-honda-dev fragments) — stock STEERING_CONTROL + STEER_STATUS for normal
+    # LKAS, plus TI_STEERING_CONTROL/TI_FEEDBACK for the optional Torque Interceptor.
+    radar_dbc_dict('honda_accord_2017_can_generated'),
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
   )
   ACURA_MDX_3G = HondaNidecPlatformConfig(

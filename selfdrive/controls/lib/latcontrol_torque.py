@@ -219,6 +219,21 @@ class LatControlTorque(LatControl):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
 
+  def update_sigmoid_lookup(self, a, b, c):
+    """Live-swap the torque curve to sigmoid+linear (Honda 9G TI). Called from controlsd."""
+    from opendbc.car.honda.interface import CarInterface as HondaCI
+    HondaCI.rebuild_sigmoid_lookup(a, b, c)
+    lookup = HondaCI._sigmoid_lookup
+    self.torque_from_lateral_accel = lambda lat_accel, tp: float(np.interp(lat_accel, lookup[1], lookup[0]))
+    self.lateral_accel_from_torque = lambda torque, tp: float(np.interp(torque, lookup[0], lookup[1]))
+    self.update_limits()
+
+  def reset_to_linear(self):
+    """Live-swap back to the stock linear torque model."""
+    self.torque_from_lateral_accel = lambda lat_accel, tp: lat_accel / float(tp.latAccelFactor)
+    self.lateral_accel_from_torque = lambda torque, tp: torque * float(tp.latAccelFactor)
+    self.update_limits()
+
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay, calibrated_pose, model_data, starpilot_toggles):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
