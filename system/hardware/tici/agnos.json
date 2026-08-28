@@ -56,23 +56,30 @@
   },
   {
     "name": "boot",
-    "url": "https://commadist.azureedge.net/agnosupdate/boot-0191529aa97d90d1fa04b472d80230b777606459e1e1e9e2323c9519839827b4.img.xz",
-    "hash": "0191529aa97d90d1fa04b472d80230b777606459e1e1e9e2323c9519839827b4",
-    "hash_raw": "0191529aa97d90d1fa04b472d80230b777606459e1e1e9e2323c9519839827b4",
-    "size": 18515968,
+    "url": "https://files.firestar.link/x/ugiq4cqx08q7/boot9.img.xz",
+    "fallback_urls": [
+      "https://files-east.firestar.link/x/npthb0hzvtxx/boot9.img.xz"
+    ],
+    "hash": "ab2eba0f96b2f48efa376330c3eb509158361adf3ad9c20f269ec92457aa841f",
+    "hash_raw": "ab2eba0f96b2f48efa376330c3eb509158361adf3ad9c20f269ec92457aa841f",
+    "size": 48343040,
     "sparse": false,
     "full_check": true,
     "has_ab": true,
-    "ondevice_hash": "492ae27f569e8db457c79d0e358a7a6297d1a1c685c2b1ae6deba7315d3a6cb0"
+    "ondevice_hash": "c12865a879012d6ad3da538c2ae8aff7d58c308c303fc5d8af309cb1707bc036"
   },
   {
     "name": "system",
-    "url": "https://www.dropbox.com/scl/fi/8fd3w7hbhsyq146kqqdab/system8.img.xz?rlkey=5zt15mtuehdlj8ncj6pwn7zjy&st=j6tr4d47&dl=1",
-    "hash": "4c01245932068aedfceb41cb1aab1f7f044f6659aa2fe2de558f99e2d3aa5793",
-    "hash_raw": "4c01245932068aedfceb41cb1aab1f7f044f6659aa2fe2de558f99e2d3aa5793",
-    "size": 5368709120,
+    "url": "https://files.firestar.link/x/07530yj1jd6a/system18.img.xz",
+    "fallback_urls": [
+      "https://files-east.firestar.link/x/5pmqh33uqrob/system18.img.xz"
+    ],
+    "hash": "01c84930849f9be2bdbad5e9a8dda3a6fd2be95e81d1b3556574b18346934f49",
+    "hash_raw": "01c84930849f9be2bdbad5e9a8dda3a6fd2be95e81d1b3556574b18346934f49",
+    "size": 4718592000,
     "sparse": false,
     "full_check": false,
-    "has_ab": true
+    "has_ab": true,
+    "ondevice_hash": "01c84930849f9be2bdbad5e9a8dda3a6fd2be95e81d1b3556574b18346934f49"
   }
 ]
