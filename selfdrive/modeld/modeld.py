@@ -90,12 +90,19 @@ def _set_hcq_wait_timeout(timeout_ms: int) -> None:
   getenv.cache_clear()
 
 
-def _external_gpu_power_ready(panda_states, now: float, stable_since: float | None) -> tuple[bool, float | None, int | None]:
-  voltages = [
-    int(state.voltage) for state in panda_states
-    if state.pandaType != log.PandaState.PandaType.unknown and int(state.voltage) > 0
-  ]
-  voltage = max(voltages, default=None)
+def _external_gpu_power_ready(panda_states, peripheral_state, now: float, stable_since: float | None) -> tuple[bool, float | None, int | None]:
+  # peripheralState.voltage is sourced from the device's own harness power sense (Hardware::get_voltage()),
+  # with pandad falling back to panda's raw health.voltage_pkt only if that reads 0. pandaStates.voltage is
+  # the raw, un-fallback'd panda reading directly and can read ~0 even with the harness properly powered
+  # (observed on panda type "dos"), so prefer peripheralState and only fall back to pandaStates ourselves
+  # if peripheralState is unavailable too.
+  voltage = int(peripheral_state.voltage)
+  if voltage <= 0:
+    voltages = [
+      int(state.voltage) for state in panda_states
+      if state.pandaType != log.PandaState.PandaType.unknown and int(state.voltage) > 0
+    ]
+    voltage = max(voltages, default=None)
   if voltage is None or voltage < EXTERNAL_GPU_POWER_READY_MV:
     return False, None, voltage
 
@@ -105,14 +112,14 @@ def _external_gpu_power_ready(panda_states, now: float, stable_since: float | No
 
 def wait_for_external_gpu_power_ready() -> None:
   """Wait until the vehicle's 12 V rail is in its post-start charging state."""
-  sm = SubMaster(["pandaStates"])
+  sm = SubMaster(["pandaStates", "peripheralState"])
   stable_since = None
   last_log = 0.0
 
   while True:
     sm.update(1000)
     now = time.monotonic()
-    ready, stable_since, voltage = _external_gpu_power_ready(sm["pandaStates"], now, stable_since)
+    ready, stable_since, voltage = _external_gpu_power_ready(sm["pandaStates"], sm["peripheralState"], now, stable_since)
     if ready:
       cloudlog.warning(f"vehicle power stable at {voltage / 1000:.2f} V; starting external GPU load")
       return
