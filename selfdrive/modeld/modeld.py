@@ -112,6 +112,12 @@ def _external_gpu_power_ready(panda_states, peripheral_state, now: float, stable
 
 def wait_for_external_gpu_power_ready() -> None:
   """Wait until the vehicle's 12 V rail is in its post-start charging state."""
+  if Params().get_bool("ChestnutSkipPowerGate"):
+    # Manual bypass: pandaStates/peripheralState voltage sensing can read low on some
+    # harness/cable setups even with the vehicle genuinely running (e.g. cable voltage
+    # drop). Set this param to skip the wait entirely rather than block Chestnut load.
+    cloudlog.warning("external GPU power-ready wait bypassed via ChestnutSkipPowerGate")
+    return
   sm = SubMaster(["pandaStates", "peripheralState"])
   stable_since = None
   last_log = 0.0
