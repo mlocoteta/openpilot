@@ -78,9 +78,6 @@ BIG_MODEL_RUN_WAIT_TIMEOUT_MS = 3000
 EXTERNAL_GPU_POWER_READY_MV = 13000
 EXTERNAL_GPU_POWER_STABLE_SECONDS = 3.0
 EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS = 10.0
-# Bounded so a future sensing fault degrades to "load anyway" instead of stranding the
-# big model in "loading" forever, which is how the original unbounded wait failed.
-EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS = float(os.getenv("EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS", "60.0"))
 LAT_SMOOTH_BP = [2.0, 8.0]
 
 
@@ -119,7 +116,6 @@ def wait_for_external_gpu_power_ready() -> None:
   sm = SubMaster(["pandaStates", "peripheralState"])
   stable_since = None
   last_log = 0.0
-  started = time.monotonic()
 
   while True:
     sm.update(1000)
@@ -127,12 +123,6 @@ def wait_for_external_gpu_power_ready() -> None:
     ready, stable_since, voltage = _external_gpu_power_ready(sm["pandaStates"], sm["peripheralState"], now, stable_since)
     if ready:
       cloudlog.warning(f"vehicle power stable at {voltage / 1000:.2f} V; starting external GPU load")
-      return
-
-    if now - started >= EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS:
-      detail = "unavailable" if voltage is None else f"{voltage / 1000:.2f} V"
-      cloudlog.error(f"vehicle power never reached {EXTERNAL_GPU_POWER_READY_MV / 1000:.1f} V "
-                     f"(last {detail}) after {EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS:.0f}s; loading external GPU anyway")
       return
 
     if now - last_log >= EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS:
