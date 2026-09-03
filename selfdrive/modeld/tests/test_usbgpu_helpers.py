@@ -67,17 +67,50 @@ def test_native_amd_signal_keeps_existing_short_wait_behavior():
   assert sleeps == [200]
 
 
-def test_external_gpu_power_uses_fixed_settle_delay(monkeypatch):
-  # The voltage-based gate was replaced by a fixed settle: pandaStates.voltage reads
-  # ~0 V on some panda hardware and cable drop can hold a running car under any sane
-  # threshold, both of which hung the load forever.
-  sleeps = []
-  monkeypatch.setattr(modeld.time, "sleep", lambda seconds: sleeps.append(seconds))
+def _peripheral(voltage):
+  return SimpleNamespace(voltage=voltage)
 
-  modeld.wait_for_external_gpu_power_ready()
 
-  assert sleeps == [modeld.EXTERNAL_GPU_POWER_SETTLE_SECONDS]
-  assert modeld.EXTERNAL_GPU_POWER_SETTLE_SECONDS > 0
+def test_external_gpu_power_prefers_peripheral_state_voltage():
+  # A faulty panda ADC reports ~0 V while the car is genuinely charging; peripheralState
+  # carries the real reading, so the gate must not be driven by pandaStates.
+  panda = SimpleNamespace(pandaType=modeld.log.PandaState.PandaType.dos, voltage=242)
+
+  ready, stable_since, voltage = modeld._external_gpu_power_ready([panda], _peripheral(13500), 10.0, None)
+  assert not ready            # needs to be stable first
+  assert stable_since == 10.0
+  assert voltage == 13500     # peripheralState wins over the 242 mV panda reading
+
+  ready, _, _ = modeld._external_gpu_power_ready([panda], _peripheral(13500), 13.5, stable_since)
+  assert ready
+
+
+def test_external_gpu_power_falls_back_to_panda_when_peripheral_missing():
+  panda = SimpleNamespace(pandaType=modeld.log.PandaState.PandaType.tres, voltage=14100)
+
+  ready, stable_since, voltage = modeld._external_gpu_power_ready([panda], _peripheral(0), 10.0, None)
+  assert not ready
+  assert voltage == 14100
+
+  ready, _, _ = modeld._external_gpu_power_ready([panda], _peripheral(0), 13.5, stable_since)
+  assert ready
+
+
+def test_external_gpu_power_resets_stability_when_voltage_drops():
+  panda = SimpleNamespace(pandaType=modeld.log.PandaState.PandaType.tres, voltage=0)
+
+  _, stable_since, _ = modeld._external_gpu_power_ready([panda], _peripheral(13500), 10.0, None)
+  ready, stable_since, _ = modeld._external_gpu_power_ready([panda], _peripheral(11900), 11.0, stable_since)
+  assert not ready
+  assert stable_since is None
+
+
+def test_external_gpu_power_ignores_unknown_pandas():
+  panda_states = [
+    SimpleNamespace(pandaType=modeld.log.PandaState.PandaType.unknown, voltage=15000),
+    SimpleNamespace(pandaType=modeld.log.PandaState.PandaType.tres, voltage=0),
+  ]
+  assert modeld._external_gpu_power_ready(panda_states, _peripheral(0), 10.0, None) == (False, None, None)
 
 
 def test_external_gpu_wait_timeout_updates_tinygrad_cache(monkeypatch):

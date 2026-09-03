@@ -75,7 +75,12 @@ def _should_publish_model_output(model_output, vipc_dropped_frames: int, externa
 MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_LOAD_WAIT_TIMEOUT_MS = 30000
 BIG_MODEL_RUN_WAIT_TIMEOUT_MS = 3000
-EXTERNAL_GPU_POWER_SETTLE_SECONDS = float(os.getenv("EXTERNAL_GPU_POWER_SETTLE_SECONDS", "5.0"))
+EXTERNAL_GPU_POWER_READY_MV = 13000
+EXTERNAL_GPU_POWER_STABLE_SECONDS = 3.0
+EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS = 10.0
+# Bounded so a future sensing fault degrades to "load anyway" instead of stranding the
+# big model in "loading" forever, which is how the original unbounded wait failed.
+EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS = float(os.getenv("EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS", "60.0"))
 LAT_SMOOTH_BP = [2.0, 8.0]
 
 
@@ -88,23 +93,53 @@ def _set_hcq_wait_timeout(timeout_ms: int) -> None:
   getenv.cache_clear()
 
 
+def _external_gpu_power_ready(panda_states, peripheral_state, now: float, stable_since: float | None) -> tuple[bool, float | None, int | None]:
+  # Prefer peripheralState.voltage: pandad sources it from the device's own harness power
+  # sense (Hardware::get_voltage()) and only falls back to panda's raw health.voltage_pkt
+  # if that reads 0. pandaStates.voltage is the raw, un-fallback'd panda reading, which can
+  # sit at ~0 V on a faulty panda ADC even with harnessStatus normal and the car charging
+  # (measured: 0.2 V on pandaStates vs 13.5 V on peripheralState, same instant, same panda).
+  # Only fall back to pandaStates when peripheralState itself is unavailable.
+  voltage = int(peripheral_state.voltage)
+  if voltage <= 0:
+    voltages = [
+      int(state.voltage) for state in panda_states
+      if state.pandaType != log.PandaState.PandaType.unknown and int(state.voltage) > 0
+    ]
+    voltage = max(voltages, default=None)
+  if voltage is None or voltage < EXTERNAL_GPU_POWER_READY_MV:
+    return False, None, voltage
+
+  stable_since = now if stable_since is None else stable_since
+  return now - stable_since >= EXTERNAL_GPU_POWER_STABLE_SECONDS, stable_since, voltage
+
+
 def wait_for_external_gpu_power_ready() -> None:
-  """Let the vehicle's 12 V rail settle after engine start before loading the external GPU.
+  """Wait until the vehicle's 12 V rail is in its post-start charging state."""
+  sm = SubMaster(["pandaStates", "peripheralState"])
+  stable_since = None
+  last_log = 0.0
+  started = time.monotonic()
 
-  Deliberately a fixed delay rather than a voltage check. Onroad only begins after
-  ignition and cranking is over within a second or two, so a short settle is enough to
-  avoid loading through the start-up brownout.
+  while True:
+    sm.update(1000)
+    now = time.monotonic()
+    ready, stable_since, voltage = _external_gpu_power_ready(sm["pandaStates"], sm["peripheralState"], now, stable_since)
+    if ready:
+      cloudlog.warning(f"vehicle power stable at {voltage / 1000:.2f} V; starting external GPU load")
+      return
 
-  Voltage gating was tried and removed: pandaStates.voltage reads ~0 V on some panda
-  hardware even with the harness properly powered, and harness/cable drop can hold a
-  genuinely running car below any sane threshold, so the check would hang forever and
-  strand the big model in "loading". Engine RPM was considered as an alternative, but
-  HONDA_ACCORD_9G also covers the Accord Hybrid, where ENGINE_RPM is legitimately 0
-  while the car is running. A fixed settle has no sensor dependency and no such edge
-  case. Override with EXTERNAL_GPU_POWER_SETTLE_SECONDS if needed.
-  """
-  cloudlog.warning(f"settling {EXTERNAL_GPU_POWER_SETTLE_SECONDS:.1f}s before external GPU load")
-  time.sleep(EXTERNAL_GPU_POWER_SETTLE_SECONDS)
+    if now - started >= EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS:
+      detail = "unavailable" if voltage is None else f"{voltage / 1000:.2f} V"
+      cloudlog.error(f"vehicle power never reached {EXTERNAL_GPU_POWER_READY_MV / 1000:.1f} V "
+                     f"(last {detail}) after {EXTERNAL_GPU_POWER_MAX_WAIT_SECONDS:.0f}s; loading external GPU anyway")
+      return
+
+    if now - last_log >= EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS:
+      detail = "unavailable" if voltage is None else f"{voltage / 1000:.2f} V"
+      cloudlog.warning(f"external GPU load deferred: vehicle power is {detail}; waiting for " +
+                       f"{EXTERNAL_GPU_POWER_READY_MV / 1000:.1f} V to remain stable")
+      last_log = now
 
 
 def get_lateral_smooth_seconds(v_ego: float, maximum: float = 0.0) -> float:
