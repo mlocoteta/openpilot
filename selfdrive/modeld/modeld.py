@@ -5,6 +5,7 @@ from functools import cached_property
 import json
 import os
 import struct
+import usb1
 from openpilot.system.hardware import HARDWARE, TICI
 os.environ['GMMU'] = '0'
 os.environ['DEV'] = 'QCOM' if TICI else 'LLVM'
@@ -50,6 +51,7 @@ from openpilot.selfdrive.modeld.compile_modeld import (
 )
 from openpilot.selfdrive.modeld.helpers import get_tg_input_devices, load_oob, tinygrad_dev_config, usbgpu_present
 from openpilot.selfdrive.modeld.usbgpu_link import wait_usbgpu_link
+from openpilot.system.hardware.usb import CHESTNUT_USB_IDS
 from openpilot.starpilot.assets.model_manager import (
   ModelManager,
   get_model_profile,
@@ -212,6 +214,38 @@ class ChestnutState:
     self.valid = True
     self.sends = 0
     self.metrics = {}
+    self._asm_usb = None
+
+  def _close_asm_usb(self) -> None:
+    if self._asm_usb is not None:
+      self._asm_usb.close()
+      self._asm_usb = None
+
+  def _open_asm_usb(self):
+    context = usb1.USBContext()
+    for vendor_id, product_id in CHESTNUT_USB_IDS:
+      handle = context.openByVendorIDAndProductID(vendor_id, product_id, skip_on_error=True)
+      if handle is not None:
+        return handle
+    context.close()
+
+  def _read_ina(self) -> tuple[int, int, bool]:
+    if "AMD" in Device._opened_devices and self._asm_usb is None:
+      try:
+        raw = Device["AMD"].iface.pci_dev.usb.usb.control_read(0xC0, 5)
+        return struct.unpack("<Hh?", bytes(raw))
+      except Exception:
+        pass
+    if self._asm_usb is None:
+      self._asm_usb = self._open_asm_usb()
+    if self._asm_usb is None:
+      raise usb1.USBErrorNoDevice
+    try:
+      raw = self._asm_usb.controlRead(0xC0, 0xC0, 0, 0, 5, timeout=100)
+    except usb1.USBError:
+      self._close_asm_usb()
+      raise
+    return struct.unpack("<Hh?", bytes(raw))
 
   @cached_property
   def power_limit(self) -> int:
@@ -253,12 +287,14 @@ class ChestnutState:
         setattr(state, key, value)
 
     asm_valid = False
+    try:
+      state.supplyVoltage, state.supplyCurrent, state.supplyFault = self._read_ina()
+      asm_valid = True
+    except Exception:
+      pass
     if "AMD" in Device._opened_devices:
       try:
-        asm = Device["AMD"].iface.pci_dev.usb
-        state.pcieLtssm = asm.read(0xB450, 1)[0]
-        state.supplyVoltage, state.supplyCurrent = struct.unpack("<Hh", bytes(asm.usb.control_read(0xC0, 5))[:4])
-        asm_valid = True
+        state.pcieLtssm = Device["AMD"].iface.pci_dev.usb.read(0xB450, 1)[0]
       except Exception:
         pass
 
