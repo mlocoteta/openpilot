@@ -425,7 +425,7 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   # Shared API surface added for the second batch of ported pages.
   for method in ["selectTestingGround",
                  "getSentryStatus", "getSentryEvents", "deleteSentryEvent", "sentryPushSubscribe",
-                 "getModelStatus", "startModelDownload", "downloadAllModels", "deleteModel", "saveModelPreferences",
+                 "getModelStatus", "setActiveModel", "startModelDownload", "downloadAllModels", "deleteModel", "saveModelPreferences",
                  "getPlotsLive",
                  "getGalaxySession", "deleteNavigationKey",
                  "getThemeList", "saveTheme", "applyTheme", "deleteTheme", "downloadTheme",

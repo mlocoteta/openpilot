@@ -44,9 +44,17 @@ model_manager = ModuleType("openpilot.starpilot.assets.model_manager")
 model_manager.MODEL_LAB_DOWNLOAD_PARAM = "ModelLabModelToDownload"
 model_manager.canonical_model_key = lambda value: str(value or "").strip().lower().replace(" ", "-")
 model_manager.external_gpu_available = lambda: False
+model_manager.disable_big_model_profile = lambda params: (
+  params.put("ActiveBigModel", "none"),
+  params.remove("ActiveBigModelName"),
+  params.remove("ActiveBigModelVersion"),
+)
 def _stub_get_model_profile(params, profile):
   prefix = "ActiveBigModel" if profile == "big" else "ActiveSmallModel"
-  key = params.get(prefix) or ("rdf43" if profile == "small" else "")
+  stored_key = params.get(prefix)
+  if profile == "big" and stored_key == "none":
+    return "", "", ""
+  key = stored_key or ("rdf43" if profile == "small" else "")
   return key, params.get(f"{prefix}Name") or key, params.get(f"{prefix}Version") or ""
 
 
@@ -1850,6 +1858,12 @@ def test_model_profiles_can_be_selected_without_external_gpu(monkeypatch, tmp_pa
   status = client.get("/api/models/status").get_json()
   assert status["activeBigModel"] == "big-one"
   assert status["activeSmallModel"] == "small-one"
+
+  disabled = client.put("/api/models/active", json={"profile": "big", "model": ""})
+  assert disabled.status_code == 200
+  assert params.values["ActiveBigModel"] == "none"
+  assert disabled.get_json()["model"] == ""
+  assert client.get("/api/models/status").get_json()["activeBigModel"] == ""
 
   wrong_profile = client.put("/api/models/active", json={"profile": "small", "model": "big-one"})
   assert wrong_profile.status_code == 409

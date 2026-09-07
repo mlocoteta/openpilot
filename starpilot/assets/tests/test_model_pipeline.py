@@ -177,6 +177,40 @@ def test_active_small_and_big_profiles_migrate_from_legacy_selection(tmp_path, m
   assert model_manager.get_model_profile(big_params, "big") == ("big-one", "Big One", "v16")
 
 
+def test_disabled_big_profile_does_not_migrate_from_legacy_selection(tmp_path, monkeypatch):
+  monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
+  (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({
+    "big-one": {"uses_external_gpu": True},
+  }))
+
+  class FakeParams:
+    def __init__(self):
+      self.values = {
+        "Model": "big-one",
+        "DrivingModel": "big-one",
+        "ActiveBigModel": model_manager.DISABLED_MODEL_PROFILE,
+        "ActiveBigModelName": "Big One",
+        "ActiveBigModelVersion": "v16",
+      }
+
+    def get(self, key):
+      return self.values.get(key)
+
+    def put(self, key, value):
+      self.values[key] = value
+
+    def remove(self, key):
+      self.values.pop(key, None)
+
+  params = FakeParams()
+  assert model_manager.get_model_profile(params, "big") == ("", "", "")
+
+  model_manager.disable_big_model_profile(params)
+  assert params.values["ActiveBigModel"] == model_manager.DISABLED_MODEL_PROFILE
+  assert "ActiveBigModelName" not in params.values
+  assert "ActiveBigModelVersion" not in params.values
+
+
 def test_runtime_model_metadata_does_not_overwrite_model_profiles(tmp_path, monkeypatch):
   monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
   (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({

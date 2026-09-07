@@ -473,8 +473,8 @@ function bindDomHandlers() {
     if (!(target instanceof HTMLSelectElement)) return;
     if (target.id === "mm-active-small-model-select" || target.id === "mm-active-big-model-select") {
       const modelKey = safeText(target.value, "");
-      if (!modelKey) return;
       const profile = target.id === "mm-active-big-model-select" ? "big" : "small";
+      if (!modelKey && profile !== "big") return;
       runAction(`select-${profile}`, modelKey).catch(() => {});
       return;
     }
@@ -669,7 +669,7 @@ export function ModelManager() {
         </select>
 
         <label class="mm-filter-label" for="mm-active-big-model-select">Active Big</label>
-        <select class="mm-select" id="mm-active-big-model-select" disabled="${() => getInstalledModels("big").length === 0}">
+        <select class="mm-select" id="mm-active-big-model-select">
           ${() => {
             const orderedInstalled = getInstalledModels("big").sort((a, b) => {
               const aCurrent = safeText(a.value) === state.activeBigModel ? 0 : 1;
@@ -680,14 +680,14 @@ export function ModelManager() {
 
             return orderedInstalled.length > 0
               ? html`
-                ${state.activeBigModel ? "" : html`<option value="" selected>Choose an eGPU model</option>`}
+                <option value="" selected="${() => !state.activeBigModel || false}">None — always use Active Small</option>
                 ${orderedInstalled.map(model => html`
                   <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.activeBigModel || false}">
                     ${safeText(model.label, model.value)}
                   </option>
                 `)}
               `
-              : html`<option value="">No installed eGPU models</option>`;
+              : html`<option value="" selected>None — always use Active Small</option>`;
           }}
         </select>
 

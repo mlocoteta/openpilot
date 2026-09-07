@@ -428,7 +428,8 @@ def hardware_thread(end_event, hw_queue) -> None:
     if chestnut is not None:
       chestnut.update(started_ts is None, last_hw_state.usb_state)
       model_lab_config = params.get("ModelLabConfig")
-      chestnut_expected = bool(params.get("ActiveBigModel")) or (
+      active_big_model = params.get("ActiveBigModel", encoding="utf-8") or ""
+      chestnut_expected = active_big_model.lower() not in ("", "none") or (
         isinstance(model_lab_config, dict) and bool(model_lab_config.get("enabled"))
       )
       chestnut_state = sm["chestnutState"]

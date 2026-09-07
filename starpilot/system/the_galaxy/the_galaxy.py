@@ -55,6 +55,7 @@ from panda import Panda
 from openpilot.starpilot.assets.model_manager import (
   MODEL_LAB_DOWNLOAD_PARAM,
   canonical_model_key,
+  disable_big_model_profile,
   external_gpu_available,
   get_model_profile,
   is_builtin_model_key,
@@ -6450,7 +6451,21 @@ def setup(app):
 
     model_key = canonical_model_key(str(data.get("model") or "").strip())
     if not model_key:
-      return jsonify({"error": "Missing model key."}), 400
+      if profile != "big":
+        return jsonify({"error": "Active Small cannot be disabled."}), 400
+
+      lab_config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+      if lab_config["enabled"]:
+        lab_config["enabled"] = False
+        params.put(MODEL_LAB_CONFIG_PARAM, lab_config)
+        params.remove(MODEL_LAB_RUNTIME_PARAM)
+
+      disable_big_model_profile(params)
+      return jsonify({
+        "message": "Active Big disabled. Active Small will be used even when Chestnut is connected.",
+        "profile": profile,
+        "model": "",
+      }), 200
 
     catalog = {model["value"]: model for model in get_model_catalog()}
     model = catalog.get(model_key)

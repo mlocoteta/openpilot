@@ -37,6 +37,7 @@ ACTIVE_BIG_MODEL_VERSION_PARAM = "ActiveBigModelVersion"
 ACTIVE_SMALL_MODEL_PARAM = "ActiveSmallModel"
 ACTIVE_SMALL_MODEL_NAME_PARAM = "ActiveSmallModelName"
 ACTIVE_SMALL_MODEL_VERSION_PARAM = "ActiveSmallModelVersion"
+DISABLED_MODEL_PROFILE = "none"
 MODEL_PROFILE_PARAMS = {
   "big": (ACTIVE_BIG_MODEL_PARAM, ACTIVE_BIG_MODEL_NAME_PARAM, ACTIVE_BIG_MODEL_VERSION_PARAM),
   "small": (ACTIVE_SMALL_MODEL_PARAM, ACTIVE_SMALL_MODEL_NAME_PARAM, ACTIVE_SMALL_MODEL_VERSION_PARAM),
@@ -154,7 +155,11 @@ def get_model_profile(params, profile: str) -> tuple[str, str, str]:
     raise ValueError(f"Unknown model profile: {profile}")
 
   key_param, name_param, version_param = MODEL_PROFILE_PARAMS[profile]
-  model_key = canonical_model_key(_params_text(params, key_param))
+  stored_value = _params_text(params, key_param)
+  if profile == "big" and stored_value.lower() == DISABLED_MODEL_PROFILE:
+    return "", "", ""
+
+  model_key = canonical_model_key(stored_value)
   requires_gpu = profile == "big"
   if model_key and model_uses_external_gpu(model_key) != requires_gpu:
     model_key = ""
@@ -201,6 +206,12 @@ def set_model_profile(params, profile: str, model_key: str, model_name: str = ""
   params.put(key_param, canonical_key)
   params.put(name_param, model_name or catalog_name or canonical_key)
   params.put(version_param, model_version or catalog_version or ("v15" if is_builtin_model_key(canonical_key) else ""))
+
+
+def disable_big_model_profile(params) -> None:
+  params.put(ACTIVE_BIG_MODEL_PARAM, DISABLED_MODEL_PROFILE)
+  params.remove(ACTIVE_BIG_MODEL_NAME_PARAM)
+  params.remove(ACTIVE_BIG_MODEL_VERSION_PARAM)
 
 
 def set_runtime_model_params(params, model_key: str, model_version: str = "") -> None:

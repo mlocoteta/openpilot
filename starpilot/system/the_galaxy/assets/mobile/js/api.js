@@ -260,6 +260,7 @@ export const api = {
   sentryPushSubscribe(body) { return request("/api/sentry/push/subscribe", { method: "POST", data: body }) },
 
   getModelStatus() { return requestOk("/api/models/status", { cache: "no-store" }) },
+  setActiveModel(profile, modelKey = "") { return request("/api/models/active", { method: "PUT", data: { profile, model: modelKey } }) },
   startModelDownload(modelKey, allowGpuWithoutGpu = false) { return request("/api/models/download", { method: "POST", data: { model: modelKey, allowGpuWithoutGpu } }) },
   downloadAllModels(allowGpuWithoutGpu = false) { return request("/api/models/download_all", { method: "POST", data: { allowGpuWithoutGpu } }) },
   deleteModel(modelKey) { return request("/api/models/delete", { method: "POST", data: { model: modelKey } }) },
