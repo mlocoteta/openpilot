@@ -10,7 +10,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, Buttons, CarControllerParams, CAR, CANFD_ANGLE_LONGITUDINAL_CAR, \
+from opendbc.car.hyundai.values import HyundaiFlags, HyundaiSafetyFlags, HyundaiStarPilotFlags, Buttons, CarControllerParams, CAR, CANFD_ANGLE_LONGITUDINAL_CAR, \
                                         CANFD_RADAR_LIVE_LONGITUDINAL_CAR, CANFD_ALT_BUTTONS_RESUME_CAR, kia_ev6_gt_line_longitudinal_tuning, \
                                         KIA_EV6_GT_LINE_LONG_TUNING_TESTING_GROUND_ID
 from opendbc.car.interfaces import CarControllerBase
@@ -477,6 +477,11 @@ class CarController(CarControllerBase):
     self._dash_lat_disengage_init = False
     self._dash_prev_lat_active = False
     self._ray_lkas11_active = False
+    self._ray_lfa_8byte = CP.carFingerprint == CAR.KIA_RAY_EV and bool(
+      getattr(CP, "safetyConfigs", None) and
+      CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_REFRESH_MSGS
+    )
+    self._ray_lfa_packer = CANPacker("hyundai_kia_ray_lfa") if self._ray_lfa_8byte else None
 
   def _update_dash_icon_state(self, CC):
     if CC.latActive:
@@ -834,7 +839,10 @@ class CarController(CarControllerBase):
 
     # 20 Hz LFA MFA message
     if self.frame % 5 == 0 and (self.CP.flags & HyundaiFlags.SEND_LFA.value or (self.long_active_ecu and blended_hda2)):
-      can_sends.append(hyundaican.create_lfahda_mfc(self.packer, CC.enabled, self.frame, self.CP, lfa_icon))
+      if self._ray_lfa_8byte:
+        can_sends.append(hyundaican.create_ray_lfahda_mfc(self._ray_lfa_packer, CC.latActive, lfa_icon))
+      else:
+        can_sends.append(hyundaican.create_lfahda_mfc(self.packer, CC.enabled, self.frame, self.CP, lfa_icon))
 
     # 5 Hz ACC options
     if self.frame % 20 == 0 and self.long_active_ecu and not can_canfd_blended:

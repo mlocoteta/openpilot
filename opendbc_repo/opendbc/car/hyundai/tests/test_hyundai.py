@@ -901,7 +901,21 @@ class TestHyundaiFingerprint:
     fingerprint[2][0x485] = 8
     CP = CarInterface.get_params(CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
 
-    assert not (CP.flags & HyundaiFlags.SEND_LFA)
+    assert CP.flags & HyundaiFlags.SEND_LFA
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_REFRESH_MSGS
+
+  def test_ray_ev_uses_carrot_eight_byte_lfa_frame(self):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x485] = 8
+    CP = CarInterface.get_params(CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+
+    msg = hyundaican.create_ray_lfahda_mfc(controller._ray_lfa_packer, True, 2)
+    assert msg[0] == 0x485
+    assert len(msg[1]) == 8
+    assert msg[1][0] & 0x03 == 2
+    assert msg[1][2] & 0x10 == 0x10
+    assert msg[1][3] & 0x03 == 2
 
   def test_non_ray_legacy_platform_keeps_53e_lkas12_detection(self):
     fingerprint = gen_empty_fingerprint()
@@ -1038,8 +1052,11 @@ class TestHyundaiFingerprint:
     ret = update(0, 3)
     assert any(be.type == ButtonType.lkas and not be.pressed for be in ret.buttonEvents)
 
-    ret = update(2, 4)
+    ret = update(1, 4)
     assert any(be.type == ButtonType.lkas and be.pressed for be in ret.buttonEvents)
+
+    raw_button_msg = packer.make_can_msg("BCM_PO_11", 0, {"RAY_LKAS_BTN": 1})
+    assert raw_button_msg[1][0] == 0x10
 
   def test_non_ray_does_not_use_ray_lkas_signal(self):
     CP = CarInterface.get_params(CAR.KIA_FORTE_2021_NON_SCC, gen_empty_fingerprint(), [], False, False, False, None)
