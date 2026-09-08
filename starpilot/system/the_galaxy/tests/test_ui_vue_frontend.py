@@ -44,6 +44,7 @@ def test_ui_app_shell_files_exist():
     "js/views/Tuning.js",
     "js/views/Navigation.js",
     "js/views/Vehicle.js",
+    "js/views/Bluetooth.js",
     "js/views/SystemTools.js",
   ]
   for rel in required:
@@ -55,6 +56,8 @@ def test_ui_index_wires_vue_and_mount_point():
   assert 'id="galaxy-app"' in index
   assert 'src="/assets/mobile/js/app.js"' in index
   assert '"vue": "/assets/vendor/vue/vue.esm-browser.js"' in index
+  assert '<title>Galaxy</title>' in index
+  assert 'apple-mobile-web-app-title" content="Galaxy"' in index
 
 
 def test_ui_uses_same_backend_endpoints():
@@ -107,7 +110,7 @@ def test_ui_ports_all_tool_views():
         "js/views/Recordings.js": ["/api/routes", "getRoutesStream", "getRouteLogs"],
     "js/views/Logs.js": ["getErrorLogs", "tmuxSnapshot"],
     "js/components/TroubleshootPanel.js": ["getTroubleshoot", "resetTroubleshootSection", "GalaxyConfirm"],
-    "js/views/Tuning.js": ["LateralTuningPanel", "LongitudinalManeuvers"],
+    "js/views/Tuning.js": ["LateralTuningPanel"],
     "js/views/Navigation.js": ["getNavigation", "setNavigation", "MapsPanel", "NavigationKeysPanel"],
     "js/views/ToolEmbed.js": ["/manage_maps", "/manage_navigation_keys"],
     "js/views/SystemTools.js": [
@@ -122,7 +125,9 @@ def test_ui_ports_all_tool_views():
     for ep in endpoints:
       assert ep in src, f"{rel} should use api.{ep}"
   vehicle = _read("js/views/Vehicle.js")
-  assert "WheelControls" in vehicle and "BluetoothPanel" in vehicle and "carFeaturesCheck" in vehicle
+  bluetooth = _read("js/views/Bluetooth.js")
+  assert "WheelControls" in vehicle and "BluetoothPanel" not in vehicle and "carFeaturesCheck" in vehicle
+  assert "BluetoothPanel" in bluetooth
 
 
 def test_ui_routes_ported_views_natively_no_classic_fallback():
@@ -130,16 +135,16 @@ def test_ui_routes_ported_views_natively_no_classic_fallback():
   shell = _read("js/components/AppShell.js")
   tools = _read("js/views/Tools.js")
 
-  for view in ["Recordings", "Logs", "Tuning", "Navigation", "Vehicle", "SystemTools"]:
+  for view in ["Recordings", "Logs", "Tuning", "Navigation", "Vehicle", "Bluetooth", "SystemTools"]:
     assert view in app, f"app.js should register {view}"
 
   # Ported routes must resolve natively in the Vue app (zero /classic redirect).
-  for route in ["/recordings", "/logs", "/tuning", "/navigation", "/vehicle", "/system"]:
+  for route in ["/recordings", "/logs", "/tuning", "/navigation", "/vehicle", "/bluetooth", "/system"]:
     assert route in shell, f"AppShell should route {route} natively"
     assert route in app, f"app.js should resolve {route} natively"
   # Tools grid routes the native categories (Recordings lives in the bottom nav
   # and is intentionally absent from the Tools page).
-  for tool in ["/tuning", "/logs", "/navigation", "/vehicle", "/system"]:
+  for tool in ["/tuning", "/logs", "/navigation", "/vehicle", "/bluetooth", "/system"]:
     assert tool in tools, f"Tools grid should route {tool} natively"
   assert "/cameras" in tools, "Tools grid should route the camera hub natively"
   assert "/manage_v_asm" not in tools and "/manage_pip_sidecam" not in tools
@@ -204,7 +209,7 @@ def test_ui_speed_units_follow_the_vehicle():
   assert "displayParam" in card and "formatNumericParamValue" in card
   assert "sliderStepDisplay" in card and "Step:" in card
   assert ':values="values"' in settings
-  assert "Use Metric System" in settings
+  assert "gx-unit-note" not in settings
 
 
 def test_ui_centralizes_api_and_uses_composables():
@@ -226,10 +231,10 @@ def test_ui_centralizes_api_and_uses_composables():
 def test_ui_schema_driven_param_engine_reused():
   tuning = _read("js/views/Tuning.js")
   assert "GalaxyEmbed" not in tuning and 'src="/tuning"' not in tuning, "Tuning must be native, not a classic embed"
-  assert "LateralTuningPanel" in tuning and "LongitudinalManeuvers" in tuning
+  assert "LateralTuningPanel" in tuning and "LongitudinalManeuvers" not in tuning
   vehicle = _read("js/views/Vehicle.js")
   assert "ParamSections" not in vehicle, "Vehicle must not render redundant toggles"
-  assert "WheelControls" in vehicle and "BluetoothPanel" in vehicle
+  assert "WheelControls" in vehicle and "BluetoothPanel" not in vehicle
   assert "GalaxySection" in vehicle
   engine = _read("js/components/ParamSections.js")
   assert "SettingTree" in engine
@@ -285,6 +290,7 @@ def test_ui_has_bottom_navigation_and_drawer():
   assert "gx-drawer" in shell
   assert "gx-appbar" in shell
   assert "Search toggles" in shell
+  assert ">Galaxy</span>" in shell
 
 
 def test_ui_search_visible_on_mobile_and_content_full_width():
@@ -342,8 +348,6 @@ def test_ui_galaxy_background_is_css_only_and_lightweight():
 
 def test_galaxy_py_serves_classic_at_root_and_new_ui_at_mobile():
   source = GALAXY_PY.read_text(encoding="utf-8")
-  # The classic Galaxy SPA is the default landing at / (original behaviour) unless
-  # the "New Galaxy by Default" (GalaxyMobileDefault) toggle is enabled.
   assert '@app.route("/", methods=["GET"])' in source
   assert 'render_template("index.html")' in source
   assert 'params.get_bool("GalaxyMobileDefault")' in source
@@ -358,7 +362,8 @@ def test_galaxy_py_serves_classic_at_root_and_new_ui_at_mobile():
 def test_ui_manifest_is_valid_pwa_manifest():
   manifest = json.loads((UI_ROOT / "manifest.json").read_text(encoding="utf-8"))
   assert manifest["display"] == "standalone"
-  assert manifest["name"]
+  assert manifest["name"] == "Galaxy"
+  assert manifest["short_name"] == "Galaxy"
   assert manifest["icons"]
   assert "start_url" not in manifest
 
@@ -417,7 +422,6 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
 
   # Standalone native views + their routes.
   native = {
-    "/sentry": "Sentry",
     "/manage_models": "ModelManager",
     "/plots": "Plots",
     "/testing_ground": "TestingGround",
@@ -430,6 +434,10 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
     src = _read(f"js/views/{view}.js")
     assert src, f"missing view: {view}"
     assert "GalaxyEmbed" not in src and "fetch(" not in src, f"{view} should be native with no raw fetch"
+
+  assert '"/sentry": Cameras' in app
+  sentry = _read("js/views/Sentry.js")
+  assert "GalaxyEmbed" not in sentry and "fetch(" not in sentry
 
   # Navigation maps + App Keys and Tuning lateral are native tabs now.
   nav = _read("js/views/Navigation.js")
@@ -466,8 +474,9 @@ def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
   assert "/cameras" in app and "Cameras" in app, "app.js should register the camera hub"
   assert "/cameras" in store, "store NATIVE_ROOTS should include /cameras"
   assert "GalaxyEmbed" not in cameras and "fetch(" not in cameras
-  assert "Vasm" in cameras and "Pip" in cameras, "camera hub should embed V-ASM and PiP"
+  assert "Sentry" in cameras and "Vasm" in cameras and "Pip" in cameras, "camera hub should embed Sentry, V-ASM, and PiP"
   assert "GalaxyTabs" in cameras
+  assert cameras.index('sentry: "Sentry Mode"') < cameras.index('vasm: "V-ASM Spot Monitor"')
 
   # Removed standalone pages are no longer routed or listed as native roots.
   for route in ["/manage_v_asm", "/manage_pip_sidecam"]:
@@ -485,6 +494,40 @@ def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
   for method in ["getVasmSnapshotBlob", "deleteVasmConfig", "getMemoryParam",
                  "pipSnapshotSource", "deletePipConfig"]:
     assert method in api, f"api.js should expose {method}"
+
+
+def test_ui_mobile_polish_regressions():
+  system = _read("js/views/SystemTools.js")
+  css = _read("css/material.css")
+  assert 'button v-if="updateAvailable"' in system
+  assert "checkedForUpdates && !!this.fastStatus?.updateAvailable" in system
+  assert "gx-update-progress__fill" in system
+  assert "linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%)" in css
+
+  bluetooth = _read("js/components/BluetoothPanel.js")
+  assert "methods: {\n    address," in bluetooth
+
+  logs = _read("js/views/Logs.js")
+  assert logs.index('troubleshoot: "Troubleshoot"') < logs.index('errors: "Error Logs"') < logs.index('tmux: "Tmux Live Log"')
+  troubleshoot = _read("js/components/TroubleshootPanel.js")
+  assert "gx-diagnostic-row--changed" in troubleshoot and ".gx-row.gx-diagnostic-row--changed" in css
+
+  recordings = _read("js/views/Recordings.js")
+  galaxy = _read("js/views/Galaxy.js")
+  assert "bandwidth reasons" in recordings and "status?.lanIp" in recordings
+  assert "status?.lanIp" in galaxy
+  assert ':href="localUrl"' in recordings and ':href="localUrl"' in galaxy
+
+  home = _read("js/views/Home.js")
+  home_css = _read("css/home.css")
+  assert "backgroundImage: modelView.style" in home
+  assert "display: flex" in home_css and "flex-direction: column" in home_css
+
+  tuning = _read("js/views/Tuning.js")
+  classic_sidebar = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/sidebar.js").read_text(encoding="utf-8")
+  c4_developer = (REPO_ROOT / "selfdrive/ui/layouts/settings/developer.py").read_text(encoding="utf-8")
+  assert "LongitudinalManeuvers" not in tuning and "Long Maneuvers" not in classic_sidebar
+  assert 'tr("Longitudinal Maneuver Mode")' not in c4_developer
 
 
 def _node_exe():

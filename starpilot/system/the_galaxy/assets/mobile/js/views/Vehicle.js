@@ -1,7 +1,6 @@
 import { api, showSnackbar } from "../api.js"
 import { navigate, toolHref } from "../store.js"
 import { WheelControls } from "../components/WheelControls.js"
-import { BluetoothPanel } from "../components/BluetoothPanel.js"
 import { GalaxySection } from "../components/GalaxySection.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
 import { useTabRouting } from "../composables.js"
@@ -13,13 +12,12 @@ const FEATURES = [
 
 const TABS = {
   controllers: "Controllers",
-  bluetooth: "Bluetooth",
   features: "Vehicle Features",
 }
 
 export const Vehicle = {
   name: "Vehicle",
-  components: { WheelControls, BluetoothPanel, GalaxySection, GalaxyTabs },
+  components: { WheelControls, GalaxySection, GalaxyTabs },
   data() {
     return {
       TABS,
@@ -29,7 +27,7 @@ export const Vehicle = {
     }
   },
   setup() {
-    return useTabRouting("/vehicle", { controllers: "controllers", bluetooth: "bluetooth", features: "features" })
+    return useTabRouting("/vehicle", { controllers: "controllers", features: "features" })
   },
   computed: {
     featureList() { return this.features },
@@ -69,10 +67,6 @@ export const Vehicle = {
 
       <template v-if="tab === 'controllers'">
         <WheelControls />
-      </template>
-
-      <template v-else-if="tab === 'bluetooth'">
-        <BluetoothPanel />
       </template>
 
       <template v-else>
