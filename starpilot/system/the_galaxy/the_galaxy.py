@@ -6348,20 +6348,23 @@ def setup(app):
       },
       "manifest": {
         "version": params.get("ModelManifestVersion", encoding="utf-8") or "unknown",
-        "shortcomings": [
-          "The current manifest does not consistently declare model size; legacy non-Chestnut entries are treated as small.",
-          "The current manifest does not publish AMD-compiled variants for its ordinary small-model downloads.",
-          "The current manifest does not declare lateral or longitudinal quality/capability tags.",
-          "The current manifest does not declare output-contract compatibility, memory, or frame-time measurements.",
-        ],
-        "opportunities": [
-          "Publish model_size and model_lab_eligible for every model.",
-          "Publish an accelerator_artifacts.chestnut entry pointing to a precompiled AMD pickle for each supported small model.",
-          "Publish role scores and pairing notes from replay evaluations.",
-          "Publish architecture, output-contract, peak-memory, and p50/p95 execution metadata.",
-        ],
       },
     }
+
+  def _activate_preferred_model_profile():
+    """Restore the model that the normal small/big profile system would run."""
+    profile = "big" if external_gpu_available() and _active_model_key("big") else "small"
+    model_key, model_name, model_version = get_model_profile(params, profile)
+    if not model_key:
+      model_key, model_name, model_version = _default_model_key(), _default_model_name(), _default_model_version()
+
+    params.put("Model", model_key)
+    params.put("DrivingModel", model_key)
+    params.put("DrivingModelName", model_name or model_key)
+    if model_version:
+      params.put("ModelVersion", model_version)
+      params.put("DrivingModelVersion", model_version)
+    return model_name or model_key
 
   @app.route("/api/model-laboratory", methods=["GET", "PUT"])
   def model_laboratory():
@@ -6401,7 +6404,8 @@ def setup(app):
         params.put("DrivingModelVersion", lateral["version"])
       message = "Model Laboratory enabled. The pair will load on the next drive."
     else:
-      message = "Model Laboratory disabled."
+      restored_model = _activate_preferred_model_profile()
+      message = f"Model Laboratory disabled. {restored_model} will be used next."
 
     return jsonify({"message": message, **_model_lab_status_payload()}), 200
 
@@ -6409,8 +6413,6 @@ def setup(app):
   def download_model_laboratory_artifact():
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Model Laboratory artifacts can only be downloaded while parked."}), 403
-    if not external_gpu_available():
-      return jsonify({"error": "Chestnut is not connected and firmware-ready."}), 409
     if (
       params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
       or (params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
@@ -6424,16 +6426,50 @@ def setup(app):
     if model is None:
       return jsonify({"error": f"Unknown model '{model_key}'."}), 404
     if not model.get("modelLabEligible"):
-      return jsonify({"error": "Only compatible small models can be prepared for Model Laboratory."}), 409
+      return jsonify({"error": "Only compatible small models have Model Laboratory eGPU variants."}), 409
     if not model.get("modelLabArtifactAvailable"):
       return jsonify({"error": "The manifest does not publish a precompiled AMD artifact for this model."}), 409
     if model.get("modelLabArtifactInstalled"):
-      return jsonify({"message": f"\"{model['label']}\" is already prepared for Chestnut."}), 200
+      return jsonify({"message": f"The eGPU variant for \"{model['label']}\" is already downloaded."}), 200
 
     params_memory.remove(MODEL_CANCEL_DOWNLOAD_PARAM)
     params_memory.put(MODEL_LAB_DOWNLOAD_PARAM, model_key)
-    params_memory.put(MODEL_DOWNLOAD_PROGRESS_PARAM, "Downloading precompiled AMD artifact...")
-    return jsonify({"message": f"Started preparing \"{model['label']}\" for Chestnut."}), 200
+    params_memory.put(MODEL_DOWNLOAD_PROGRESS_PARAM, "Starting eGPU variant download...")
+    return jsonify({"message": f"Started downloading the eGPU variant for \"{model['label']}\"."}), 200
+
+  @app.route("/api/model-laboratory/artifact", methods=["DELETE"])
+  def delete_model_laboratory_artifact():
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Model Laboratory eGPU variants can only be deleted while parked."}), 403
+    if (
+      params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
+      or (params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
+      or (params_memory.get(MODEL_LAB_DOWNLOAD_PARAM, encoding="utf-8") or "")
+    ):
+      return jsonify({"error": "Cannot delete an eGPU variant while a model download is in progress."}), 409
+
+    data = request.get_json(silent=True) or {}
+    model_key = canonical_model_key(str(data.get("model") or "").strip())
+    model = next((entry for entry in get_model_catalog() if entry["value"] == model_key), None)
+    if model is None:
+      return jsonify({"error": f"Unknown model '{model_key}'."}), 404
+    if not model.get("modelLabArtifactInstalled"):
+      return jsonify({"message": f"No eGPU variant is downloaded for \"{model['label']}\"."}), 200
+
+    config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+    if config["enabled"] and model_key in (config["lateralModel"], config["longitudinalModel"]):
+      return jsonify({"error": "Disable Model Laboratory or choose a different pair before deleting this eGPU variant."}), 409
+
+    artifact_path = MODELS_PATH / model_accelerator_artifact_filename(model_key)
+    try:
+      artifact_path.unlink(missing_ok=True)
+      Path(get_manifest_path(artifact_path)).unlink(missing_ok=True)
+      for chunk_path in artifact_path.parent.glob(f"{artifact_path.name}.chunk*of*"):
+        chunk_path.unlink(missing_ok=True)
+    except Exception as exception:
+      return jsonify({"error": f"Failed deleting the eGPU variant: {exception}"}), 500
+
+    return jsonify({"message": f"Deleted the eGPU variant for \"{model['label']}\".", **_model_lab_status_payload()}), 200
 
   @app.route("/api/models/preferences", methods=["GET", "PUT"])
   def get_or_set_models_preferences():
@@ -6487,8 +6523,9 @@ def setup(app):
         params.remove(MODEL_LAB_RUNTIME_PARAM)
 
       disable_big_model_profile(params)
+      restored_model = _activate_preferred_model_profile()
       return jsonify({
-        "message": "Active Big disabled. Active Small will be used even when Chestnut is connected.",
+        "message": f"Active Big disabled. {restored_model} will be used even when Chestnut is connected.",
         "profile": profile,
         "model": "",
       }), 200
@@ -6510,8 +6547,9 @@ def setup(app):
       params.remove(MODEL_LAB_RUNTIME_PARAM)
 
     set_model_profile(params, profile, model_key, model["label"], model["version"])
+    active_model = _activate_preferred_model_profile()
     return jsonify({
-      "message": f"Active {profile.title()} set to '{model['label']}'.",
+      "message": f"Active {profile.title()} set to '{model['label']}'. {active_model} will be used next.",
       "profile": profile,
       "model": model_key,
     }), 200

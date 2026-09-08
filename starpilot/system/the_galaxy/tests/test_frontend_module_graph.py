@@ -128,8 +128,13 @@ def test_model_laboratory_frontend_exposes_guards_and_role_copy():
   assert 'if (!state.chestnutReady)' in source
   assert 'if (state.isOnroad)' in source
   assert "model.modelLabArtifactInstalled" in source
-  assert "Nothing is compiled on the comma" in source
-  assert "run every camera frame on Chestnut's AMD GPU" in source
+  assert "Download eGPU-compatible small models" in source
+  assert "Choose from downloaded eGPU variant combinations below" in source
+  assert "Download eGPU variant" in source
+  assert "Delete eGPU variant" in source
+  assert "Nothing is compiled on the comma" not in source
+  assert "availableModels().filter(model => model.modelLabArtifactInstalled)" in source
+  assert source.index("<h3>Available models</h3>") < source.index("<h3>Compose a pair</h3>")
   assert 'lateral.value === longitudinal.value' in source
   assert 'lateral.version !== longitudinal.version' not in source
   assert 'class="ml-chip ${' not in source
@@ -146,5 +151,5 @@ def test_model_laboratory_frontend_exposes_guards_and_role_copy():
   assert "longitudinalModel: selectionDirty" in source
   assert source.count("selectionDirty = true") == 2
   assert "selectionDirty = false\n    applyPayload(payload)" in source
-  assert 'model_laboratory.js?v=model-lab-5' in ROUTER_PATH.read_text(encoding="utf-8")
-  assert 'model_laboratory.css?v=model-lab-4' in INDEX_PATH.read_text(encoding="utf-8")
+  assert 'model_laboratory.js?v=model-lab-6' in ROUTER_PATH.read_text(encoding="utf-8")
+  assert 'model_laboratory.css?v=model-lab-5' in INDEX_PATH.read_text(encoding="utf-8")

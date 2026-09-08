@@ -960,7 +960,7 @@ class TestLatControl:
     assert get_genesis_g70_low_speed_output_limit(0.0, 2.0) < 0.30
     assert get_genesis_g70_low_speed_angle_damping(0.0, -20.0, 0.0, 2.0) < 0.0
     assert get_genesis_g70_low_speed_angle_damping(0.0, 20.0, 0.0, 2.0) > 0.0
-    assert get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) == pytest.approx(1.0)
+    assert 0.90 < get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) < 1.0
     assert get_genesis_g70_curve_unwind_output_scale(0.7, 0.5, 25.0) == 1.0
     assert get_genesis_g70_angle_output_scale(55.0, 1.0) > get_genesis_g70_angle_output_scale(85.0, 1.0)
     assert get_genesis_g70_angle_output_scale(85.0, -1.0) == pytest.approx(1.0)

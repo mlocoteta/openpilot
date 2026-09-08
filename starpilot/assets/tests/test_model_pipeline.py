@@ -326,7 +326,8 @@ def test_model_manager_downloads_precompiled_accelerator_variant_without_compili
     },
   }])
   (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps(metadata))
-  monkeypatch.setattr(model_manager, "external_gpu_available", lambda: True)
+  # These are precompiled files, so downloading must not require a connected eGPU.
+  monkeypatch.setattr(model_manager, "external_gpu_available", lambda: False)
   monkeypatch.setattr(model_manager, "get_resource_urls", lambda: ["https://models.example"])
   monkeypatch.setattr(manager, "_load_artifact_url_map", lambda: {})
   calls = []
@@ -346,7 +347,7 @@ def test_model_manager_downloads_precompiled_accelerator_variant_without_compili
   )
   assert calls[0][3]["execution_device"] == "AMD"
   assert calls[0][5] == ["https://models.example"]
-  assert manager.params_memory.values[model_manager.DOWNLOAD_PROGRESS_PARAM] == "Chestnut artifact downloaded!"
+  assert manager.params_memory.values[model_manager.DOWNLOAD_PROGRESS_PARAM] == "eGPU variant downloaded!"
   assert model_manager.MODEL_LAB_DOWNLOAD_PARAM not in manager.params_memory.values
 
 

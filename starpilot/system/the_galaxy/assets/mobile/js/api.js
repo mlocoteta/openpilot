@@ -136,6 +136,7 @@ export const api = {
   getModelLab() { return request("/api/model-laboratory", { cache: "no-store" }) },
   saveModelLab(config) { return request("/api/model-laboratory", { method: "PUT", data: config }) },
   prepareModelLabArtifact(model) { return request("/api/model-laboratory/download", { method: "POST", data: { model } }) },
+  deleteModelLabArtifact(model) { return request("/api/model-laboratory/artifact", { method: "DELETE", data: { model } }) },
 
   getErrorLogs() { return request("/api/error_logs", { headers: { Accept: "application/json" } }) },
   getErrorLog(filename) { return fetch(`/api/error_logs/${encodeURIComponent(filename)}`).then((r) => r.text()) },

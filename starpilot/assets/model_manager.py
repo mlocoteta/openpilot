@@ -1022,11 +1022,6 @@ class ModelManager:
     model_key = self._canonical_model_key(model_key)
     accelerator = str(accelerator or "").strip().lower()
     try:
-      if accelerator == MODEL_LAB_ACCELERATOR and not external_gpu_available():
-        handle_error(None, "External GPU required...", "Chestnut is not connected and firmware-ready.",
-                     MODEL_LAB_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, self.params_memory)
-        return False
-
       artifact_metadata = model_accelerator_artifact_metadata(model_key, accelerator)
       if not model_accelerator_artifact_available(model_key, accelerator):
         handle_error(None, "Accelerator artifact unavailable...",
@@ -1059,7 +1054,7 @@ class ModelManager:
                        MODEL_LAB_DOWNLOAD_PARAM, DOWNLOAD_PROGRESS_PARAM, self.params_memory)
         return False
 
-      self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Chestnut artifact downloaded!")
+      self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "eGPU variant downloaded!")
       return True
     finally:
       self.params_memory.remove(MODEL_LAB_DOWNLOAD_PARAM)

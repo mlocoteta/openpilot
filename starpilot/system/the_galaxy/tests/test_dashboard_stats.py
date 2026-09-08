@@ -1859,9 +1859,16 @@ def test_model_profiles_can_be_selected_without_external_gpu(monkeypatch, tmp_pa
   assert status["activeBigModel"] == "big-one"
   assert status["activeSmallModel"] == "small-one"
 
+  monkeypatch.setattr(server, "external_gpu_available", lambda: True)
+  active_big_response = client.put("/api/models/active", json={"profile": "big", "model": "big-one"})
+  assert active_big_response.status_code == 200
+  assert params.values["Model"] == params.values["DrivingModel"] == "big-one"
+  assert params.values["DrivingModelName"] == "Big One"
+
   disabled = client.put("/api/models/active", json={"profile": "big", "model": ""})
   assert disabled.status_code == 200
   assert params.values["ActiveBigModel"] == "none"
+  assert params.values["Model"] == params.values["DrivingModel"] == "small-one"
   assert disabled.get_json()["model"] == ""
   assert client.get("/api/models/status").get_json()["activeBigModel"] == ""
 
@@ -1899,6 +1906,12 @@ def test_model_laboratory_api_uses_installed_models_and_enforces_hardware_size_v
     "ModelManifestVersion": "v25",
     "Model": "rdf43",
     "DrivingModel": "rdf43",
+    "ActiveSmallModel": "rdf43",
+    "ActiveSmallModelName": "Regret Driven Framework V4",
+    "ActiveSmallModelVersion": "v15",
+    "ActiveBigModel": "big",
+    "ActiveBigModelName": "Chestnut One Billion",
+    "ActiveBigModelVersion": "v16",
   })
   metadata = {
     "lat": {"model_size": "small", "model_size_declared": True, "model_lab_eligible": True,
@@ -1974,10 +1987,16 @@ def test_model_laboratory_api_uses_installed_models_and_enforces_hardware_size_v
   queued = client.post("/api/model-laboratory/download", json={"model": "old"})
   assert queued.status_code == 200
   assert params_memory.values["ModelLabModelToDownload"] == "old"
-  assert "precompiled AMD" in params_memory.values["ModelDownloadProgress"]
+  assert "eGPU variant" in params_memory.values["ModelDownloadProgress"]
   params_memory.remove("ModelLabModelToDownload")
 
   monkeypatch.setattr(server, "external_gpu_available", lambda: False)
+  (tmp_path / "old_driving_chestnut_tinygrad.pkl").unlink(missing_ok=True)
+  queued_without_chestnut = client.post("/api/model-laboratory/download", json={"model": "old"})
+  assert queued_without_chestnut.status_code == 200
+  assert params_memory.values["ModelLabModelToDownload"] == "old"
+  params_memory.remove("ModelLabModelToDownload")
+
   no_chestnut = client.put("/api/model-laboratory", json={
     "enabled": True,
     "lateralModel": "lat",
@@ -1985,6 +2004,21 @@ def test_model_laboratory_api_uses_installed_models_and_enforces_hardware_size_v
   })
   assert no_chestnut.status_code == 409
   assert "Chestnut" in no_chestnut.get_json()["error"]
+
+  monkeypatch.setattr(server, "external_gpu_available", lambda: True)
+  disabled = client.put("/api/model-laboratory", json={
+    "enabled": False,
+    "lateralModel": "lat",
+    "longitudinalModel": "long",
+  })
+  assert disabled.status_code == 200
+  assert params.values["Model"] == params.values["DrivingModel"] == "big"
+  assert params.values["DrivingModelName"] == "Chestnut One Billion"
+
+  deleted = client.delete("/api/model-laboratory/artifact", json={"model": "lat"})
+  assert deleted.status_code == 200
+  assert not (tmp_path / "lat_driving_chestnut_tinygrad.pkl").exists()
+  assert (tmp_path / "lat_driving_tinygrad.pkl").exists()
 
   params.values["IsOnroad"] = True
   onroad = client.put("/api/model-laboratory", json={"enabled": False})
