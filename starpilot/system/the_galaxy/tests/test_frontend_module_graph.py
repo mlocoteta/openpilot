@@ -7,6 +7,7 @@ ROUTER_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/components/router.
 INDEX_PATH = REPO_ROOT / "starpilot/system/the_galaxy/templates/index.html"
 BLUETOOTH_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/bluetooth.js"
 CONTROLLERS_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/wheel_controls.js"
+MOBILE_CONTROLLERS_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/mobile/js/components/WheelControls.js"
 SIDEBAR_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/components/sidebar.js"
 MODEL_LAB_PATH = REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/model_laboratory.js"
 
@@ -23,7 +24,7 @@ def test_router_and_settings_cache_bust_is_consistent():
   index = INDEX_PATH.read_text(encoding="utf-8")
 
   assert "/assets/components/settings.js?v=router-cycle-fix-5" in router
-  assert "/assets/components/router.js?v=router-cycle-fix-7" in index
+  assert "/assets/components/router.js?v=router-cycle-fix-8" in index
 
 
 def test_bluetooth_actions_use_reactive_disabled_bindings():
@@ -74,6 +75,16 @@ def test_controller_joystick_mode_requires_explicit_device_selection():
   assert "Favorite buttons are the default" in source
   assert "Enable for Joystick Mode" in source
   assert 'request("joystick", { device_id: device.device_id, enabled: !selected() })' in source
+
+
+def test_controller_offroad_disconnect_is_opt_in():
+  source = CONTROLLERS_PATH.read_text(encoding="utf-8")
+  mobile_source = MOBILE_CONTROLLERS_PATH.read_text(encoding="utf-8")
+
+  for frontend in (source, mobile_source):
+    assert "Disconnect controllers when offroad" in frontend
+    assert "After two minutes offroad" in frontend
+    assert "offroad-disconnect" in frontend
 
 
 def test_controller_page_has_ten_controller_only_action_slots():

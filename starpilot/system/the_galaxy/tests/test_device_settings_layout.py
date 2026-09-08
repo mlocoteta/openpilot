@@ -107,6 +107,41 @@ def test_device_shutdown_uses_literal_hours():
   assert device_shutdown["step"] == 1
 
 
+def test_speed_settings_follow_vehicle_units_with_one_unit_steps():
+  sections = _params_by_section(_layout())
+  speed_keys = {
+    "MinimumLaneChangeSpeed", "PauseLateralSpeed",
+    "CESpeed", "CESpeedLead", "CESignalSpeed",
+    "CustomCruise", "CustomCruiseLong", "SetSpeedOffset", "PulseGlideSpeedDelta",
+    "Offset1", "Offset2", "Offset3", "Offset4", "Offset5", "Offset6", "Offset7",
+    "CCMSpeed", "CCMSpeedLead", "CCMSetSpeedMargin",
+    "VisionSpeedLimitLowLimitThreshold", "TurnSteeringLimitMuteSpeed",
+  }
+  params = {
+    param["key"]: param
+    for section in sections.values()
+    for param in section.values()
+    if param["key"] in speed_keys
+  }
+
+  assert params.keys() == speed_keys
+  assert all(param["unit_type"] == "vehicle_speed" for param in params.values())
+
+  one_unit_keys = speed_keys - {"PulseGlideSpeedDelta", "VisionSpeedLimitLowLimitThreshold"}
+  assert all(params[key]["step"] == 1 for key in one_unit_keys)
+  assert params["PulseGlideSpeedDelta"]["step"] == 0.5
+  assert params["VisionSpeedLimitLowLimitThreshold"]["step"] == 5
+
+  for index in range(7):
+    offset = params[f"Offset{index + 1}"]
+    assert offset["unit_range_index"] == index
+    assert (offset["metric_min"], offset["metric_max"]) == (-150, 150)
+
+  assert params["CustomCruise"]["metric_max"] == 150
+  assert params["CCMSetSpeedMargin"]["metric_max"] == 30
+  assert params["PulseGlideSpeedDelta"]["imperial_max"] == 15
+
+
 def test_curve_speed_controller_no_lead_toggle_is_nested_under_csc():
   csc_no_lead = _params_by_section(_layout())["Longitudinal (Speed & Following)"]["CurveSpeedControllerNoLead"]
 

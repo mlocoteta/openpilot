@@ -860,7 +860,9 @@ class CarController(CarControllerBase):
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
-    lfa_longitudinal_active = longitudinal_active if self.CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN else self.CP.openpilotLongitudinalControl
+    lfa_status_cars = (CAR.HYUNDAI_IONIQ_6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN)
+    lfa_longitudinal_active = self.CP.openpilotLongitudinalControl \
+      if self.CP.carFingerprint in lfa_status_cars else longitudinal_active
     lka_steering_long = lka_steering and lfa_longitudinal_active
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
@@ -890,7 +892,8 @@ class CarController(CarControllerBase):
     if angle_lkas_alt:
       steering_msg_active = bool(steering_msg_active and drive_gear)
     angle_lkas_alt_standstill_handoff = bool(getattr(CS.out, "standstill", False) and not CC.latActive)
-    forward_stock_lkas = self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and angle_lkas_alt and (
+    forward_stock_lkas = (self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR or
+                          self.CP.carFingerprint == CAR.KIA_SPORTAGE_HEV_2026) and angle_lkas_alt and (
       angle_lkas_alt_standstill_handoff or not (drive_gear and (CC.latActive or CC.enabled))
     )
     preserve_stock_lfa_status = preserve_stock_canfd_lfa_status(self.CP.carFingerprint)

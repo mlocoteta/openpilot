@@ -432,6 +432,48 @@ def test_scan_stops_after_timeout():
   assert not client.discovering and controller._scan_deadline == 0.0
 
 
+def test_controller_offroad_disconnect_policy_is_opt_in_and_delayed():
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True, BluetoothDisconnectControllersOffroad=False)
+  client = FakeBlueZ()
+  controller = BluetoothController(params, lambda: client, FakeRadio())
+  controller._bluez = client
+  controller_status = {
+    "offroad": True,
+    "devices": [
+      {**client.device, "name": "Controller", "audio": False, "controller": True, "connected": True},
+      {**client.device, "address": "AA:BB:CC:DD:EE:FF", "audio": True, "controller": False, "connected": True},
+    ],
+  }
+
+  assert not controller._maintain_controller_offroad_policy(controller_status, 100.0)
+  params.put_bool("BluetoothDisconnectControllersOffroad", True)
+  assert not controller._maintain_controller_offroad_policy(controller_status, 219.9)
+  assert client.actions == []
+
+  assert controller._maintain_controller_offroad_policy(controller_status, 220.0)
+  assert client.actions == [("disconnect", client.device["address"])]
+  assert client.device["address"].upper() in controller._policy_disconnected
+  assert controller._maintain_controller_offroad_policy(controller_status, 221.0)
+  assert client.actions == [("disconnect", client.device["address"])]
+
+
+def test_controller_offroad_disconnect_policy_reconnects_onroad():
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True, BluetoothDisconnectControllersOffroad=True)
+  controller = BluetoothController(params, FakeBlueZ, FakeRadio())
+  address = "00:11:22:33:44:55"
+  controller._offroad_since = 100.0
+  controller._policy_disconnected.add(address)
+  controller._reconnect_backoff[address] = (3, 500.0)
+  controller._last_reconnect = 210.0
+
+  assert not controller._maintain_controller_offroad_policy({"offroad": False, "devices": []}, 220.0)
+  assert controller._offroad_since is None
+  assert controller._policy_disconnected == set()
+  assert controller._policy_disconnect_retry_after == {}
+  assert address not in controller._reconnect_backoff
+  assert controller._last_reconnect == 0.0
+
+
 def test_pair_keeps_discovery_until_pair_starts():
   params = FakeParams(IsOffroad=True, BluetoothEnabled=True)
   client = FakeBlueZ()

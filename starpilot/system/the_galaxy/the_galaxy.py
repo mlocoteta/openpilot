@@ -5015,6 +5015,7 @@ def setup(app):
       "/assets/components/settings.js",
       "/assets/components/home/home.js",
       "/assets/components/home/home.css",
+      "/assets/mobile/js/params.js",
       "/assets/components/tools/device_settings.js",
       "/assets/components/tools/device_settings.css",
       "/assets/components/tools/device_settings_layout.json",
@@ -5181,6 +5182,7 @@ def setup(app):
     status["slots"] = slots
     status["controller_slots"] = controller_slots
     status["controller_options"] = controller_options
+    status["disconnect_controllers_offroad"] = params.get_bool("BluetoothDisconnectControllersOffroad")
     is_metric = params.get_bool("IsMetric")
     speed_minimum, speed_maximum = controller_speed_bounds(is_metric)
     status["speed_unit"] = "km/h" if is_metric else "mph"
@@ -5190,13 +5192,16 @@ def setup(app):
 
   @app.route("/api/wheel-controls/<operation>", methods=["POST"])
   def wheel_controls_operation(operation):
-    if operation not in {"action", "learn", "cancel", "delete", "clear", "test", "test-stop", "joystick"}:
+    if operation not in {"action", "learn", "cancel", "delete", "clear", "test", "test-stop", "joystick", "offroad-disconnect"}:
       return jsonify({"error": "Unknown wheel control operation."}), 404
     if not params.get_bool("IsOffroad"):
       return jsonify({"error": "Wheel controls can only be configured offroad."}), 409
 
     data = request.get_json(silent=True) or {}
     try:
+      if operation == "offroad-disconnect":
+        params.put_bool("BluetoothDisconnectControllersOffroad", bool(data.get("enabled", False)))
+        return jsonify({"message": "Offroad controller disconnect updated."}), 200
       if operation == "action":
         slot_index = int(data.get("slot", -1))
         key = str(data.get("key") or "").strip()

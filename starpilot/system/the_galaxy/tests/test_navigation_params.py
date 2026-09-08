@@ -231,6 +231,25 @@ def test_wheel_controls_status_includes_favorite_slots(monkeypatch):
     "__starpilot_controller_action__:disengage_openpilot",
   }
   assert response.get_json()["speed_unit"] == "mph"
+  assert response.get_json()["disconnect_controllers_offroad"] is False
+
+
+def test_wheel_controls_configures_offroad_controller_disconnect(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"IsOffroad": True}, "mici")
+
+  response = client.post("/api/wheel-controls/offroad-disconnect", json={"enabled": True})
+
+  assert response.status_code == 200
+  assert fake_params.get_bool("BluetoothDisconnectControllersOffroad")
+
+
+def test_wheel_controls_offroad_controller_disconnect_requires_offroad(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"IsOffroad": False}, "mici")
+
+  response = client.post("/api/wheel-controls/offroad-disconnect", json={"enabled": True})
+
+  assert response.status_code == 409
+  assert not fake_params.get_bool("BluetoothDisconnectControllersOffroad")
 
 
 def test_wheel_controls_configures_a_controller_only_action(monkeypatch):

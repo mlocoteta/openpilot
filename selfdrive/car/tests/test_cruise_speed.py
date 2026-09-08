@@ -313,6 +313,22 @@ class TestVCruiseHelper:
         assert V_CRUISE_MIN <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX
         assert self.v_cruise_helper.v_cruise_initialized
 
+  def test_resume_keeps_previous_software_cruise_speed(self):
+    engage_cs = car.CarState(vEgo=75 * CV.MPH_TO_MS)
+    self.v_cruise_helper.initialize_v_cruise(engage_cs, experimental_mode=False, resume_prev_button=False,
+                                             starpilot_toggles=self.starpilot_toggles)
+
+    disabled_cs = car.CarState(cruiseState={"available": True})
+    self.v_cruise_helper.update_v_cruise(disabled_cs, enabled=False, is_metric=False,
+                                         speed_limit_changed=False, starpilot_toggles=self.starpilot_toggles)
+
+    resume_cs = car.CarState(vEgo=22 * CV.MPH_TO_MS)
+    self.v_cruise_helper.initialize_v_cruise(resume_cs, experimental_mode=False, resume_prev_button=True,
+                                             starpilot_toggles=self.starpilot_toggles)
+
+    assert self.v_cruise_helper.v_cruise_kph == pytest.approx(75 * CV.MPH_TO_KPH)
+    assert self.v_cruise_helper.v_cruise_cluster_kph == pytest.approx(75 * CV.MPH_TO_KPH)
+
   def test_initialize_v_cruise_matches_speed_limit(self):
     self.reset_cruise_speed_state()
     self.starpilot_toggles.set_speed_limit = True

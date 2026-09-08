@@ -852,7 +852,6 @@ class CarController(CarControllerBase):
       CAR.CHEVROLET_VOLT_CC,
       CAR.CHEVROLET_MALIBU_CC,
       CAR.CHEVROLET_MALIBU_HYBRID_CC,
-      CAR.BUICK_LACROSSE,
     }
 
     if (self.CP.enableGasInterceptorDEPRECATED and self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and

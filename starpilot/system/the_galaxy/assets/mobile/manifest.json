@@ -8,7 +8,6 @@
     { "src": "/assets/images/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
   ],
   "id": "46bf2df73deba8e1512c35de",
-  "start_url": "/mobile/",
   "scope": "/",
   "background_color": "#06060f",
   "theme_color": "#8b6cc5",

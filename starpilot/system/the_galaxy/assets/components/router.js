@@ -3,7 +3,7 @@ import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-
 import { hideSidebar } from "/assets/js/utils.js"
 import { DeviceSettings } from "/assets/components/tools/device_settings.js?v=favorite-c4-hint-1"
 import { Bluetooth } from "/assets/components/tools/bluetooth.js?v=bluetooth-live-15"
-import { WheelControls } from "/assets/components/tools/wheel_controls.js?v=controllers-2"
+import { WheelControls } from "/assets/components/tools/wheel_controls.js?v=controllers-3"
 import { DoorControl } from "/assets/components/tools/doors.js"
 import { ErrorLogs } from "/assets/components/tools/error_logs.js"
 import { VehicleFeatures } from "/assets/components/tools/vehicle_features.js"
