@@ -126,8 +126,8 @@ def test_ui_ports_all_tool_views():
       assert ep in src, f"{rel} should use api.{ep}"
   vehicle = _read("js/views/Vehicle.js")
   bluetooth = _read("js/views/Bluetooth.js")
-  assert "WheelControls" in vehicle and "BluetoothPanel" not in vehicle and "carFeaturesCheck" in vehicle
-  assert "BluetoothPanel" in bluetooth
+  assert "WheelControls" not in vehicle and "BluetoothPanel" not in vehicle and "carFeaturesCheck" in vehicle
+  assert "BluetoothPanel" in bluetooth and "WheelControls" in bluetooth
 
 
 def test_ui_routes_ported_views_natively_no_classic_fallback():
@@ -233,9 +233,13 @@ def test_ui_schema_driven_param_engine_reused():
   assert "GalaxyEmbed" not in tuning and 'src="/tuning"' not in tuning, "Tuning must be native, not a classic embed"
   assert "LateralTuningPanel" in tuning and "LongitudinalManeuvers" not in tuning
   vehicle = _read("js/views/Vehicle.js")
+  bluetooth = _read("js/views/Bluetooth.js")
   assert "ParamSections" not in vehicle, "Vehicle must not render redundant toggles"
-  assert "WheelControls" in vehicle and "BluetoothPanel" not in vehicle
+  assert "WheelControls" not in vehicle and "BluetoothPanel" not in vehicle
   assert "GalaxySection" in vehicle
+  assert "WheelControls" in bluetooth and "BluetoothPanel" in bluetooth
+  assert bluetooth.index('bluetooth: "Bluetooth"') < bluetooth.index('controllers: "Controllers"')
+  assert 'useTabRouting("/bluetooth"' in bluetooth
   engine = _read("js/components/ParamSections.js")
   assert "SettingTree" in engine
   assert "isSettingVisible" in engine
@@ -517,6 +521,10 @@ def test_ui_mobile_polish_regressions():
   assert "bandwidth reasons" in recordings and "status?.lanIp" in recordings
   assert "status?.lanIp" in galaxy
   assert ':href="localUrl"' in recordings and ':href="localUrl"' in galaxy
+  assert 'localDeviceUrl(status?.lanIp, "/recordings")' in recordings
+  assert 'localDeviceUrl(status?.lanIp, "/galaxy")' in galaxy
+  assert "gx-btn gx-btn--tonal" in recordings and "Open Recordings Locally" in recordings
+  assert "gx-btn gx-btn--tonal" in galaxy and "Open Galaxy Locally" in galaxy
 
   home = _read("js/views/Home.js")
   home_css = _read("css/home.css")

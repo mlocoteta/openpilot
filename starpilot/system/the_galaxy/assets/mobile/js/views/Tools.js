@@ -11,7 +11,7 @@ const TOOLS = [
   { name: "System Tools", link: "/system", icon: "bi-arrow-repeat", desc: "Backup, restore, updates" },
   { name: "Theme Maker", link: "/theme_maker", icon: "bi-palette-fill", desc: "Customize the look" },
   { name: "Tuning, Plots & Testing", link: "/tuning", icon: "bi-sign-turn-right", desc: "Steering & speed tuning, live plots, testing grounds" },
-  { name: "Vehicle Controls", link: "/vehicle", icon: "bi-car-front", desc: "Controllers & vehicle features" },
+  { name: "Vehicle Controls", link: "/vehicle", icon: "bi-car-front", desc: "Vehicle features" },
 ].sort((a, b) => a.name.localeCompare(b.name))
 
 export const Tools = {

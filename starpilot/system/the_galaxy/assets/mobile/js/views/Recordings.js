@@ -52,11 +52,11 @@ function normalizeRoute(r) {
   }
 }
 
-function localDeviceUrl(ip) {
+function localDeviceUrl(ip, route = "/") {
   const raw = String(ip || "").trim()
   if (!raw || raw === "unknown") return ""
   const host = raw.includes(":") && !raw.startsWith("[") ? `[${raw}]` : raw
-  return `http://${host}:8082`
+  return `http://${host}:8082/#${route}`
 }
 
 export const Recordings = {
@@ -346,7 +346,7 @@ export const Recordings = {
     if (this.onFirestar) {
       try {
         const status = await api.getDeviceStatus()
-        this.localUrl = localDeviceUrl(status?.lanIp)
+        this.localUrl = localDeviceUrl(status?.lanIp, "/recordings")
       } catch (e) {}
       return
     }
@@ -520,7 +520,10 @@ export const Recordings = {
 
       <GxNotice v-else tone="info" icon="bi-satellite" title="Recordings unavailable via Galaxy">
         Recordings are unavailable via Galaxy for bandwidth reasons. If you are on the same local network, connect here:
-        <a v-if="localUrl" :href="localUrl" style="color:inherit; font-weight:var(--fw-bold); overflow-wrap:anywhere;">{{ localUrl }}</a>
+        <br />
+        <a v-if="localUrl" class="gx-btn gx-btn--tonal" :href="localUrl" style="margin-top:var(--sp-3);">
+          <i class="bi bi-box-arrow-up-right"></i> Open Recordings Locally
+        </a>
         <span v-else>your device's local IP on port 8082.</span>
       </GxNotice>
     </div>
