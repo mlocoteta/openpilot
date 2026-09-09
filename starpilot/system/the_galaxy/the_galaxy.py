@@ -8730,6 +8730,7 @@ def setup(app):
         return {"returncode": None, "stdout": "", "stderr": "command timed out"}
 
     service = command_result(["sudo", "systemctl", "is-active", "tailscaled"])
+    journal = command_result(["sudo", "journalctl", "-u", "tailscaled", "-n", "80", "--no-pager"])
     cli = {"returncode": None, "stdout": "", "stderr": "Tailscale binary is not installed"}
     if os.path.exists(tailscale_binary):
       cli = command_result(["sudo", tailscale_binary, "--socket", socket, "status", "--json"])
@@ -8749,6 +8750,7 @@ def setup(app):
     return jsonify({
       "installed": os.path.exists(tailscale_binary),
       "service": service,
+      "journal": journal,
       "cli": cli,
       "status": status,
     }), 200
