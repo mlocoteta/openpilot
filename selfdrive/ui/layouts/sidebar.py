@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from collections.abc import Callable
 from cereal import log
+from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -69,6 +70,7 @@ class Sidebar(Widget):
     self._net_strength = 0
 
     self._temp_status = MetricData(tr_noop("TEMP"), "--°C", Colors.GOOD)
+    self._show_egpu_temp = Params().get_bool("SidebarEgpuTemp")
     self._panda_status = MetricData(tr_noop("VEHICLE"), tr_noop("ONLINE"), Colors.GOOD)
     self._connect_status = MetricData(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
     self._recording_audio = False
@@ -109,7 +111,7 @@ class Sidebar(Widget):
 
     self._recording_audio = ui_state.recording_audio
     self._update_network_status(device_state)
-    self._update_temperature_status(device_state)
+    self._update_temperature_status(device_state, sm)
     self._update_connection_status(device_state)
     self._update_panda_status()
 
@@ -118,9 +120,36 @@ class Sidebar(Widget):
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
 
-  def _update_temperature_status(self, device_state):
+  def _egpu_temp(self, sm):
+    """External GPU hotspot temp, or None when unavailable.
+
+    The sidebar's normal reading is the SoC (Adreno) temperature -- the eGPU is
+    driven in userspace over USB and has no thermal zone, so its temperature only
+    arrives via chestnutState. Returns None whenever that is missing, stale or
+    zero so the caller can fall back rather than show a bogus 0 C.
+    """
+    try:
+      if not sm.valid.get("chestnutState", False) or not sm.alive.get("chestnutState", False):
+        return None
+      temp = float(sm["chestnutState"].tempC)
+      return temp if temp > 0 else None
+    except Exception:
+      return None
+
+  def _update_temperature_status(self, device_state, sm=None):
     thermal_status = device_state.thermalStatus
     temperature = f"{int(device_state.maxTempC)}°C"
+
+    # Opt-in: show the external GPU instead. Deliberately does not replace the
+    # SoC reading anywhere else -- hardwared still gates onroad on that, and the
+    # eGPU temperature says nothing about whether the device itself is throttling.
+    if sm is not None and self._show_egpu_temp:
+      egpu = self._egpu_temp(sm)
+      if egpu is not None:
+        # colour still tracks the device's own thermal state, not the eGPU
+        colour = Colors.GOOD if thermal_status == ThermalStatus.ok else Colors.WARNING
+        self._temp_status.update(tr_noop("GPU"), f"{int(egpu)}°C", colour)
+        return
 
     if thermal_status == ThermalStatus.ok:
       self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
