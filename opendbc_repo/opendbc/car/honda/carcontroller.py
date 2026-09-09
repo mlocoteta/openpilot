@@ -332,7 +332,9 @@ class CarController(CarControllerBase):
     # lateral is inactive is wrong regardless.
     ti_apply_steer = 0
     if self.has_ti and CC.latActive and CS.ti_lkas_allowed:
-      ti_new_steer = int(round(torque_cmd * TI_LIMITS.TI_STEER_MAX))
+      # Same CAN-reference conversion the stock path applies above (positive =
+      # steering right). Without the negation the TI steers the wrong way.
+      ti_new_steer = int(round(-torque_cmd * TI_LIMITS.TI_STEER_MAX))
       ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, CS.out.steeringTorque, TI_LIMITS)
     self.ti_apply_steer_last = ti_apply_steer
 
