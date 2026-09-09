@@ -1,0 +1,10 @@
+[Unit]
+Description=Virtual touchscreen (keeps magic.service alive when the digitizer has failed)
+Before=magic.service
+[Service]
+Type=simple
+ExecStart=/usr/local/venv/bin/python3 -u /usr/comma/virtual_touch.py
+Restart=always
+RestartSec=2
+[Install]
+WantedBy=multi-user.target
