@@ -8719,6 +8719,41 @@ def setup(app):
     socket = f"{base}/tailscaled.sock"
     tailscale_binary = f"{base}/tailscale"
 
+    def start_tailscale_login():
+      proc = subprocess.Popen(
+        ["sudo", tailscale_binary, "--socket", socket, "login", "--json", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        preexec_fn=os.setsid
+      )
+
+      auth_url = None
+      output = []
+      selector = selectors.DefaultSelector()
+      selector.register(proc.stdout, selectors.EVENT_READ)
+      deadline = time.monotonic() + 20
+      while time.monotonic() < deadline:
+        events = selector.select(timeout=max(0, deadline - time.monotonic()))
+        if not events:
+          break
+        line = proc.stdout.readline()
+        if not line:
+          break
+        output.append(line.strip())
+        match = re.search(r"https://login\.tailscale\.com/\S+", line)
+        if match:
+          auth_url = match.group(0)
+          # The client must remain alive while browser authorization completes.
+          break
+      selector.close()
+
+      return jsonify({
+        "message": "Tailscale setup started. Please authenticate in your browser." if auth_url else "Tailscale did not provide an authorization link yet.",
+        "auth_url": auth_url,
+        "detail": "\\n".join(output[-10:])
+      }), 200
+
     # A cancelled browser login leaves the daemon holding the original URL.
     # Return that URL directly instead of starting another client that will
     # intentionally suppress the duplicate notification.
@@ -8737,6 +8772,11 @@ def setup(app):
           }), 200
       except (json.JSONDecodeError, subprocess.TimeoutExpired):
         pass
+
+    # The daemon and its binaries persist under /data. Never overwrite an
+    # active tailscaled binary merely to retry browser authorization.
+    if os.path.exists(tailscale_binary) and os.path.exists(f"{base}/tailscaled"):
+      return start_tailscale_login()
 
     try:
       result = subprocess.run(
@@ -8792,40 +8832,7 @@ def setup(app):
     run_cmd(["sudo", "systemctl", "enable", "/etc/systemd/system/tailscaled.service"], "Enabled tailscaled service.", "Failed to enable tailscaled service.")
     run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
 
-    proc = subprocess.Popen(
-      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--json", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.STDOUT,
-      text=True,
-      preexec_fn=os.setsid
-    )
-
-    auth_url = None
-    output = []
-    selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ)
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-      events = selector.select(timeout=max(0, deadline - time.monotonic()))
-      if not events:
-        break
-      line = proc.stdout.readline()
-      if not line:
-        break
-      output.append(line.strip())
-      match = re.search(r"https://login\.tailscale\.com/\S+", line)
-      if match:
-        auth_url = match.group(0)
-        # `tailscale up` must remain running while the user completes this
-        # browser authorization. Killing it here invalidates the handoff.
-        break
-    selector.close()
-
-    return jsonify({
-      "message": "Tailscale setup started. Please authenticate in your browser." if auth_url else "Tailscale did not provide an authorization link yet.",
-      "auth_url": auth_url,
-      "detail": "\\n".join(output[-10:])
-    }), 200
+    return start_tailscale_login()
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
   def tailscale_uninstall():
