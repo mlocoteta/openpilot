@@ -8762,9 +8762,9 @@ def setup(app):
     socket = f"{base}/tailscaled.sock"
     tailscale_binary = f"{base}/tailscale"
 
-    def start_tailscale_login():
+    def start_tailscale_auth():
       proc = subprocess.Popen(
-        ["sudo", tailscale_binary, "--socket", socket, "login", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
+        ["sudo", tailscale_binary, "--socket", socket, "up", "--force-reauth", "--json", "--timeout=30s"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -8819,7 +8819,7 @@ def setup(app):
     # The daemon and its binaries persist under /data. Never overwrite an
     # active tailscaled binary merely to retry browser authorization.
     if os.path.exists(tailscale_binary) and os.path.exists(f"{base}/tailscaled"):
-      return start_tailscale_login()
+      return start_tailscale_auth()
 
     try:
       result = subprocess.run(
@@ -8875,7 +8875,7 @@ def setup(app):
     run_cmd(["sudo", "systemctl", "enable", "/etc/systemd/system/tailscaled.service"], "Enabled tailscaled service.", "Failed to enable tailscaled service.")
     run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
 
-    return start_tailscale_login()
+    return start_tailscale_auth()
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
   def tailscale_uninstall():
