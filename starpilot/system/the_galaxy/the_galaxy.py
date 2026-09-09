@@ -8781,8 +8781,8 @@ def setup(app):
       match = re.search(r"https://login\.tailscale\.com/\S+", line)
       if match and not auth_url:
         auth_url = match.group(0)
-        run_cmd(["sudo", "kill", "-TERM", f"-{proc.pid}"], "Sent SIGTERM to Tailscale setup process.", "Failed to send SIGTERM to Tailscale setup process.")
-        proc.wait(timeout=5)
+        # `tailscale up` must remain running while the user completes this
+        # browser authorization. Killing it here invalidates the handoff.
         break
 
     return jsonify({
