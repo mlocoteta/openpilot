@@ -8716,6 +8716,27 @@ def setup(app):
   def tailscale_setup():
     arch = "arm64"
     base = "/data/tailscale"
+    socket = f"{base}/tailscaled.sock"
+    tailscale_binary = f"{base}/tailscale"
+
+    # A cancelled browser login leaves the daemon holding the original URL.
+    # Return that URL directly instead of starting another client that will
+    # intentionally suppress the duplicate notification.
+    if os.path.exists(tailscale_binary):
+      try:
+        status = subprocess.run(
+          ["sudo", tailscale_binary, "--socket", socket, "status", "--json"],
+          capture_output=True, text=True, timeout=10
+        )
+        pending_auth_url = json.loads(status.stdout).get("AuthURL") if status.returncode == 0 else None
+        if pending_auth_url:
+          return jsonify({
+            "message": "Tailscale is awaiting browser authentication.",
+            "auth_url": pending_auth_url,
+            "detail": ""
+          }), 200
+      except (json.JSONDecodeError, subprocess.TimeoutExpired):
+        pass
 
     try:
       result = subprocess.run(
@@ -8772,7 +8793,7 @@ def setup(app):
     run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
 
     proc = subprocess.Popen(
-      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
+      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--json", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT,
       text=True,
