@@ -327,8 +327,11 @@ class CarController(CarControllerBase):
 
     # Torque Interceptor steering command (9G Accord). Uses the normalized lateral
     # output directly, scaled to TI units, then driver-torque + rate limited.
+    # Must follow latActive like the stock path does: panda rejects 0x249 with
+    # non-zero torque while controls are not allowed, and sending torque when
+    # lateral is inactive is wrong regardless.
     ti_apply_steer = 0
-    if self.has_ti and CS.ti_lkas_allowed:
+    if self.has_ti and CC.latActive and CS.ti_lkas_allowed:
       ti_new_steer = int(round(torque_cmd * TI_LIMITS.TI_STEER_MAX))
       ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, CS.out.steeringTorque, TI_LIMITS)
     self.ti_apply_steer_last = ti_apply_steer
