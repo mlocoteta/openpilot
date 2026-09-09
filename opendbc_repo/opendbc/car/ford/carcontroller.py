@@ -1,13 +1,15 @@
 import math
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, apply_hysteresis, structs
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, structs
 from opendbc.car.lateral import ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.ford import fordcan
-from opendbc.car.ford.values import CarControllerParams, FordFlags, CAR
+from opendbc.car.ford.values import CarControllerParams, FordFlags
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
+# This Ford extension boundary substantially adapts BluePilot bp-7.0 work. See the root CREDITS.md
+# (including Alan Polk's d0aac605f and db2bdff05) and THIRD_PARTY_NOTICES.md.
 from openpilot.starpilot.car.ford import fordcan as starpilot_fordcan
-from openpilot.starpilot.car.ford.lateral import FordLateralController, FordLateralMode, FordLateralResult
+from openpilot.starpilot.car.ford.lateral import FordLateralController, FordLateralResult
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -18,25 +20,29 @@ AVERAGE_ROAD_ROLL = 0.06  # ~3.4 degrees, 6% superelevation. higher actual roll 
 MAX_LATERAL_ACCEL = ISO_LATERAL_ACCEL - (ACCELERATION_DUE_TO_GRAVITY * AVERAGE_ROAD_ROLL)  # ~2.4 m/s^2
 
 
+class FordStockCruiseButton:
+  """Resolve Ford's context-sensitive cancel/resume switch for stock ACC."""
+
+  def __init__(self):
+    self.pressed = False
+    self.cancel = False
+    self.resume = False
+
+  def update(self, pressed: bool, cruise_available: bool, cruise_enabled: bool) -> tuple[bool, bool]:
+    if pressed and not self.pressed:
+      self.cancel = cruise_available and cruise_enabled
+      self.resume = cruise_available and not cruise_enabled
+    elif not pressed:
+      self.cancel = False
+      self.resume = False
+
+    self.pressed = pressed
+    return self.cancel, self.resume
+
+
 def apply_ford_angle(desired_angle_deg: float, current_angle_deg: float) -> float:
   relative_angle = desired_angle_deg - current_angle_deg
   return float(np.clip(relative_angle, -5.8, 5.8))
-
-
-def anti_overshoot(apply_curvature, apply_curvature_last, v_ego):
-  diff = 0.1
-  tau = 5  # 5s smooths over the overshoot
-  dt = DT_CTRL * CarControllerParams.STEER_STEP
-  alpha = 1 - np.exp(-dt / tau)
-
-  lataccel = apply_curvature * (v_ego ** 2)
-  last_lataccel = apply_curvature_last * (v_ego ** 2)
-  last_lataccel = apply_hysteresis(lataccel, last_lataccel, diff)
-  last_lataccel = alpha * lataccel + (1 - alpha) * last_lataccel
-
-  output_curvature = last_lataccel / (max(v_ego, 1) ** 2)
-
-  return float(np.interp(v_ego, [5, 10], [apply_curvature, output_curvature]))
 
 
 def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP):
@@ -73,7 +79,6 @@ class CarController(CarControllerBase):
 
     self.apply_curvature_last = 0
     self.apply_angle_last = 0
-    self.anti_overshoot_curvature_last = 0
     self.accel = 0.0
     self.gas = 0.0
     self.brake_request = False
@@ -83,8 +88,8 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = None
     self.distance_bar_frame = 0
     self.ford_lateral = None if CP.flags & FordFlags.LKA_STEERING else FordLateralController(CP)
-    self.ford_shadow_curvature = 0.0
-    self.ford_lateral_announced_mode = FordLateralMode.native
+    self.ford_extended_lateral_announced = False
+    self.stock_cruise_button = FordStockCruiseButton()
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     can_sends = []
@@ -100,9 +105,23 @@ class CarController(CarControllerBase):
       self.ford_lateral.update_inputs()
 
     ### acc buttons ###
+    stock_cancel = False
+    stock_resume = False
+    if not self.CP.openpilotLongitudinalControl:
+      stock_cancel, stock_resume = self.stock_cruise_button.update(
+        bool(CS.buttons_stock_values["CcAslButtnCnclResPress"]),
+        CS.out.cruiseState.available,
+        CS.out.cruiseState.enabled,
+      )
+
     if CC.cruiseControl.cancel:
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.camera, CS.buttons_stock_values, cancel=True))
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.main, CS.buttons_stock_values, cancel=True))
+    elif (stock_cancel or stock_resume) and (self.frame % CarControllerParams.BUTTONS_STEP) == 0:
+      can_sends.append(fordcan.create_button_msg(
+        self.packer, self.CAN.camera, CS.buttons_stock_values, cancel=stock_cancel, resume=stock_resume))
+      can_sends.append(fordcan.create_button_msg(
+        self.packer, self.CAN.main, CS.buttons_stock_values, cancel=stock_cancel, resume=stock_resume))
     elif CC.cruiseControl.resume and (self.frame % CarControllerParams.BUTTONS_STEP) == 0:
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.camera, CS.buttons_stock_values, resume=True))
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.main, CS.buttons_stock_values, resume=True))
@@ -136,70 +155,26 @@ class CarController(CarControllerBase):
         can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN, active=lka_active, apply_angle=self.apply_angle_last,
                                                direction=direction, ramp_type=ramp_type, curvature=-self.apply_curvature_last))
     else:
-      lateral_mode = self.ford_lateral.mode
-      lateral_mode_ready = lateral_mode == self.ford_lateral_announced_mode
-
-      # Keep the original Ford path available without changing its command behavior.
-      if lateral_mode == FordLateralMode.native:
-        if (self.frame % CarControllerParams.STEER_STEP) == 0:
-          if not lateral_mode_ready:
-            self.apply_curvature_last = 0.0
-            apply_curvature = 0.0
-          elif self.CP.carFingerprint in (CAR.FORD_BRONCO_SPORT_MK1, CAR.FORD_F_150_MK14):
-            self.anti_overshoot_curvature_last = anti_overshoot(
-              actuators.curvature, self.anti_overshoot_curvature_last, CS.out.vEgoRaw)
-            apply_curvature = self.anti_overshoot_curvature_last
-          else:
-            apply_curvature = actuators.curvature
-
-          current_curvature = -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1)
-          self.apply_curvature_last = apply_ford_curvature_limits(
-            apply_curvature, self.apply_curvature_last, current_curvature,
-            CS.out.vEgoRaw, 0., CC.latActive and lateral_mode_ready, self.CP)
-
-          if self.CP.flags & FordFlags.CANFD:
-            mode = 1 if CC.latActive and lateral_mode_ready else 0
-            counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
-            can_sends.append(fordcan.create_lat_ctl2_msg(
-              self.packer, self.CAN, mode, 0., 0., -self.apply_curvature_last, 0., counter))
-          else:
-            can_sends.append(fordcan.create_lat_ctl_msg(
-              self.packer, self.CAN, CC.latActive and lateral_mode_ready, 0., 0., -self.apply_curvature_last, 0.))
-      elif (self.frame % CarControllerParams.STEER_STEP) == 0:
-        if not lateral_mode_ready:
-          lateral = FordLateralResult(shadow_curvature=self.ford_lateral._current_curvature(CS))
-        elif lateral_mode == FordLateralMode.angle:
-          lateral = self.ford_lateral.update_angle(CC, CS, actuators)
-        else:
-          lateral = self.ford_lateral.update_curvature(CC, CS, actuators)
+      if (self.frame % CarControllerParams.STEER_STEP) == 0:
+        lateral = self.ford_lateral.update(CC, CS, actuators) \
+          if self.ford_extended_lateral_announced else FordLateralResult()
 
         self.apply_curvature_last = lateral.curvature
-        self.ford_shadow_curvature = lateral.shadow_curvature
         if self.CP.flags & FordFlags.CANFD:
           counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
           can_sends.append(starpilot_fordcan.create_lat_ctl2_msg(
             self.packer, self.CAN, 1 if lateral.active else 0,
             lateral.ramp_type, lateral.precision_type,
-            -lateral.path_offset, -lateral.path_angle,
             -lateral.curvature, -lateral.curvature_rate, counter))
         else:
           can_sends.append(starpilot_fordcan.create_lat_ctl_msg(
             self.packer, self.CAN, lateral.active,
             lateral.ramp_type, lateral.precision_type,
-            -lateral.path_offset, -lateral.path_angle,
             -lateral.curvature, -lateral.curvature_rate))
 
       if (self.frame % CarControllerParams.LKA_STEP) == 0:
-        if lateral_mode == FordLateralMode.native:
-          can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN))
-        else:
-          angle_mode = lateral_mode == FordLateralMode.angle
-          shadow_curvature = -self.ford_lateral._current_curvature(CS)
-          if angle_mode:
-            shadow_curvature = -self.ford_shadow_curvature
-          can_sends.append(starpilot_fordcan.create_lka_msg(
-            self.packer, self.CAN, angle_mode=angle_mode, shadow_curvature=shadow_curvature))
-        self.ford_lateral_announced_mode = lateral_mode
+        can_sends.append(starpilot_fordcan.create_lka_msg(self.packer, self.CAN))
+        self.ford_extended_lateral_announced = True
 
     ### longitudinal control ###
     # send acc msg at 50Hz
@@ -255,9 +230,14 @@ class CarController(CarControllerBase):
 
     if (self.frame % CarControllerParams.ACC_UI_STEP) == 0 or send_ui:
       show_distance_bars = self.frame - self.distance_bar_frame < 400
+      hands_free_cluster = bool(
+        self.ford_lateral is not None
+        and self.ford_extended_lateral_announced
+        and self.ford_lateral.hands_free_cluster_enabled)
       can_sends.append(fordcan.create_acc_ui_msg(self.packer, self.CAN, self.CP, main_on, CC.latActive,
                                                  fcw_alert, CS.out.cruiseState.standstill, show_distance_bars,
-                                                 hud_control, CS.acc_tja_status_stock_values))
+                                                 hud_control, CS.acc_tja_status_stock_values,
+                                                 hands_free_cluster))
 
     self.main_on_last = main_on
     self.lkas_enabled_last = CC.latActive

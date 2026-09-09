@@ -1,9 +1,13 @@
+# Ford-specific additions first imported in StarPilot 3f6ccd104e substantially adapt BluePilot
+# bp-7.0 vehicle-state work, including a sunnypilot extension with the Haibin Wen/contributors
+# notice retained in THIRD_PARTY_NOTICES.md. See the repository root CREDITS.md for provenance.
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import DBC, CarControllerParams, FordFlags
+from opendbc.car.gps import get_car_gps_config
 from opendbc.car.interfaces import CarStateBase
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -27,11 +31,39 @@ class CarState(CarStateBase):
     self.lc_button = 0
     self.lkas_available = False
     self.lateral_motion_control = None
+    self.lateral_control_status = None
     self.steering_angle_offset_deg = 0.0
+    self.car_gps_config = get_car_gps_config(CP)
+    self.car_gps_supported = self.car_gps_config is not None
+    self.car_gps = None
+    self._car_gps_timestamp_nanos = 0
+
+  def _update_car_gps(self, cp) -> None:
+    if self.car_gps_config is None:
+      return
+
+    timestamps = [max(cp.ts_nanos[name].values(), default=0) for name in self.car_gps_config.messages]
+    if not all(timestamps) or max(timestamps) - min(timestamps) > 2_000_000_000:
+      return
+
+    timestamp_nanos = max(timestamps)
+    if timestamp_nanos <= self._car_gps_timestamp_nanos:
+      return
+
+    gps = self.car_gps_config.decoder(*(cp.vl[name] for name in self.car_gps_config.messages))
+    if gps is not None:
+      gps["timestamp_nanos"] = timestamp_nanos
+      self.car_gps = gps
+      self._car_gps_timestamp_nanos = timestamp_nanos
+
+  def get_car_gps(self):
+    return self.car_gps
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
+
+    self._update_car_gps(cp)
 
     ret = structs.CarState()
 
@@ -81,7 +113,8 @@ class CarState(CarStateBase):
 
     if self.CP.flags & FordFlags.CANFD:
       # this signal is always 0 on non-CAN FD cars
-      ret.steerFaultTemporary |= cp.vl["Lane_Assist_Data3_FD1"]["LatCtlSte_D_Stat"] not in (1, 2, 3)
+      self.lateral_control_status = int(cp.vl["Lane_Assist_Data3_FD1"]["LatCtlSte_D_Stat"])
+      ret.steerFaultTemporary |= self.lateral_control_status not in (1, 2, 3)
 
     # cruise state
     is_metric = cp.vl["INSTRUMENT_PANEL"]["METRIC_UNITS"] == 1 if not self.CP.flags & FordFlags.CANFD else \
@@ -177,7 +210,81 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    gps_config = get_car_gps_config(CP)
+    gps_messages = [(name, 0) for name in gps_config.messages] if gps_config is not None else []
+
+    pt_messages = [
+      ("BrakeSysFeatures", 50),
+      ("Yaw_Data_FD1", 100),
+      ("DesiredTorqBrk", 50),
+      ("EngVehicleSpThrottle", 100),
+      ("EngVehicleSpThrottle2", 50),
+      ("BrakeSnData_4", 50),
+      ("EngBrakeData", 10),
+      ("EPAS_INFO", 50),
+      ("Cluster_Info1_FD1", 10),
+      ("Steering_Data_FD1", 10),
+      ("BodyInfo_3_FD1", 2),
+      ("RCMStatusMessage2_FD1", 10),
+      ("BCM_Lamp_Stat_FD1", 0),
+      *gps_messages,
+    ]
+
+    if CP.flags & FordFlags.ALT_STEER_ANGLE:
+      pt_messages += [
+        ("SteeringPinion_Data_Alt", 100),
+        ("ParkAid_Data", 50),
+      ]
+    else:
+      pt_messages += [("SteeringPinion_Data", 100)]
+
+    if CP.flags & FordFlags.CANFD:
+      pt_messages += [
+        ("Lane_Assist_Data3_FD1", 33),
+        ("Cluster_Info_3_FD1", 10),
+      ]
+    else:
+      pt_messages += [("INSTRUMENT_PANEL", 1)]
+
+    if CP.transmissionType == TransmissionType.automatic:
+      if CP.flags & FordFlags.CANFD:
+        pt_messages += [("Gear_Shift_by_Wire_FD1", 10)]
+      elif CP.flags & FordFlags.ALT_STEER_ANGLE:
+        pt_messages += [("TransGearData", 10)]
+      else:
+        pt_messages += [("PowertrainData_10", 10)]
+
+    if CP.enableBsm and not (CP.flags & FordFlags.CANFD):
+      pt_messages += [
+        ("Side_Detect_L_Stat", 5),
+        ("Side_Detect_R_Stat", 5),
+      ]
+
+    cam_messages = [
+      ("ACCDATA", 50),
+      ("ACCDATA_2", 50),
+      ("ACCDATA_3", 5),
+      ("IPMA_Data", 1),
+    ]
+
+    if CP.flags & FordFlags.CANFD:
+      cam_messages += [
+        ("Traffic_RecognitnData", 1),
+        ("IPMA_Data2", 1),
+      ]
+    else:
+      cam_messages += [("Traffic_RecognitnData", 0)]
+
+    if CP.enableBsm and CP.flags & FordFlags.CANFD:
+      cam_messages += [
+        ("Side_Detect_L_Stat", 5),
+        ("Side_Detect_R_Stat", 5),
+      ]
+
+    if CP.flags & FordFlags.LKA_STEERING:
+      cam_messages += [("LateralMotionControl", 20)]
+
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).main),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).main),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus(CP).camera),
     }

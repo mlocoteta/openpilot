@@ -325,7 +325,7 @@ def test_picker_description_uses_measured_wrap_and_truncates_to_two_lines(monkey
   assert wrap_calls[0][0] == long_description
   assert wrap_calls[0][1] >= 24
   assert wrap_calls[0][2] > 0
-  assert drawn_texts[-2:] == ["Measured first line", "Measured second line…"]
+  assert drawn_texts[-2:] == ["Measured first line", "Measured second line..."]
 
 
 def test_picker_uses_compact_section_labels_without_mutating_catalog_copy():
@@ -342,9 +342,9 @@ def test_picker_fit_text_truncates_at_word_boundary(monkeypatch):
   monkeypatch.setattr(FavoriteRadialMenu, "_measure_text",
                       staticmethod(lambda _font, text, _font_size: rl.Vector2(len(text) * 10, 20)))
 
-  fitted = FavoriteRadialMenu._fit_picker_text(object(), "Longitudinal Speed Following", 24, 140)
+  fitted = FavoriteRadialMenu._fit_picker_text(object(), "Longitudinal Speed Following", 24, 160)
 
-  assert fitted == "Longitudinal…"
+  assert fitted == "Longitudinal..."
 
 
 def test_picker_wraps_long_titles_by_measured_words(monkeypatch):
@@ -908,6 +908,7 @@ def test_render_boolean_toggle_switch_and_picker_badges(monkeypatch):
   monkeypatch.setattr(rl, "draw_rectangle_rounded", lambda *args: None)
   monkeypatch.setattr(rl, "draw_rectangle_rounded_lines_ex", lambda *args: None)
   monkeypatch.setattr(rl, "draw_line_ex", lambda *args: None)
+  monkeypatch.setattr(rl, "draw_triangle", lambda *args: None)
   monkeypatch.setattr(rl, "draw_rectangle_rec", lambda *args: None)
   monkeypatch.setattr(rl, "draw_text_ex", lambda *args: None)
 

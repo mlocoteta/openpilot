@@ -12,11 +12,12 @@ from openpilot.selfdrive.ui.lib.starpilot_status import (
 from openpilot.selfdrive.ui.ui_state import UIStatus
 
 
-def _state(*, enabled=False, lat_active=False, aol=False, status=None, events=()):
+def _state(*, enabled=False, lat_active=False, pause_lateral=False, aol=False, status=None, events=()):
   return SimpleNamespace(
     sm={
       "selfdriveState": SimpleNamespace(enabled=enabled, experimentalMode=False),
       "carControl": SimpleNamespace(latActive=lat_active),
+      "starpilotCarState": SimpleNamespace(pauseLateral=pause_lateral),
       "onroadEvents": events,
     },
     status=status if status is not None else (UIStatus.ENGAGED if enabled else UIStatus.DISENGAGED),
@@ -31,8 +32,22 @@ def _rgb(color):
   return color.r, color.g, color.b
 
 
-def test_cruise_only_uses_pink_for_border_and_screen_edge():
-  state = _state(enabled=True, lat_active=False)
+def test_manual_lateral_pause_uses_pink_for_border_and_screen_edge():
+  state = _state(enabled=True, lat_active=False, pause_lateral=True)
+
+  assert _rgb(get_border_color(state)) == _rgb(LONGITUDINAL_ONLY_COLOR)
+  assert _rgb(get_screen_edge_color(state)) == _rgb(LONGITUDINAL_ONLY_COLOR)
+
+
+def test_temporary_lateral_inactivity_does_not_use_pink():
+  state = _state(enabled=True, lat_active=False, pause_lateral=False)
+
+  assert _rgb(get_border_color(state)) == _rgb(ENGAGED_COLOR)
+  assert _rgb(get_screen_edge_color(state)) == _rgb(ENGAGED_COLOR)
+
+
+def test_manual_pause_signal_controls_pink_independent_of_lat_active_timing():
+  state = _state(enabled=True, lat_active=True, pause_lateral=True)
 
   assert _rgb(get_border_color(state)) == _rgb(LONGITUDINAL_ONLY_COLOR)
   assert _rgb(get_screen_edge_color(state)) == _rgb(LONGITUDINAL_ONLY_COLOR)
@@ -53,10 +68,10 @@ def test_override_color_matches_active_control_mode():
   assert _rgb(get_border_color(_state(enabled=True, lat_active=True, status=override, events=[lateral_override]))) == _rgb(OVERRIDE_COLOR)
   assert _rgb(get_border_color(_state(enabled=True, lat_active=True, status=override, events=[longitudinal_override]))) == _rgb(OVERRIDE_COLOR)
 
-  # Pink: steering is already inactive, so only a longitudinal override is gray.
-  pink_state = _state(enabled=True, status=override, events=[lateral_override])
+  pink_state = _state(enabled=True, pause_lateral=True, status=override, events=[lateral_override])
   assert _rgb(get_border_color(pink_state)) == _rgb(LONGITUDINAL_ONLY_COLOR)
-  assert _rgb(get_border_color(_state(enabled=True, status=override, events=[longitudinal_override]))) == _rgb(OVERRIDE_COLOR)
+  assert _rgb(get_border_color(_state(enabled=True, pause_lateral=True, status=override,
+                                      events=[longitudinal_override]))) == _rgb(OVERRIDE_COLOR)
 
   # Blue/AOL: longitudinal override is inactive, so only steering is gray.
   assert _rgb(get_border_color(_state(aol=True, status=override, events=[lateral_override]))) == _rgb(OVERRIDE_COLOR)

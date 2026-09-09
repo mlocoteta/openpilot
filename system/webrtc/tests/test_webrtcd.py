@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("libdatachannel", reason="the upstream WebRTC backend requires Python 3.12")
 
-from openpilot.system.webrtc.webrtcd import ServerState, handle_get_schema, handle_post_notify, on_shutdown
+from openpilot.system.webrtc.webrtcd import ServerState, handle_get_schema, handle_get_stream, handle_post_notify, on_shutdown
 
 
 @pytest.mark.asyncio
@@ -20,6 +20,13 @@ async def test_get_schema():
 async def test_get_schema_rejects_unknown_service():
   with pytest.raises(AssertionError, match="Invalid service name"):
     await handle_get_schema(ServerState(), "notARealService")
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_non_json_content_type():
+  response = await handle_get_stream(ServerState(), b"{}", "text/plain")
+
+  assert response == (415, b'{"error": "unsupported media type"}', "application/json; charset=utf-8")
 
 
 @pytest.mark.asyncio

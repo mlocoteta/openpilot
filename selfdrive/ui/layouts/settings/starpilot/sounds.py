@@ -34,6 +34,8 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   GROUP_HEADER_HEIGHT,
   GROUP_HEADER_GAP,
   GROUP_HEADER_LINE_GAP,
+  GROUP_HEADER_TOTAL_HEIGHT,
+  GROUP_TOP_INSET,
   draw_group_header,
 )
 
@@ -57,20 +59,13 @@ class SoundsManagerView(AdjustorTogglesPanelView):
 
     self._init_adjustors()
     self._init_toggles()
-    self._forward_touch_valid()
-
-  def _forward_touch_valid(self):
-    self._toggle_grid.set_touch_valid_callback(
-      lambda: self._scroll_panel.is_touch_valid()
-    )
 
   def _init_toggles(self):
     if self.PANEL_STYLE.toggle_row_mode:
       self._toggle_grid = TileGrid(columns=1, padding=SPACING.md, min_tile_height=TOGGLE_MIN_HEIGHT)
     else:
       self._toggle_grid = TileGrid(columns=2, padding=12, min_tile_height=130.0)
-    self._child(self._toggle_grid)
-    self._page_grid = self._toggle_grid
+    self.register_page_grid(self._toggle_grid)
 
     toggle_defs = []
     for key in self._controller.CUSTOM_ALERTS_KEYS:
@@ -199,8 +194,7 @@ class SoundsManagerView(AdjustorTogglesPanelView):
       self._adjustor_rows[key].custom_row_height = None
     self._adjustor_rows[self._controller.COOLDOWN_KEY].custom_row_height = None
 
-    hdr_h = GROUP_HEADER_HEIGHT + GROUP_HEADER_GAP + GROUP_HEADER_LINE_GAP
-    vol_overhead = 4 + 24 + 4  # top pad + "Reset All" label + gap
+    vol_overhead = GROUP_TOP_INSET + 28  # top pad + "Reset All" label
 
     available_h = max(72.0, (self._scroll_rect.height if self._scroll_rect else 0.0) - 6.0)
     rows_available = max(72.0 * (len(self._controller.VOLUME_KEYS) + 1), available_h - vol_overhead)
@@ -210,7 +204,7 @@ class SoundsManagerView(AdjustorTogglesPanelView):
     self._adjustor_rows[self._controller.COOLDOWN_KEY].custom_row_height = ROW_HEIGHT
 
     left_content_h = (len(self._controller.VOLUME_KEYS) + 1) * ROW_HEIGHT + vol_overhead
-    tiles_needed_h = self.measure_page_grid_height(self._toggle_grid, col_width - 24) + 24 + 4 + hdr_h
+    tiles_needed_h = self.measure_page_grid_height(self._toggle_grid, col_width - 24) + 24 + GROUP_TOP_INSET + GROUP_HEADER_TOTAL_HEIGHT
     max_content_h = max(left_content_h, tiles_needed_h)
 
     self._left_container_h = max_content_h
@@ -236,10 +230,10 @@ class SoundsManagerView(AdjustorTogglesPanelView):
       style=PANEL_STYLE
     )
 
-    current_y = y + 4
+    current_y = y + GROUP_TOP_INSET
 
-    label_rect = rl.Rectangle(x + 24, current_y, width - 48, 24)
-    gui_label(label_rect, tr("Reset All"), 24, AetherListColors.MUTED, FontWeight.NORMAL,
+    label_rect = rl.Rectangle(x + 24, current_y, width - 48, 28)
+    gui_label(label_rect, tr("Reset All"), 28, AetherListColors.SUBTEXT, FontWeight.MEDIUM,
               alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT)
     self._reset_rect = rl.Rectangle(label_rect.x + label_rect.width - 140, label_rect.y, 140, 24)
     self._interactive_rects["action:restore_defaults"] = self._reset_rect
@@ -255,7 +249,7 @@ class SoundsManagerView(AdjustorTogglesPanelView):
 
   def _draw_utility_column(self, y: float, x: float, width: float):
     draw_list_group_shell(rl.Rectangle(x, y, width, self._tiles_container_h), style=PANEL_STYLE)
-    header_y = draw_group_header(x + 24, y + 4, width - 48, tr("Alerts"))
+    header_y = draw_group_header(x + 24, y + GROUP_TOP_INSET, width - 48, tr("Alerts"))
     avail_h = self._tiles_container_h - (header_y - y)
     self._render_page_grid(self._toggle_grid, rl.Rectangle(x + 12, header_y, width - 24, max(0.0, avail_h - 12)))
 

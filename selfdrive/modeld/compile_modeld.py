@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import atexit
+import hashlib
 import math
 import os
+import pathlib
 import pickle
 import shutil
 import tempfile
@@ -13,10 +15,26 @@ from functools import partial
 import numpy as np
 
 
-def _patch_tinygrad_fetch_fw():
-  import hashlib
-  import pathlib
+FIRMWARE_ROOTS = (
+  pathlib.Path(__file__).resolve().parent / "firmware",
+  pathlib.Path("/lib/firmware"),
+)
+FIRMWARE_CACHE_DIR = pathlib.Path("/data/tinygrad_fw_cache")
 
+
+def _read_firmware(path, sha256, compressed=False, zstandard_module=None):
+  if not path.is_file():
+    return None
+
+  blob = path.read_bytes()
+  if compressed:
+    if zstandard_module is None:
+      import zstandard as zstandard_module
+    blob = zstandard_module.ZstdDecompressor().stream_reader(blob).read()
+  return blob if hashlib.sha256(blob).hexdigest() == sha256 else None
+
+
+def _patch_tinygrad_fetch_fw():
   try:
     import zstandard
   except ImportError:
@@ -28,12 +46,41 @@ def _patch_tinygrad_fetch_fw():
     return
 
   def fetch_fw(path, name, sha256):
-    firmware_path = pathlib.Path(f"/lib/firmware/{path}/{name}.zst")
-    if firmware_path.is_file():
-      blob = zstandard.ZstdDecompressor().stream_reader(firmware_path.read_bytes()).read()
-      if hashlib.sha256(blob).hexdigest() == sha256:
+    for root in FIRMWARE_ROOTS:
+      if (blob := _read_firmware(root / path / f"{name}.zst", sha256, compressed=True, zstandard_module=zstandard)) is not None:
         return blob
-    return original_fetch_fw(path, name, sha256)
+
+    cached_path = FIRMWARE_CACHE_DIR / path / f"{name}.{sha256}"
+    if (blob := _read_firmware(cached_path, sha256)) is not None:
+      return blob
+
+    last_error = None
+    for attempt in range(3):
+      if attempt:
+        time.sleep(5)
+      try:
+        blob = original_fetch_fw(path, name, sha256)
+        break
+      except Exception as error:
+        last_error = error
+    else:
+      assert last_error is not None
+      raise last_error
+
+    cache_path = None
+    try:
+      cached_path.parent.mkdir(parents=True, exist_ok=True)
+      with tempfile.NamedTemporaryFile(dir=cached_path.parent, delete=False) as cache_file:
+        cache_file.write(blob)
+        cache_path = pathlib.Path(cache_file.name)
+      cache_path.replace(cached_path)
+    except OSError:
+      try:
+        if cache_path is not None:
+          cache_path.unlink(missing_ok=True)
+      except OSError:
+        pass
+    return blob
 
   helpers.fetch_fw = fetch_fw
 
@@ -204,13 +251,14 @@ def _packed_policy_shapes(input_shapes, include_prev_feature=False):
     shapes[key] = tuple(shape)
   if include_prev_feature:
     features_shape = input_shapes["features_buffer"]
-    shapes["prev_feat"] = (features_shape[0], features_shape[2])
+    shapes["prev_feat"] = (features_shape[0], math.prod(features_shape[2:]))
   return shapes, [math.prod(shape) for shape in shapes.values()]
 
 
 def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip, device):
   queues, npy = make_warp_input_queues(vision_input_shapes, frame_skip, device)
   features_shape = policy_input_shapes["features_buffer"]
+  feature_dim = math.prod(features_shape[2:])
   desire_key = _detect_desire_key(policy_input_shapes)
   desire_shape = policy_input_shapes[desire_key]
   packed_shapes, packed_sizes = _packed_policy_shapes(policy_input_shapes)
@@ -224,7 +272,7 @@ def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip
   })
   queues.update({
     "feat_q": Tensor(
-      np.zeros((frame_skip * (features_shape[1] - 1) + 1, features_shape[0], features_shape[2]), dtype=np.float32),
+      np.zeros((frame_skip * (features_shape[1] - 1) + 1, features_shape[0], feature_dim), dtype=np.float32),
       device=device,
     ).contiguous().realize(),
     "desire_q": Tensor(
@@ -239,6 +287,7 @@ def make_split_input_queues(vision_input_shapes, policy_input_shapes, frame_skip
 def make_supercombo_input_queues(input_shapes, frame_skip, device):
   queues, npy = make_warp_input_queues(input_shapes, frame_skip, device)
   features_shape = input_shapes["features_buffer"]
+  feature_dim = math.prod(features_shape[2:])
   desire_key = _detect_desire_key(input_shapes)
   desire_shape = input_shapes[desire_key]
   packed_shapes, packed_sizes = _packed_policy_shapes(input_shapes, include_prev_feature=True)
@@ -252,7 +301,7 @@ def make_supercombo_input_queues(input_shapes, frame_skip, device):
   })
   queues.update({
     "feat_q": Tensor(
-      np.zeros((frame_skip * features_shape[1], features_shape[0], features_shape[2]), dtype=np.float32),
+      np.zeros((frame_skip * features_shape[1], features_shape[0], feature_dim), dtype=np.float32),
       device=device,
     ).contiguous().realize(),
     "desire_q": Tensor(
@@ -335,6 +384,7 @@ def make_run_split_policy(vision_runner, policy_runners, metadata, policy_order,
     vision_output = next(iter(vision_runner({road_key: img, wide_key: big_img}).values())).cast("float32")
     new_feature = vision_output[:, vision_features_slice].reshape(1, -1).unsqueeze(0)
     features_buffer = shift_and_sample(feat_q, new_feature, sample_skip_fn)
+    features_buffer = features_buffer.reshape(policy_metadata["input_shapes"]["features_buffer"])
 
     policy_inputs = {
       "features_buffer": features_buffer,
@@ -388,6 +438,7 @@ def make_run_supercombo(model_runner, metadata, frame_skip, image_history_pipeli
     features_buffer = shift_and_sample(
       feat_q, previous_feature.reshape(1, 1, -1), sample_skip_fn,
     )
+    features_buffer = features_buffer.reshape(input_shapes["features_buffer"])
     model_inputs = {
       road_key: img,
       wide_key: big_img,

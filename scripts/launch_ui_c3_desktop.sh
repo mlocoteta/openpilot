@@ -55,6 +55,11 @@ export SKIP_FW_QUERY=1
 export USE_WEBCAM=1
 export PRIME_TYPE="${PRIME_TYPE:-0}"
 export SP_C3_FAKE_DRIVE_STATS="${SP_C3_FAKE_DRIVE_STATS:-1}"
+if [[ "${SP_C3_FAKE_BLUETOOTH:-1}" =~ ^(1|true|yes|on)$ ]]; then
+  export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=1
+else
+  export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=0
+fi
 
 backup_dir="$(mktemp -d /tmp/starpilot_c3_ui_backup.XXXXXX)"
 backup_manifest="${backup_dir}/.artifact_manifest"

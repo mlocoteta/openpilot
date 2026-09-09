@@ -2,6 +2,18 @@ import { html, reactive } from "/assets/vendor/arrow-core.js";
 
 const CANVAS_W = 640;
 const CANVAS_H = 480;
+const VEHICLE_SIDE_LABELS = {
+  left: {
+    canvas: "LEFT SIDE OF VEHICLE - LEFT HERE",
+    button: "Annotate Left Side of Vehicle - Left Here",
+    active: "Annotating Left Side of Vehicle - Left Here...",
+  },
+  right: {
+    canvas: "RIGHT SIDE OF VEHICLE - RIGHT HERE",
+    button: "Annotate Right Side of Vehicle - Right Here",
+    active: "Annotating Right Side of Vehicle - Right Here...",
+  },
+};
 let pollInterval = null;
 let pollHasBeenActive = false;
 let initialLoadTriggered = false;
@@ -55,7 +67,20 @@ function redraw() {
   const img = _loadedImage;
   if (img) {
     canvas._img = img;
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    ctx.font = "bold 14px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fillRect(0, 0, canvas.width / 2, 34);
+    ctx.fillRect(canvas.width / 2, 0, canvas.width / 2, 34);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(VEHICLE_SIDE_LABELS.left.canvas, canvas.width / 4, 22);
+    ctx.fillText(VEHICLE_SIDE_LABELS.right.canvas, canvas.width * 3 / 4, 22);
   } else {
     ctx.fillStyle = "#222";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -67,8 +92,8 @@ function redraw() {
   }
 
   const sides = [
-    { key: "left", points: state.leftPoints, fillColor: "rgba(13, 110, 253, 0.25)", borderColor: "#0d6efd", label: "LEFT OF IMAGE" },
-    { key: "right", points: state.rightPoints, fillColor: "rgba(253, 126, 20, 0.25)", borderColor: "#fd7e14", label: "RIGHT OF IMAGE" },
+    { key: "left", points: state.leftPoints, fillColor: "rgba(13, 110, 253, 0.25)", borderColor: "#0d6efd", label: VEHICLE_SIDE_LABELS.left.canvas },
+    { key: "right", points: state.rightPoints, fillColor: "rgba(253, 126, 20, 0.25)", borderColor: "#fd7e14", label: VEHICLE_SIDE_LABELS.right.canvas },
   ];
 
   for (const side of sides) {
@@ -280,8 +305,11 @@ async function saveConfig() {
   const cw = canvas ? canvas.width : nativeW;
   const ch = canvas ? canvas.height : nativeH;
 
+  // The preview is mirrored for vehicle-side clarity; the daemon still stores
+  // raw camera coordinates, so un-mirror X when writing back. The LEFT side of
+  // the vehicle (raw image RIGHT) is saved as poly_right and vice versa.
   function scalePoints(pts) {
-    return pts.map(([x, y]) => [Math.round(x * nativeW / cw), Math.round(y * nativeH / ch)]);
+    return pts.map(([x, y]) => [Math.round((cw - x) * nativeW / cw), Math.round(y * nativeH / ch)]);
   }
 
   const config = {
@@ -289,14 +317,14 @@ async function saveConfig() {
     height: nativeH,
   };
   if (state.leftPoints.length >= 3) {
-    config.poly_left = scalePoints(state.leftPoints);
-  } else {
-    config.poly_left = [];
-  }
-  if (state.rightPoints.length >= 3) {
-    config.poly_right = scalePoints(state.rightPoints);
+    config.poly_right = scalePoints(state.leftPoints);
   } else {
     config.poly_right = [];
+  }
+  if (state.rightPoints.length >= 3) {
+    config.poly_left = scalePoints(state.rightPoints);
+  } else {
+    config.poly_left = [];
   }
 
   state.loading = true;
@@ -350,11 +378,18 @@ function applyConfigToCanvas() {
   const scaleX = cw / nativeW;
   const scaleY = ch / nativeH;
 
-  const left = Array.isArray(config.poly_left) && config.poly_left.length >= 3
-    ? config.poly_left.map(([x, y]) => [Math.round(x * scaleX), Math.round(y * scaleY)])
+  function toCanvas(pts) {
+    return pts.map(([x, y]) => [Math.round(cw - x * scaleX), Math.round(y * scaleY)]);
+  }
+
+  // poly_left is raw image-LEFT (the vehicle's right side) and poly_right is
+  // raw image-RIGHT (the vehicle's left side). Mirror X so each polygon lands
+  // on the correct vehicle side of the flipped preview.
+  const left = Array.isArray(config.poly_right) && config.poly_right.length >= 3
+    ? toCanvas(config.poly_right)
     : [];
-  const right = Array.isArray(config.poly_right) && config.poly_right.length >= 3
-    ? config.poly_right.map(([x, y]) => [Math.round(x * scaleX), Math.round(y * scaleY)])
+  const right = Array.isArray(config.poly_left) && config.poly_left.length >= 3
+    ? toCanvas(config.poly_left)
     : [];
 
   state.leftPoints = left;
@@ -419,7 +454,7 @@ export function VASMAnnotations() {
             <ul class="v-asm-card-list">
               <li>Camera-based adjacent spot monitoring using the driver camera, works alongside factory blind spot monitoring or standalone</li>
               <li>Annotate window areas so V-ASM knows where to look</li>
-              <li>Massive thanks to those who contributed to our total of 65GB of training data (over 36GB from your submissions). If performance is lacking, submit edge case routes via the repo form or give feedback in the StarPilot Discord.</li>
+              <li>Massive thanks to those who contributed to our total of 120GB of training data. If performance is lacking, submit edge case routes via the repo form or give feedback in the StarPilot Discord.</li>
               <li class="v-asm-card-action">Submit edge cases, learn about training pipeline, and data handling within the form at <a href="https://github.com/prabhaavp/vasm-op" target="_blank" rel="noopener noreferrer">github.com/prabhaavp/vasm-op</a></li>
             </ul>
           </div>
@@ -427,6 +462,7 @@ export function VASMAnnotations() {
           <div class="v-asm-card v-asm-card-danger">
             <div class="v-asm-card-title">Tracing Guidelines</div>
             <ul class="v-asm-card-list">
+              <li>The preview is mirrored: the LEFT side of the vehicle is always on the LEFT here; the RIGHT side is always on the RIGHT.</li>
               <li>Trace the visible glass (front and rear side windows on each side, as seen by the driver camera). Mask as much of the window area as possible.</li>
               <li>Exclude A-pillars, door frames, and interior. Include the side mirror if visible through the glass.</li>
               <li>The B-pillar is fine to include as needed for a continuous mask. Your head or body being in frame is fine (that is part of the training data). Be consistent left vs right.</li>
@@ -451,11 +487,11 @@ export function VASMAnnotations() {
           <div class="v-asm-btn-group">
             <button class="${state.annotating === "left" ? "v-asm-btn v-asm-btn-left-active" : "v-asm-btn v-asm-btn-outline-left"}"
                     @click="${startAnnotate}" value="left">
-              ${state.annotating === "left" ? "Annotating Left (perspective of image)..." : "Annotate Left (as seen)"}
+              ${state.annotating === "left" ? VEHICLE_SIDE_LABELS.left.active : VEHICLE_SIDE_LABELS.left.button}
             </button>
             <button class="${state.annotating === "right" ? "v-asm-btn v-asm-btn-right-active" : "v-asm-btn v-asm-btn-outline-right"}"
                     @click="${startAnnotate}" value="right">
-              ${state.annotating === "right" ? "Annotating Right (perspective of image)..." : "Annotate Right (as seen)"}
+              ${state.annotating === "right" ? VEHICLE_SIDE_LABELS.right.active : VEHICLE_SIDE_LABELS.right.button}
             </button>
             ${state.annotating ? html`<button class="v-asm-btn v-asm-btn-primary" @click="${finishSide}">Finish ${state.annotating === "left" ? "Left" : "Right"}</button>` : ""}
 
@@ -483,8 +519,8 @@ export function VASMAnnotations() {
           </div>
         </div>
 
-        ${state.annotating === "left" ? html`<div class="v-asm-mode-banner v-asm-mode-left"><span>⬅ Annotating Left Window</span><span>Click the canvas to place points around the visible glass</span></div>`
-          : state.annotating === "right" ? html`<div class="v-asm-mode-banner v-asm-mode-right"><span>➡ Annotating Right Window</span><span>Click the canvas to place points around the visible glass</span></div>`
+        ${state.annotating === "left" ? html`<div class="v-asm-mode-banner v-asm-mode-left"><span>⬅ ${VEHICLE_SIDE_LABELS.left.canvas}</span><span>Click the canvas to place points around the visible glass</span></div>`
+          : state.annotating === "right" ? html`<div class="v-asm-mode-banner v-asm-mode-right"><span>➡ ${VEHICLE_SIDE_LABELS.right.canvas}</span><span>Click the canvas to place points around the visible glass</span></div>`
           : state.error ? html`<div class="v-asm-mode-banner v-asm-mode-banner-error"><span>Snapshot unavailable</span><span>${state.error}</span><button class="v-asm-btn v-asm-btn-retry" @click="${retrySnapshot}">Retry</button></div>`
           : !state.image ? html`<div class="v-asm-mode-banner"><span>Loading camera snapshot...</span><span>The snapshot will load automatically</span></div>`
           : html`<div class="v-asm-mode-banner v-asm-mode-idle"><span>Idle Mode</span><span>Click "Annotate" above to configure your active canvas boundaries</span></div>`}

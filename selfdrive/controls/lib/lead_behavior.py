@@ -113,7 +113,14 @@ def is_radarless_matched_follow_window(v_ego: float, lead_distance: float, v_lea
 
 
 def get_tracked_lead_catchup_bias(v_ego: float, lead_distance: float, desired_gap: float, closing_speed: float,
-                                  v_cruise: float | None = None, y_rel: float | None = None) -> float:
+                                  v_cruise: float | None = None, y_rel: float | None = None,
+                                  min_headway_margin: float = TRACKED_LEAD_CATCHUP_BIAS_MIN_HEADWAY_MARGIN,
+                                  full_headway_margin: float = TRACKED_LEAD_CATCHUP_BIAS_FULL_HEADWAY_MARGIN,
+                                  bias_gain: float = TRACKED_LEAD_CATCHUP_BIAS_GAIN,
+                                  bias_cap: float | None = None,
+                                  speed_range: tuple[float, float] | None = None,
+                                  fade_margins: tuple[float, float] | None = None,
+                                  cruise_error_full: float = TRACKED_LEAD_CATCHUP_BIAS_CRUISE_ERROR_FULL) -> float:
   gap_error = lead_distance - desired_gap
   actual_hw = lead_distance / max(v_ego, 1e-3)
   desired_hw = desired_gap / max(v_ego, 1e-3)
@@ -122,23 +129,27 @@ def get_tracked_lead_catchup_bias(v_ego: float, lead_distance: float, desired_ga
   if gap_error <= 0.0:
     return 0.0
 
-  speed_factor = _smoothstep(v_ego, HIGHWAY_LEAD_BEHAVIOR_MIN_SPEED, TRACKED_LEAD_CATCHUP_BIAS_FULL_SPEED)
+  speed_min, speed_full = speed_range or (HIGHWAY_LEAD_BEHAVIOR_MIN_SPEED, TRACKED_LEAD_CATCHUP_BIAS_FULL_SPEED)
+  speed_factor = _smoothstep(v_ego, speed_min, speed_full)
   cruise_factor = 1.0
   if v_cruise is not None:
-    cruise_factor = _smoothstep(v_cruise - v_ego, 0.0, TRACKED_LEAD_CATCHUP_BIAS_CRUISE_ERROR_FULL)
+    cruise_factor = _smoothstep(v_cruise - v_ego, 0.0, cruise_error_full)
   if speed_factor == 0.0 or cruise_factor == 0.0:
     return 0.0
 
   # Encourage ACC to treat a tracked lead as the active constraint when we're
   # hanging far above the requested time gap, but don't override cruise for a
   # truly distant lead or one we're already closing on decisively.
-  fade_start_margin = max(TRACKED_LEAD_CATCHUP_BIAS_MIN_FADE_START_MARGIN,
-                          TRACKED_LEAD_CATCHUP_BIAS_ABSOLUTE_FADE_START - desired_hw)
-  fade_end_margin = max(TRACKED_LEAD_CATCHUP_BIAS_MIN_FADE_END_MARGIN,
-                        TRACKED_LEAD_CATCHUP_BIAS_ABSOLUTE_FADE_END - desired_hw)
+  if fade_margins is None:
+    fade_start_margin = max(TRACKED_LEAD_CATCHUP_BIAS_MIN_FADE_START_MARGIN,
+                            TRACKED_LEAD_CATCHUP_BIAS_ABSOLUTE_FADE_START - desired_hw)
+    fade_end_margin = max(TRACKED_LEAD_CATCHUP_BIAS_MIN_FADE_END_MARGIN,
+                          TRACKED_LEAD_CATCHUP_BIAS_ABSOLUTE_FADE_END - desired_hw)
+  else:
+    fade_start_margin, fade_end_margin = fade_margins
   entry_factor = _smoothstep(headway_margin,
-                             TRACKED_LEAD_CATCHUP_BIAS_MIN_HEADWAY_MARGIN,
-                             TRACKED_LEAD_CATCHUP_BIAS_FULL_HEADWAY_MARGIN)
+                             min_headway_margin,
+                             full_headway_margin)
   exit_factor = 1.0 - _smoothstep(headway_margin, fade_start_margin, fade_end_margin)
 
   closing_fade_end = max(2.5, 0.12 * v_ego)
@@ -152,8 +163,9 @@ def get_tracked_lead_catchup_bias(v_ego: float, lead_distance: float, desired_ga
                                        TRACKED_LEAD_CATCHUP_BIAS_FULL_LATERAL_OFFSET,
                                        TRACKED_LEAD_CATCHUP_BIAS_MAX_LATERAL_OFFSET)
 
-  bias_cap = max(10.0, TRACKED_LEAD_CATCHUP_BIAS_SPEED_FACTOR * v_ego)
-  return (min(gap_error * TRACKED_LEAD_CATCHUP_BIAS_GAIN, bias_cap) * speed_factor * cruise_factor *
+  if bias_cap is None:
+    bias_cap = max(10.0, TRACKED_LEAD_CATCHUP_BIAS_SPEED_FACTOR * v_ego)
+  return (min(gap_error * max(0.0, float(bias_gain)), float(bias_cap)) * speed_factor * cruise_factor *
           entry_factor * exit_factor * closing_factor * lateral_factor)
 
 

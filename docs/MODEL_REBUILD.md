@@ -1,146 +1,128 @@
-# StarPilot Unified Model Rebuild
+# StarPilot Model Rebuild
 
-This workflow rebuilds StarPilot driving and driver-monitoring artifacts for the vendored tinygrad revision. Driving-model behavior versions remain manifest metadata; every runtime driving artifact uses the `tinygrad_single_v1` layout.
+This is the supported workflow for changing the vendored tinygrad revision and
+releasing a new model manifest generation. A manifest generation represents one
+tinygrad ABI. Model behavior versions (`v8` through `v16`) are independent and
+must remain unchanged when only tinygrad changes.
 
-## Safety
+The current generation is **v25**, pinned to tinygrad
+`e837e367aac9e1a66e689f4f32ce20ca9367df13`. The supported compiler is
+`comma@192.168.3.110`; never substitute another comma without explicit approval.
 
-- The supported build device is `comma@192.168.3.109`.
-- Never run these commands against `192.168.3.110`.
-- Normal artifacts target QCOM. External-GPU artifacts must be compiled explicitly and tagged in the manifest.
-- Keep source ONNX files and compiled PKLs on the T5 workspace, not the comma.
+## Release Contract
 
-## Workspace
+- Keep every existing StarPilot model ID stable across manifest generations.
+- Store HF artifacts under `models/v25/<model-id>/`.
+- Store GitHub fallback artifacts on the `Models` branch under `v25/<model-id>/`.
+- Name every logical artifact `<model-id>_driving_tinygrad.pkl`.
+- Publish native chunks as `.chunkNNofNN` plus `.chunkmanifest`.
+- Serialize every v25 driving artifact out-of-band; this applies to normal QCOM
+  models as well as external-GPU models.
+- Include `artifact_sha256` and `artifact_chunk_count` in the manifest.
+- Set `uses_external_gpu: true` only for models compiled for Chestnut.
+- Do not rename an artifact from another tinygrad revision. PKLs must either use
+  the exact v25 pin or be rebuilt with it.
+- Do not add models absent from the existing StarPilot catalog unless the
+  release explicitly requests them.
 
-The default workspace is:
+The downloader checks Hugging Face first and GitHub second. There is no GitLab
+fallback. The HF manifest lives only at `manifests/model_names_v25.json`, old
+artifacts live under `models/v24/`, and current artifacts live under
+`models/v25/`. The v25 downloader never probes unversioned or v24 artifact
+paths; missing v25 artifacts fail safely instead of loading an incompatible
+pickle.
+
+## Tinygrad Bump
+
+1. Record the exact tinygrad commit used by the compatible source catalog.
+2. Replace `tinygrad_repo/` from that commit, excluding nested Git metadata.
+3. Write the full SHA to `tinygrad_repo/TINYGRAD_COMMIT`.
+4. Review upstream `modeld`, compiler, parser, and camera-warp changes. Merge
+   required ABI changes into StarPilot's existing multi-model runtime; never
+   replace StarPilot `modeld.py` wholesale.
+5. Increment `MANIFEST_CANDIDATES` to a new single version. Do not fall back to
+   the prior manifest because its PKLs target a different tinygrad ABI.
+6. Sync the exact tree to the compiler before building anything:
+
+```bash
+./dev sync
+rsync -az --delete --exclude=.git --exclude=__pycache__ -e ssh \
+  tinygrad_repo/ comma@192.168.3.110:/data/openpilot/tinygrad_repo/
+rsync -az -e ssh selfdrive/modeld/ \
+  comma@192.168.3.110:/data/openpilot/selfdrive/modeld/
+rsync -az -e ssh scripts/model_compiler.py \
+  comma@192.168.3.110:/data/openpilot/scripts/model_compiler.py
+rsync -az -e ssh models comma@192.168.3.110:/data/openpilot/models
+```
+
+Confirm the device marker before compiling:
+
+```bash
+ssh comma@192.168.3.110 \
+  'cat /data/openpilot/tinygrad_repo/TINYGRAD_COMMIT'
+```
+
+## Reuse Compatible Artifacts
+
+Reusing an artifact is preferred when its catalog records the exact same
+tinygrad SHA and exact same source-model commit. Display names and release dates
+are not sufficient proof. Copy compatible chunks server-side so the Mac never
+stores a second multi-gigabyte artifact, but rename every destination chunk to
+the stable StarPilot model ID.
+
+Example:
+
+```bash
+hf buckets cp \
+  'hf://datasets/<source>/<path>/<source-file>.chunk01of02' \
+  'hf://buckets/StarPilot-Driving/StarPilot-Resources/models/v25/pop223/pop223_driving_tinygrad.pkl.chunk01of02'
+```
+
+Write `2` to `pop223_driving_tinygrad.pkl.chunkmanifest`, upload it last, and
+put the source artifact's full SHA-256 and chunk count into the v25 manifest.
+Upload the manifest only after every listed artifact directory is complete.
+
+## Compile Missing Models
+
+Archived sources live under:
 
 ```text
-/Volumes/T5/StarPilot-Model-Rebuild-2026-06-22/
+hf://buckets/StarPilot-Driving/StarPilot-Resources/onnx/<source-id>/
 ```
 
-Important directories:
-
-- `onnx/<model-id>/`: ID-prefixed source ONNX files.
-- `compiled/`: completed unified driving PKLs.
-- `driver-monitoring/`: DM ONNX, model PKL, metadata, and camera warps.
-- `ready-for-resources/`: flat repository-upload handoff.
-- Oversized models are represented by repository-safe `.p00`, `.p01`, and `.sha256` files in `ready-for-resources/`.
-- `logs/`: one remote compilation log per model.
-- `results/`: source and artifact checksum records.
-- `manifests/`: source `model_names_v22.json` and namespaced release `model_names_v23.json`.
-- The v23 manifest and compiled artifacts are published together in the resource repository's `Models` branch.
-
-## Initialize And Extract
+Stage one model at a time in `/data/openpilot/uncompiledmodels`; this avoids
+filling the comma and prevents `./models` from selecting stale input files.
 
 ```bash
-python3 scripts/model_rebuild_pipeline.py init
-python3 scripts/model_rebuild_pipeline.py extract \
-  --base-manifest /path/to/model_names_v21.json
+./models --<model-id> --version <behavior-version>
+./models --<gpu-model-id> --version v16 --gpu
 ```
 
-Extraction streams Git blobs directly to disk. LFS pointers are resolved from the local object cache or fetched by object ID, then checked against the pointer SHA-256 and size. Binary ONNX data is never stored in a shell variable.
-
-To retry one source:
+The default input is a single supercombo ONNX. For legacy sources use:
 
 ```bash
-python3 scripts/model_rebuild_pipeline.py extract \
-  --model pop22 \
-  --base-manifest /path/to/model_names_v21.json
+./models --<model-id> --input-format split --version <behavior-version>
 ```
 
-The original catalog sources are defined in `scripts/model_source_map_v22.json`.
-Recovered late-model and supercombo sources, including RDF2, are defined in
-`scripts/model_source_map_v23.json`. The v23 map is intentionally separate so
-adding a recovered iteration cannot alter the older model source history.
+Every non-local release build emits an OOB artifact as native chunks and removes
+the temporary full PKL. `./models --local-<id>` intentionally keeps one OOB PKL
+for local use.
 
-## Compile
-
-Compile one model:
+The resumable bulk helper is:
 
 ```bash
+STAR_PILOT_MODEL_REMOTE=comma@192.168.3.110 \
 python3 scripts/model_rebuild_pipeline.py compile \
-  --model pop22 \
-  --base-manifest /path/to/model_names_v21.json
+  --workspace /Volumes/T5/StarPilot-Model-Rebuild \
+  --source-map scripts/model_source_map_v25.json \
+  --base-manifest ~/StarPilot-Resources/model_names_v25.json
 ```
 
-Compile or resume the full catalog:
+Failures are recorded under `results/`; rerun the same command to resume.
 
-```bash
-python3 scripts/model_rebuild_pipeline.py compile \
-  --base-manifest /path/to/model_names_v21.json
-```
+## Driver Monitoring And Default
 
-Existing artifacts are skipped unless `--force` is passed. Each model is staged in its own remote input directory, compiled on `.109`, copied back to the T5, hashed, and copied into `ready-for-resources/`. Failures are written to `results/<id>_failure.json`; rerunning the same command resumes incomplete models.
-
-Validate one or all completed artifacts with synthetic camera inputs on QCOM:
-
-```bash
-python3 scripts/model_rebuild_pipeline.py validate \
-  --model pop22 \
-  --base-manifest /path/to/model_names_v21.json
-```
-
-The lower-level device compiler also supports direct use:
-
-```bash
-./models --model pop22 --input-format split --version v11
-./models --model deeprl3v2 --input-format supercombo --version v15
-```
-
-For a model that cannot run on the device GPU, compile with the USB AMD GPU attached:
-
-```bash
-./models --lebowski --gpu
-```
-
-The ASM2464PD bridge must run the current tinygrad custom firmware from
-https://github.com/tinygrad/asm2464pd-firmware. Its USB product string starts
-with `custom`; the legacy `USB 3.2 PCIe TinyEnclosure` patch is not compatible
-with comma's current external-GPU runtime. Firmware flashing is a separate,
-explicit hardware setup step and StarPilot never performs it automatically.
-
-The dynamic flag (`--lebowski` above) sets the output and manifest model ID;
-when only one source model is staged, its ONNX filename does not need to match
-that ID. Input format and behavior version are inferred. `--external-gpu`
-remains available as a compatibility alias for `--gpu`.
-
-This emits a streaming out-of-band pickle and keeps QCOM available for camera warps. Its manifest entry must include:
-
-```json
-{
-  "id": "lebowski",
-  "uses_external_gpu": true
-}
-```
-
-Only tagged models activate the external GPU. If the GPU or artifact is unavailable, runtime falls back to the built-in model; all untagged models retain the existing QCOM path.
-
-`--version` records behavioral semantics only. It does not change artifact layout.
-
-If the compiled PKL exceeds 100 MiB, `./models` automatically keeps the full
-local PKL and creates 95 MiB upload parts beside it:
-
-```text
-deeprl3v2_driving_tinygrad.pkl
-deeprl3v2_driving_tinygrad.pkl.p00
-deeprl3v2_driving_tinygrad.pkl.p01
-deeprl3v2_driving_tinygrad.pkl.sha256
-```
-
-To split an already compiled artifact:
-
-```bash
-./models --split-artifact /path/to/deeprl3v2_driving_tinygrad.pkl \
-  --output-dir /path/to/upload-ready
-```
-
-Upload only the numbered parts and checksum when the full PKL exceeds the
-repository limit. The downloader reassembles into a temporary file, verifies
-the companion SHA-256, and atomically installs the final PKL. No manifest field
-is required for multipart artifacts.
-
-## Driver Monitoring
-
-Stage the current DM ONNX in `uncompiledmodels`, then run:
+Driver monitoring is built once per tinygrad generation:
 
 ```bash
 ./models --dm \
@@ -148,61 +130,43 @@ Stage the current DM ONNX in `uncompiledmodels`, then run:
   --output-dir /tmp/dm_artifacts
 ```
 
-This builds:
+Replace these four files together:
 
 - `dmonitoring_model_tinygrad.pkl`
 - `dmonitoring_model_metadata.pkl`
 - `dm_warp_1928x1208_tinygrad.pkl`
 - `dm_warp_1344x760_tinygrad.pkl`
 
-All four files must be updated together.
+Recompile RDF V4 with the same pin and replace the built-in
+`selfdrive/modeld/models/driving_tinygrad.pkl` native chunk set. Never commit a
+full built-in PKL over the repository limit.
 
-## Manifest
+## Validation
 
-Generate the base manifest after compilation, then namespace the release artifacts as v23:
-
-```bash
-python3 scripts/model_rebuild_pipeline.py manifest \
-  --base-manifest /path/to/model_names_v21.json
-```
+Run repository tests first:
 
 ```bash
-python3 scripts/namespace_model_artifacts.py \
-  --workspace /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22 \
-  --base-manifest /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22/manifests/model_names_v22.json \
-  --manifest-version v23 --suffix 3
+./dev sync
+./.venv/bin/pytest -q -n0 \
+  starpilot/assets/tests/test_model_pipeline.py \
+  common/tests/test_file_chunker.py \
+  scripts/tests/test_model_release.py
 ```
 
-The namespace command changes IDs such as `tr1422` to `tr14223`, renames the
-compiled and upload-ready files, and writes an ID map. It preserves display
-names and behavioral versions. The current model manager requests v23 only;
-the manifest is fetched from `Models/model_names_v23.json`, while v22 remains
-available for devices that have not updated yet.
+For representative v8, v11, v12, v15, v16, and GPU artifacts, validate both
+camera resolutions on real QCOM and require finite plan, lane-line, road-edge,
+lead, pose, and action outputs. Then start `modeld` and confirm stable
+`modelV2` publication. Validate DM `driverStateV2` at both resolutions.
 
-After importing newly compiled sources, normalize the release namespace before
-copying files into either resource repository:
+## Device Migration
 
-```bash
-python3 scripts/reconcile_v23_artifacts.py \
-  --workspace /Volumes/T5/StarPilot-Model-Rebuild-2026-06-22
-```
+When `ModelManifestVersion` changes, the model manager retains the selected
+model ID but deletes every non-local downloaded driving artifact from the old
+generation, including full PKLs, `.pNN` parts, native chunks, and chunk
+manifests. It then downloads that ID's v25 chunks. Local models and DM files are
+not deleted. If the selected v25 artifact cannot be downloaded and verified,
+the manager selects the built-in RDF V4 model.
 
-This maps recovered source IDs to their v23 release IDs, removes duplicate
-macOS metadata files, and adds `rdf23` for Regret Driven Framework V2. It does
-not overwrite a conflicting artifact.
-Repository-hosted multipart files are discovered by naming convention, so no
-size, hash, format, or part-count metadata is required.
-
-`uses_external_gpu` is optional and defaults to `false`.
-
-## Runtime Verification
-
-Compilation validates JIT capture/replay, pickle round-trip, finite outputs, metadata slices, and both camera warps. Before release:
-
-1. Select representative v8, v11, v12, v15, and supercombo models.
-2. Confirm `modeld` stays running.
-3. Confirm finite `modelV2` path, lane-line, lead, pose, and action data.
-4. Confirm `driverStateV2` on both supported camera resolutions.
-5. Test download, selection, deletion, randomization, migration, and fallback in both device UIs and Galaxy.
-
-The built-in RDF artifact is `selfdrive/modeld/models/driving_tinygrad.pkl`. If migration cannot download the selected v23 artifact, StarPilot switches to that built-in model.
+Test this explicitly before release by starting with a v24 selected model and
+checking that no v24 driving artifact remains under `/data/models` after the
+v25 manifest is applied.

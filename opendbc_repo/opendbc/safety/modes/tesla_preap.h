@@ -224,10 +224,16 @@ static void tesla_preap_rx_hook(const CANPacket_t *msg) {
   }
 
   if (msg->addr == 0x368U) {
-    const int cruise_state = (msg->data[1] >> 4) & 0x07U;
+    const int cruise_state = (msg->data[1] >> 4) & 0x0FU;
     if (cruise_state == 3) {
       vehicle_moving = false;
     }
+    acc_main_on = (cruise_state == 1) ||
+                  (cruise_state == 2) ||
+                  (cruise_state == 3) ||
+                  (cruise_state == 4) ||
+                  (cruise_state == 6) ||
+                  (cruise_state == 7);
   }
 
   if (msg->addr == 0x118U) {
@@ -332,7 +338,7 @@ static bool tesla_preap_tx_hook(const CANPacket_t *msg) {
 static bool tesla_preap_fwd_hook(int bus_num, int addr) {
   (void)bus_num;
   (void)addr;
-  return false;
+  return true;
 }
 
 static safety_config tesla_preap_init(uint16_t param) {

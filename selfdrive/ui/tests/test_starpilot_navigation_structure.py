@@ -1,4 +1,52 @@
+import sys
+import types
+from unittest.mock import MagicMock
 from types import SimpleNamespace
+
+if "cereal.messaging" not in sys.modules:
+  try:
+    import cereal.messaging
+  except ImportError:
+    msg_mod = types.ModuleType("cereal.messaging")
+    msg_mod.SubMaster = MagicMock
+    msg_mod.PubMaster = MagicMock
+    sys.modules["cereal.messaging"] = msg_mod
+
+if "openpilot.starpilot.common.starpilot_variables" not in sys.modules:
+  try:
+    import openpilot.starpilot.common.starpilot_variables
+  except ImportError:
+    sv_mod = types.ModuleType("openpilot.starpilot.common.starpilot_variables")
+    sv_mod.update_starpilot_toggles = lambda: None
+    sv_mod.migrate_cancel_button_controls = lambda: None
+    sv_mod.ACTIVE_THEME_PATH = "/tmp"
+    sv_mod.THEME_SAVE_PATH = "/tmp"
+    sv_mod.MODELS_PATH = "/tmp"
+    sv_mod.EARTH_RADIUS = 6371000
+    sv_mod.STARPILOT_API = ""
+    sv_mod.KONIK_PATH = "/tmp"
+    sys.modules["openpilot.starpilot.common.starpilot_variables"] = sv_mod
+
+if "openpilot.common.transformations.orientation" not in sys.modules:
+  try:
+    import openpilot.common.transformations.orientation
+  except ImportError:
+    trans_mod = types.ModuleType("openpilot.common.transformations.orientation")
+    trans_mod.rot_from_euler = lambda *a, **k: None
+    trans_mod.euler_from_rot = lambda *a, **k: None
+    sys.modules["openpilot.common.transformations.orientation"] = trans_mod
+
+if "openpilot.starpilot.common.accel_profile" not in sys.modules:
+  try:
+    import openpilot.starpilot.common.accel_profile
+  except ImportError:
+    from collections import defaultdict
+    accel_mod = types.ModuleType("openpilot.starpilot.common.accel_profile")
+    accel_mod.ACCELERATION_PROFILES = defaultdict(lambda: 0)
+    accel_mod.DECELERATION_PROFILES = defaultdict(lambda: 0)
+    accel_mod.normalize_acceleration_profile = lambda v: v
+    accel_mod.normalize_deceleration_profile = lambda v: v
+    sys.modules["openpilot.starpilot.common.accel_profile"] = accel_mod
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.main_panel import StarPilotLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.navigation import StarPilotNavigationLayout
@@ -265,3 +313,51 @@ def test_rejected_search_invalidates_an_in_flight_request_generation():
 
   assert layout._search_generation == 4
   assert layout._search_error
+
+
+def test_breadcrumb_mouse_interaction_lifecycle():
+  import pyray as rl
+  from openpilot.system.ui.lib.application import MousePos
+  controller = BreadcrumbController()
+  controller._rects = {
+    "action:home": rl.Rectangle(10, 10, 50, 30),
+    "action:hub:1": rl.Rectangle(70, 10, 80, 30),
+  }
+  controller._bounds = rl.Rectangle(0, 0, 200, 50)
+
+  # Press on Home
+  controller.init_interaction(MousePos(20, 20))
+  assert controller.pressed == "action:home"
+
+  # Move within Home rect -> remains pressed
+  controller.update_interaction(MousePos(25, 20))
+  assert controller.pressed == "action:home"
+
+  # Drag outside Home rect -> cancels pressed target
+  controller.update_interaction(MousePos(500, 500))
+  assert controller.pressed is None
+
+  # Re-press and cancel
+  controller.init_interaction(MousePos(20, 20))
+  assert controller.pressed == "action:home"
+  controller.cancel_interaction()
+  assert controller.pressed is None
+
+
+def test_breadcrumb_panel_stack_unwinds_nav_stack(monkeypatch):
+  layout, _ = _make_layout(monkeypatch)
+  _click_title(layout, "Driving Controls")
+  _click_title(layout, "Navigation & Maps")
+  _click_title(layout, "Map Data")
+  layout._panel_stack.append((StarPilotPanelType.MAPS, "sub1"))
+  layout._panel_stack.append((StarPilotPanelType.MAPS, "sub2"))
+
+  nav_stack = [layout, object(), object()]
+  monkeypatch.setattr(gui_app, "_nav_stack", nav_stack, raising=False)
+  monkeypatch.setattr(gui_app, "pop_widget", lambda: nav_stack.pop(), raising=False)
+
+  BreadcrumbController().handle_click("action:panel_stack:0")
+  assert nav_stack == [layout]
+  assert len(layout._panel_stack) == 1
+  assert layout._panel_stack[0] == (StarPilotPanelType.MAPS, "sub1")
+

@@ -48,6 +48,12 @@ SETTINGS_CATALOG_PATH = Path(__file__).resolve().parent / "assets" / "device_set
 
 
 BLOCKED_ONROAD_KEYS = {
+  "ActiveBigModel",
+  "ActiveBigModelName",
+  "ActiveBigModelVersion",
+  "ActiveSmallModel",
+  "ActiveSmallModelName",
+  "ActiveSmallModelVersion",
   "AlphaLongitudinalEnabled",
   "DrivingModel",
   "Model",
@@ -128,6 +134,9 @@ def build_favorite_slot_options(is_eligible_param: Callable[[str], bool], *,
 
   options = [dict(option) for option in FAVORITE_ACTION_OPTIONS]
   for key, param_data in catalog_map.items():
+    if param_data.get("galaxy_only"):
+      continue
+
     ui_type = str(param_data.get("ui_type") or "")
     data_type = str(param_data.get("data_type") or "")
     raw_options = param_data.get("options")
@@ -477,20 +486,12 @@ def trigger_favorite_action(key: str | None, params_memory: Params | None = None
   return True
 
 
-def toggle_favorite_slot(slot_index: int, params: Params | None = None, params_memory: Params | None = None, *,
+def execute_favorite_key(key: str | None, params: Params | None = None, params_memory: Params | None = None, *,
                          eligible_keys: Iterable[str] | None = None) -> bool:
-  """Universal polymorphic favorite execution dispatcher."""
-  if slot_index < 0 or slot_index >= FAVORITE_SLOT_COUNT:
-    return False
-
   params = params or Params(return_defaults=True)
   eligible_keys = set(eligible_keys) if eligible_keys is not None else None
-  slots = load_favorite_slots(params, eligible_keys=eligible_keys)
-  slot = slots[slot_index]
-  key = slot.get("key")
-  if not slot.get("enabled") or not key:
+  if not favorite_key_is_valid(params, key, eligible_keys=eligible_keys):
     return False
-
   if not is_param_action_safe_onroad(key, params):
     return False
 
@@ -511,6 +512,22 @@ def toggle_favorite_slot(slot_index: int, params: Params | None = None, params_m
     return True
 
   return False
+
+
+def toggle_favorite_slot(slot_index: int, params: Params | None = None, params_memory: Params | None = None, *,
+                         eligible_keys: Iterable[str] | None = None) -> bool:
+  """Universal polymorphic favorite execution dispatcher."""
+  if slot_index < 0 or slot_index >= FAVORITE_SLOT_COUNT:
+    return False
+
+  params = params or Params(return_defaults=True)
+  eligible_keys = set(eligible_keys) if eligible_keys is not None else None
+  slots = load_favorite_slots(params, eligible_keys=eligible_keys)
+  slot = slots[slot_index]
+  key = slot.get("key")
+  if not slot.get("enabled") or not key:
+    return False
+  return execute_favorite_key(key, params, params_memory, eligible_keys=eligible_keys)
 
 
 def unassign_favorite_slot(slot_index: int, params: Params | None = None, params_memory: Params | None = None, *,

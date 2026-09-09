@@ -12,9 +12,8 @@ import zipfile
 from datetime import date, timedelta
 from dateutil import easter
 from pathlib import Path
-from urllib.parse import quote_plus
 
-from openpilot.starpilot.common.starpilot_download_utilities import GITHUB_URL, GITLAB_URL, download_file, get_repository_url, handle_error, verify_download
+from openpilot.starpilot.common.starpilot_download_utilities import HF_BUCKET, GITHUB_URL, download_file, get_resource_urls, handle_error, verify_download
 from openpilot.starpilot.common.theme_asset_names import find_matching_theme_asset_file, find_matching_theme_asset_name
 from openpilot.starpilot.common.starpilot_utilities import delete_file, extract_zip, load_json_file, update_json_file
 from openpilot.starpilot.common.starpilot_variables import ACTIVE_THEME_PATH, RANDOM_EVENTS_PATH, RESOURCES_REPO, THEME_SAVE_PATH
@@ -219,44 +218,49 @@ class ThemeManager:
   def download_theme(self, theme_component, theme_name, asset_param, starpilot_toggles):
     self.downloading_theme = True
 
-    repo_url = get_repository_url(self.session)
-    if not repo_url:
-      handle_error(None, asset_param, "Repository unavailable", "GitHub and GitLab are offline...", self.params_memory, DOWNLOAD_PROGRESS_PARAM)
+    resource_urls = get_resource_urls(self.session)
+    if not resource_urls:
+      handle_error(None, asset_param, "Repository unavailable", "Hugging Face and GitHub are offline...", self.params_memory, DOWNLOAD_PROGRESS_PARAM)
       self.downloading_theme = False
       return
 
-    alternate_url = GITLAB_URL if "raw.githubusercontent" in repo_url else GITHUB_URL
-    primary_source = "GitLab" if "gitlab" in repo_url else "GitHub"
-
     if theme_component == "boot_logos":
-      download_link = f"{repo_url}/Themes/bootlogo"
       download_path = THEME_SAVE_PATH / "bootlogos" / theme_name
       extensions = [".png", ".jpg", ".jpeg"]
       name_candidates = list(dict.fromkeys([theme_name, theme_name.replace("_", "-"), theme_name.replace("-", "_")]))
     elif theme_component == "distance_icons":
-      download_link = f"{repo_url}/Distance-Icons/{theme_name}"
       download_path = THEME_SAVE_PATH / "theme_packs" / theme_name / theme_component
       extensions = [".zip"]
       name_candidates = [theme_name]
     elif theme_component == "steering_wheels":
-      download_link = f"{repo_url}/Steering-Wheels/{theme_name}"
       download_path = THEME_SAVE_PATH / theme_component / theme_name
       extensions = [".gif", ".png"]
       name_candidates = [theme_name]
     else:
-      download_link = f"{repo_url}/Themes/{theme_name}/{theme_component}"
       download_path = THEME_SAVE_PATH / "theme_packs" / theme_name / theme_component
       extensions = [".zip"]
       name_candidates = [theme_name]
 
     for extension in extensions:
       theme_path = download_path.with_suffix(extension)
-      theme_urls = [f"{download_link}/{candidate}{extension}" for candidate in name_candidates] if theme_component == "boot_logos" else [download_link + extension]
+      theme_urls = []
+      for resource_url in resource_urls:
+        source_prefix = f"{resource_url}/theme" if "huggingface.co/buckets/" in resource_url else resource_url
+        if theme_component == "boot_logos":
+          path_prefix = f"{source_prefix}/Themes/bootlogo"
+          theme_urls.extend(f"{path_prefix}/{candidate}{extension}" for candidate in name_candidates)
+        elif theme_component == "distance_icons":
+          theme_urls.append(f"{source_prefix}/Distance-Icons/{theme_name}{extension}")
+        elif theme_component == "steering_wheels":
+          theme_urls.append(f"{source_prefix}/Steering-Wheels/{theme_name}{extension}")
+        else:
+          theme_urls.append(f"{source_prefix}/Themes/{theme_name}/{theme_component}{extension}")
 
       for theme_url in theme_urls:
         delete_file(theme_path)
 
-        print(f"Downloading theme from {primary_source}: {theme_name}")
+        source = "Hugging Face" if "huggingface.co/buckets/" in theme_url else "GitHub"
+        print(f"Downloading theme from {source}: {theme_name}")
         download_file(CANCEL_DOWNLOAD_PARAM, theme_path, asset_param, self.params_memory, DOWNLOAD_PROGRESS_PARAM, self.session, theme_url)
 
         if self.params_memory.get_bool(CANCEL_DOWNLOAD_PARAM):
@@ -267,7 +271,7 @@ class ThemeManager:
           return
 
         if verify_download(theme_path, self.params_memory, self.session, theme_url):
-          print(f"Theme {theme_name} downloaded and verified successfully from {primary_source}!")
+          print(f"Theme {theme_name} downloaded and verified successfully from {source}!")
           self.update_theme_size(theme_component, theme_name, theme_path.stat().st_size)
 
           if extension == ".zip":
@@ -282,21 +286,34 @@ class ThemeManager:
           self.update_themes(starpilot_toggles)
           return
 
-      if self.handle_verification_failure(extension, theme_component, theme_name, asset_param, theme_path, download_path, starpilot_toggles, alternate_url):
-        return
-
     handle_error(download_path, asset_param, "Download failed...", "Download failed...", self.params_memory, DOWNLOAD_PROGRESS_PARAM)
     self.downloading_theme = False
 
   def fetch_assets(self, repo_url, starpilot_toggles):
     is_github = "github" in repo_url
-    is_gitlab = "gitlab" in repo_url
-
-    repo_encoded = quote_plus(RESOURCES_REPO)
+    is_huggingface = "huggingface.co/buckets/" in repo_url
 
     assets = {"boot_logos": [], "themes": {}, "wheels": []}
     try:
       def list_files(branch):
+        if is_huggingface:
+          response = self.session.get(f"https://huggingface.co/api/buckets/{HF_BUCKET}/tree?recursive=true", timeout=10)
+          response.raise_for_status()
+          prefix = {
+            "Themes": "theme/Themes/",
+            "Distance-Icons": "theme/Distance-Icons/",
+            "Steering-Wheels": "theme/Steering-Wheels/",
+          }[branch]
+          return [
+            {
+              "path": item.get("path", "")[len(prefix):],
+              "name": Path(item.get("path", "")).name,
+              "type": item.get("type"),
+              "size": item.get("size", 0),
+            }
+            for item in response.json()
+            if item.get("type") == "file" and item.get("path", "").startswith(prefix)
+          ]
         if is_github:
           response = self.session.get(f"https://api.github.com/repos/{RESOURCES_REPO}/git/trees/{branch}?recursive=1", timeout=10)
           response.raise_for_status()
@@ -310,27 +327,12 @@ class ThemeManager:
             for item in response.json().get("tree", [])
             if item.get("type") == "blob"
           ]
-        if is_gitlab:
-          response = self.session.get(f"https://gitlab.com/api/v4/projects/{repo_encoded}/repository/tree?ref={branch}&recursive=true", timeout=10)
-          response.raise_for_status()
-          return [
-            {
-              "path": item.get("path", ""),
-              "name": item.get("name", ""),
-              "type": item.get("type"),
-              "size": 0,
-            }
-            for item in response.json()
-            if item.get("type") in ("blob", "file")
-          ]
         print(f"Unsupported repository URL: {repo_url}")
         return []
 
       def file_size(branch, path, fallback):
-        if is_github:
+        if is_github or is_huggingface:
           return int(fallback or 0)
-        response = self.session.head(f"https://gitlab.com/api/v4/projects/{repo_encoded}/repository/files/{quote_plus(path)}/raw?ref={branch}", timeout=10)
-        return int(response.headers.get("content-length", 0)) if response.ok else 0
 
       for branch in ["Distance-Icons", "Steering-Wheels"]:
         for item in list_files(branch):
@@ -402,7 +404,8 @@ class ThemeManager:
       return assets
 
     except requests.exceptions.RequestException as error:
-      print(f"Failed to fetch theme sizes from {'GitHub' if is_github else 'GitLab'}: {error}")
+      source = "Hugging Face" if is_huggingface else "GitHub"
+      print(f"Failed to fetch theme sizes from {source}: {error}")
       return {}
 
   @staticmethod
@@ -465,9 +468,8 @@ class ThemeManager:
       "christmas_week": date(year, 12, 25)
     }
 
-  def handle_verification_failure(self, extension, theme_component, theme_name, asset_param, theme_path, download_path, starpilot_toggles, fallback_url=GITLAB_URL):
-    is_github = "raw.githubusercontent" in fallback_url
-    source = "GitHub" if is_github else "GitLab"
+  def handle_verification_failure(self, extension, theme_component, theme_name, asset_param, theme_path, download_path, starpilot_toggles, fallback_url=GITHUB_URL):
+    source = "GitHub"
 
     if theme_component == "boot_logos":
       download_link = f"{fallback_url}/Themes/bootlogo"
@@ -750,13 +752,17 @@ class ThemeManager:
 
     self.sync_local_resources()
 
-    repo_url = get_repository_url(self.session)
-    if repo_url is None:
-      print("GitHub and GitLab are offline...")
+    resource_urls = get_resource_urls(self.session)
+    if not resource_urls:
+      print("Hugging Face and GitHub are offline...")
       self.update_theme_params([], [], [], [], [], [], [])
       return
 
-    assets = self.fetch_assets(repo_url, starpilot_toggles)
+    assets = {}
+    for repo_url in resource_urls:
+      assets = self.fetch_assets(repo_url, starpilot_toggles)
+      if assets:
+        break
     if not assets:
       return
 

@@ -76,6 +76,7 @@ def _load_starpilot_onroad_view(monkeypatch):
     DriverMonitorWidget=dummy_widget,
     SteeringWheelWidget=dummy_widget,
     StoppedTimerWidget=dummy_widget,
+    ModelSourceWidget=dummy_widget,
   )
   stub_module(
     "openpilot.selfdrive.ui.onroad.starpilot.stopping_point",
@@ -193,6 +194,7 @@ def test_starpilot_road_overlays_use_the_parent_scissor(monkeypatch):
     _track_edge_vertices=SimpleNamespace(size=4),
   )
   view._font_bold = object()
+  view._get_border_width = lambda: 0
 
   monkeypatch.setattr(starpilot_onroad_view, "render_path_edges", lambda *_args: events.append("path_edges"))
   monkeypatch.setattr(starpilot_onroad_view, "render_adjacent_lanes", lambda *_args: events.append("adjacent_lanes"))

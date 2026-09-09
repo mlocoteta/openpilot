@@ -193,6 +193,19 @@ body {
   padding-left: var(--padding-lg);
 }
 
+.embedded #sidebar,
+.embedded #sidebar_shell,
+.embedded #sidebarUnderlay {
+  display: none !important;
+}
+.embedded #menu_button {
+  display: none !important;
+}
+.embedded .content {
+  margin-left: 0 !important;
+  padding-left: var(--padding-lg);
+}
+
 /* ――― Headings ――― */
 h1,
 h2,

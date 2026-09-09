@@ -36,6 +36,39 @@ class StarPilotTracking:
 
     self.model_name = clean_model_name(starpilot_toggles.model_name)
 
+  def _commit_tracked_time(self, now=None, time_validated=False):
+    if not self.previously_enabled or self.tracked_time <= 0:
+      return
+
+    if time_validated and now is not None:
+      current_month = now.month
+      if current_month != self.starpilot_stats.get("Month"):
+        self.starpilot_stats.update({
+          "CurrentMonthsMeters": 0,
+          "Month": current_month
+        })
+
+    self.starpilot_stats["StarPilotSeconds"] = self.starpilot_stats.get("StarPilotSeconds", 0) + self.tracked_time
+
+    total_model_times = self.starpilot_stats.get("ModelTimes", {})
+    total_model_times[self.model_name] = total_model_times.get(self.model_name, 0) + self.tracked_time
+    self.starpilot_stats["ModelTimes"] = total_model_times
+
+    self.starpilot_stats["TrackedTime"] = self.starpilot_stats.get("TrackedTime", 0) + self.tracked_time
+    self.tracked_time = 0
+
+    if not self.drive_added:
+      self.starpilot_stats["StarPilotDrives"] = self.starpilot_stats.get("StarPilotDrives", 0) + 1
+      self.drive_added = True
+
+  def flush(self, now=None, time_validated=False):
+    """Persist the current drive, including time since the last stop checkpoint."""
+    if not self.previously_enabled:
+      return
+
+    self._commit_tracked_time(now, time_validated)
+    self.params.put("StarPilotStats", dict(sorted(self.starpilot_stats.items())))
+
   def update(self, now, time_validated, sm, starpilot_toggles):
     v_cruise = min(sm["carState"].vCruiseCluster, V_CRUISE_MAX) * CV.KPH_TO_MS
     v_ego = max(sm["carState"].vEgo, 0)
@@ -141,27 +174,5 @@ class StarPilotTracking:
     self.starpilot_stats["WeatherTimes"] = weather_times
 
     if self.tracked_time >= 60 and sm["carState"].standstill and self.previously_enabled:
-      if time_validated:
-        current_month = now.month
-        if current_month != self.starpilot_stats.get("Month"):
-          self.starpilot_stats.update({
-            "CurrentMonthsMeters": 0,
-            "Month": current_month
-          })
-
-      self.starpilot_stats["StarPilotSeconds"] = self.starpilot_stats.get("StarPilotSeconds", 0) + self.tracked_time
-
-      current_model = self.model_name
-      total_model_times = self.starpilot_stats.get("ModelTimes", {})
-      total_model_times[current_model] = total_model_times.get(current_model, 0) + self.tracked_time
-      self.starpilot_stats["ModelTimes"] = total_model_times
-
-      self.starpilot_stats["TrackedTime"] = self.starpilot_stats.get("TrackedTime", 0) + self.tracked_time
-
-      self.tracked_time = 0
-
-      if not self.drive_added:
-        self.starpilot_stats["StarPilotDrives"] = self.starpilot_stats.get("StarPilotDrives", 0) + 1
-        self.drive_added = True
-
+      self._commit_tracked_time(now, time_validated)
       self.params.put_nonblocking("StarPilotStats", dict(sorted(self.starpilot_stats.items())))

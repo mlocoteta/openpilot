@@ -2,6 +2,9 @@
 import os
 import time
 import argparse
+import fcntl
+import select
+import struct
 import threading
 import numpy as np
 import inputs
@@ -12,6 +15,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import HARDWARE
+from openpilot.starpilot.system.wheel_controls import connected_input_sources, selected_joystick_device
 from openpilot.tools.lib.kbhit import KBHit
 
 EXPO = 0.4
@@ -25,6 +29,11 @@ CONTROLLER_PROFILES = {
   'DualSense': {'name': 'DualSense', 'steer': 'ABS_X', 'accel': 'ABS_RY', 'lo': 0.,      'hi': 255.},
 }
 DEFAULT_PROFILE = 'X-Box'
+ABS_CODES = {'ABS_X': 0, 'ABS_Y': 1, 'ABS_Z': 2, 'ABS_RX': 3, 'ABS_RY': 4, 'ABS_RZ': 5}
+INPUT_EVENT = struct.Struct('@llHHi')
+EV_KEY = 1
+EV_ABS = 3
+BTN_NORTH = 307
 
 
 class Keyboard:
@@ -57,10 +66,15 @@ class Joystick:
   def __init__(self):
     self.cancel_button = 'BTN_NORTH'
     self.is_pc = HARDWARE.get_device_type() == 'pc'
+    self.params = Params(return_defaults=True)
     self._last_scan = 0.
+    self._source_id = ''
+    self._event_path = ''
+    self._event_fd = None
     self._load_profile()
+    self._rescan(force=True)
 
-  def _load_profile(self):
+  def _load_profile(self, name=''):
     if self.is_pc:
       # DualSense over a laptop for development
       accel_axis, steer_axis = 'ABS_Z', 'ABS_RX'
@@ -68,7 +82,6 @@ class Joystick:
       raw_min, raw_max, self.deadzone = 0., 255., 0.03
       name, prof_name = 'pc', 'pc'
     else:
-      name = inputs.devices.gamepads[0].name if inputs.devices.gamepads else ''
       prof = next((p for key, p in CONTROLLER_PROFILES.items() if key in name), CONTROLLER_PROFILES[DEFAULT_PROFILE])
       accel_axis, steer_axis = prof['accel'], prof['steer']
       self.flip_map = {}
@@ -82,18 +95,103 @@ class Joystick:
     self.axes_order = [accel_axis, steer_axis]
     self.cancel = False
 
-  def _rescan(self):
-    # `inputs` enumerates /dev/input once at import, so a pad that wasn't ready at boot (or was
-    # hot-swapped) never gets read. Re-scan so it's picked up without a restart. Throttled to 1s.
+  def _close_event(self):
+    if self._event_fd is not None:
+      try:
+        os.close(self._event_fd)
+      except OSError:
+        pass
+    self._event_fd = None
+    self._event_path = ''
+    self._source_id = ''
+
+  def _axis_range(self, axis_name, fallback_min, fallback_max):
+    if self._event_fd is None:
+      return fallback_min, fallback_max
+    axis = ABS_CODES[axis_name]
+    data = bytearray(24)
+    try:
+      fcntl.ioctl(self._event_fd, 0x80184540 + axis, data, True)
+      _value, minimum, maximum, _fuzz, _flat, _resolution = struct.unpack('iiiiii', data)
+      if maximum > minimum:
+        return float(minimum), float(maximum)
+    except OSError:
+      pass
+    return fallback_min, fallback_max
+
+  def _rescan(self, force=False):
     now = time.monotonic()
-    if now - self._last_scan < 1.0:
+    if not force and now - self._last_scan < 1.0:
       return
     self._last_scan = now
-    inputs.devices = inputs.DeviceManager()
-    if not self.is_pc and inputs.devices.gamepads:
-      self._load_profile()
+    if self.is_pc:
+      inputs.devices = inputs.DeviceManager()
+      if inputs.devices.gamepads:
+        self._load_profile(inputs.devices.gamepads[0].name)
+      return
+
+    selected = selected_joystick_device(self.params)
+    source = next((item for item in connected_input_sources()
+                   if item.device_id == selected and item.joystick_capable), None)
+    if source is None:
+      if self._event_fd is not None:
+        cloudlog.info('joystick_control: selected controller disconnected')
+      self._close_event()
+      self.axes_values = dict.fromkeys(self.axes_values, 0.)
+      return
+    if self._source_id == source.device_id and self._event_path == source.path and self._event_fd is not None:
+      return
+
+    self._close_event()
+    try:
+      self._event_fd = os.open(source.path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+      return
+    self._source_id = source.device_id
+    self._event_path = source.path
+    self._load_profile(source.name)
+    for axis in self.axes_order:
+      self.min_axis_value[axis], self.max_axis_value[axis] = self._axis_range(
+        axis, self.min_axis_value[axis], self.max_axis_value[axis])
+    cloudlog.info(f"joystick_control: selected '{source.name}' at {source.path}")
+
+  def _handle_event(self, event_type, code, value):
+    if event_type == EV_KEY and code == BTN_NORTH:
+      self.cancel = value != 0
+      return True
+    if event_type != EV_ABS:
+      return False
+    event_name = next((name for name, number in ABS_CODES.items() if number == code), '')
+    if event_name not in self.axes_values:
+      return False
+    norm = -float(np.interp(value, [self.min_axis_value[event_name], self.max_axis_value[event_name]], [-1., 1.]))
+    norm = norm if abs(norm) > self.deadzone else 0.
+    self.axes_values[event_name] = EXPO * norm ** 3 + (1 - EXPO) * norm
+    return True
 
   def update(self):
+    if not self.is_pc:
+      self._rescan()
+      if self._event_fd is None:
+        time.sleep(0.1)
+        return False
+      try:
+        readable, _, _ = select.select([self._event_fd], [], [], 0.1)
+        if not readable:
+          return False
+        data = os.read(self._event_fd, INPUT_EVENT.size * 64)
+      except OSError:
+        self._close_event()
+        return False
+      if not data:
+        self._close_event()
+        return False
+      handled = False
+      for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+        _seconds, _microseconds, event_type, code, value = INPUT_EVENT.unpack_from(data, offset)
+        handled = self._handle_event(event_type, code, value) or handled
+      return handled
+
     try:
       joystick_event = get_gamepad()[0]
     except (OSError, UnpluggedError):

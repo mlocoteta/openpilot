@@ -16,12 +16,15 @@ from cereal import messaging
 from cereal.messaging import PubMaster, SubMaster
 from msgq.visionipc import VisionBuf, VisionIpcClient, VisionStreamType
 from openpilot.common.file_chunker import read_file_chunked
+from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import _ar_ox_fisheye, _os_fisheye
 from openpilot.common.transformations.model import dmonitoringmodel_intrinsics
 from openpilot.selfdrive.modeld.helpers import get_tg_input_devices
 from openpilot.selfdrive.modeld.parse_model_outputs import safe_exp, sigmoid
+from openpilot.starpilot.common.model_lab import load_model_lab_config
+from openpilot.system.hardware.usb import chestnut_firmware_ready
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 
 PROCESS_NAME = "selfdrive.modeld.dmonitoringmodeld"
@@ -29,6 +32,16 @@ SEND_RAW_PRED = os.getenv("SEND_RAW_PRED")
 MODELS_DIR = Path(__file__).parent / "models"
 MODEL_PKL_PATH = MODELS_DIR / "dmonitoring_model_tinygrad.pkl"
 METADATA_PATH = MODELS_DIR / "dmonitoring_model_metadata.pkl"
+DEFAULT_DMONITORING_CORES = 7
+MODEL_LAB_DMONITORING_CORES = [0, 1, 2, 3]
+
+
+def dmonitoring_cpu_cores(params: Params, chestnut_ready: bool) -> int | list[int]:
+  if chestnut_ready and load_model_lab_config(params)["enabled"]:
+    return MODEL_LAB_DMONITORING_CORES
+  return DEFAULT_DMONITORING_CORES
+
+
 class ModelState:
   def __init__(self, cam_w: int, cam_h: int):
     self.device = get_tg_input_devices(PROCESS_NAME, usbgpu=False)["DEV"]
@@ -129,7 +142,10 @@ def get_driverstate_packet(model_output, frame_id: int, exec_time: float, gpu_ex
 
 
 def main():
-  config_realtime_process(7, 5)
+  params = Params()
+  cpu_cores = dmonitoring_cpu_cores(params, chestnut_firmware_ready())
+  config_realtime_process(cpu_cores, 5)
+  cloudlog.info(f"driver monitoring CPU affinity: {cpu_cores}")
   cloudlog.warning("connecting to driver stream")
   vipc_client = VisionIpcClient("camerad", VisionStreamType.VISION_STREAM_DRIVER, True)
   while not vipc_client.connect(False):

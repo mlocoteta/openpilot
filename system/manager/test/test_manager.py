@@ -392,6 +392,7 @@ class TestManager:
       "CoastUpToLeads": True,
       "HumanAcceleration": True,
       "HumanFollowing": True,
+      "ReverseCruise": True,
     })
     params_cache = FileBackedFakeParams(tmp_path / "cache", {
       "HumanFollowing": False,
@@ -403,6 +404,7 @@ class TestManager:
     assert not Path(params.get_param_path("CoastUpToLeads")).exists()
     assert not Path(params.get_param_path("HumanAcceleration")).exists()
     assert not Path(params.get_param_path("HumanFollowing")).exists()
+    assert params.get_bool("ReverseCruise")
     assert not Path(params_cache.get_param_path("HumanFollowing")).exists()
     assert not Path(params_cache.get_param_path("PrioritizeSmoothFollowing")).exists()
 

@@ -158,7 +158,7 @@ class HudRenderer(Widget):
     self._txt_exclamation_point: rl.Texture = gui_app.texture('icons_mici/exclamation_point.png', 44, 44)
     self._txt_egpu_loading: rl.Texture = gui_app.texture('icons_mici/egpu_loading.png', 60, 44)
     self._txt_egpu_green: rl.Texture = gui_app.texture('icons_mici/egpu_green.png', 60, 44)
-    self._txt_egpu_orange: rl.Texture = gui_app.texture('icons_mici/egpu_orange.png', 60, 44)
+    self._txt_egpu_orange: rl.Texture = gui_app.texture('icons_mici/egpu_orange.png', 75, 44)
     self._txt_egpu_crossed: rl.Texture = gui_app.texture('icons_mici/egpu_crossed.png', 60, 52)
     self._egpu_icon: rl.Texture | None = None
 

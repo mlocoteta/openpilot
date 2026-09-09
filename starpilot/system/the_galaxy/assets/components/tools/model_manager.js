@@ -8,8 +8,11 @@ const state = reactive({
   sortMode: "release_date",
   communityFavoriteFilter: "all",
   userFavoriteFilter: "all",
+  allowGpuDownloadsWithoutGpu: false,
   models: [],
   currentModel: "",
+  activeSmallModel: "",
+  activeBigModel: "",
   summary: { installed: 0, missing: 0, total: 0 },
   status: {
     modelToDownload: "",
@@ -74,6 +77,14 @@ function parseReleased(value) {
 
 function normalizeSeries(model) {
   return safeText(model?.series, "Custom Series") || "Custom Series";
+}
+
+function modelHardwareTag(model) {
+  return model?.requiresGpu ? "eGPU" : "On-device GPU";
+}
+
+function gpuDownloadBlocked(model) {
+  return !!model?.requiresGpu && !model?.gpuAvailable && !state.allowGpuDownloadsWithoutGpu;
 }
 
 function modelSortCompare(a, b) {
@@ -149,9 +160,10 @@ function getReleaseOrderedModels() {
   return getFilteredModels().sort(modelSortCompare);
 }
 
-function getInstalledModels() {
+function getInstalledModels(profile = "") {
   return state.models
     .filter(model => model && typeof model === "object" && !!model.installed)
+    .filter(model => !profile || (!!model.requiresGpu === (profile === "big")))
     .sort(modelSortCompare);
 }
 
@@ -169,6 +181,13 @@ function getCurrentModelName() {
   if (!match) return current;
 
   return safeText(match.label, current);
+}
+
+function getModelName(modelKey, fallback = "none selected") {
+  const key = safeText(modelKey, "");
+  if (!key) return fallback;
+  const match = state.models.find(model => safeText(model?.value, "") === key);
+  return match ? safeText(match.label, key) : key;
 }
 
 async function fetchJson(url, options = {}) {
@@ -209,6 +228,8 @@ async function fetchStatus() {
 
     state.models = models;
     state.currentModel = safeText(payload.currentModel, "");
+    state.activeSmallModel = safeText(payload.activeSmallModel, "");
+    state.activeBigModel = safeText(payload.activeBigModel, "");
 
     const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
     state.summary = {
@@ -232,6 +253,8 @@ async function fetchStatus() {
     const signature = [
       state.models.length,
       state.currentModel,
+      state.activeSmallModel,
+      state.activeBigModel,
       state.status.downloading,
       state.status.downloadAll,
       state.status.modelToDownload,
@@ -291,11 +314,13 @@ function ensurePolling() {
   pollingHandle = setTimeout(poll, ACTIVE_POLL_INTERVAL_MS);
 }
 
-async function setActiveModel(modelKey) {
-  const payload = await fetchJson("/api/params", {
+async function setActiveModel(modelKey, profile = "") {
+  const model = state.models.find(entry => safeText(entry?.value, "") === safeText(modelKey, ""));
+  const resolvedProfile = profile || (model?.requiresGpu ? "big" : "small");
+  const payload = await fetchJson("/api/models/active", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: "Model", value: modelKey }),
+    body: JSON.stringify({ profile: resolvedProfile, model: modelKey }),
   });
 
   notify(payload.message || `Selected "${modelKey}".`);
@@ -305,14 +330,21 @@ async function startDownload(modelKey) {
   const payload = await fetchJson("/api/models/download", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: modelKey }),
+    body: JSON.stringify({
+      model: modelKey,
+      allowGpuWithoutGpu: state.allowGpuDownloadsWithoutGpu,
+    }),
   });
 
   notify(payload.message || `Downloading "${modelKey}"...`);
 }
 
 async function startDownloadAll() {
-  const payload = await fetchJson("/api/models/download_all", { method: "POST" });
+  const payload = await fetchJson("/api/models/download_all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ allowGpuWithoutGpu: state.allowGpuDownloadsWithoutGpu }),
+  });
   notify(payload.message || "Started downloading all models.");
 }
 
@@ -378,9 +410,10 @@ async function runAction(action, modelKey = "") {
       return;
     }
 
-    if (action === "select") {
+    if (action === "select" || action === "select-small" || action === "select-big") {
       if (!modelKey) return;
-      await setActiveModel(modelKey);
+      const profile = action === "select-small" ? "small" : action === "select-big" ? "big" : "";
+      await setActiveModel(modelKey, profile);
     } else if (action === "download") {
       if (!modelKey) return;
       await startDownload(modelKey);
@@ -432,11 +465,17 @@ function bindDomHandlers() {
     if (!isModelRouteActive()) return;
 
     const target = event.target;
+    if (target instanceof HTMLInputElement && target.id === "mm-gpu-download-override") {
+      state.allowGpuDownloadsWithoutGpu = target.checked;
+      return;
+    }
+
     if (!(target instanceof HTMLSelectElement)) return;
-    if (target.id === "mm-active-model-select") {
+    if (target.id === "mm-active-small-model-select" || target.id === "mm-active-big-model-select") {
       const modelKey = safeText(target.value, "");
-      if (!modelKey) return;
-      runAction("select", modelKey).catch(() => {});
+      const profile = target.id === "mm-active-big-model-select" ? "big" : "small";
+      if (!modelKey && profile !== "big") return;
+      runAction(`select-${profile}`, modelKey).catch(() => {});
       return;
     }
 
@@ -477,9 +516,11 @@ function bindDomHandlers() {
 function renderActions(model) {
   const modelKey = safeText(model.value, "");
   const modelIsDownloading = state.status.downloading && !state.status.downloadAll && state.status.modelToDownload === modelKey;
+  const profile = model.requiresGpu ? "big" : "small";
+  const isActive = profile === "big" ? state.activeBigModel === modelKey : state.activeSmallModel === modelKey;
 
-  if (state.currentModel === modelKey) {
-    return html`<span class="mm-chip mm-chip-active">Active</span>`;
+  if (isActive) {
+    return html`<span class="mm-chip mm-chip-active">Active ${profile === "big" ? "Big" : "Small"}</span>`;
   }
 
   if (state.status.downloading) {
@@ -491,14 +532,18 @@ function renderActions(model) {
 
   if (model.installed) {
     return html`
-      <button class="mm-btn mm-btn-secondary" data-mm-action="select" data-model="${modelKey}">Set Active</button>
+      <button class="mm-btn mm-btn-secondary" data-mm-action="select-${profile}" data-model="${modelKey}">Set Active ${profile === "big" ? "Big" : "Small"}</button>
       ${model.builtin
         ? ""
         : html`<button class="mm-btn mm-btn-danger" data-mm-action="delete" data-model="${modelKey}">Delete</button>`}
     `;
   }
 
-  return html`<button class="mm-btn mm-btn-primary" data-mm-action="download" data-model="${modelKey}">Download</button>`;
+  return html`
+    <button class="mm-btn mm-btn-primary" data-mm-action="download" data-model="${modelKey}" disabled="${() => gpuDownloadBlocked(model) || false}">
+      ${() => gpuDownloadBlocked(model) ? "GPU Required" : "Download"}
+    </button>
+  `;
 }
 
 function renderModelRow(model) {
@@ -516,6 +561,7 @@ function renderModelRow(model) {
         <div class="mm-row-meta">
           <span class="mm-chip">${key}</span>
           ${model.builtin ? html`<span class="mm-chip">Built-in</span>` : ""}
+          <span class="mm-chip ${model.requiresGpu ? "mm-chip-egpu" : "mm-chip-device-gpu"}">${modelHardwareTag(model)}</span>
           ${state.sortMode === "release_date" ? "" : model.series ? html`<span class="mm-chip">${safeText(model.series)}</span>` : ""}
           ${model.version ? html`<span class="mm-chip">Version ${safeText(model.version)}</span>` : ""}
           ${model.released ? html`<span class="mm-chip">Released ${safeText(model.released)}</span>` : ""}
@@ -594,30 +640,55 @@ export function ModelManager() {
       </div>
 
       <div class="mm-status">
-        <span class="mm-chip">Current: ${getCurrentModelName()}</span>
+        <span class="mm-chip">Loaded: ${() => getCurrentModelName()}</span>
+        <span class="mm-chip mm-chip-device-gpu">Active Small: ${() => getModelName(state.activeSmallModel)}</span>
+        <span class="mm-chip mm-chip-egpu">Active Big: ${() => getModelName(state.activeBigModel)}</span>
         <span class="mm-chip">Progress: ${safeText(state.status.progress, "Idle")}</span>
         <span class="mm-chip">${() => getUserFavoriteModels(false).length} personal favorites</span>
         ${() => state.status.isOnroad ? html`<span class="mm-chip mm-chip-warning">Onroad: actions disabled</span>` : ""}
       </div>
 
       <div class="mm-filters">
-        <label class="mm-filter-label" for="mm-active-model-select">Active Model</label>
-        <select class="mm-select" id="mm-active-model-select">
-          ${(() => {
-            const orderedInstalled = getInstalledModels().sort((a, b) => {
-              const aCurrent = safeText(a.value) === state.currentModel ? 0 : 1;
-              const bCurrent = safeText(b.value) === state.currentModel ? 0 : 1;
+        <label class="mm-filter-label" for="mm-active-small-model-select">Active Small</label>
+        <select class="mm-select" id="mm-active-small-model-select">
+          ${() => {
+            const orderedInstalled = getInstalledModels("small").sort((a, b) => {
+              const aCurrent = safeText(a.value) === state.activeSmallModel ? 0 : 1;
+              const bCurrent = safeText(b.value) === state.activeSmallModel ? 0 : 1;
               if (aCurrent !== bCurrent) return aCurrent - bCurrent;
               return safeText(a.label, a.value).localeCompare(safeText(b.label, b.value), undefined, { sensitivity: "base" });
             });
 
             return orderedInstalled.length > 0
               ? orderedInstalled.map(model => html`
-                <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.currentModel || false}">
+                <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.activeSmallModel || false}">
                   ${safeText(model.label, model.value)}
                 </option>              `)
               : html`<option value="">No installed models</option>`;
-          })()}
+          }}
+        </select>
+
+        <label class="mm-filter-label" for="mm-active-big-model-select">Active Big</label>
+        <select class="mm-select" id="mm-active-big-model-select">
+          ${() => {
+            const orderedInstalled = getInstalledModels("big").sort((a, b) => {
+              const aCurrent = safeText(a.value) === state.activeBigModel ? 0 : 1;
+              const bCurrent = safeText(b.value) === state.activeBigModel ? 0 : 1;
+              if (aCurrent !== bCurrent) return aCurrent - bCurrent;
+              return safeText(a.label, a.value).localeCompare(safeText(b.label, b.value), undefined, { sensitivity: "base" });
+            });
+
+            return orderedInstalled.length > 0
+              ? html`
+                <option value="" selected="${() => !state.activeBigModel || false}">None — always use Active Small</option>
+                ${orderedInstalled.map(model => html`
+                  <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.activeBigModel || false}">
+                    ${safeText(model.label, model.value)}
+                  </option>
+                `)}
+              `
+              : html`<option value="" selected>None — always use Active Small</option>`;
+          }}
         </select>
 
         <label class="mm-filter-label" for="mm-favorite-model-select">Favorite Models</label>
@@ -658,6 +729,17 @@ export function ModelManager() {
           <option value="yes" selected="${() => state.communityFavoriteFilter === "yes" || false}">Yes</option>
           <option value="no" selected="${() => state.communityFavoriteFilter === "no"}">No</option>
         </select>
+
+        <div class="mm-filter-break"></div>
+
+        <label class="mm-filter-checkbox" for="mm-gpu-download-override">
+          <input
+            id="mm-gpu-download-override"
+            type="checkbox"
+            checked="${() => state.allowGpuDownloadsWithoutGpu || false}">
+          Download GPU models without GPU
+        </label>
+        <span class="mm-chip mm-chip-warning">GPU models are very large and will not run without an external GPU.</span>
       </div>
 
       ${() => state.loading ? html`<div class="mm-empty">Loading models...</div>` : ""}

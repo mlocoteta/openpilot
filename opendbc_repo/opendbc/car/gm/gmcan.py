@@ -1,4 +1,4 @@
-from opendbc.car import DT_CTRL
+from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.values import CAR, CanBus, CruiseButtons, GMFlags
@@ -28,6 +28,9 @@ BOLT_CC_BUTTON_CARS = {
 BOLT_CC_TARGET_DEADBAND_MPH = 0.75
 BOLT_CC_REVERSE_CONFIRM_S = 0.6
 BOLT_CC_DIRECTION_MEMORY_S = 1.5
+VOLT_CC_CARS = {
+  CAR.CHEVROLET_VOLT_CC,
+}
 
 
 def malibu_phase_map_for_button(button):
@@ -336,6 +339,28 @@ def stabilize_bolt_cc_button(controller, CP, requested_button):
   return requested_button
 
 
+def _create_volt_cc_spam_command(CS, actuators, ms_convert):
+  accel = float(actuators.accel)
+  speed_setpoint = int(round(CS.out.cruiseState.speed * ms_convert))
+  ego_speed = CS.out.vEgo * ms_convert
+
+  if accel == 0.0:
+    return CruiseButtons.INIT, float("inf")
+
+  if accel < 0.0:
+    if speed_setpoint > ego_speed + 3.0:
+      rate = 0.2
+    else:
+      rate = max(1.0 / (-accel * ms_convert), 0.2)
+    return CruiseButtons.DECEL_SET, rate
+
+  if speed_setpoint < ego_speed - 3.0:
+    rate = 0.2
+  else:
+    rate = max(1.0 / (accel * ms_convert), 0.2)
+  return CruiseButtons.RES_ACCEL, rate
+
+
 def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles):
   accel = actuators.accel
   v_ego = CS.out.vEgo
@@ -350,12 +375,15 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
   target_deadband = BOLT_CC_TARGET_DEADBAND_MPH * (CV.MPH_TO_KPH if is_metric else 1.0) if bolt_cc else 0.0
   comparison_setpoint = projected_setpoint if bolt_cc else desired_setpoint
 
-  if CS.CP.minEnableSpeed - (desired_setpoint / ms_convert) > 3.25:
-    cruise_btn = CruiseButtons.CANCEL
-  elif comparison_setpoint < speed_setpoint - target_deadband and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
-    cruise_btn = CruiseButtons.DECEL_SET
-  elif comparison_setpoint > speed_setpoint + target_deadband:
-    cruise_btn = CruiseButtons.RES_ACCEL
+  if CS.CP.carFingerprint in VOLT_CC_CARS:
+    cruise_btn, rate = _create_volt_cc_spam_command(CS, actuators, ms_convert)
+  else:
+    if CS.CP.minEnableSpeed - (desired_setpoint / ms_convert) > 3.25:
+      cruise_btn = CruiseButtons.CANCEL
+    elif comparison_setpoint < speed_setpoint - target_deadband and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
+      cruise_btn = CruiseButtons.DECEL_SET
+    elif comparison_setpoint > speed_setpoint + target_deadband:
+      cruise_btn = CruiseButtons.RES_ACCEL
 
   cruise_btn = stabilize_bolt_cc_button(controller, CS.CP, cruise_btn)
   if cruise_btn == CruiseButtons.CANCEL:
@@ -420,9 +448,11 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
     idx = (CS.buttons_counter + 1) % 4  # Need to predict the next idx for '22-23 EUV
     msgs = [create_buttons(packer, CanBus.POWERTRAIN, idx, cruise_btn)]
 
-    # Flashed camera-forward Volt CC installs also need the button spoof on the
-    # camera side. Removed-camera installs set NO_CAMERA and keep this PT-only.
-    if CS.CP.carFingerprint == CAR.CHEVROLET_VOLT_CC and not (CS.CP.flags & GMFlags.NO_CAMERA.value):
+    # A camera-forward Volt CC install needs the button spoof on both sides.
+    # The OBD-C/L&P gateway variant has no camera bus and remains PT-only.
+    if (CS.CP.carFingerprint == CAR.CHEVROLET_VOLT_CC and
+        getattr(CS.CP, "networkLocation", None) == structs.CarParams.NetworkLocation.fwdCamera and
+        not (CS.CP.flags & GMFlags.NO_CAMERA.value)):
       msgs.append(create_buttons(packer, CanBus.CAMERA, idx, cruise_btn))
     return msgs
   else:

@@ -94,9 +94,9 @@ class TogglesLayoutMici(NavScroller):
 
     # CP gating for experimental mode
     if ui_state.CP is not None:
-      if ui_state.has_longitudinal_control:
+      if ui_state.experimental_mode_available:
         self._experimental_btn.set_visible(True)
-        self._personality_toggle.set_visible(True)
+        self._personality_toggle.set_visible(ui_state.has_longitudinal_control)
       else:
         # no long for now
         self._experimental_btn.set_visible(False)

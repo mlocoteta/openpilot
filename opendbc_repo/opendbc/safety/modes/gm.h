@@ -559,6 +559,7 @@ static safety_config gm_init(uint16_t param) {
   const uint16_t GM_PARAM_REMOTE_START_BOOTS_COMMA = 8192;
   const uint16_t GM_PARAM_PANDA_3D1_SCHED = 16384;
   const uint16_t GM_PARAM_PANDA_PADDLE_SCHED = 32768U;
+  const uint16_t GM_PARAM_VOLT_CC_GATEWAY = 16384U;
 
   static const LongitudinalLimits GM_ASCM_LONG_LIMITS = {
     .max_gas = 8191,
@@ -706,6 +707,11 @@ static safety_config gm_init(uint16_t param) {
                                                         {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false},
                                                         {0x184, 2, 8, .check_relay = false}, {0x1E1, 2, 7, .check_relay = false}};  // camera bus
 
+  static const CanMsg GM_CC_LONG_ASCM_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x409, 0, 7, .check_relay = false},
+                                                   {0x40A, 0, 7, .check_relay = false}, {0x370, 0, 6, .check_relay = false},
+                                                   {0x1E1, 0, 7, .check_relay = false}, {0x3D1, 0, 8, .check_relay = false},
+                                                   {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false}};
+
   gm_hw = GET_FLAG(param, GM_PARAM_HW_CAM) ? GM_CAM : GM_ASCM;
   gm_sdgm = GET_FLAG(param, GM_PARAM_HW_SDGM);
   gm_ascm_int = GET_FLAG(param, GM_PARAM_HW_ASCM_INT);
@@ -714,6 +720,7 @@ static safety_config gm_init(uint16_t param) {
   gm_cc_long = GET_FLAG(param, GM_PARAM_CC_LONG);
   gm_has_acc = !GET_FLAG(param, GM_PARAM_NO_ACC);
   gm_pedal_long = GET_FLAG(param, GM_PARAM_PEDAL_LONG);
+  const bool gm_volt_cc_gateway = GET_FLAG(param, GM_PARAM_VOLT_CC_GATEWAY) && gm_no_camera && !gm_pedal_long && !gm_has_acc;
   enable_gas_interceptor = GET_FLAG(param, GM_PARAM_PEDAL_INTERCEPTOR);
   gm_force_ascm = GET_FLAG(param, GM_PARAM_HW_ASCM_LONG);
   gm_force_brake_c9 = GET_FLAG(param, GM_PARAM_FORCE_BRAKE_C9);
@@ -781,6 +788,8 @@ static safety_config gm_init(uint16_t param) {
     } else {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_SDGM_TX_MSGS);
     }
+  } else if (gm_cc_long && gm_volt_cc_gateway && (gm_hw == GM_ASCM) && !gm_sdgm) {
+    ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CC_LONG_ASCM_TX_MSGS);
   } else if ((gm_hw == GM_CAM) || gm_sdgm) {
     // FIXME: cppcheck thinks that gm_cam_long is always false. This is not true
     // if ALLOW_DEBUG is defined but cppcheck is run without ALLOW_DEBUG

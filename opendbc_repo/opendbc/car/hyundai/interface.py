@@ -1,4 +1,6 @@
 import time
+# Provenance: portions of HKG angle integration are adapted from sunnypilot/opendbc's
+# hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
@@ -31,7 +33,7 @@ ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.can
 # Track when ECU disable happened - used to permanently suppress CAN errors from disabled ECU
 ECU_DISABLE_TIMESTAMP = 0.0
 KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
-KIA_EV9_ACCEL_MAX = 2.5
+KIA_EV9_ACCEL_MAX = 2.2
 
 
 def apply_platform_longitudinal_params(ret: structs.CarParams) -> None:
@@ -48,7 +50,7 @@ def apply_platform_longitudinal_params(ret: structs.CarParams) -> None:
 
 def apply_kia_ev6_gt_line_longitudinal_params(ret: structs.CarParams) -> None:
   ret.startAccel = 1.4
-  ret.longitudinalActuatorDelay = 0.35
+  ret.longitudinalActuatorDelay = 0.5
   ret.vEgoStarting = 0.5
 
 
@@ -223,6 +225,9 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hyundaiLegacy)]
       else:
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hyundai, 0)]
+
+      if candidate == CAR.KIA_RAY_EV and fingerprint[CAN.CAM].get(0x485) == 8:
+        ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAN_REFRESH_MSGS.value
 
       if ret.flags & HyundaiFlags.CAMERA_SCC:
         ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAMERA_SCC.value

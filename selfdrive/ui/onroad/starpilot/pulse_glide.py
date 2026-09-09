@@ -6,6 +6,24 @@ from openpilot.system.ui.lib.text_measure import draw_text_with_shadow, measure_
 
 PULSE_COLOR = rl.Color(52, 190, 112, 255)
 GLIDE_COLOR = rl.Color(65, 155, 235, 255)
+DEEP_GLIDE_BORDER_COLOR = rl.Color(24, 72, 150, 255)
+
+
+def get_pulse_glide_border_color(sm, default_color: rl.Color) -> rl.Color:
+  """Use a deep-blue outer border only while developer P&G is gliding."""
+  if (
+    not sm.valid.get("starpilotCarState", False) or
+    not sm.valid.get("starpilotPlan", False) or
+    not sm.valid.get("carControl", False) or
+    not bool(getattr(sm["carControl"], "longActive", False))
+  ):
+    return default_color
+
+  car_state = sm["starpilotCarState"]
+  plan = sm["starpilotPlan"]
+  if bool(getattr(car_state, "pulseAndGlide", False)) and bool(getattr(plan, "pulseGlideCoasting", False)):
+    return DEEP_GLIDE_BORDER_COLOR
+  return default_color
 
 
 def render_pulse_glide(rect: rl.Rectangle, coasting: bool) -> None:

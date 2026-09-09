@@ -1075,13 +1075,14 @@ class SafetyTest(SafetyTestBase):
               continue
             if attr.startswith('TestSubaruGen') and current_test.startswith('TestSubaruGen'):
               continue
-            if 'TestSubaruDPlatformAngleSafety' in {attr, current_test} and \
-                'Angle' in attr and 'Angle' in current_test:
+            if attr.startswith('TestSubaruDPlatform') and current_test.startswith('TestSubaruDPlatform'):
               continue
-            if 'TestSubaruDPlatformAngleSafety' in {attr, current_test}:
+            if attr.startswith('TestSubaruDPlatform'):
               # D-platform uses the same main-bus HUD messages as the other
               # Subaru modes, so those modes cannot be distinguished by ID.
-              tx = list(filter(lambda m: not (m[1] == 0 and m[0] in [0x321, 0x322, 0x323]), tx))
+              tx = list(filter(lambda m: not (m[1] == 0 and m[0] in [0x124, 0x321, 0x322, 0x323]), tx))
+            if current_test.startswith('TestSubaruDPlatform') and attr.startswith('TestSubaruGen'):
+              tx = list(filter(lambda m: not (m[1] == 0 and m[0] in [0x124, 0x321, 0x322, 0x323]), tx))
             if attr.startswith('TestSubaruPreglobal') and current_test.startswith('TestSubaruPreglobal'):
               continue
             if {attr, current_test}.issubset({'TestVolkswagenPqSafety', 'TestVolkswagenPqStockSafety', 'TestVolkswagenPqLongSafety'}):
@@ -1101,8 +1102,10 @@ class SafetyTest(SafetyTestBase):
               continue
             if {attr, current_test}.issubset({'TestHyundaiLongitudinalSafety', 'TestHyundaiLongitudinalSafetyCameraSCC',
                                               'TestHyundaiSafetyFCEVLong', 'TestHyundaiLongitudinalAolLkasOnEngageSafety',
+                                              'TestHyundaiLongitudinalAolMainLkasOnEngageSafety',
                                               'TestHyundaiSafetyCanRefreshLong', 'TestHyundaiSafetyCanRefreshLongCameraSCC',
                                               'TestHyundaiCanCanfdBlendedLongitudinalSafety',
+                                              'TestHyundaiLegacyLongitudinalSafety',
                                               'TestHyundaiLegacyLongitudinalSafetyHEV'}):
               continue
             volkswagen_shared = ('TestVolkswagenMqb', 'TestVolkswagenMlb', 'TestVolkswagenMeb')
@@ -1155,7 +1158,9 @@ class SafetyTest(SafetyTestBase):
 
             if attr.startswith('TestHyundaiLongitudinal') or attr in ('TestHyundaiSafetyFCEVLong',
                                                                       'TestHyundaiLongitudinalAolLkasOnEngageSafety',
+                                                                      'TestHyundaiLongitudinalAolMainLkasOnEngageSafety',
                                                                       'TestHyundaiCanCanfdBlendedLongitudinalSafety',
+                                                                      'TestHyundaiLegacyLongitudinalSafety',
                                                                       'TestHyundaiLegacyLongitudinalSafetyHEV'):
               # exceptions for common msgs across different Hyundai CAN platforms
               tx = list(filter(lambda m: m[0] not in [0x420, 0x50A, 0x389, 0x4A2], tx))

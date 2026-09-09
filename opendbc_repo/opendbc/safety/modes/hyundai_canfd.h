@@ -1,10 +1,15 @@
 #pragma once
 
+// Provenance: portions of HKG angle-command safety are adapted from sunnypilot/opendbc's
+// hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/hyundai_common.h"
 
 #define HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(bus) \
   {0x1CF, bus, 8, .check_relay = false},  /* CRUISE_BUTTON */   \
+
+#define HYUNDAI_CANFD_ALT_CRUISE_BUTTON_TX_MSGS(bus) \
+  {0x1AA, bus, 16, .check_relay = false},  /* CRUISE_BUTTONS_ALT */ \
 
 #define HYUNDAI_CANFD_LKA_STEERING_COMMON_TX_MSGS(a_can, e_can) \
   HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(e_can)                        \
@@ -291,8 +296,8 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
   }
 
   // cruise buttons check
-  if (msg->addr == 0x1cfU) {
-    int button = msg->data[2] & 0x7U;
+  if ((msg->addr == 0x1cfU) || (hyundai_canfd_alt_buttons && (msg->addr == 0x1aaU))) {
+    int button = (msg->addr == 0x1aaU) ? ((msg->data[4] >> 4U) & 0x7U) : (msg->data[2] & 0x7U);
     bool is_cancel = (button == HYUNDAI_BTN_CANCEL);
     bool is_resume = (button == HYUNDAI_BTN_RESUME);
     bool is_set = (button == HYUNDAI_BTN_SET);
@@ -427,11 +432,6 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
   };
 
-  static const CanMsg HYUNDAI_CANFD_CCNC_ANGLE_FALLBACK_TX_MSGS[] = {
-    HYUNDAI_CANFD_LKA_STEERING_ALT_COMMON_TX_MSGS(0, 1)
-    {0x12A, 1, 16, .check_relay = false},  // LFA status
-  };
-
   static const CanMsg HYUNDAI_CANFD_LFA_STEERING_TX_MSGS[] = {
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2)
     HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0)
@@ -455,8 +455,23 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
     {0x160, 0, 16, .check_relay = (longitudinal)}, /* ADRV_0x160 */ \
 
+#define HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_ALT_BUTTONS_TX_MSGS(longitudinal) \
+    HYUNDAI_CANFD_ALT_CRUISE_BUTTON_TX_MSGS(2) \
+    HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0) \
+    HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
+    {0x160, 0, 16, .check_relay = (longitudinal)}, /* ADRV_0x160 */ \
+
 #define HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_TX_MSGS(longitudinal) \
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2) \
+    HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0) \
+    HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
+    {0x161, 0, 32, .check_relay = true}, /* CCNC_0x161 */ \
+    {0x162, 0, 32, .check_relay = true}, /* CCNC_0x162 */ \
+    {0x7C4, 2, 8, .check_relay = true},  /* camera support frame */ \
+    {0xEA, 2, 24, .check_relay = true},  /* MDPS support frame */ \
+
+#define HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_ALT_BUTTONS_TX_MSGS(longitudinal) \
+    HYUNDAI_CANFD_ALT_CRUISE_BUTTON_TX_MSGS(2) \
     HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(0) \
     HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(0, (longitudinal)) \
     {0x161, 0, 32, .check_relay = true}, /* CCNC_0x161 */ \
@@ -527,7 +542,19 @@ static safety_config hyundai_canfd_init(uint16_t param) {
 
       if (hyundai_camera_scc) {
         if (hyundai_ccnc) {
-          SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_tx_msgs, ret);
+          if (hyundai_canfd_alt_buttons) {
+            static CanMsg hyundai_canfd_lfa_steering_camera_scc_ccnc_alt_buttons_tx_msgs[] = {
+              HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_ALT_BUTTONS_TX_MSGS(true)
+            };
+            SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_alt_buttons_tx_msgs, ret);
+          } else {
+            SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_tx_msgs, ret);
+          }
+        } else if (hyundai_canfd_alt_buttons) {
+          static CanMsg hyundai_canfd_lfa_steering_camera_scc_alt_buttons_tx_msgs[] = {
+            HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_ALT_BUTTONS_TX_MSGS(true)
+          };
+          SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_alt_buttons_tx_msgs, ret);
         } else {
           SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_tx_msgs, ret);
         }
@@ -555,9 +582,7 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       } else {
         SET_RX_CHECKS(hyundai_canfd_lka_steering_rx_checks, ret);
       }
-      if (hyundai_ccnc && hyundai_canfd_angle_steering && hyundai_canfd_lka_steering_alt) {
-        SET_TX_MSGS(HYUNDAI_CANFD_CCNC_ANGLE_FALLBACK_TX_MSGS, ret);
-      } else if (hyundai_canfd_lka_steering_alt) {
+      if (hyundai_canfd_lka_steering_alt) {
         if (hyundai_canfd_alt_buttons) {
           SET_TX_MSGS(HYUNDAI_CANFD_LKA_STEERING_ALT_ALT_BUTTONS_TX_MSGS, ret);
         } else {
@@ -613,8 +638,22 @@ static safety_config hyundai_canfd_init(uint16_t param) {
         HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_TX_MSGS(false)
       };
 
+      static CanMsg hyundai_canfd_lfa_steering_camera_scc_alt_buttons_tx_msgs[] = {
+        HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_ALT_BUTTONS_TX_MSGS(false)
+      };
+
+      static CanMsg hyundai_canfd_lfa_steering_camera_scc_ccnc_alt_buttons_tx_msgs[] = {
+        HYUNDAI_CANFD_LFA_STEERING_CAMERA_SCC_CCNC_ALT_BUTTONS_TX_MSGS(false)
+      };
+
       if (hyundai_ccnc) {
-        SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_tx_msgs, ret);
+        if (hyundai_canfd_alt_buttons) {
+          SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_alt_buttons_tx_msgs, ret);
+        } else {
+          SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_ccnc_tx_msgs, ret);
+        }
+      } else if (hyundai_canfd_alt_buttons) {
+        SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_alt_buttons_tx_msgs, ret);
       } else {
         SET_TX_MSGS(hyundai_canfd_lfa_steering_camera_scc_tx_msgs, ret);
       }

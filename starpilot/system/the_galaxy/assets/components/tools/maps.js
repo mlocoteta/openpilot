@@ -30,6 +30,7 @@ const state = reactive({
     scheduleLabel: "Monthly",
     selectedCount: 0,
     storageBytes: 0,
+    storageKnown: false,
     downloadProgress: {
       active: false,
       cancelled: false,
@@ -42,6 +43,7 @@ const state = reactive({
       percent: 0,
       phase: "idle",
       primaryLocation: "",
+      storageKnown: false,
       totalFiles: 0,
     },
   },
@@ -120,6 +122,7 @@ function normalizeDownloadProgress(progress) {
     percent: Math.max(0, Math.min(100, Number(value.percent || 0))),
     phase: String(value.phase || "idle"),
     primaryLocation: String(value.primaryLocation || ""),
+    storageKnown: Boolean(value.storageKnown),
     totalFiles: Number(value.totalFiles || 0),
   };
 }
@@ -185,6 +188,7 @@ function applyStatus(payload) {
     scheduleLabel: payload.scheduleLabel || "Monthly",
     selectedCount: Number(payload.selectedCount || 0),
     storageBytes: Number(payload.storageBytes || 0),
+    storageKnown: Boolean(payload.storageKnown),
     downloadProgress: normalizeDownloadProgress(payload.downloadProgress),
   };
   state.selectedSaved = selectedLocations;
@@ -421,12 +425,16 @@ function renderSelectedSummary() {
 function downloadSizeLabel() {
   const progress = state.status.downloadProgress;
   if (!selectionDirty() && progress.estimatedDownloadBytes > 0) {
-    return `~${formatBytes(progress.estimatedDownloadBytes)}`;
+    return `~${formatBytes(progress.estimatedDownloadBytes)} additional`;
   }
   if (state.selectedDraft.length > 0) {
-    return "Calculated during download";
+    return "Not yet available";
   }
   return "Select regions";
+}
+
+function storageLabel() {
+  return state.status.storageKnown ? formatBytes(state.status.storageBytes) : "Calculating…";
 }
 
 function renderDownloadProgress() {
@@ -436,13 +444,13 @@ function renderDownloadProgress() {
 
   const isActive = state.status.downloading;
   const title = isActive ? "Download Progress" : progress.completed ? "Last Download" : progress.cancelled ? "Download Cancelled" : "Download Estimate";
-  const sizeLabel = progress.estimatedDownloadBytes > 0 ? `~${formatBytes(progress.estimatedDownloadBytes)} total` : "Calculating total size...";
-  const storedLabel = progress.downloadedBytes > 0 ? `${formatBytes(progress.downloadedBytes)} stored` : "No files stored yet";
+  const sizeLabel = progress.estimatedDownloadBytes > 0 ? `~${formatBytes(progress.estimatedDownloadBytes)} additional storage` : "Storage estimate unavailable";
+  const storedLabel = progress.downloadedBytes > 0 ? `${formatBytes(progress.downloadedBytes)} added storage` : "Storage reconciles after completion";
   const filesLabel = progress.totalFiles > 0 ? `${progress.downloadedFiles} / ${progress.totalFiles} files` : "Waiting for map service...";
   const etaLabel = isActive && progress.etaSeconds > 0 ? `About ${formatDuration(progress.etaSeconds)} remaining` : "ETA unavailable until files start arriving";
-  const sourceLabel = progress.estimateSource === "previous_download"
-    ? "Estimate based on the last download of this exact selection."
-    : "Size is estimated from the map files as they arrive.";
+  const sourceLabel = progress.estimateSource === "previous_additional_storage"
+    ? "Estimate based on additional storage from the last download of this exact selection."
+    : "File progress comes from mapd; storage is reconciled after the transfer ends.";
 
   return html`
     <div class="maps-progress-card">
@@ -523,7 +531,7 @@ export function MapsManager() {
             <span class="maps-stat-value">${() => state.status.selectedCount}</span>
           </div>
           <div class="maps-stat">
-            <span class="maps-stat-label">Download Size</span>
+            <span class="maps-stat-label">Additional Storage</span>
             <span class="maps-stat-value">${() => downloadSizeLabel()}</span>
           </div>
           <div class="maps-stat">
@@ -532,7 +540,7 @@ export function MapsManager() {
           </div>
           <div class="maps-stat">
             <span class="maps-stat-label">Storage Used</span>
-            <span class="maps-stat-value">${() => formatBytes(state.status.storageBytes)}</span>
+            <span class="maps-stat-value">${() => storageLabel()}</span>
           </div>
         </div>
         ${() => state.error ? html`<p class="maps-error">${state.error}</p>` : ""}

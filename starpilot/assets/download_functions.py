@@ -8,12 +8,11 @@ import urllib.parse
 from datetime import datetime
 from pathlib import Path
 
+from openpilot.common.file_chunker import get_chunk_name, get_manifest_path
+from openpilot.starpilot.common.starpilot_download_utilities import HF_BUCKET_URL, GITHUB_URL
 from openpilot.starpilot.common.starpilot_utilities import delete_file, is_url_pingable
 
 RESOURCES_REPO = os.getenv("STARPILOT_RESOURCES_REPO", "firestar5683/StarPilot-Resources")
-GITLAB_RESOURCES_REPO = os.getenv("STARPILOT_GITLAB_RESOURCES_REPO", "firestar5683/FrogPilot-Resources")
-GITHUB_URL = f"https://raw.githubusercontent.com/{RESOURCES_REPO}"
-GITLAB_URL = f"https://gitlab.com/{GITLAB_RESOURCES_REPO}/-/raw"
 LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1\n"
 MAX_MULTIPART_FILES = 100
 
@@ -193,6 +192,91 @@ def download_multipart_file(cancel_param, destination, progress_param, url, down
     if temp_path is not None:
       temp_path.unlink(missing_ok=True)
 
+
+def delete_chunked_artifact(destination: Path) -> None:
+  """Remove a logical artifact and every native chunk belonging to it."""
+  destination.unlink(missing_ok=True)
+  Path(get_manifest_path(destination)).unlink(missing_ok=True)
+  for chunk_path in destination.parent.glob(f"{destination.name}.chunk*of*"):
+    chunk_path.unlink(missing_ok=True)
+
+
+def download_chunked_file(cancel_param, destination, progress_param, url, params_memory,
+                          expected_size=None, expected_sha256=None, expected_chunk_count=None):
+  """Download a file_chunker artifact without reassembling it on disk."""
+  manifest_text = get_remote_text(append_url_suffix(url, ".chunkmanifest"), suppress_errors=True)
+  try:
+    chunk_count = int(manifest_text)
+  except (TypeError, ValueError):
+    return False
+
+  expected_chunk_count = int(expected_chunk_count or 0)
+  if chunk_count <= 0 or chunk_count > MAX_MULTIPART_FILES:
+    return False
+  if expected_chunk_count and chunk_count != expected_chunk_count:
+    print(f"Chunk count mismatch for {destination.name}: {chunk_count} != {expected_chunk_count}")
+    return False
+
+  expected_size = int(expected_size or 0)
+  expected_sha256 = str(expected_sha256 or "").strip().lower()
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  temporary_paths: list[Path] = []
+  downloaded_size = 0
+  digest = hashlib.sha256()
+
+  try:
+    chunk_urls = [append_url_suffix(url, f".chunk{index + 1:02d}of{chunk_count:02d}") for index in range(chunk_count)]
+    chunk_sizes = [get_remote_file_size(chunk_url, suppress_errors=True) for chunk_url in chunk_urls]
+    if any(size <= 0 for size in chunk_sizes):
+      return False
+    remote_size = sum(chunk_sizes)
+    if expected_size and remote_size != expected_size:
+      print(f"Artifact size mismatch for {destination.name}: {remote_size} != {expected_size}")
+      return False
+
+    for index, (chunk_url, chunk_size) in enumerate(zip(chunk_urls, chunk_sizes, strict=True)):
+      print(f"Downloading {destination.name} chunk {index + 1}/{chunk_count} ({chunk_size} bytes)")
+      with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as output_file:
+        temporary_path = Path(output_file.name)
+        temporary_paths.append(temporary_path)
+        actual_chunk_size = 0
+        with requests.get(normalize_download_url(chunk_url), stream=True, timeout=(10, 60)) as response:
+          response.raise_for_status()
+          for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if params_memory.get_bool(cancel_param):
+              return False
+            if not chunk:
+              continue
+            output_file.write(chunk)
+            digest.update(chunk)
+            actual_chunk_size += len(chunk)
+            downloaded_size += len(chunk)
+            params_memory.put(progress_param, f"{(downloaded_size / remote_size) * 100:.0f}%")
+      if actual_chunk_size != chunk_size:
+        print(f"Chunk size mismatch for {chunk_url}: {actual_chunk_size} != {chunk_size}")
+        return False
+
+    params_memory.put(progress_param, "Verifying authenticity...")
+    if expected_size and downloaded_size != expected_size:
+      return False
+    if expected_sha256 and digest.hexdigest() != expected_sha256:
+      print(f"SHA-256 mismatch for chunked {destination.name}")
+      return False
+
+    delete_chunked_artifact(destination)
+    for index, temporary_path in enumerate(temporary_paths):
+      temporary_path.replace(Path(get_chunk_name(destination, index, chunk_count)))
+    temporary_paths.clear()
+    Path(get_manifest_path(destination)).write_text(str(chunk_count))
+    print(f"Downloaded and verified {destination.name} in {chunk_count} chunks")
+    return True
+  except Exception as error:
+    print(f"Chunked download failed for {destination.name}: {error}")
+    return False
+  finally:
+    for temporary_path in temporary_paths:
+      temporary_path.unlink(missing_ok=True)
+
 def get_remote_file_size(url, suppress_errors=False):
   try:
     url = normalize_download_url(url)
@@ -204,12 +288,19 @@ def get_remote_file_size(url, suppress_errors=False):
       handle_request_error(error, None, None, None, None)
     return 0
 
+def get_resource_urls():
+  """Return resource origins in priority order; GitHub is the only fallback."""
+  urls = []
+  if is_url_pingable("https://huggingface.co"):
+    urls.append(HF_BUCKET_URL)
+  if is_url_pingable("https://github.com") or is_url_pingable("https://api.github.com"):
+    urls.append(GITHUB_URL)
+  return urls
+
+
 def get_repository_url():
-  if is_url_pingable("https://github.com"):
-    if check_github_rate_limit():
-      return GITHUB_URL
-  if is_url_pingable("https://gitlab.com"):
-    return GITLAB_URL
+  for url in get_resource_urls():
+    return url
   return None
 
 def handle_error(destination, error_message, error, download_param, progress_param, params_memory):

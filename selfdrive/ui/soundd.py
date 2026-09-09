@@ -5,7 +5,7 @@ import wave
 
 from pathlib import Path
 
-from cereal import car, custom, log, messaging
+from cereal import custom, log, messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
@@ -17,6 +17,7 @@ from openpilot.system import micd
 from openpilot.system.hardware import HARDWARE
 
 from openpilot.starpilot.common.starpilot_variables import ACTIVE_THEME_PATH, ERROR_LOGS_PATH, RANDOM_EVENTS_PATH, get_starpilot_toggles
+from openpilot.starpilot.system.bluetooth.audio import BluetoothAudioSink
 
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
@@ -40,11 +41,29 @@ StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
 # stock sounds still work, and only offset custom random-event sounds.
 STARPILOT_CUSTOM_ALERT_OFFSET = 1000
 STARPILOT_CUSTOM_ALERT_START = int(StarPilotAudibleAlert.angry)
+TURN_STEERING_LIMIT_ALERT_SUFFIX = "steersaturated"
+# Keep carState out of this list; C4's onroad stack is near msgq's 15-reader limit.
+SOUNDD_SERVICES = ('selfdriveState', 'soundPressure', 'starpilotSelfdriveState', 'starpilotPlan')
 
 
 def starpilot_alert_key(alert):
   raw_alert = int(alert)
   return STARPILOT_CUSTOM_ALERT_OFFSET + raw_alert if raw_alert >= STARPILOT_CUSTOM_ALERT_START else raw_alert
+
+
+def is_turn_steering_limit_alert(alert_type: str) -> bool:
+  """Return whether an alert type represents Turn Exceeds Steering Limit."""
+  alert_name = str(alert_type or "").split("/", 1)[0].casefold()
+  return alert_name.endswith(TURN_STEERING_LIMIT_ALERT_SUFFIX)
+
+
+def should_mute_turn_steering_limit_alert(alert_type: str, v_ego: float, mute_below_speed: float) -> bool:
+  """Mute only the audio for steering-limit alerts below the configured speed."""
+  return (
+    mute_below_speed > 0.0 and
+    v_ego < mute_below_speed and
+    is_turn_steering_limit_alert(alert_type)
+  )
 
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
@@ -110,8 +129,13 @@ class Soundd:
 
     self.openpilot_crashed_played = False
 
-    self.auto_volume = 0
+    self.auto_volume = MIN_VOLUME
     self.pending_stream_status = None
+    self.bluetooth_audio = None
+    self.bluetooth_supported = HARDWARE.get_device_type() in ("tici", "tizi", "mici")
+    self.bluetooth_params = Params() if self.bluetooth_supported else None
+    self.bluetooth_enabled = False
+    self.bluetooth_last_check = 0.0
 
     self.previous_sound_pack = None
     self.previous_sound_source_signature = None
@@ -140,44 +164,72 @@ class Soundd:
 
     return str(resolved_path), sound_files
 
+  def _sound_candidates(self, filename: str) -> list[Path]:
+    random_events_path = self.random_events_directory / filename
+    sounds_path = self.sound_directory / filename
+
+    if not sounds_path.exists() and "_tizi" in filename:
+      standard_path = self.sound_directory / filename.replace("_tizi", "")
+      if standard_path.exists():
+        sounds_path = standard_path
+
+    stock_filename = "engage.wav" if filename == "startup.wav" else filename
+    stock_path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / stock_filename
+
+    candidates = []
+    for path in (random_events_path, sounds_path, stock_path):
+      if path.exists() and path not in candidates:
+        candidates.append(path)
+    return candidates
+
+  @staticmethod
+  def _read_sound(path: Path) -> np.ndarray | None:
+    with wave.open(str(path), 'r') as wavefile:
+      if wavefile.getnchannels() != 1 or wavefile.getsampwidth() != 2 or wavefile.getframerate() != SAMPLE_RATE:
+        cloudlog.warning(f"soundd: invalid format {path}, skipping")
+        return None
+      length = wavefile.getnframes()
+      if length <= 0:
+        cloudlog.warning(f"soundd: empty audio {path}, skipping")
+        return None
+      raw = wavefile.readframes(length)
+      if len(raw) < 2 or (len(raw) % 2) != 0:
+        cloudlog.warning(f"soundd: truncated audio {path}, skipping")
+        return None
+      sound = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / (2**16/2)
+      if sound.size == 0:
+        cloudlog.warning(f"soundd: empty audio {path}, skipping")
+        return None
+      return sound
+
   def load_sounds(self):
     self.loaded_sounds: dict[int, np.ndarray] = {}
 
-    # Load all sounds
     for sound in sound_list:
       filename, play_count, volume = sound_list[sound]
-
-      random_events_path = self.random_events_directory / filename
-      sounds_path = self.sound_directory / filename
-
-      if not sounds_path.exists() and "_tizi" in filename:
-        standard_path = self.sound_directory / filename.replace("_tizi", "")
-        if standard_path.exists():
-          sounds_path = standard_path
-
-      if random_events_path.exists():
-        wavefile = wave.open(str(random_events_path), 'r')
-      elif sounds_path.exists():
-        wavefile = wave.open(str(sounds_path), 'r')
-      else:
-        if filename == "startup.wav":
-          filename = "engage.wav"
-        wavefile = wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r')
-
-      assert wavefile.getnchannels() == 1
-      assert wavefile.getsampwidth() == 2
-      assert wavefile.getframerate() == SAMPLE_RATE
-
-      length = wavefile.getnframes()
-      self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      loaded = False
+      for path in self._sound_candidates(filename):
+        try:
+          sound_data = self._read_sound(path)
+        except (OSError, EOFError, ValueError, wave.Error):
+          cloudlog.exception(f"soundd: failed to load {path}")
+          continue
+        if sound_data is not None:
+          self.loaded_sounds[sound] = sound_data
+          loaded = True
+          break
+      if not loaded:
+        cloudlog.warning(f"soundd: missing {filename}, skipping")
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
     ret = np.zeros(frames, dtype=np.float32)
 
-    if self.current_alert != AudibleAlert.none:
+    if self.current_alert != AudibleAlert.none and self.current_alert in self.loaded_sounds:
       num_loops = sound_list[self.current_alert][1]
       sound_data = self.loaded_sounds[self.current_alert]
+      if sound_data.size == 0:
+        return ret * self.current_volume
       written_frames = 0
 
       current_sound_frame = self.current_sound_frame % len(sound_data)
@@ -195,10 +247,36 @@ class Soundd:
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     if status:
       self.pending_stream_status = status
-    data_out[:frames, 0] = self.get_sound_data(frames)
+    samples = self.get_sound_data(frames)
+    bluetooth_healthy = self.bluetooth_audio.submit(samples) if self.bluetooth_audio is not None else False
+    data_out[:frames, 0] = 0.0 if bluetooth_healthy else samples
+
+  def update_bluetooth_audio(self) -> None:
+    if not self.bluetooth_supported or time.monotonic() - self.bluetooth_last_check < 1.0:
+      return
+    self.bluetooth_last_check = time.monotonic()
+    enabled = self.bluetooth_params.get_bool("BluetoothEnabled")
+    if enabled == self.bluetooth_enabled:
+      return
+    self.bluetooth_enabled = enabled
+    if enabled:
+      self.bluetooth_audio = BluetoothAudioSink(params=self.bluetooth_params)
+    elif self.bluetooth_audio is not None:
+      sink = self.bluetooth_audio
+      self.bluetooth_audio = None
+      sink.close()
+
+  def select_critical_alert(self, stock_alert, goat_scream_critical):
+    goat_alert = starpilot_alert_key(StarPilotAudibleAlert.goat)
+    if goat_scream_critical and goat_alert in self.loaded_sounds:
+      return goat_alert
+    return stock_alert
 
   def update_alert(self, new_alert):
-    current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame > len(self.loaded_sounds[self.current_alert])
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      new_alert = AudibleAlert.none
+    loaded = self.loaded_sounds.get(self.current_alert)
+    current_alert_played_once = self.current_alert == AudibleAlert.none or loaded is None or self.current_sound_frame > len(loaded)
     if self.current_alert != new_alert and (new_alert != AudibleAlert.none or current_alert_played_once):
       self.current_alert = new_alert
       self.current_sound_frame = 0
@@ -226,8 +304,10 @@ class Soundd:
 
       critical_full_alert = sm['selfdriveState'].alertStatus == log.SelfdriveState.AlertStatus.critical
       critical_full_alert &= sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.full
-      if self.starpilot_toggles.goat_scream_critical_alerts and critical_full_alert:
-        new_alert = starpilot_alert_key(StarPilotAudibleAlert.goat)
+      new_alert = self.select_critical_alert(
+        new_alert,
+        self.starpilot_toggles.goat_scream_critical_alerts and critical_full_alert,
+      )
 
       new_starpilot_alert = sm['starpilotSelfdriveState'].alertSound.raw
       if new_alert == AudibleAlert.none and new_starpilot_alert != StarPilotAudibleAlert.none:
@@ -285,9 +365,7 @@ class Soundd:
     # sounddevice must be imported after forking processes
     import sounddevice as sd
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
-
-    sm = sm.extend(['starpilotSelfdriveState', 'starpilotPlan'])
+    sm = messaging.SubMaster(list(SOUNDD_SERVICES))
 
     while True:
       stream = None
@@ -297,6 +375,7 @@ class Soundd:
 
         while True:
           sm.update(0)
+          self.update_bluetooth_audio()
 
           if self.pending_stream_status is not None:
             status = self.pending_stream_status
@@ -305,18 +384,28 @@ class Soundd:
 
           if sm.updated['soundPressure'] and self.current_alert == AudibleAlert.none: # only update volume filter when not playing alert
             self.spl_filter_weighted.update(sm["soundPressure"].soundPressureWeightedDb)
-            self.current_volume = self.calculate_volume(float(self.spl_filter_weighted.x))
+            self.auto_volume = self.calculate_volume(float(self.spl_filter_weighted.x))
+            self.current_volume = self.auto_volume
 
             if self.starpilot_toggles.alert_volume_controller:
-              self.auto_volume = self.current_volume
               self.current_volume = 0.0
 
-          elif self.current_alert != AudibleAlert.none and self.starpilot_toggles.alert_volume_controller:
-            self.current_volume = self.get_volume_override()
-            if self.current_volume == 1.01:
-              self.current_volume = self.auto_volume
-
           self.get_audible_alert(sm)
+
+          if self.current_alert != AudibleAlert.none:
+            v_ego = max(float(getattr(sm["starpilotSelfdriveState"], "vEgo", 0.0)), 0.0)
+            if should_mute_turn_steering_limit_alert(
+              self.current_alert_type,
+              v_ego,
+              float(getattr(self.starpilot_toggles, "turn_steering_limit_mute_speed", 0.0)),
+            ):
+              self.current_volume = 0.0
+            elif self.starpilot_toggles.alert_volume_controller:
+              self.current_volume = self.get_volume_override()
+              if self.current_volume == 1.01:
+                self.current_volume = self.auto_volume
+            else:
+              self.current_volume = self.auto_volume
 
           rk.keep_time()
 

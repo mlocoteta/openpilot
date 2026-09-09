@@ -175,6 +175,7 @@ class GMSafetyFlags(IntFlag):
   FLAG_GM_REMOTE_START_BOOTS_COMMA = 8192
   FLAG_GM_PANDA_3D1_SCHED = 16384
   FLAG_GM_PANDA_PADDLE_SCHED = 32768
+  FLAG_GM_VOLT_CC_GATEWAY = 16384
 
 
 class Footnote(Enum):
@@ -247,7 +248,7 @@ class CAR(Platforms):
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
   CHEVROLET_VOLT_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt No-ACC 2017-18", min_enable_speed=0)],
+    [GMCarDocs("Chevrolet Volt No-ACC 2016-18 (OBD Harness)", "Redneck ACC", min_enable_speed=0)],
     CHEVROLET_VOLT.specs,
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )

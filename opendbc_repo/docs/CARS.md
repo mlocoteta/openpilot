@@ -85,7 +85,7 @@
 |Chevrolet|Volt 2019|Adaptive Cruise Control (ACC) & LKAS|[Upstream](#upstream)|
 |Chevrolet|Volt ASCM Harness 2017-18|Adaptive Cruise Control (ACC)|[Upstream](#upstream)|
 |Chevrolet|Volt Camera Harness 2017-18|Flashed camera-forward integration with ACC|[Upstream](#upstream)|
-|Chevrolet|Volt No-ACC 2017-18|Adaptive Cruise Control (ACC)|[Upstream](#upstream)|
+|Chevrolet|Volt No-ACC 2016-18 (OBD Harness)|Redneck ACC|[Upstream](#upstream)|
 |Chrysler|Pacifica 2017-18|Adaptive Cruise Control (ACC)|[Upstream](#upstream)|
 |Chrysler|Pacifica 2019-20|Adaptive Cruise Control (ACC)|[Upstream](#upstream)|
 |Chrysler|Pacifica 2021-23|All|[Upstream](#upstream)|

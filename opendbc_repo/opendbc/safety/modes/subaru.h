@@ -35,12 +35,14 @@
 #define MSG_SUBARU_ES_DashStatus         0x321U
 #define MSG_SUBARU_ES_LKAS_State         0x322U
 #define MSG_SUBARU_ES_Infotainment       0x323U
+#define MSG_SUBARU_Cruise_Buttons        0x146U
 
 #define MSG_SUBARU_ES_UDS_Request        0x787U
 
 #define MSG_SUBARU_ES_HighBeamAssist     0x121U
 #define MSG_SUBARU_ES_STATIC_1           0x22aU
 #define MSG_SUBARU_ES_STATIC_2           0x325U
+#define MSG_SUBARU_Dashlights            0x390U
 
 #define SUBARU_MAIN_BUS 0U
 #define SUBARU_ALT_BUS  1U
@@ -55,11 +57,17 @@
 #define SUBARU_COMMON_TX_MSGS(alt_bus) \
   {MSG_SUBARU_ES_Distance, alt_bus, 8, .check_relay = false}, \
 
+#define SUBARU_REDNECK_TX_MSGS() \
+  {MSG_SUBARU_Cruise_Buttons, SUBARU_MAIN_BUS, 8, .check_relay = false}, \
+
 #define SUBARU_D_PLATFORM_ANGLE_TX_MSGS(bus) \
   {MSG_SUBARU_ES_LKAS_ANGLE,   bus, 8, .check_relay = true}, \
   {MSG_SUBARU_ES_DashStatus,   bus, 8, .check_relay = true}, \
   {MSG_SUBARU_ES_LKAS_State,   bus, 8, .check_relay = true}, \
   {MSG_SUBARU_ES_Infotainment, bus, 8, .check_relay = true}, \
+
+#define SUBARU_STOP_START_TX_MSGS(bus) \
+  {MSG_SUBARU_Dashlights, bus, 8, .check_relay = false}, \
 
 #define SUBARU_COMMON_LONG_TX_MSGS(alt_bus) \
   {MSG_SUBARU_ES_Distance,       alt_bus,         8, .check_relay = true}, \
@@ -108,6 +116,8 @@ static bool subaru_stop_and_go = false;
 static bool subaru_lkas_angle = false;
 static bool subaru_d_platform = false;
 static bool subaru_fixed_angle_limits = false;
+static bool subaru_stop_start_button = false;
+static bool subaru_redneck_cruise = false;
 
 static uint32_t subaru_get_checksum(const CANPacket_t *msg) {
   return (uint8_t)msg->data[0];
@@ -285,6 +295,19 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     violation |= !(is_tester_present || is_button_rdbi);
   }
 
+  if (msg->addr == MSG_SUBARU_Dashlights) {
+    violation |= !subaru_stop_start_button;
+    violation |= msg->bus != (subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS);
+    violation |= !GET_BIT(msg, 54U);
+    violation |= subaru_get_checksum(msg) != subaru_compute_checksum(msg);
+  }
+
+  if (msg->addr == MSG_SUBARU_Cruise_Buttons) {
+    violation |= !subaru_redneck_cruise;
+    violation |= msg->bus != SUBARU_MAIN_BUS;
+    violation |= subaru_get_checksum(msg) != subaru_compute_checksum(msg);
+  }
+
   if (violation){
     tx = false;
   }
@@ -295,6 +318,19 @@ static safety_config subaru_init(uint16_t param) {
   static const CanMsg SUBARU_TX_MSGS[] = {
     SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS)
     SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
+  };
+
+  static const CanMsg SUBARU_REDNECK_TX_MSGS_CONFIG[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS)
+    SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
+    SUBARU_REDNECK_TX_MSGS()
+  };
+
+  static const CanMsg SUBARU_REDNECK_STOP_AND_GO_TX_MSGS_CONFIG[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS)
+    SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
+    SUBARU_REDNECK_TX_MSGS()
+    SUBARU_STOP_AND_GO_ADDITIONAL_TX_MSGS()
   };
 
   static const CanMsg SUBARU_LONG_TX_MSGS[] = {
@@ -329,9 +365,21 @@ static safety_config subaru_init(uint16_t param) {
     SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
   };
 
+  static const CanMsg SUBARU_GEN2_LKAS_ANGLE_STOP_START_TX_MSGS[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
+    SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
+    SUBARU_STOP_START_TX_MSGS(SUBARU_ALT_BUS)
+  };
+
   static const CanMsg SUBARU_D_PLATFORM_ANGLE_MAIN_TX_MSGS[] = {
     SUBARU_D_PLATFORM_ANGLE_TX_MSGS(SUBARU_MAIN_BUS)
     SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
+  };
+
+  static const CanMsg SUBARU_D_PLATFORM_ANGLE_STOP_START_MAIN_TX_MSGS[] = {
+    SUBARU_D_PLATFORM_ANGLE_TX_MSGS(SUBARU_MAIN_BUS)
+    SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
+    SUBARU_STOP_START_TX_MSGS(SUBARU_ALT_BUS)
   };
 
   static const CanMsg SUBARU_D_PLATFORM_ANGLE_CAMERA_TX_MSGS[] = {
@@ -378,6 +426,12 @@ static safety_config subaru_init(uint16_t param) {
   const uint16_t SUBARU_PARAM_FIXED_ANGLE_LIMITS = 128;
   subaru_fixed_angle_limits = GET_FLAG(param, SUBARU_PARAM_FIXED_ANGLE_LIMITS);
 
+  const uint16_t SUBARU_PARAM_STOP_START_BUTTON = 256;
+  subaru_stop_start_button = GET_FLAG(param, SUBARU_PARAM_STOP_START_BUTTON);
+
+  const uint16_t SUBARU_PARAM_REDNECK_CRUISE = 512;
+  subaru_redneck_cruise = GET_FLAG(param, SUBARU_PARAM_REDNECK_CRUISE);
+
 #ifdef ALLOW_DEBUG
   const uint16_t SUBARU_PARAM_LONGITUDINAL = 2;
   subaru_longitudinal = GET_FLAG(param, SUBARU_PARAM_LONGITUDINAL);
@@ -385,15 +439,19 @@ static safety_config subaru_init(uint16_t param) {
 
   safety_config ret;
   if (subaru_lkas_angle) {
-    ret = subaru_d_platform ? (subaru_d_platform_camera ? BUILD_SAFETY_CFG(subaru_d_platform_angle_rx_checks, SUBARU_D_PLATFORM_ANGLE_CAMERA_TX_MSGS) : \
-                              BUILD_SAFETY_CFG(subaru_d_platform_angle_rx_checks, SUBARU_D_PLATFORM_ANGLE_MAIN_TX_MSGS)) : \
-          subaru_gen2 ? BUILD_SAFETY_CFG(subaru_gen2_lkas_angle_rx_checks, SUBARU_GEN2_LKAS_ANGLE_TX_MSGS) : \
+    ret = subaru_d_platform ? (subaru_stop_start_button ? BUILD_SAFETY_CFG(subaru_d_platform_angle_rx_checks, SUBARU_D_PLATFORM_ANGLE_STOP_START_MAIN_TX_MSGS) : \
+                              (subaru_d_platform_camera ? BUILD_SAFETY_CFG(subaru_d_platform_angle_rx_checks, SUBARU_D_PLATFORM_ANGLE_CAMERA_TX_MSGS) : \
+                              BUILD_SAFETY_CFG(subaru_d_platform_angle_rx_checks, SUBARU_D_PLATFORM_ANGLE_MAIN_TX_MSGS))) : \
+          subaru_gen2 ? (subaru_stop_start_button ? BUILD_SAFETY_CFG(subaru_gen2_lkas_angle_rx_checks, SUBARU_GEN2_LKAS_ANGLE_STOP_START_TX_MSGS) : \
+                         BUILD_SAFETY_CFG(subaru_gen2_lkas_angle_rx_checks, SUBARU_GEN2_LKAS_ANGLE_TX_MSGS)) : \
                         BUILD_SAFETY_CFG(subaru_lkas_angle_rx_checks, SUBARU_LKAS_ANGLE_TX_MSGS);
   } else if (subaru_gen2) {
     ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_LONG_TX_MSGS) : \
                                 BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_TX_MSGS);
   } else {
-    ret = subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_LONG_TX_MSGS) : \
+    ret = subaru_redneck_cruise ? (subaru_stop_and_go ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_REDNECK_STOP_AND_GO_TX_MSGS_CONFIG) : \
+                                   BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_REDNECK_TX_MSGS_CONFIG)) : \
+          subaru_longitudinal ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_LONG_TX_MSGS) : \
           subaru_stop_and_go  ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_STOP_AND_GO_TX_MSGS) : \
                                 BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
   }

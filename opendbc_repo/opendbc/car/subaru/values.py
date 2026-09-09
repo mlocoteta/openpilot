@@ -37,6 +37,11 @@ class CarControllerParams:
     self.STEER_OVERRIDE_TORQUE_HIGH = 200
     self.STEER_OVERRIDE_TORQUE_LOW = 150
 
+    # Crosstrek 2025 reports manual parking-lot inputs below the generic handoff threshold.
+    if CP.carFingerprint == CAR.SUBARU_CROSSTREK_2025:
+      self.STEER_OVERRIDE_TORQUE_HIGH = 150
+      self.STEER_OVERRIDE_TORQUE_LOW = 100
+
     if CP.flags & SubaruFlags.GLOBAL_GEN2:
       # TODO: lower rate limits, this reaches min/max in 0.5s which negatively affects tuning
       self.STEER_MAX = 1500
@@ -83,6 +88,8 @@ class SubaruSafetyFlags(IntFlag):
   D_PLATFORM = 32
   D_PLATFORM_CAMERA = 64
   FIXED_ANGLE_LIMITS = 128
+  STOP_START_BUTTON = 256
+  REDNECK_CRUISE = 512
   LEGACY_2025_ANGLE_LIMITS = FIXED_ANGLE_LIMITS
 
 
@@ -263,6 +270,15 @@ class CAR(Platforms):
     flags=SubaruFlags.LKAS_ANGLE,
   )
 
+
+SUBARU_STOP_START_CARS = (
+  CAR.SUBARU_OUTBACK_2023,
+  CAR.SUBARU_LEGACY_2025,
+)
+
+SUBARU_REDNECK_CRUISE_CARS = (
+  CAR.SUBARU_IMPREZA_2020,
+)
 
 SUBARU_VERSION_REQUEST = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER]) + \
   p16(uds.DATA_IDENTIFIER_TYPE.APPLICATION_DATA_IDENTIFICATION)

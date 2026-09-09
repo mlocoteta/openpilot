@@ -42,6 +42,9 @@ def test_force_stop_jerk_scale_is_platform_specific():
 
 def test_lead_follow_jerk_scale_is_platform_specific():
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")) == 1.25
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="hyundai", carFingerprint="GENESIS_GV70_ELECTRIFIED_1ST_GEN")) == 1.75
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="ford", carFingerprint="FORD_F_150_LIGHTNING_MK1")) == 1.35
+  assert get_lead_follow_jerk_scale(SimpleNamespace(brand="honda", carFingerprint="HONDA_CRV_5G")) == 1.35
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="other", carFingerprint="OTHER_CAR")) == 1.0
 
 
@@ -116,6 +119,20 @@ def test_standstill_without_turn_signal_keeps_lateral_allowed(monkeypatch):
     planner.update(0.0, False, make_sm(planner, frame=1, v_ego=0.0, left_blinker=False, standstill=True), toggles)
 
     assert planner.lateral_check is True
+  finally:
+    planner.shutdown()
+
+
+def test_manual_lateral_pause_blocks_lateral_while_cruise_is_enabled(monkeypatch):
+  planner = make_planner(monkeypatch)
+
+  try:
+    sm = make_sm(planner, frame=1, v_ego=20.0, left_blinker=False)
+    sm["starpilotCarState"].pauseLateral = True
+
+    planner.update(0.0, False, sm, make_toggles())
+
+    assert planner.lateral_check is False
   finally:
     planner.shutdown()
 

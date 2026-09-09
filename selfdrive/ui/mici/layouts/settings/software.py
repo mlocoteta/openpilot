@@ -1,9 +1,12 @@
+import json
 import os
 import threading
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import IntEnum
-from functools import cache
-from pathlib import Path
 
 import pyray as rl
 
@@ -13,7 +16,6 @@ from openpilot.selfdrive.ui.mici.layouts.settings.device import EngagedConfirmat
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.system.hardware.hw import Paths
 from openpilot.system.ui.lib.application import FontWeight, MousePos, gui_app
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets import Widget
@@ -21,11 +23,40 @@ from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets.scroller import NavScroller
 
 UPDATER_TIMEOUT = 10.0
+FAST_UPDATE_HOLD_SECONDS = 0.8
+FAST_UPDATE_POLL_SECONDS = 0.5
+FAST_UPDATE_REQUEST_TIMEOUT = 5.0
 
 
-@cache
-def _is_frogs_go_moo() -> bool:
-  return (Path(Paths.persist_root()) / "frogsgomoo.py").is_file()
+@dataclass
+class FastUpdateDisplayState:
+  stage: str = "idle"
+  message: str = ""
+  error: str = ""
+
+
+def _galaxy_api_url(path: str) -> str:
+  port = os.getenv("SP_GALAXY_PORT", "8082")
+  return f"http://127.0.0.1:{port}/api/update/fast{path}"
+
+
+def _galaxy_fast_update_request(path: str = "", method: str = "GET") -> dict:
+  request = urllib.request.Request(_galaxy_api_url(path), method=method)
+  try:
+    with urllib.request.urlopen(request, timeout=FAST_UPDATE_REQUEST_TIMEOUT) as response:
+      payload = json.loads(response.read().decode("utf-8"))
+  except urllib.error.HTTPError as error:
+    try:
+      payload = json.loads(error.read().decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+      payload = {}
+    raise RuntimeError(payload.get("error") or str(error)) from error
+  except (OSError, urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError) as error:
+    raise RuntimeError(f"Galaxy fast update unavailable: {error}") from error
+
+  if not isinstance(payload, dict):
+    raise RuntimeError("Galaxy returned an invalid fast update response")
+  return payload
 
 
 def _split_description(desc: str) -> tuple[str, str, str, str] | None:
@@ -109,6 +140,10 @@ class CheckUpdateButton(BigButton):
     self._waiting_for_updater_t: float | None = None
     self._hide_value_t: float | None = None
     self._state: UpdaterState = UpdaterState.IDLE
+    self._press_start_t: float | None = None
+    self._press_action = ""
+    self._fast_update_state = FastUpdateDisplayState()
+    self._fast_update_state_lock = threading.Lock()
 
     ui_state.add_offroad_transition_callback(self.offroad_transition)
 
@@ -116,8 +151,23 @@ class CheckUpdateButton(BigButton):
     if ui_state.is_offroad():
       self.set_enabled(True)
 
+  def _handle_mouse_press(self, mouse_pos: MousePos):
+    super()._handle_mouse_press(mouse_pos)
+    self._press_start_t = rl.get_time()
+    self._press_action = self.get_value()
+
   def _handle_mouse_release(self, mouse_pos: MousePos):
+    held_for = 0.0 if self._press_start_t is None else rl.get_time() - self._press_start_t
+    self._press_start_t = None
     super()._handle_mouse_release(mouse_pos)
+
+    if held_for >= FAST_UPDATE_HOLD_SECONDS:
+      self._show_fast_update_confirmation()
+      return
+
+    if self._get_fast_update_state().stage == "error":
+      self._set_fast_update_state(stage="idle")
+      return
 
     if not system_time_valid():
       dlg = BigDialog("", tr("Please connect to Wi-Fi to update."))
@@ -129,12 +179,74 @@ class CheckUpdateButton(BigButton):
     self.set_icon(self._txt_update_icon)
 
     def run():
-      if self.get_value() == "download update":
+      if self._press_action == "download update":
         _request_update_download()
       else:
         _request_update_check()
 
     threading.Thread(target=run, daemon=True).start()
+
+  def _show_fast_update_confirmation(self):
+    if not system_time_valid():
+      gui_app.push_widget(BigDialog("", tr("Please connect to Wi-Fi to update.")))
+      return
+    if ui_state.started:
+      return
+
+    gui_app.push_widget(BigConfirmationDialog(
+      "slide to\nfast update",
+      self._txt_update_icon,
+      self._start_fast_update,
+      red=True,
+    ))
+
+  def _set_fast_update_state(self, *, stage: str, message: str = "", error: str = ""):
+    with self._fast_update_state_lock:
+      self._fast_update_state = FastUpdateDisplayState(stage, message, error)
+
+  def _get_fast_update_state(self) -> FastUpdateDisplayState:
+    with self._fast_update_state_lock:
+      state = self._fast_update_state
+      return FastUpdateDisplayState(state.stage, state.message, state.error)
+
+  def _start_fast_update(self):
+    if ui_state.started:
+      return
+
+    state = self._get_fast_update_state()
+    if state.stage not in ("idle", "error"):
+      return
+
+    self._set_fast_update_state(stage="starting", message="starting fast update...")
+    threading.Thread(target=self._run_fast_update, daemon=True).start()
+
+  def _run_fast_update(self):
+    try:
+      _galaxy_fast_update_request(method="POST")
+
+      while True:
+        status = _galaxy_fast_update_request("/status")
+        stage = str(status.get("stage") or "updating")
+        error = str(status.get("lastError") or "").strip()
+        message = str(
+          status.get("progressDetail") or
+          status.get("progressLabel") or
+          status.get("message") or
+          "fast update in progress..."
+        ).strip()
+
+        if error or stage == "error":
+          self._set_fast_update_state(stage="error", message="fast update failed", error=error or message)
+          return
+
+        self._set_fast_update_state(stage=stage, message=message)
+        if not bool(status.get("running")):
+          return
+        time.sleep(FAST_UPDATE_POLL_SECONDS)
+    except Exception as error:
+      current = self._get_fast_update_state()
+      if current.stage != "rebooting":
+        self._set_fast_update_state(stage="error", message="fast update failed", error=str(error))
 
   def set_value(self, value: str):
     super().set_value(value)
@@ -144,7 +256,23 @@ class CheckUpdateButton(BigButton):
     super()._update_state()
 
     if ui_state.started:
+      self._press_start_t = None
       self.set_enabled(False)
+      return
+
+    fast_update_state = self._get_fast_update_state()
+    if fast_update_state.stage != "idle":
+      self.set_rotate_icon(fast_update_state.stage not in ("error", "rebooting"))
+      if fast_update_state.stage == "error":
+        self.set_enabled(True)
+        self.set_value(fast_update_state.error or fast_update_state.message)
+      elif fast_update_state.stage == "rebooting":
+        self.set_enabled(False)
+        self.set_value("update complete\nrebooting...")
+      else:
+        self.set_enabled(False)
+        self.set_value(fast_update_state.message or "fast update in progress...")
+      self.set_text("fast update")
       return
 
     updater_state = ui_state.params.get("UpdaterState") or ""
@@ -233,10 +361,9 @@ class BranchSelectPage(NavScroller):
     branches_str = params.get("UpdaterAvailableBranches") or ""
     branches = [b for b in branches_str.split(",") if b]
 
-    if not _is_frogs_go_moo():
-      for hidden_branch in ("StarPilot-Vetting", "MAKE-PRS-HERE"):
-        if hidden_branch in branches:
-          branches.remove(hidden_branch)
+    for hidden_branch in ("StarPilot-Vetting", "MAKE-PRS-HERE"):
+      if hidden_branch in branches:
+        branches.remove(hidden_branch)
 
     for branch in [current_git_branch, "devel-staging", "devel", "nightly", "nightly-dev", "master"]:
       if branch in branches:

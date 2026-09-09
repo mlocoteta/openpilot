@@ -276,6 +276,7 @@ async function fetchStatus() {
     state.status = {
       ...(payload.status || {}),
       isOnroad: !!payload.isOnroad,
+      laneCentering: !!payload.laneCentering,
     }
     if (payload.activeTrial !== undefined) {
       state.workspace = {
@@ -1125,11 +1126,14 @@ export function Tuning() {
         <p class="longManeuverIntro">
           Analyze one or more local routes, review deterministic lateral findings, apply a bounded trial, drive, then revert or refine.
         </p>
+        <p class="longManeuverError">
+          <strong>Before using FLM:</strong> turn Lane Centering off. FLM must analyze the model's unmodified lateral request; routes recorded with Lane Centering enabled are excluded.
+        </p>
 
         <div class="longManeuverActions">
           <button
             class="longManeuverButton"
-            disabled="${() => state.runningAction || state.selectedRoutes.length === 0 || !!state.status?.isOnroad}"
+            disabled="${() => state.runningAction || state.selectedRoutes.length === 0 || !!state.status?.isOnroad || !!state.status?.laneCentering}"
             @click="${runAnalyze}">
             Analyze Selected Routes
           </button>
@@ -1190,6 +1194,10 @@ export function Tuning() {
 
         ${() => state.status?.isOnroad ? html`
           <p class="longManeuverError">FLM analysis is offroad-only. Stop the car and go offroad before starting a run.</p>
+        ` : ""}
+
+        ${() => state.status?.laneCentering ? html`
+          <p class="longManeuverError">FLM is blocked while Lane Centering is enabled. Turn it off before starting analysis.</p>
         ` : ""}
 
         ${() => state.workspace?.activeTrial?.rollbackAvailable === false ? html`
@@ -1366,6 +1374,7 @@ export function Tuning() {
               <p><strong>Processed Segments:</strong> ${safeCount(state.report.summary?.processedSegments)}</p>
               <p><strong>Skipped Segments:</strong> ${safeCount(state.report.summary?.skippedSegments)}</p>
               <p><strong>Driver-Override Samples Excluded:</strong> ${safeCount(state.report.summary?.excludedDriverOverrideSamples)}</p>
+              <p><strong>Lane Centering Segments Excluded:</strong> ${safeCount(state.report.summary?.laneCenteringExcludedSegments)}</p>
               <p><strong>qlog Fallback:</strong> ${state.report.summary?.usedQlogFallback ? "Yes" : "No"}</p>
               <p><strong>Samples:</strong> ${safeCount(state.report.summary?.sampleCount)}</p>
             </div>

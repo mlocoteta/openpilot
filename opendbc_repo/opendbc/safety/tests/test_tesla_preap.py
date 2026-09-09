@@ -2,6 +2,7 @@
 import unittest
 
 from opendbc.car.tesla.preap.interface import SAFETY_TESLA_PREAP
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 
@@ -35,6 +36,12 @@ class TestTeslaPreAPSafety(common.SafetyTestBase):
     dat = bytearray(8)
     dat[0] = lever & 0x3F
     return common.make_msg(0, 0x45, 8, dat)
+
+  @staticmethod
+  def _di_state_msg(cruise_state: int):
+    dat = bytearray(8)
+    dat[1] = (cruise_state & 0x0F) << 4
+    return common.make_msg(0, 0x368, 8, dat)
 
   @staticmethod
   def _steering_status_msg(hands_on_level: int = 0, eac_status: int = 1, eac_error_code: int = 0, angle_tenths: int = 0):
@@ -123,6 +130,30 @@ class TestTeslaPreAPSafety(common.SafetyTestBase):
     self.assertTrue(self._tx(self._epas_control_msg(1)))
     self.assertFalse(self._tx(self._epas_control_msg(2)))
 
+  def test_always_on_lateral(self):
+    ENABLED, OFF = 2, 0
+    self.safety.set_controls_allowed(False)
+
+    self.safety.set_alternative_experience(0)
+    self.assertTrue(self._rx(self._di_state_msg(ENABLED)))
+    self.assertFalse(self._tx(self._steer_cmd_msg(0, 1)))
+
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL)
+    self.assertTrue(self._rx(self._di_state_msg(OFF)))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertFalse(self._tx(self._steer_cmd_msg(0, 1)))
+
+    self.assertTrue(self._rx(self._di_state_msg(ENABLED)))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertTrue(self._tx(self._steer_cmd_msg(0, 1)))
+
+    self.assertTrue(self._rx(self._di_state_msg(OFF)))
+    self.assertFalse(self._tx(self._steer_cmd_msg(0, 1)))
+
+    self.assertTrue(self._rx(self._di_state_msg(9)))
+    self.assertFalse(self.safety.get_aol_allowed())
+    self.assertFalse(self._tx(self._steer_cmd_msg(0, 1)))
+
   def test_aeb_is_blocked(self):
     self.safety.set_controls_allowed(True)
     self.assertTrue(self._tx(self._long_msg(0)))
@@ -198,9 +229,9 @@ class TestTeslaPreAPSafety(common.SafetyTestBase):
     self.assertTrue(self._rx(self._msg(0x118, b"\x00\x00\x01\x00\x01\x00")))
     self.assertTrue(self._rx(self._msg(0x118, b"\x00\x00\x20\x03\x02\x00")))
 
-  def test_forwarding_passthrough(self):
-    self.assertEqual(self.safety.safety_fwd_hook(0, 0x123), 2)
-    self.assertEqual(self.safety.safety_fwd_hook(2, 0x123), 0)
+  def test_forwarding_to_dead_ap_bus_is_blocked(self):
+    self.assertEqual(self.safety.safety_fwd_hook(0, 0x123), -1)
+    self.assertEqual(self.safety.safety_fwd_hook(2, 0x123), -1)
 
 
 if __name__ == "__main__":

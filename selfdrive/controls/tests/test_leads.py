@@ -6,10 +6,16 @@ from cereal import log
 import pytest
 
 from opendbc.car.toyota.values import CAR as TOYOTA
+from opendbc.car.honda.values import CAR as HONDA
 from openpilot.selfdrive.test.process_replay import replay_process_with_name
 from openpilot.selfdrive.controls.radard import (
+  DT_MDL,
+  HONDA_BOSCH_A_RADAR_TS,
+  RadarD,
   g90_low_speed_radar_lead_sane,
   g90_radar_lead_lateral_sane,
+  has_slow_radar_tracks,
+  is_bosch_a_radar_car,
   match_vision_to_track,
 )
 
@@ -78,6 +84,27 @@ class TestLeads:
     )
 
     assert track is None
+
+  def test_bosch_a_radard_path_is_gated_to_verified_honda_radar(self):
+    assert is_bosch_a_radar_car(SimpleNamespace(brand="honda", carFingerprint=HONDA.HONDA_CIVIC_BOSCH, radarUnavailable=False))
+    assert not is_bosch_a_radar_car(SimpleNamespace(brand="toyota", carFingerprint=HONDA.HONDA_CIVIC_BOSCH, radarUnavailable=False))
+    assert not is_bosch_a_radar_car(SimpleNamespace(brand="honda", carFingerprint=HONDA.HONDA_CIVIC_BOSCH, radarUnavailable=True))
+
+  def test_bosch_a_and_legacy_lead_filter_timesteps_are_scoped(self):
+    legacy = RadarD(radar_ts=0.06)
+    bosch_a = RadarD(radar_ts=0.06, honda_bosch_a_radar=True)
+    assert legacy.lead_prob_filters[0].dt == pytest.approx(0.06)
+    assert bosch_a.lead_prob_filters[0].dt == pytest.approx(DT_MDL)
+    assert bosch_a.kalman_params.A[0][1] == pytest.approx(HONDA_BOSCH_A_RADAR_TS)
+
+  def test_slow_radar_frequency_relaxation_is_scoped(self):
+    slow_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.15, radarUnavailable=False)
+    normal_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.1, radarUnavailable=False)
+    unavailable_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.15, radarUnavailable=True)
+
+    assert has_slow_radar_tracks(slow_radar)
+    assert not has_slow_radar_tracks(normal_radar)
+    assert not has_slow_radar_tracks(unavailable_radar)
 
   @pytest.mark.skipif(platform.system() == "Darwin", reason="SocketEventHandle requires eventfd")
   def test_radar_fault(self):

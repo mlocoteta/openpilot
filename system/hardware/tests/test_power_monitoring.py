@@ -42,7 +42,48 @@ class TestPowerMonitoring:
     for _ in range(10):
       pm.calculate(None, None)
     assert pm.get_power_used() == 0
-    assert pm.get_car_battery_capacity() == (CAR_BATTERY_CAPACITY_uWh / 10)
+    assert pm.get_car_battery_capacity() == CAR_BATTERY_CAPACITY_uWh
+
+  def test_persisted_exhausted_capacity_is_not_reset(self):
+    self.params.put_int("CarBatteryCapacity", 0)
+    try:
+      pm = PowerMonitoring()
+      assert pm.get_car_battery_capacity() == 0
+    finally:
+      self.params.remove("CarBatteryCapacity")
+
+  def test_exhausted_capacity_requests_shutdown(self, mocker):
+    pm_patch(mocker, "DELAY_SHUTDOWN_TIME_S", 0, constant=True)
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = 0
+    start_time = ssb
+
+    # The capacity guard remains independent from the voltage debounce.
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) == "battery_capacity_exhausted"
+
+  def test_low_voltage_requires_sustained_signal_and_resets_on_recovery(self, mocker):
+    pm_patch(mocker, "VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S", 0, constant=True)
+    pm_patch(mocker, "VOLTAGE_SHUTDOWN_SUSTAINED_TIME_S", 3, constant=True)
+    pm_patch(mocker, "DELAY_SHUTDOWN_TIME_S", 0, constant=True)
+
+    pm = PowerMonitoring()
+    pm.car_battery_capacity_uWh = CAR_BATTERY_CAPACITY_uWh
+    start_time = ssb
+
+    pm.car_voltage_mV = 11.0 * 1e3
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) is None
+    assert pm.low_voltage_start_time is not None
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) is None
+
+    pm.car_voltage_mV = 12.0 * 1e3
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) is None
+    assert pm.low_voltage_start_time is None
+
+    pm.car_voltage_mV = 11.0 * 1e3
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) is None
+    for _ in range(2):
+      assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) is None
+    assert pm.shutdown_reason(False, True, start_time, True, self.toggles()) == "low_voltage"
 
   # Test to see that it doesn't integrate offroad when ignition is True
   def test_offroad_ignition(self):

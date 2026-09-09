@@ -142,4 +142,4 @@ class ExpButton(Widget):
       return False
 
     # Mirror exp mode toggle using persistent car params
-    return ui_state.has_longitudinal_control
+    return ui_state.experimental_mode_available

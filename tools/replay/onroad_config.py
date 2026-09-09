@@ -55,6 +55,47 @@ class ReplayArgs:
   auto_source: bool = False
 
 
+@dataclass
+class ReplayGpuState:
+  """Reconstruct modeld's transient GPU Params from replayed messages."""
+  present: bool = False
+  compiled: bool = False
+  loading: bool = False
+  active: bool = False
+  failed: bool = False
+
+  def update(self, *, present: bool | None = None, event_names: Sequence[str] = (), model_updated: bool = False) -> tuple[bool, bool, bool, bool]:
+    loading_event = "bigModelLoading" in event_names
+    failed_event = "bigModelFailed" in event_names
+
+    if present is not None:
+      self.present = present
+      if not present:
+        self.compiled = False
+        self.loading = False
+        self.active = False
+        self.failed = False
+
+    if loading_event or failed_event:
+      self.present = True
+      self.compiled = True
+
+    if loading_event:
+      self.loading = True
+      self.active = False
+      self.failed = False
+    elif failed_event:
+      self.loading = False
+      self.active = False
+      self.failed = True
+    elif model_updated and self.present and self.compiled and not self.failed:
+      self.compiled = True
+      self.loading = False
+      self.active = True
+
+    return self.present, self.compiled, self.loading, self.active
+
+
 def _truthy_env(name: str) -> bool:
   return os.getenv(name, "").lower() in {"1", "true", "yes", "on"}
 
@@ -244,6 +285,19 @@ def seed_logged_params(init_data: Any | None, params: Params) -> int:
   return seeded
 
 
+def _model_uses_external_gpu(model_key: str) -> bool:
+  from openpilot.starpilot.assets.model_manager import model_uses_external_gpu
+
+  return model_uses_external_gpu(model_key)
+
+
+def seed_replay_gpu_model(init_data: Any | None, params: Params) -> None:
+  raw_model = logged_params(init_data).get("Model", b"")
+  model_key = raw_model.decode("utf-8", errors="replace").strip()
+  if model_key and _model_uses_external_gpu(model_key):
+    params.put_bool("UsbGpuCompiled", True)
+
+
 def seed_nav_offroad_preview(params: Params) -> None:
   secret = params.get("MapboxSecretKey", encoding="utf-8") or ""
   if not str(secret).strip():
@@ -271,6 +325,7 @@ def seed_desktop_overrides(params: Params) -> None:
 def seed_onroad_params(init_data: Any | None, params: Params | None = None) -> int:
   params = params or Params()
   seeded = seed_logged_params(init_data, params)
+  seed_replay_gpu_model(init_data, params)
   seed_desktop_overrides(params)
   return seeded
 
@@ -291,10 +346,34 @@ def _cmd_seed(args: Sequence[str]) -> int:
   return 0
 
 
+def _cmd_sync_gpu() -> int:
+  from cereal import messaging
+
+  params = Params()
+  sm = messaging.SubMaster(["deviceState", "onroadEvents", "modelV2"])
+  state = ReplayGpuState(compiled=params.get_bool("UsbGpuCompiled"))
+  last_values: tuple[bool, bool, bool, bool] | None = None
+
+  while True:
+    sm.update(1000)
+    if not any(sm.updated.values()):
+      continue
+
+    present = bool(sm["deviceState"].chestnutPresent) if sm.updated["deviceState"] else None
+    event_names = tuple(str(event.name) for event in sm["onroadEvents"]) if sm.updated["onroadEvents"] else ()
+    values = state.update(present=present, event_names=event_names, model_updated=sm.updated["modelV2"])
+    if values == last_values:
+      continue
+
+    for key, value in zip(("UsbGpuPresent", "UsbGpuCompiled", "UsbGpuLoading", "UsbGpuActive"), values, strict=True):
+      params.put_bool(key, value)
+    last_values = values
+
+
 def main(argv: Sequence[str] | None = None) -> int:
   argv = list(sys.argv[1:] if argv is None else argv)
   if not argv or argv[0] in {"-h", "--help"}:
-    print("Usage: onroad_config.py (select-ui|seed) <replay-args...>", file=sys.stderr)
+    print("Usage: onroad_config.py (select-ui|seed|sync-gpu) <replay-args...>", file=sys.stderr)
     return 2
 
   command = argv[0]
@@ -306,6 +385,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     return _cmd_select_ui(args)
   if command == "seed":
     return _cmd_seed(args)
+  if command == "sync-gpu":
+    return _cmd_sync_gpu()
 
   print(f"Unknown command: {command}", file=sys.stderr)
   return 2

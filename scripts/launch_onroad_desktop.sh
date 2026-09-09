@@ -79,6 +79,7 @@ CEM_PID=""
 ALERT_PID=""
 CSC_PID=""
 GALAXY_PID=""
+GPU_SYNC_PID=""
 GALAXY_PORT=""
 GALAXY_URL=""
 ONROAD_TEMP_PREFIX=""
@@ -262,6 +263,9 @@ cleanup() {
   if [[ -n "${GALAXY_PID}" ]]; then
     kill "${GALAXY_PID}" >/dev/null 2>&1 || true
   fi
+  if [[ -n "${GPU_SYNC_PID}" ]]; then
+    kill "${GPU_SYNC_PID}" >/dev/null 2>&1 || true
+  fi
 
   for pid in "${UI_PIDS[@]-}"; do
     if [[ -n "${pid}" ]]; then
@@ -285,6 +289,9 @@ cleanup() {
   fi
   if [[ -n "${GALAXY_PID}" ]]; then
     wait "${GALAXY_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${GPU_SYNC_PID}" ]]; then
+    wait "${GPU_SYNC_PID}" >/dev/null 2>&1 || true
   fi
 
   if [[ -n "${ONROAD_TEMP_PREFIX:-}" && "${ONROAD_TEMP_PREFIX}" == desktop-onroad-* ]]; then
@@ -468,6 +475,11 @@ launch_replay() {
   fi
 }
 
+launch_gpu_param_sync() {
+  "${ROOT_DIR}/.venv/bin/python3" "${ROOT_DIR}/tools/replay/onroad_config.py" sync-gpu &
+  GPU_SYNC_PID=$!
+}
+
 launch_nav_demo() {
   echo "Starting fake nav demo publisher..."
   "${ROOT_DIR}/.venv/bin/python3" "${ROOT_DIR}/tools/replay/fake_nav_demo.py" &
@@ -595,6 +607,27 @@ launch_python_ui() {
   UI_PIDS+=("$!")
 }
 
+configure_bluetooth_demo() {
+  case " ${UI_TARGETS[*]-} " in
+    *" c3 "*|*" c4 "*)
+      local fake_bluetooth="${SP_ONROAD_FAKE_BLUETOOTH:-}"
+      if [[ -z "${fake_bluetooth}" ]]; then
+        case " ${UI_TARGETS[*]-} " in
+          " c3 ") fake_bluetooth="${SP_C3_FAKE_BLUETOOTH:-1}" ;;
+          " c4 ") fake_bluetooth="${SP_C4_FAKE_BLUETOOTH:-1}" ;;
+          *) fake_bluetooth=1 ;;
+        esac
+      fi
+
+      if env_var_truthy "${fake_bluetooth}"; then
+        export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=1
+      else
+        export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=0
+      fi
+      ;;
+  esac
+}
+
 launch_control_bar() {
   local watch_pids="${UI_PIDS[*]}"
   (
@@ -662,6 +695,8 @@ if [[ "${REPLAY_ONLY}" != "1" && ${#UI_TARGETS[@]} -eq 0 ]]; then
   exit 1
 fi
 
+configure_bluetooth_demo
+
 echo "Preparing replay and desktop UI runtime..."
 
 build_replay
@@ -687,6 +722,7 @@ fi
 
 echo "Starting replay: ${REPLAY_ARGS[*]}"
 launch_replay
+launch_gpu_param_sync
 
 if [[ "${NAV_DEMO}" == "1" && "${OFFROAD_DEMO}" != "1" ]]; then
   launch_nav_demo

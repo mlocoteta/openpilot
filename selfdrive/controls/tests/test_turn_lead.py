@@ -1,11 +1,38 @@
+import math
+import types
+
 from cereal import car
 
 import pytest
 
-from openpilot.selfdrive.controls.controlsd import get_control_lateral_smooth_seconds, turn_lead_allowed
+from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.controls.controlsd import (
+  TWITCH_GUARD_DURATION,
+  TWITCH_GUARD_FLOOR,
+  TWITCH_GUARD_MAX_SPEED,
+  get_control_lateral_smooth_seconds,
+  limit_curvature_to_plan,
+  turn_lead_allowed,
+  update_twitch_guard,
+)
 
 
 LateralControlMode = car.CarControl.Actuators.LateralControlMode
+
+
+def _plan(xs, ys):
+  return types.SimpleNamespace(position=types.SimpleNamespace(x=xs, y=ys))
+
+
+def _arc_plan(radius, n=200):
+  return _plan([radius * math.sin(i / n) for i in range(n)],
+               [radius * (1.0 - math.cos(i / n)) for i in range(n)])
+
+
+STRAIGHT_PLAN = _plan([i * 0.5 for i in range(200)], [0.0] * 200)
+STANDSTILL_STUB_PLAN = _plan([0.0, 0.3], [0.0, 0.0])
+TURN_PLAN = _arc_plan(30.0)
+GENTLE_BEND_PLAN = _arc_plan(143.0)
 
 
 def test_turn_lead_is_suppressed_only_during_applied_angle_control():
@@ -37,3 +64,79 @@ def test_subaru_control_smoothing_uses_vehicle_schedule(v_ego, expected):
 ])
 def test_rivian_control_smoothing_remains_speed_scheduled(v_ego, expected):
   assert get_control_lateral_smooth_seconds("rivian", v_ego, 0.4) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("curvature", [0.0155, -0.0155])
+def test_twitch_against_a_straight_plan_is_clamped_to_the_floor(curvature):
+  guarded = limit_curvature_to_plan(STRAIGHT_PLAN, curvature, 1.2)
+  assert abs(guarded) == pytest.approx(TWITCH_GUARD_FLOOR)
+  assert math.copysign(1.0, guarded) == math.copysign(1.0, curvature)
+
+
+def test_command_already_below_the_floor_is_untouched():
+  assert limit_curvature_to_plan(STRAIGHT_PLAN, 0.0015, 1.2) == pytest.approx(0.0015)
+
+
+@pytest.mark.parametrize("v_ego", [TWITCH_GUARD_MAX_SPEED, 6.0, 30.0])
+def test_guard_is_inactive_above_its_speed_band(v_ego):
+  assert limit_curvature_to_plan(STRAIGHT_PLAN, 0.0155, v_ego) == pytest.approx(0.0155)
+
+
+def test_guard_fades_out_across_the_speed_band():
+  full = limit_curvature_to_plan(STRAIGHT_PLAN, 0.0155, 1.2)
+  half = limit_curvature_to_plan(STRAIGHT_PLAN, 0.0155, 3.5)
+  assert full < half < 0.0155
+
+
+@pytest.mark.parametrize("ratio", [0.8, 1.0, 2.0, 3.0])
+def test_real_turns_tracking_their_own_plan_are_untouched(ratio):
+  action = (1.0 / 30.0) * ratio
+  assert limit_curvature_to_plan(TURN_PLAN, action, 1.2) == pytest.approx(action)
+
+
+def test_a_barely_bending_plan_does_not_license_a_large_command():
+  guarded = limit_curvature_to_plan(GENTLE_BEND_PLAN, 0.0155, 1.2)
+  assert TWITCH_GUARD_FLOOR < guarded < 0.008
+
+
+@pytest.mark.parametrize("plan", [STANDSTILL_STUB_PLAN, _plan([], [])])
+def test_guard_stands_down_when_the_plan_is_too_short_to_judge(plan):
+  assert limit_curvature_to_plan(plan, 0.0155, 0.4) == pytest.approx(0.0155)
+
+
+def test_zero_command_stays_zero():
+  assert limit_curvature_to_plan(STRAIGHT_PLAN, 0.0, 1.2) == 0.0
+
+
+@pytest.mark.parametrize("bad_plan", [
+  _plan([0.0, math.nan, 20.0], [0.0, 0.0, 0.0]),
+  _plan([0.0, math.inf, 20.0], [0.0, 0.0, 0.0]),
+  _plan([0.0, 20.0], [0.0]),
+])
+def test_invalid_plan_data_leaves_curvature_untouched(bad_plan):
+  assert limit_curvature_to_plan(bad_plan, 0.0155, 1.2) == pytest.approx(0.0155)
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_nonfinite_guard_inputs_disarm(value):
+  assert update_twitch_guard(value, 1.0, False) == 0.0
+  assert update_twitch_guard(TWITCH_GUARD_DURATION, value, False) == 0.0
+
+
+def test_twitch_guard_arms_at_standstill_or_creep_speed():
+  assert update_twitch_guard(0.0, 0.0, True) == TWITCH_GUARD_DURATION
+  assert update_twitch_guard(0.0, 0.3, False) == TWITCH_GUARD_DURATION
+
+
+def test_twitch_guard_decays_after_pullaway_and_expires():
+  remaining = update_twitch_guard(0.0, 0.0, True)
+  remaining = update_twitch_guard(remaining, 1.0, False)
+  assert remaining == pytest.approx(TWITCH_GUARD_DURATION - DT_CTRL)
+
+  for _ in range(int(TWITCH_GUARD_DURATION / DT_CTRL) + 1):
+    remaining = update_twitch_guard(remaining, 1.0, False)
+  assert remaining == 0.0
+
+
+def test_twitch_guard_does_not_arm_while_moving():
+  assert update_twitch_guard(0.0, 1.0, False) == 0.0

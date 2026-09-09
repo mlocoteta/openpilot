@@ -6,20 +6,23 @@ from cereal import messaging, car
 from dataclasses import dataclass, field
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.selfdrive.controls.lib.lane_centering import get_lane_centering_visual_direction
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.lib.starpilot_theme import get_param_color, get_theme_color, get_visual_color, is_stock_color_scheme, with_alpha
 from openpilot.selfdrive.ui.onroad.starpilot.rainbow_path import RainbowPath
 from openpilot.selfdrive.ui.lib.starpilot_visuals import blend_colors, lead_indicator_enabled
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.mici.onroad.starpilot_status import get_border_color
-from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
 CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
 MAX_DRAW_DISTANCE = 100.0
 STOCK_LANE_LINES_COLOR = rl.Color(255, 255, 255, 255)
+OCEAN_BLUE_LANE_LINES_COLOR = rl.Color(0, 176, 220, 255)
 DEFAULT_LANE_LINES_WIDTH = 4.0
 DEFAULT_PATH_WIDTH = 6.1
 DEFAULT_ROAD_EDGES_WIDTH = 2.0
@@ -64,6 +67,7 @@ class ModelRenderer(Widget):
     self._lane_line_probs = np.zeros(4, dtype=np.float32)
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
+    self._lead_info_enabled = False
     self._path_offset_z = HEIGHT_INIT[0]
 
     # Initialize ModelPoints objects
@@ -134,7 +138,8 @@ class ModelRenderer(Widget):
     model = sm['modelV2']
     radar_state = sm['radarState'] if sm.valid['radarState'] else None
     lead_one = radar_state.leadOne if radar_state else None
-    render_lead_indicator = self._longitudinal_control and radar_state is not None and lead_indicator_enabled(self._params, hide_by_default=True)
+    self._lead_info_enabled = self._params.get_bool("LeadInfo")
+    render_lead_indicator = self._should_render_lead_indicator(radar_state)
 
     # Update model data when needed
     model_updated = sm.updated['modelV2']
@@ -157,7 +162,10 @@ class ModelRenderer(Widget):
     self._draw_path(sm)
 
     if render_lead_indicator and radar_state:
-      self._draw_lead_indicator()
+      self._draw_lead_indicator(radar_state)
+
+  def _should_render_lead_indicator(self, radar_state) -> bool:
+    return radar_state is not None and lead_indicator_enabled(self._params, hide_by_default=True)
 
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
@@ -360,7 +368,32 @@ class ModelRenderer(Widget):
 
     return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
 
-  def _lane_line_palette(self) -> tuple[bool, rl.Color, rl.Color]:
+  def _lane_centering_direction(self) -> int:
+    toggles = ui_state.starpilot_toggles
+    sm = ui_state.sm
+    if (sm.recv_frame.get("modelV2", 0) < ui_state.started_frame or
+        sm.recv_frame.get("carState", 0) < ui_state.started_frame):
+      return 0
+
+    car_state = sm["carState"]
+    applied_correction = None
+    if sm.recv_frame.get("controlsState", 0) >= ui_state.started_frame:
+      try:
+        applied_correction = sm["controlsState"].desiredCurvature - sm["modelV2"].action.desiredCurvature
+      except (AttributeError, TypeError, ValueError):
+        pass
+    return get_lane_centering_visual_direction(
+      sm["modelV2"], car_state.vEgo,
+      toggles.get("lane_center_offset", 0.0),
+      toggles.get("lane_centering_e2e_authority", 1.0),
+      bool(toggles.get("lane_centering", False)),
+      ui_state.status == UIStatus.ENGAGED or ui_state.always_on_lateral_active,
+      bool(toggles.get("lane_centering_pause_on_signal", True)),
+      bool(car_state.leftBlinker or car_state.rightBlinker),
+      applied_correction,
+    )
+
+  def _lane_line_palette(self) -> tuple[bool, rl.Color, rl.Color, int]:
     stock_scheme = is_stock_color_scheme(self._params)
     line_status = UIStatus.ENGAGED if ui_state.status == UIStatus.DISENGAGED and ui_state.always_on_lateral_active else ui_state.status
 
@@ -373,12 +406,18 @@ class ModelRenderer(Widget):
     if lane_color is None:
       lane_color = STOCK_LANE_LINES_COLOR if stock_scheme else get_theme_color("LaneLines", STOCK_LANE_LINES_COLOR)
 
-    return stock_scheme, edge_color, lane_color
+    lane_centering_direction = self._lane_centering_direction()
+    return stock_scheme, edge_color, lane_color, lane_centering_direction
 
   def _get_ll_color(self, prob: float, adjacent: bool, left: bool, stock_scheme: bool,
-                    edge_color: rl.Color, lane_color: rl.Color):
+                    edge_color: rl.Color, lane_color: rl.Color, lane_centering_direction: int = 0):
     alpha = np.clip(prob, 0.0, 0.7)
-    if adjacent:
+    lane_centering_line = adjacent and ((lane_centering_direction > 0 and not left) or
+                                        (lane_centering_direction < 0 and left))
+    if lane_centering_line:
+      color = rl.Color(OCEAN_BLUE_LANE_LINES_COLOR.r, OCEAN_BLUE_LANE_LINES_COLOR.g,
+                       OCEAN_BLUE_LANE_LINES_COLOR.b, int(alpha * OCEAN_BLUE_LANE_LINES_COLOR.a))
+    elif adjacent:
       color = rl.Color(edge_color.r, edge_color.g, edge_color.b, int(alpha * edge_color.a))
 
       # turn adjacent lls orange if torque is high
@@ -401,13 +440,13 @@ class ModelRenderer(Widget):
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
     """Two closest lines should be green (lane line or road edges)"""
-    stock_scheme, edge_color, lane_color = self._lane_line_palette()
+    stock_scheme, edge_color, lane_color, lane_centering_direction = self._lane_line_palette()
     for i, lane_line in enumerate(self._lane_lines):
       if lane_line.projected_points.size == 0:
         continue
 
       color = self._get_ll_color(float(self._lane_line_probs[i]), i in (1, 2), i in (0, 1),
-                                 stock_scheme, edge_color, lane_color)
+                                 stock_scheme, edge_color, lane_color, lane_centering_direction)
       draw_polygon(self._rect, lane_line.projected_points, color)
 
     for i, road_edge in enumerate(self._road_edges):
@@ -462,7 +501,7 @@ class ModelRenderer(Widget):
       ]
       draw_polygon(self._rect, self._path.projected_points, gradient=self._path_gradient)
 
-  def _draw_lead_indicator(self):
+  def _draw_lead_indicator(self, radar_state):
     # Draw lead vehicles if available
     lead_color = get_theme_color("LeadMarker", rl.Color(201, 34, 49, 255))
     for lead in self._lead_vehicles:
@@ -471,6 +510,35 @@ class ModelRenderer(Widget):
 
       rl.draw_triangle_fan(lead.glow, len(lead.glow), rl.Color(218, 202, 37, 255))
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(lead_color, lead.fill_alpha))
+
+    lead_one = radar_state.leadOne
+    if self._lead_info_enabled and lead_one and lead_one.status:
+      self._draw_lead_speed(lead_one)
+
+  @staticmethod
+  def _format_lead_speed(lead_speed: float, is_metric: bool, use_si_metrics: bool) -> str:
+    lead_speed = max(float(lead_speed), 0.0)
+    if use_si_metrics:
+      return f"{round(lead_speed)} m/s"
+    if is_metric:
+      return f"{round(lead_speed * CV.MS_TO_KPH)} km/h"
+    return f"{round(lead_speed * CV.MS_TO_MPH)} mph"
+
+  def _draw_lead_speed(self, lead_data) -> None:
+    from openpilot.selfdrive.ui.onroad.starpilot.path import _draw_text_with_outline
+
+    text = self._format_lead_speed(
+      getattr(lead_data, "vLead", 0.0),
+      ui_state.is_metric,
+      ui_state.starpilot_toggles.get("UseSiMetrics", False),
+    )
+    font = gui_app.font(FontWeight.SEMI_BOLD)
+    font_size = 40
+    text_size = measure_text_cached(font, text, font_size)
+    center_x = self._rect.x + self._rect.width / 2
+    x = center_x - text_size.x / 2
+    y = self._rect.y + 22
+    _draw_text_with_outline(text, float(x), float(y), font, font_size)
 
   @staticmethod
   def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:

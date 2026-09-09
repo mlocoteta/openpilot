@@ -75,6 +75,7 @@ class CarState(CarStateBase):
     self.distance_button = 0
 
     self.pcm_follow_distance = 0
+    self.pcm_acc_status = 0
 
     self.acc_type = 1
     self.lkas_hud = {}
@@ -208,6 +209,7 @@ class CarState(CarStateBase):
       if self.CP.openpilotLongitudinalControl:
         ret.accFaulted = ret.accFaulted or cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
 
+    prev_pcm_acc_status = self.pcm_acc_status
     self.pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]
     if self.CP.carFingerprint not in (NO_STOP_TIMER_CAR - TSS2_CAR):
       # ignore standstill state in certain vehicles, since pcm allows to restart with just an acceleration request
@@ -245,6 +247,11 @@ class CarState(CarStateBase):
 
         buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
+    if self.CP.carFingerprint in LEGACY_PRIUS_CAR and not self.has_SDSU:
+      prev_distance_button = self.distance_button
+      self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
     if self.CP.carFingerprint in DISTANCE_BUTTON_CAR:
       prev_distance_button = self.distance_button
       self.distance_button = cp.vl["PCM_CRUISE_4"]["DISTANCE"]
@@ -259,8 +266,8 @@ class CarState(CarStateBase):
       buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
     buttonEvents += [
-      *create_button_events(self.pcm_acc_status == 9, False, {1: ButtonType.accelCruise}),
-      *create_button_events(self.pcm_acc_status == 10, False, {1: ButtonType.decelCruise}),
+      *create_button_events(self.pcm_acc_status == 9, prev_pcm_acc_status == 9, {1: ButtonType.accelCruise}),
+      *create_button_events(self.pcm_acc_status == 10, prev_pcm_acc_status == 10, {1: ButtonType.decelCruise}),
     ]
 
     fp_ret.dashboardSpeedLimit = calculate_speed_limit(cp_cam)
@@ -294,14 +301,23 @@ class CarState(CarStateBase):
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
+    cam_messages = []
 
     if CP.enableGasInterceptorDEPRECATED:
       pt_messages.append(("GAS_SENSOR", 50))
 
+    if CP.carFingerprint in LEGACY_PRIUS_CAR:
+      pt_messages.append(("ACC_CONTROL", float('nan')))
+      if CP.flags & ToyotaFlags.DSU_BYPASS.value:
+        cam_messages.append(("ACC_CONTROL", float('nan')))
+
     if CP.carFingerprint in DISTANCE_BUTTON_CAR:
       pt_messages.append(("PCM_CRUISE_4", 1))
 
+    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value:
+      cam_messages.append(("PRE_COLLISION_2", 50))
+
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),
     }

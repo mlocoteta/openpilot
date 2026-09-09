@@ -53,6 +53,11 @@ export NOBOARD=1
 export SIMULATION=1
 export SKIP_FW_QUERY=1
 export USE_WEBCAM=1
+if [[ "${SP_C4_FAKE_BLUETOOTH:-1}" =~ ^(1|true|yes|on)$ ]]; then
+  export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=1
+else
+  export SP_ALLOW_DESKTOP_FAKE_BLUETOOTH=0
+fi
 
 backup_dir="$(mktemp -d /tmp/starpilot_c4_ui_backup.XXXXXX)"
 backup_manifest="${backup_dir}/.artifact_manifest"
@@ -330,14 +335,38 @@ if [[ "${SP_C4_COMPILE_ONLY:-0}" == "1" ]]; then
 fi
 
 "${PY_BIN}" - <<'PY'
+import dataclasses
+import datetime
+import json
+import os
+
 from openpilot.common.params import Params
-from openpilot.system.version import terms_version, training_version
+from openpilot.system.version import get_build_metadata, terms_version, training_version
 
 params = Params()
+metadata = get_build_metadata()
+channel = os.getenv("SP_C4_METADATA_BRANCH", "StarPilot")
+commit_date = metadata.openpilot.git_commit_date
+try:
+  date = datetime.datetime.fromtimestamp(int(commit_date.strip("'").split()[0])).strftime("%b %d")
+except (ValueError, IndexError):
+  date = ""
+
+metadata_dict = dataclasses.asdict(metadata)
+metadata_dict["channel"] = channel
+params.put("BuildMetadata", json.dumps(metadata_dict))
+params.put("Version", metadata.openpilot.version)
+params.put("GitBranch", channel)
+params.put("GitCommit", metadata.openpilot.git_commit)
+params.put("GitCommitDate", commit_date)
+params.put("GitRemote", metadata.openpilot.git_origin)
+params.put("UpdaterCurrentDescription", f"{metadata.openpilot.version} / {channel} / {metadata.openpilot.git_commit[:7]} / {date}")
 params.put("HasAcceptedTerms", terms_version)
 params.put("CompletedTrainingVersion", training_version)
 params.put_bool("OpenpilotEnabledToggle", True)
 params.put_bool("IsDriverViewEnabled", False)
+if os.getenv("SP_ALLOW_DESKTOP_FAKE_BLUETOOTH") == "1":
+  params.put_bool("BluetoothEnabled", True)
 PY
 
 seed_starpilot_theme

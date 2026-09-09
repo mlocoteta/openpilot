@@ -18,13 +18,12 @@ LONGITUDINAL_ONLY_COLOR = rl.Color(255, 105, 180, 255)
 
 
 def is_longitudinal_only_active(state: UIState) -> bool:
-  """Return true when control is enabled but lateral control is inactive.
+  """Return true when the user has paused lateral while control is enabled.
 
-  Do not use carControl.longActive here: stock-cruise cars intentionally leave
-  that field false while the vehicle's own longitudinal controller is active.
+  carControl.latActive also becomes false when lateral is temporarily unavailable,
+  such as below minimum steer speed, so it does not represent user intent.
   """
-  car_control = state.sm["carControl"]
-  return bool(state.sm["selfdriveState"].enabled and not car_control.latActive)
+  return bool(state.sm["selfdriveState"].enabled and state.sm["starpilotCarState"].pauseLateral)
 
 
 def _override_color_applies(state: UIState) -> bool:

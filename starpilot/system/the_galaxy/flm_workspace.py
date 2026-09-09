@@ -385,6 +385,12 @@ def _require_flm_offroad(params: Params | None = None) -> None:
     raise FLMAnalysisCancelled("FLM analysis stopped because the vehicle went onroad.")
 
 
+def _require_flm_lane_centering_off(params: Params | None = None) -> None:
+  params = params or Params(return_defaults=True)
+  if params.get_bool("LaneCentering"):
+    raise FLMAnalysisCancelled("FLM analysis requires Lane Centering to be off.")
+
+
 def flm_analyzer_running() -> bool:
   process = FLM_ANALYZER_PROCESS
   if process is not None and process.poll() is None:
@@ -557,6 +563,7 @@ def start_flm_background_analysis(route_names: list[str], footage_paths: list[st
   segment_ranges = normalize_segment_ranges(route_names, segment_ranges)
   try:
     _require_flm_offroad()
+    _require_flm_lane_centering_off()
   except FLMAnalysisCancelled:
     return False
 
@@ -879,6 +886,10 @@ def _decode_init_param(init, key: str) -> str:
     return str(value or "")
 
 
+def _init_param_enabled(init_data: dict[str, str], key: str) -> bool:
+  return init_data.get(key, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _car_params_control_path(car_params) -> str:
   angle_type = getattr(car.CarParams.SteerControlType, "angle", None)
   if angle_type is not None and getattr(car_params, "steerControlType", None) == angle_type:
@@ -947,6 +958,7 @@ def _segment_samples(segment_source: RouteSource, params: Params | None = None) 
         "gitCommit": str(getattr(init, "gitCommit", "") or ""),
         "gitBranch": str(getattr(init, "gitBranch", "") or ""),
         "ForceTorqueController": _decode_init_param(init, "ForceTorqueController"),
+        "LaneCentering": _decode_init_param(init, "LaneCentering"),
       }
       continue
     if which == "carState":
@@ -2369,6 +2381,8 @@ def _render_report_html(report: dict[str, Any]) -> str:
 
   start_here_lines = "".join(f"<li>{line}</li>" for line in report.get("addTheseParametersAndStartHere", []))
   start_here_html = f"<section class='flm-card'><h3>Add These Parameters And Start Here</h3><ul>{start_here_lines}</ul></section>" if start_here_lines else ""
+  warnings_html = "".join(f"<li>{warning}</li>" for warning in report.get("warnings", []))
+  warnings_block = f"<section class='flm-card'><h3>Warnings</h3><ul>{warnings_html}</ul></section>" if warnings_html else ""
   findings_block = "".join(findings_html) or "<p class='flm-muted'>No strong findings.</p>"
   profiles_block = "".join(profile_html) or "<p class='flm-muted'>No trial profiles generated.</p>"
   return (
@@ -2388,6 +2402,7 @@ def _render_report_html(report: dict[str, Any]) -> str:
     f"<section class='flm-card'><h3>Control Path</h3><p>{report['car'].get('controlPath', 'unknown')}</p></section>"
     f"<section class='flm-card'><h3>Friction Family</h3><p>{report['capabilities'].get('frictionFamily', 'standard')}</p></section>"
     f"<section class='flm-card'><h3>Nonlinear Torque Map</h3><p>{'Asymmetric left/right siglin' if report['capabilities'].get('nonlinearTorqueMap', {}).get('asymmetric') else ('Symmetric siglin' if report['capabilities'].get('nonlinearTorqueMap') else 'Not detected')}</p></section></div>"
+    f"{warnings_block}"
     f"{''.join(path_html)}"
     f"{start_here_html}"
     f"<h2>Active Findings: {primary_path.get('title', 'Recommendations')}</h2>"
@@ -2403,6 +2418,7 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
   ensure_flm_workspace()
   params = Params(return_defaults=True)
   _require_flm_offroad(params)
+  _require_flm_lane_centering_off(params)
   report_id = report_id or f"flm-{int(time.time())}"
   feedback = feedback or {}
   segment_ranges = normalize_segment_ranges(route_names, segment_ranges)
@@ -2420,8 +2436,11 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
   skipped_segments = 0
   last_skipped_segment = ""
   last_skip_reason = ""
+  lane_centering_excluded_segments = 0
+  lane_centering_excluded_routes: dict[str, int] = {}
   for idx, source in enumerate(sources, start=1):
     _require_flm_offroad(params)
+    _require_flm_lane_centering_off(params)
     _write_flm_status({
       "pid": os.getpid(),
       "startedAt": time.time(),
@@ -2469,6 +2488,14 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
       skipped_segments += 1
       continue
     _require_flm_offroad(params)
+    _require_flm_lane_centering_off(params)
+    if _init_param_enabled(segment_init, "LaneCentering"):
+      lane_centering_excluded_segments += 1
+      lane_centering_excluded_routes[source.route] = lane_centering_excluded_routes.get(source.route, 0) + 1
+      skipped_segments += 1
+      last_skipped_segment = source.segment
+      last_skip_reason = "Lane Centering was enabled in the recorded route."
+      continue
     if segment_car_params is not None:
       car_params_candidates.append(segment_car_params)
     if segment_init and not init_data:
@@ -2480,7 +2507,19 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
     all_samples.extend(segment_samples)
     processed_segments += 1
 
+  for route, count in sorted(lane_centering_excluded_routes.items()):
+    warnings.append(
+      f"{route}: excluded {count} segment(s) because Lane Centering was enabled when they were recorded. "
+      "Turn it off before recording routes for FLM."
+    )
+
   if not car_params_candidates:
+    if lane_centering_excluded_segments:
+      excluded_routes = ", ".join(sorted(lane_centering_excluded_routes))
+      raise RuntimeError(
+        "All selected FLM segments were recorded with Lane Centering enabled and were excluded. "
+        f"Turn Lane Centering off, record a fresh route, and try again ({excluded_routes})."
+      )
     raise RuntimeError("No carParams were found in the selected routes.")
 
   _require_flm_offroad(params)
@@ -2619,6 +2658,9 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
       "processedSegments": processed_segments,
       "skippedSegments": skipped_segments,
       "usedQlogFallback": used_qlog,
+      "laneCenteringExcludedSegments": lane_centering_excluded_segments,
+      "laneCenteringExcludedRoutes": lane_centering_excluded_routes,
+      "laneCenteringRequiredOff": True,
     },
     "primaryPathKey": path_decision["primaryPathKey"],
     "selectedPathKey": path_decision["primaryPathKey"],

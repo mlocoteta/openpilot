@@ -10,17 +10,18 @@ from openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager import Widget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets import (
   SetSpeedWidget, SpeedLimitWidget, PedalIconsWidget,
   AetherGaugeWidget, PersonalityButtonWidget, DriverMonitorWidget,
-  SteeringWheelWidget, StoppedTimerWidget
+  SteeringWheelWidget, StoppedTimerWidget, ModelSourceWidget
 )
 from openpilot.selfdrive.ui.onroad.starpilot.stopping_point import render_stopping_point
 from openpilot.selfdrive.ui.onroad.starpilot.pause_indicators import render_lateral_paused, render_longitudinal_paused
-from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import render_pulse_glide
+from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import get_pulse_glide_border_color, render_pulse_glide
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
 from openpilot.selfdrive.ui.onroad.starpilot.favorite_radial_menu import FavoriteRadialMenu
 from openpilot.selfdrive.ui.onroad.starpilot.weather_icon import render_weather_icon
 from openpilot.selfdrive.ui.lib.starpilot_status import (
   get_screen_edge_color,
 )
+from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_roundness
 from openpilot.starpilot.common.favorite_slots import (
   build_favorite_slot_options,
   filter_favorite_slot_options,
@@ -70,6 +71,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._pedals_widget = PedalIconsWidget()
     self._personality_button_widget = PersonalityButtonWidget()
     self._driver_monitor_widget = DriverMonitorWidget(self.driver_state_renderer)
+    self._model_source_widget = ModelSourceWidget()
     self._stopped_timer_widget = StoppedTimerWidget(self.is_in_reverse)
 
     # Register to layout zones
@@ -78,6 +80,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self.layout_manager.register_widget("left", self._aethergauge_widget)
     self.layout_manager.register_widget("right", self._steering_wheel_widget)
     self.layout_manager.register_widget("right", self._pedals_widget)
+    self.layout_manager.register_widget("right_center", self._model_source_widget)
     self.layout_manager.register_widget("bottom", self._personality_button_widget)
     self.layout_manager.register_widget("bottom", self._driver_monitor_widget)
 
@@ -89,6 +92,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._child(self._pedals_widget)
     self._child(self._personality_button_widget)
     self._child(self._driver_monitor_widget)
+    self._child(self._model_source_widget)
     self._child(self._stopped_timer_widget)
 
   def _update_state(self) -> None:
@@ -97,8 +101,9 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _render(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
-    border_color = get_screen_edge_color(ui_state)
-    rl.draw_rectangle_rounded(rect, 0.12, 10, border_color)
+    border_roundness = get_border_roundness(rect, border_width)
+    border_color = get_pulse_glide_border_color(ui_state.sm, get_screen_edge_color(ui_state))
+    rl.draw_rectangle_rounded(rect, border_roundness, 10, border_color)
     render_background_effects(rect, border_width)
 
     # The favorite menu has first claim on the lower-left gesture. Filtering
@@ -156,7 +161,8 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _draw_border(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.12, 10, border_width, rl.BLACK)
+    border_roundness = get_border_roundness(rect, border_width)
+    rl.draw_rectangle_rounded_lines_ex(rect, border_roundness, 10, border_width, rl.BLACK)
     border_rect = rl.Rectangle(rect.x + border_width, rect.y + border_width,
                                 rect.width - 2 * border_width, rect.height - 2 * border_width)
     render_overlay(border_rect, border_width)
@@ -225,7 +231,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Check if click maps to any of the layout widgets
     for zone in self.layout_manager.zones.values():
       for widget in zone:
-        if widget.is_visible and rl.check_collision_point_rec(mouse_pos, widget.rect):
+        if widget.is_visible and widget.blocks_pointer and rl.check_collision_point_rec(mouse_pos, widget.rect):
           return
     super()._handle_mouse_press(mouse_pos)
 

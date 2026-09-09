@@ -21,6 +21,7 @@ from openpilot.selfdrive.ui.mici.onroad.starpilot_status import (
 )
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
+from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import get_pulse_glide_border_color
 from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import get_traffic_border_colors
 from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_width
 from openpilot.starpilot.common.favorite_slots import (
@@ -800,17 +801,6 @@ class AugmentedRoadView(CameraView):
       gui_app.mark_progress("mici.onroad.after_sidebar")
     if draw_hud_controls and (camera_view_none or is_driver_stream or not in_reverse):
       self._favorite_slots.render(self._content_rect)
-    if camera_view_none or is_driver_stream or not in_reverse:
-      self._draw_border()
-
-    self._bookmark_icon.render(self.rect)
-
-    # Draw darkened background and text if not onroad
-    if not ui_state.started:
-      rl.draw_rectangle(int(self.rect.x), int(self.rect.y), int(self.rect.width), int(self.rect.height), rl.Color(0, 0, 0, 175))
-      self._offroad_label.render(self._content_rect)
-
-    # C4 sidecam renders last (on top) and only when showing the road camera
     # Inset by the border so the pill never covers the green/orange status border.
     border = self._get_border_width()
     preview_rect = rl.Rectangle(
@@ -820,6 +810,16 @@ class AugmentedRoadView(CameraView):
       max(1, self._content_rect.height - 2 * border),
     )
     self._pip_sidecam.render(preview_rect)
+
+    if camera_view_none or is_driver_stream or not in_reverse:
+      self._draw_border()
+
+    self._bookmark_icon.render(self.rect)
+
+    # Draw darkened background and text if not onroad
+    if not ui_state.started:
+      rl.draw_rectangle(int(self.rect.x), int(self.rect.y), int(self.rect.width), int(self.rect.height), rl.Color(0, 0, 0, 175))
+      self._offroad_label.render(self._content_rect)
 
     # publish uiDebug
     msg = messaging.new_message('uiDebug')
@@ -842,7 +842,8 @@ class AugmentedRoadView(CameraView):
       int(self._content_rect.width),
       int(self._content_rect.height),
     )
-    rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, get_border_color(ui_state))
+    border_color = get_pulse_glide_border_color(ui_state.sm, get_border_color(ui_state))
+    rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, border_color)
 
     if (colors := get_traffic_border_colors()) is not None:
       for x, w, color in (

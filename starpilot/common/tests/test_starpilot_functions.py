@@ -1,4 +1,6 @@
+import json
 import shutil
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -30,6 +32,57 @@ class FakeParams:
 class FakeThreadManager:
   def is_thread_alive(self, name):
     return False
+
+
+def test_publish_maps_progress_uses_mapd_file_progress_without_synthetic_storage(monkeypatch):
+  params_memory = FakeParams()
+  progress = SimpleNamespace(
+    active=True,
+    cancelled=False,
+    downloadedFiles=2,
+    totalFiles=10,
+    locationDetails=[],
+    locations=[],
+  )
+  monkeypatch.setattr(sf.time, "monotonic", lambda: 110.0)
+
+  payload = sf._publish_maps_progress(
+    params_memory,
+    "country:CA",
+    baseline_storage_bytes=1_000,
+    started_at=100.0,
+    progress=progress,
+    cached_estimate_bytes=800,
+  )
+
+  assert payload["storageBytes"] == 1_000
+  assert payload["storageKnown"] is True
+  assert payload["downloadedBytes"] == 0
+  assert payload["bytesPerSecond"] == 0
+  assert payload["etaSeconds"] == 40
+  assert payload["estimateSource"] == "previous_additional_storage"
+  assert json.loads(params_memory.get(sf.MAPS_DOWNLOAD_PROGRESS_PARAM))["storageBytes"] == 1_000
+
+
+def test_reconcile_maps_storage_records_selection_delta(monkeypatch):
+  params = FakeParams()
+  cache = sf.load_maps_storage_cache("")
+  monkeypatch.setattr(sf, "storage_bytes", lambda _path: 18_000)
+
+  total_storage = sf._reconcile_maps_storage(
+    params,
+    cache,
+    selected_key="country:CA",
+    baseline_storage_bytes=10_000,
+    total_files=80,
+    updated_at="2026-08-31T00:00:00",
+  )
+
+  persisted = sf.load_maps_storage_cache(params.get(sf.MAPS_DOWNLOAD_SIZE_CACHE_PARAM))
+  assert total_storage == 18_000
+  assert persisted.storage_bytes == 18_000
+  assert persisted.selection_estimate_bytes("country:CA") == 8_000
+  assert persisted.selection_total_files("country:CA") == 80
 
 
 @pytest.mark.parametrize("extension,image_format", [("jpg", "JPEG"), ("png", "PNG")])

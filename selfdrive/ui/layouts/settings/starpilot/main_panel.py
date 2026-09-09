@@ -17,7 +17,7 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.system_settings import St
 from openpilot.selfdrive.ui.layouts.settings.starpilot.appearance import StarPilotAppearanceLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.vehicle import StarPilotVehicleSettingsLayout
 
-from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, SPACING, BreadcrumbController, AETHER_LIST_METRICS, AetherListColors, draw_rounded_fill, draw_rounded_stroke
+from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, SPACING, BreadcrumbController, AETHER_LIST_METRICS, AetherListColors, draw_hud_background
 
 class StarPilotLayout(Widget):
   CATEGORIES = [
@@ -280,22 +280,7 @@ class StarPilotLayout(Widget):
 
     # 0. Draw top bar with HubTile-style purple glow
     glass_rect = rl.Rectangle(shell_x, rect.y + 2, shell_w, TOP_BAR_HEIGHT - 4)
-
-    GLOW = AetherListColors.PRIMARY
-    BAR_FILL = rl.Color(12, 10, 18, 255)
-
-    # 0a. Purple glow rings — 4 concentric, fading outward (HubTile parity)
-    for i in range(4, 0, -1):
-      off = i * 2.5
-      gr = rl.Rectangle(glass_rect.x - off, glass_rect.y - off, glass_rect.width + off * 2, glass_rect.height + off * 2)
-      a = int(25 * (1.0 - i / 5))
-      draw_rounded_fill(gr, rl.Color(GLOW.r, GLOW.g, GLOW.b, max(0, min(255, a))), radius_px=34)
-
-    # 0b. Dark fill — strict parity with HubTile _HUD_BG_ON
-    draw_rounded_fill(glass_rect, BAR_FILL, radius_px=34)
-
-    # 0c. Full bright purple border — strict parity
-    draw_rounded_stroke(glass_rect, GLOW, radius_px=34)
+    draw_hud_background(glass_rect, AetherListColors.PRIMARY, radius_px=34)
 
     # 1. Draw breadcrumbs in top bar
     crumb_rect = rl.Rectangle(glass_rect.x, glass_rect.y, glass_rect.width, glass_rect.height)
@@ -319,15 +304,16 @@ class StarPilotLayout(Widget):
       self._breadcrumbs.handle_click(action)
 
   def _handle_mouse_event(self, mouse_event):
-    pass
-
+    self._breadcrumbs.update_interaction(mouse_event.pos)
 
   def show_event(self):
     super().show_event()
+    self._breadcrumbs.cancel_interaction()
     if self._current_panel != StarPilotPanelType.MAIN:
       self._panels[self._current_panel].instance.show_event()
 
   def hide_event(self):
     super().hide_event()
+    self._breadcrumbs.cancel_interaction()
     if self._current_panel != StarPilotPanelType.MAIN:
       self._panels[self._current_panel].instance.hide_event()

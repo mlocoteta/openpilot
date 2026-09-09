@@ -75,6 +75,7 @@ class TestFordSafetyBase(common.CarSafetyTest):
                                MSG_LateralMotionControl2, MSG_IPMA_Data]}
 
   STEER_MESSAGE = 0
+  STOCK_LONGITUDINAL = False
 
   # Curvature control limits
   LKA_STEERING = False
@@ -169,6 +170,11 @@ class TestFordSafetyBase(common.CarSafetyTest):
     }
     return self.packer.make_can_msg_safety("Lane_Assist_Data1", 0, values)
 
+  def _extended_lka_msg(self, angle_mode=False):
+    msg = self._lkas_command_msg(0)
+    msg[0].data[4] |= 0x2 | int(angle_mode)
+    return msg
+
   # LCA command
   def _lat_ctl_msg(self, enabled: bool, path_offset: float, path_angle: float, curvature: float, curvature_rate: float):
     if self.STEER_MESSAGE == MSG_LateralMotionControl:
@@ -198,6 +204,17 @@ class TestFordSafetyBase(common.CarSafetyTest):
       "TjaButtnOnOffPress": 1 if button == Buttons.TJA_TOGGLE else 0,
     }
     return self.packer.make_can_msg_safety("Steering_Data_FD1", bus, values)
+
+  def _combined_cancel_resume_msg(self, pressed: bool):
+    values = {"CcAslButtnCnclResPress": int(pressed)}
+    return self.packer.make_can_msg_safety("Steering_Data_FD1", 0, values)
+
+  def _pcm_main_on_msg(self, main_on: bool):
+    values = {
+      "BpedDrvAppl_D_Actl": 1,
+      "CcStat_D_Actl": 3 if main_on else 0,
+    }
+    return self.packer.make_can_msg_safety("EngBrakeData", 0, values)
 
   def test_rx_hook(self):
     # checksum, counter, and quality flag checks
@@ -364,6 +381,25 @@ class TestFordSafetyBase(common.CarSafetyTest):
         should_tx |= self.LKA_STEERING and controls_allowed and action in (2, 4)
         self.assertEqual(should_tx, self._tx(self._lkas_command_msg(action)))
 
+  def test_extended_angle_mode_rejected(self):
+    if self.LKA_STEERING:
+      return
+
+    self.assertTrue(self._tx(self._extended_lka_msg()))
+    self.assertFalse(self._tx(self._extended_lka_msg(angle_mode=True)))
+
+  def test_extended_curvature_signals(self):
+    if self.LKA_STEERING:
+      return
+
+    speed = 15.0
+    self.safety.set_controls_allowed(True)
+    self._reset_curvature_measurement(0.0, speed)
+    self.assertTrue(self._tx(self._extended_lka_msg()))
+    self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.0, 0.001, 0.0005)))
+    self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.1, 0.0, 0.001, 0.0005)))
+    self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, 0.02, 0.001, 0.0005)))
+
   def test_acc_buttons(self):
     for allowed in (0, 1):
       self.safety.set_controls_allowed(allowed)
@@ -381,6 +417,25 @@ class TestFordSafetyBase(common.CarSafetyTest):
       for bus in (0, 2):
         self.assertEqual(enabled, self._tx(self._acc_button_msg(Buttons.CANCEL, bus)))
 
+  def test_stock_resume_relay_requires_physical_button_and_cruise_main(self):
+    self.safety.set_controls_allowed(False)
+    self._rx(self._pcm_main_on_msg(True))
+    for bus in (0, 2):
+      self.assertFalse(self._tx(self._acc_button_msg(Buttons.RESUME, bus)))
+
+    self._rx(self._combined_cancel_resume_msg(True))
+    for bus in (0, 2):
+      self.assertEqual(self.STOCK_LONGITUDINAL, self._tx(self._acc_button_msg(Buttons.RESUME, bus)))
+
+    self._rx(self._combined_cancel_resume_msg(False))
+    for bus in (0, 2):
+      self.assertFalse(self._tx(self._acc_button_msg(Buttons.RESUME, bus)))
+
+    self._rx(self._pcm_main_on_msg(False))
+    self._rx(self._combined_cancel_resume_msg(True))
+    for bus in (0, 2):
+      self.assertFalse(self._tx(self._acc_button_msg(Buttons.RESUME, bus)))
+
   def _toggle_aol(self, toggle_on):
     # EngBrakeData, CcStat_D_Actl is the cruise state
     # 3 is standby (main on), 5 is active (engaged)
@@ -394,6 +449,7 @@ class TestFordSafetyBase(common.CarSafetyTest):
 
 class TestFordCANFDStockSafety(TestFordSafetyBase):
   STEER_MESSAGE = MSG_LateralMotionControl2
+  STOCK_LONGITUDINAL = True
 
   TX_MSGS = [
     [MSG_Steering_Data_FD1, 0], [MSG_Steering_Data_FD1, 2], [MSG_ACCDATA_3, 0], [MSG_Lane_Assist_Data1, 0],
@@ -411,41 +467,9 @@ class TestFordCANFDStockSafety(TestFordSafetyBase):
     self.safety.set_safety_hooks(CarParams.SafetyModel.ford, FordSafetyFlags.CANFD)
     self.safety.init_tests()
 
-  def _extended_lka_msg(self, angle_mode=False, shadow_curvature=0.0):
-    msg = self._lkas_command_msg(0)
-    raw_shadow = int(round(shadow_curvature / 1e-6)) & 0xFFFF
-    msg[0].data[4] |= 0x2 | int(angle_mode)
-    msg[0].data[5] = raw_shadow >> 8
-    msg[0].data[6] = raw_shadow & 0xFF
-    return msg
-
-  def test_extended_curvature_signals(self):
-    speed = 15.0
-    self.safety.set_controls_allowed(True)
-    self._reset_curvature_measurement(0.0, speed)
-    self.assertTrue(self._tx(self._extended_lka_msg()))
-    self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.0, 0.001, 0.0005)))
-
-    self.assertTrue(self._tx(self._extended_lka_msg()))
-    self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.1, 0.0, 0.001, 0.0005)))
-
-  def test_extended_angle_signals(self):
-    speed = 15.0
-    curvature = 0.005
-    self.safety.set_controls_allowed(True)
-    self._reset_curvature_measurement(curvature, speed)
-    self.assertTrue(self._tx(self._extended_lka_msg(angle_mode=True, shadow_curvature=curvature)))
-    self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.02, 0.0, 0.0)))
-
-    self.assertTrue(self._tx(self._extended_lka_msg(angle_mode=True, shadow_curvature=curvature)))
-    self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, 0.2, 0.0, 0.0)))
-
-    self.assertTrue(self._tx(self._extended_lka_msg(angle_mode=True, shadow_curvature=-curvature)))
-    self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, 0.01, 0.0, 0.0)))
-
-
 class TestFordStockSafety(TestFordSafetyBase):
   STEER_MESSAGE = MSG_LateralMotionControl
+  STOCK_LONGITUDINAL = True
 
   TX_MSGS = [
     [MSG_Steering_Data_FD1, 0], [MSG_Steering_Data_FD1, 2], [MSG_ACCDATA_3, 0], [MSG_Lane_Assist_Data1, 0],

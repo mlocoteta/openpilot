@@ -518,7 +518,7 @@ class Tici(HardwareBase):
 
     # eSIM prime
     dest = "/etc/NetworkManager/system-connections/esim.nmconnection"
-    if self.get_sim_lpa().is_comma_profile(sim_id) and not os.path.exists(dest):
+    if LPABase.is_comma_profile(sim_id) and not os.path.exists(dest):
       with open(Path(__file__).parent/'esim.nmconnection') as f, tempfile.NamedTemporaryFile(mode='w') as tf:
         dat = f.read()
         dat = dat.replace("sim-id=", f"sim-id={sim_id}")

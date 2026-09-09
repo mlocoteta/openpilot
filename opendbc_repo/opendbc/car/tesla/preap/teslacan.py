@@ -88,8 +88,7 @@ class TeslaCANPreAP:
     else:
       values.update(_STW_DEFAULTS)
 
-    # Preserve the live stalk layout, but force VSL enable on engage/resume spoofs.
-    values["VSL_Enbl_Rq"] = 0 if button_to_press == 1 else 1
+    values["VSL_Enbl_Rq"] = 1
 
     data = self.packer.make_can_msg("STW_ACTN_RQ", bus, values)[1]
     values["CRC_STW_ACTN_RQ"] = _crc8_stw(data[:7])

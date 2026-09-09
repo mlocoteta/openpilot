@@ -12,6 +12,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
 from openpilot.selfdrive.ui.lib.ui_param_cache import shared_ui_params
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.starpilot.common.lateral_only_experimental import lateral_only_experimental_available
 from openpilot.system.hardware import HARDWARE, PC
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
@@ -97,6 +98,7 @@ class UIState:
     self.panda_type: log.PandaState.PandaType = log.PandaState.PandaType.unknown
     self.personality: log.LongitudinalPersonality = log.LongitudinalPersonality.standard
     self.has_longitudinal_control: bool = False
+    self.experimental_mode_available: bool = False
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
     self._param_update_time: float = 0.0
@@ -285,6 +287,12 @@ class UIState:
         self.has_longitudinal_control = self.params.get_bool("AlphaLongitudinalEnabled")
       else:
         self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+      self.experimental_mode_available = (
+        self.has_longitudinal_control or
+        lateral_only_experimental_available(self.CP)
+      )
+    else:
+      self.experimental_mode_available = False
     self._param_update_time = time.monotonic()
 
 

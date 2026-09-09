@@ -14,6 +14,7 @@ from openpilot.system.ui.lib.application import ASSETS_DIR, gui_app, FontWeight,
 from openpilot.selfdrive.ui.lib.mode_banner import ModeBannerVariant, get_mode_banner_variant, mode_atom_color
 from openpilot.selfdrive.ui.lib.starpilot_version import DEFAULT_HOME_SCREEN_NAME, STARPILOT_DISPLAY_VERSION, home_screen_name
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot.common.model_lab import model_lab_pair_display_name_from_params
 
 HEAD_BUTTON_FONT_SIZE = 40
 HOME_PADDING = 8
@@ -161,6 +162,8 @@ class MiciHomeLayout(Widget):
     self._home_screen_name = DEFAULT_HOME_SCREEN_NAME
 
     self._mode_status_atom = ModeStatusAtom()
+    self._bluetooth_icon = IconWidget("icons_mici/settings/bluetooth.png", (38, 38), opacity=0.9)
+    self._bluetooth_icon.set_visible(False)
     self._egpu_icon = IconWidget("icons_mici/egpu.png", (50, 37))
     self._egpu_icon_gray = IconWidget("icons_mici/egpu_gray.png", (50, 37))
     self._mic_icon = IconWidget("icons_mici/microphone.png", (32, 46))
@@ -168,6 +171,7 @@ class MiciHomeLayout(Widget):
     self._status_bar_layout = HBoxLayout([
       IconWidget("icons_mici/settings.png", (48, 48), opacity=0.9),
       NetworkIcon(),
+      self._bluetooth_icon,
       self._mode_status_atom,
       self._egpu_icon,
       self._egpu_icon_gray,
@@ -188,6 +192,7 @@ class MiciHomeLayout(Widget):
 
   def _update_params(self):
     self._experimental_mode = ui_state.params.get_bool("ExperimentalMode")
+    self._bluetooth_icon.set_visible(ui_state.params.get_bool("BluetoothEnabled"))
     self._mode_status_atom.refresh()
     self._home_screen_name = home_screen_name(ui_state.params)
     self._openpilot_label.set_text(self._home_screen_name)
@@ -196,7 +201,8 @@ class MiciHomeLayout(Widget):
     def _clean_model_name(value: str) -> str:
       return re.sub(r"[🗺️👀📡]", "", value).replace("(Default)", "").strip()
 
-    current_name = _clean_model_name(ui_state.params.get("DrivingModelName", encoding="utf-8") or "")
+    current_name = (model_lab_pair_display_name_from_params(ui_state.params) or
+                    _clean_model_name(ui_state.params.get("DrivingModelName", encoding="utf-8") or ""))
     if not current_name:
       default_name = ui_state.params.get_default_value("DrivingModelName")
       if isinstance(default_name, bytes):
@@ -217,8 +223,8 @@ class MiciHomeLayout(Widget):
 
     if self._mouse_down_t is not None:
       if time.monotonic() - self._mouse_down_t > 0.5:
-        # long gating for experimental mode - only allow toggle if longitudinal control is available
-        if ui_state.has_longitudinal_control:
+        # Only allow the toggle when this vehicle exposes Experimental Mode.
+        if ui_state.experimental_mode_available:
           self._experimental_mode = not self._experimental_mode
           ui_state.params.put("ExperimentalMode", self._experimental_mode)
           self._mode_status_atom.refresh()

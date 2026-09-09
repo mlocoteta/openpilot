@@ -221,6 +221,11 @@ struct StarPilotPlan @0xf98d843bfd7004a3 {
   trackingLead @36 :Bool;
   stopSignConfirmed @37 :Bool;
   pulseGlideCoasting @38 :Bool;  # developer-only P&G phase for on-road status UI
+  # Curve Speed Controller diagnostics, for tuning and rollout validation
+  cscOverridden @39 :Bool;          # driver cancelled this curve with RES+
+  cscLearnedLatAccel @40 :Float32;  # learned comfort at the current curvature, before margin
+  cscBindingDistance @41 :Float32;  # distance to the horizon point setting the target, m
+  approachStopLength @42 :Float32;  # pre-commit distance to a detected stop, m; 0 when off
 }
 
 struct StarPilotRadarState @0xb86e6369214c01c8 {
@@ -265,6 +270,7 @@ struct StarPilotSelfdriveState @0xf416ec09499d9d19 {
   alertSize @3 :AlertSize;
   alertType @4 :Text;
   alertSound @5 :Car.CarControl.HUDControl.AudibleAlert;
+  vEgo @6 :Float32;
 
   enum AlertStatus {
     normal @0;

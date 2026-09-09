@@ -94,3 +94,13 @@ class TestStateMachine:
         self.update()
         assert self.state_machine.state == state
         self.events.clear()
+
+  def test_lateral_override_returns_to_enabled_after_release(self):
+    self.state_machine.state = State.enabled
+    self.events.add(make_event([ET.OVERRIDE_LATERAL]))
+    self.update()
+    assert self.state_machine.state == State.overriding
+
+    self.events.clear()
+    self.update()
+    assert self.state_machine.state == State.enabled

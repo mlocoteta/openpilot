@@ -74,7 +74,6 @@ def get_test_starpilot_toggles() -> SimpleNamespace:
     disable_openpilot_long=False,
     force_fingerprint=False,
     lock_doors=False,
-    reverse_cruise_increase=False,
     sng_hack=False,
     subaru_sng=False,
     subaru_sng_manual_parking_brake=False,
@@ -165,13 +164,18 @@ class TestCarInterfaces:
       "Center_Stack_2": {"LKAS_Button": 1},
     }, is_ram=True)
 
-  def test_chrysler_wd_mod_enables_steer_to_zero(self):
+  @pytest.mark.parametrize("candidate", (
+    CHRYSLER_CAR.CHRYSLER_PACIFICA_2020,
+    CHRYSLER_CAR.JEEP_GRAND_CHEROKEE,
+    CHRYSLER_CAR.JEEP_GRAND_CHEROKEE_2019,
+  ))
+  def test_chrysler_steer_to_zero_module(self, candidate):
     fingerprint = {bus: {} for bus in range(8)}
     fingerprint[0][0x4FF] = 8
     toggles = get_test_starpilot_toggles()
 
     car_params = ChryslerCarInterface.get_params(
-      CHRYSLER_CAR.CHRYSLER_PACIFICA_2020,
+      candidate,
       fingerprint,
       [],
       alpha_long=False,
@@ -182,7 +186,7 @@ class TestCarInterfaces:
     assert car_params.minSteerSpeed > 0.
 
     fp_car_params = ChryslerCarInterface.get_starpilot_params(
-      CHRYSLER_CAR.CHRYSLER_PACIFICA_2020,
+      candidate,
       fingerprint,
       [],
       car_params,
@@ -206,11 +210,14 @@ class TestCarInterfaces:
       button_message="CRUISE_BUTTONS",
       auto_high_beam=0,
     )
+    controller.update(CC, CS, 0, toggles)
+    controller.update(CC, CS, 0, toggles)
     _, can_sends = controller.update(CC, CS, 0, toggles)
 
     lkas_parser = CANParser(CHRYSLER_DBC[car_params.carFingerprint][Bus.pt], [("LKAS_COMMAND", 50)], 0)
     lkas_parser.update([0, can_sends])
     assert lkas_parser.vl["LKAS_COMMAND"]["LKAS_CONTROL_BIT"] == 1
+    assert lkas_parser.vl["LKAS_COMMAND"]["STEERING_TORQUE"] != 0
 
   @pytest.mark.parametrize("candidate", (CHRYSLER_CAR.JEEP_GRAND_CHEROKEE, CHRYSLER_CAR.JEEP_GRAND_CHEROKEE_2019))
   def test_jeep_brake_hold_safety_capability_is_provisioned(self, candidate):
@@ -292,6 +299,89 @@ class TestCarInterfaces:
       toggles,
     )
     assert fp_car_params.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
+
+  def test_hyundai_elantra_hev_auto_aol_uses_main_engage_flag(self):
+    toggles = get_test_starpilot_toggles()
+    toggles.always_on_lateral_main = True
+    fingerprint = {bus: {} for bus in range(8)}
+
+    car_params = HyundaiCarInterface.get_params(
+      HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2024,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=toggles,
+    )
+    fp_car_params = HyundaiCarInterface.get_starpilot_params(
+      HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2024,
+      fingerprint,
+      [],
+      car_params,
+      toggles,
+    )
+
+    assert fp_car_params.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_ON_ENGAGE.value
+    assert not (fp_car_params.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value)
+
+  def test_hyundai_elantra_hev_lkas_aol_uses_lkas_engage_flag(self):
+    toggles = get_test_starpilot_toggles()
+    toggles.always_on_lateral_lkas = True
+    fingerprint = {bus: {} for bus in range(8)}
+
+    car_params = HyundaiCarInterface.get_params(
+      HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2024,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=toggles,
+    )
+    fp_car_params = HyundaiCarInterface.get_starpilot_params(
+      HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2024,
+      fingerprint,
+      [],
+      car_params,
+      toggles,
+    )
+
+    assert fp_car_params.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
+    assert not (fp_car_params.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_ON_ENGAGE.value)
+
+  @pytest.mark.parametrize(
+    ("candidate", "sets_main_aol_flag"),
+    (
+      (HYUNDAI_CAR.HYUNDAI_SONATA_HYBRID, True),
+      (HYUNDAI_CAR.HYUNDAI_SONATA, False),
+    ),
+  )
+  def test_hyundai_main_aol_engage_flag_is_scoped_to_hybrid(self, candidate, sets_main_aol_flag):
+    toggles = get_test_starpilot_toggles()
+    toggles.always_on_lateral_main = True
+    fingerprint = {bus: {} for bus in range(8)}
+
+    car_params = HyundaiCarInterface.get_params(
+      candidate,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=toggles,
+    )
+    fp_car_params = HyundaiCarInterface.get_starpilot_params(
+      candidate,
+      fingerprint,
+      [],
+      car_params,
+      toggles,
+    )
+
+    has_main_aol_flag = bool(fp_car_params.safetyConfigs[-1].safetyParam &
+                             HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_ON_ENGAGE.value)
+    assert has_main_aol_flag is sets_main_aol_flag
 
   def test_toyota_disable_openpilot_long_sets_stock_long_safety_flag(self):
     CarInterface = interfaces[TOYOTA_CAR.TOYOTA_PRIUS_TSS2]

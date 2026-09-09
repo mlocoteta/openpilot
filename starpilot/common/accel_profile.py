@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 
-from openpilot.selfdrive.controls.lib.longitudinal_planner import get_max_accel
+from openpilot.common.constants import CV
 
 ACCELERATION_PROFILES = {
   "STANDARD": 0,
@@ -34,6 +34,32 @@ CUSTOM_ACCEL_PROFILE_PARAM_KEYS = [key for key, _ in CUSTOM_ACCEL_PROFILE_PARAM_
 CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY = "CustomAccelProfileInitialized"
 CUSTOM_ACCEL_PROFILE_VALUE_MIN = 0.0
 CUSTOM_ACCEL_PROFILE_VALUE_MAX = 6.0
+
+CUSTOM_ACCEL_PROFILE_BREAKPOINTS_INITIALIZED_KEY = "CustomAccelProfileBreakpointsInitialized"
+CUSTOM_ACCEL_PROFILE_POINT_COUNT_KEY = "CustomAccelProfilePointCount"
+CUSTOM_ACCEL_PROFILE_MIN_POINTS = 2
+CUSTOM_ACCEL_PROFILE_MAX_POINTS = 12
+CUSTOM_ACCEL_PROFILE_BREAKPOINT_MIN_MPH = 0.0
+CUSTOM_ACCEL_PROFILE_BREAKPOINT_MAX_MPH = 150.0
+CUSTOM_ACCEL_PROFILE_DEFAULT_POINT_COUNT = len(A_CRUISE_MAX_BP_CUSTOM)
+CUSTOM_ACCEL_PROFILE_DEFAULT_BREAKPOINTS_MPH = [
+  speed / CV.MPH_TO_MS
+  for speed in (*A_CRUISE_MAX_BP_CUSTOM, 45.0, 50.0, 55.0, 60.0, 65.0)
+]
+CUSTOM_ACCEL_PROFILE_BREAKPOINT_PARAM_KEYS = [
+  f"CustomAccelProfileBreakpoint{index + 1}MPH"
+  for index in range(CUSTOM_ACCEL_PROFILE_MAX_POINTS)
+]
+CUSTOM_ACCEL_PROFILE_POINT_VALUE_PARAM_KEYS = [
+  f"CustomAccelProfilePoint{index + 1}Accel"
+  for index in range(CUSTOM_ACCEL_PROFILE_MAX_POINTS)
+]
+CUSTOM_ACCEL_PROFILE_CURVE_PARAM_KEYS = [
+  CUSTOM_ACCEL_PROFILE_POINT_COUNT_KEY,
+  *CUSTOM_ACCEL_PROFILE_BREAKPOINT_PARAM_KEYS,
+  *CUSTOM_ACCEL_PROFILE_POINT_VALUE_PARAM_KEYS,
+]
+CUSTOM_ACCEL_PROFILE_EXTRA_POINT_VALUES = [0.55, 0.50, 0.45, 0.40, 0.35]
 
 A_CRUISE_MAX_VALS_ECO_EV =        [1.50, 1.34, 1.18, 1.02, 0.90, 0.74, 0.58]
 A_CRUISE_MAX_VALS_STANDARD_EV =   [2.00, 1.84, 1.64, 1.44, 1.24, 1.08, 0.84]
@@ -111,8 +137,11 @@ def get_accel_profile_curve_values(acceleration_profile, ev_tuning=True, truck_t
   return list(A_CRUISE_MAX_VALS_STANDARD_GAS)
 
 
-def interpolate_accel_profile(v_ego, curve_values):
-  return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, curve_values))
+def interpolate_accel_profile(v_ego, curve_values, breakpoints=None):
+  curve_breakpoints = A_CRUISE_MAX_BP_CUSTOM if breakpoints is None else breakpoints
+  if len(curve_breakpoints) != len(curve_values) or len(curve_breakpoints) < CUSTOM_ACCEL_PROFILE_MIN_POINTS:
+    raise ValueError("Acceleration profile requires matching breakpoint and value arrays")
+  return float(akima_interp(v_ego, curve_breakpoints, curve_values))
 
 
 def get_max_allowed_accel(v_ego, ev_tuning=True, truck_tuning=False):
@@ -156,16 +185,75 @@ def custom_accel_profile_is_initialized(initialized_flag, raw_values_by_key):
   return False
 
 
-def coerce_custom_accel_profile_values(raw_values, acceleration_profile, ev_tuning=True, truck_tuning=False):
+def coerce_custom_accel_profile_values(raw_values, acceleration_profile, ev_tuning=True, truck_tuning=False, point_count=None):
   defaults = get_accel_profile_curve_values(acceleration_profile, ev_tuning, truck_tuning)
+  expected_count = len(defaults) if point_count is None else point_count
   values = []
-  for idx, default in enumerate(defaults):
+  for idx in range(expected_count):
+    default = defaults[min(idx, len(defaults) - 1)]
     try:
       value = float(raw_values[idx])
     except (IndexError, TypeError, ValueError):
       value = default
     values.append(min(CUSTOM_ACCEL_PROFILE_VALUE_MAX, max(CUSTOM_ACCEL_PROFILE_VALUE_MIN, value)))
   return values
+
+
+def parse_custom_accel_profile_curve(raw_count, raw_breakpoints_mph, raw_values):
+  try:
+    numeric_count = float(_decode_param_value(raw_count))
+  except (TypeError, ValueError):
+    raise ValueError("Breakpoint count must be a whole number") from None
+
+  if not math.isfinite(numeric_count) or not numeric_count.is_integer():
+    raise ValueError("Breakpoint count must be a whole number")
+
+  count = int(numeric_count)
+  if not CUSTOM_ACCEL_PROFILE_MIN_POINTS <= count <= CUSTOM_ACCEL_PROFILE_MAX_POINTS:
+    raise ValueError(
+      f"Breakpoint count must be between {CUSTOM_ACCEL_PROFILE_MIN_POINTS} and {CUSTOM_ACCEL_PROFILE_MAX_POINTS}"
+    )
+
+  if len(raw_breakpoints_mph) < count or len(raw_values) < count:
+    raise ValueError("The configured breakpoint count exceeds the available curve points")
+
+  breakpoints_mph = []
+  values = []
+  for index in range(count):
+    try:
+      breakpoint_mph = float(_decode_param_value(raw_breakpoints_mph[index]))
+      value = float(_decode_param_value(raw_values[index]))
+    except (TypeError, ValueError):
+      raise ValueError(f"Curve point {index + 1} must contain numeric values") from None
+
+    if not math.isfinite(breakpoint_mph) or not CUSTOM_ACCEL_PROFILE_BREAKPOINT_MIN_MPH <= breakpoint_mph <= CUSTOM_ACCEL_PROFILE_BREAKPOINT_MAX_MPH:
+      bounds = f"{CUSTOM_ACCEL_PROFILE_BREAKPOINT_MIN_MPH:g} and {CUSTOM_ACCEL_PROFILE_BREAKPOINT_MAX_MPH:g} mph"
+      raise ValueError(f"Breakpoint {index + 1} must be between {bounds}")
+    if breakpoints_mph and breakpoint_mph <= breakpoints_mph[-1]:
+      raise ValueError("Breakpoint speeds must be strictly increasing")
+    if not math.isfinite(value) or not CUSTOM_ACCEL_PROFILE_VALUE_MIN <= value <= CUSTOM_ACCEL_PROFILE_VALUE_MAX:
+      bounds = f"{CUSTOM_ACCEL_PROFILE_VALUE_MIN:g} and {CUSTOM_ACCEL_PROFILE_VALUE_MAX:g} m/s²"
+      raise ValueError(f"Max acceleration at point {index + 1} must be between {bounds}")
+
+    breakpoints_mph.append(breakpoint_mph)
+    values.append(value)
+
+  return [speed * CV.MPH_TO_MS for speed in breakpoints_mph], values
+
+
+def get_custom_accel_profile_curve_defaults(acceleration_profile, ev_tuning=True, truck_tuning=False):
+  profile_values = get_accel_profile_curve_values(acceleration_profile, ev_tuning, truck_tuning)
+  return {
+    CUSTOM_ACCEL_PROFILE_POINT_COUNT_KEY: CUSTOM_ACCEL_PROFILE_DEFAULT_POINT_COUNT,
+    **{
+      key: CUSTOM_ACCEL_PROFILE_DEFAULT_BREAKPOINTS_MPH[index]
+      for index, key in enumerate(CUSTOM_ACCEL_PROFILE_BREAKPOINT_PARAM_KEYS)
+    },
+    **{
+      key: (profile_values[index] if index < len(profile_values) else CUSTOM_ACCEL_PROFILE_EXTRA_POINT_VALUES[index - len(profile_values)])
+      for index, key in enumerate(CUSTOM_ACCEL_PROFILE_POINT_VALUE_PARAM_KEYS)
+    },
+  }
 
 
 def _normalize_profile(value, profile_map, fallback):
@@ -181,6 +269,12 @@ def _normalize_profile(value, profile_map, fallback):
     return int(float(value))
   except (TypeError, ValueError):
     return fallback
+
+
+def _decode_param_value(value):
+  if isinstance(value, bytes):
+    return value.decode("utf-8", errors="replace")
+  return value
 
 
 def _coerce_bool(value):

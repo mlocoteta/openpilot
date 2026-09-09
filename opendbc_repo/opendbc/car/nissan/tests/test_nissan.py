@@ -4,6 +4,7 @@ import pytest
 
 from opendbc.car import Bus, ButtonType, gen_empty_fingerprint, structs
 from opendbc.car.can_definitions import CanData
+from opendbc.car.nissan import interface as nissan_interface
 from opendbc.car.nissan.carstate import CarState
 from opendbc.car.nissan.interface import CarInterface, LEAF_2025_SV_PLUS_CAMERA_FW, leaf_adas_commands_present, \
                                           leaf_adas_commands_silent, restore_leaf_adas_tx
@@ -16,6 +17,12 @@ SUPPORTED_LEAF_FW = [structs.CarParams.CarFw(
   fwVersion=LEAF_2025_SV_PLUS_CAMERA_FW,
   address=0x707,
 )]
+
+
+@pytest.fixture
+def experimental_leaf_long(monkeypatch):
+  """Exercise the dormant implementation without making it available in production."""
+  monkeypatch.setattr(nissan_interface, "LEAF_2025_SV_PLUS_ALPHA_LONG_ENABLED", True)
 
 
 def run_controller(alpha_long, accel=0.0, long_active=True, long_state=structs.CarControl.Actuators.LongControlState.pid):
@@ -33,7 +40,28 @@ def run_controller(alpha_long, accel=0.0, long_active=True, long_state=structs.C
   return {msg[0]: msg for msg in can_sends}
 
 
-def test_leaf_2025_sv_plus_alpha_long_params():
+def test_leaf_2025_sv_plus_alpha_long_is_disabled(monkeypatch):
+  stock = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, False, False, False, None)
+  alpha_long = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, None)
+
+  assert not stock.alphaLongitudinalAvailable
+  assert not stock.openpilotLongitudinalControl
+  assert stock.pcmCruise
+  assert not (stock.safetyConfigs[-1].safetyParam & NissanSafetyFlags.LONG_CONTROL)
+
+  assert not alpha_long.alphaLongitudinalAvailable
+  assert not alpha_long.openpilotLongitudinalControl
+  assert alpha_long.pcmCruise
+  assert not alpha_long.autoResumeSng
+  assert not (alpha_long.safetyConfigs[-1].safetyParam & NissanSafetyFlags.LONG_CONTROL)
+
+  disable_calls = []
+  monkeypatch.setattr("opendbc.car.nissan.interface.disable_ecu", lambda *args, **kwargs: disable_calls.append((args, kwargs)))
+  CarInterface.init(alpha_long, None, None)
+  assert not disable_calls
+
+
+def test_dormant_leaf_2025_sv_plus_alpha_long_params(experimental_leaf_long):
   stock = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, False, False, False, None)
   alpha_long = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, None)
 
@@ -79,7 +107,13 @@ def test_stock_controller_does_not_send_longitudinal_messages():
   assert not ({0x2B0, 0x1C3, 0x707} & can_sends.keys())
 
 
-def test_alpha_long_controller_sends_stock_shaped_commands_and_keepalive():
+def test_disabled_alpha_long_controller_does_not_send_longitudinal_messages():
+  can_sends = run_controller(True)
+
+  assert not ({0x2B0, 0x1C3, 0x707} & can_sends.keys())
+
+
+def test_alpha_long_controller_sends_stock_shaped_commands_and_keepalive(experimental_leaf_long):
   can_sends = run_controller(True)
 
   assert can_sends[0x2B0][1].hex() == "ff6090ac5b000e03"
@@ -89,13 +123,13 @@ def test_alpha_long_controller_sends_stock_shaped_commands_and_keepalive():
   assert can_sends[0x707][2] == 0
 
 
-def test_alpha_long_controller_clamps_to_panda_accel_limit():
+def test_alpha_long_controller_clamps_to_panda_accel_limit(experimental_leaf_long):
   can_sends = run_controller(True, accel=5.0)
 
   assert can_sends[0x2B0][1].hex() == "007f8fac5b000e0c"
 
 
-def test_alpha_long_controller_blends_friction_brake_below_regen_limit():
+def test_alpha_long_controller_blends_friction_brake_below_regen_limit(experimental_leaf_long):
   can_sends = run_controller(True, accel=-2.0)
 
   assert can_sends[0x2B0][1].hex() == "a827d5ac5b000e09"
@@ -104,7 +138,7 @@ def test_alpha_long_controller_blends_friction_brake_below_regen_limit():
   assert brake[5] & 0x84 == 0x84
 
 
-def test_alpha_long_controller_sends_inactive_commands_when_disengaged():
+def test_alpha_long_controller_sends_inactive_commands_when_disengaged(experimental_leaf_long):
   can_sends = run_controller(True, accel=1.0, long_active=False)
 
   assert can_sends[0x2B0][1].hex() == "dc53a2ac1b000e03"
@@ -113,7 +147,7 @@ def test_alpha_long_controller_sends_inactive_commands_when_disengaged():
 
 @pytest.mark.parametrize(("signal", "button_type"), [("SET_BUTTON", ButtonType.decelCruise),
                                                         ("RES_BUTTON", ButtonType.accelCruise)])
-def test_leaf_set_resume_release_enables_alpha_long(signal, button_type):
+def test_leaf_set_resume_release_enables_alpha_long(signal, button_type, experimental_leaf_long):
   CP = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, TEST_TOGGLES)
   FPCP = CarInterface.get_starpilot_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, CP, TEST_TOGGLES)
   CS = CarState(CP, FPCP)
@@ -130,7 +164,7 @@ def test_leaf_set_resume_release_enables_alpha_long(signal, button_type):
 
 
 @pytest.mark.parametrize("ecu_disabled", [False, True])
-def test_leaf_ecu_disable_is_strict_and_falls_back(monkeypatch, ecu_disabled):
+def test_leaf_ecu_disable_is_strict_and_falls_back(monkeypatch, ecu_disabled, experimental_leaf_long):
   CP = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, None)
   calls = []
 
@@ -158,7 +192,7 @@ def test_leaf_ecu_disable_is_strict_and_falls_back(monkeypatch, ecu_disabled):
   assert bool(CP.safetyConfigs[-1].safetyParam & NissanSafetyFlags.LONG_CONTROL) is ecu_disabled
 
 
-def test_leaf_kwp_no_response_disable_can_confirm_ecu_silence(monkeypatch):
+def test_leaf_kwp_no_response_disable_can_confirm_ecu_silence(monkeypatch, experimental_leaf_long):
   CP = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, None)
 
   monkeypatch.setattr("opendbc.car.nissan.interface.disable_ecu", lambda *args, **kwargs: True)
@@ -171,7 +205,7 @@ def test_leaf_kwp_no_response_disable_can_confirm_ecu_silence(monkeypatch):
   assert CP.safetyConfigs[-1].safetyParam & NissanSafetyFlags.LONG_CONTROL
 
 
-def test_leaf_positive_disable_response_without_command_silence_falls_back(monkeypatch):
+def test_leaf_positive_disable_response_without_command_silence_falls_back(monkeypatch, experimental_leaf_long):
   CP = CarInterface.get_params(CAR.NISSAN_LEAF, gen_empty_fingerprint(), SUPPORTED_LEAF_FW, True, False, False, None)
   restore_calls = []
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
+from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController, get_lane_centering_visual_direction
 
 
 _V_EGO = 20.0
@@ -29,9 +29,9 @@ def _model(left=-1.8, right=1.8, model_y=0.0, lane_prob=0.9, lane_std=0.1, path_
 
 
 def _update(controller, model, *, offset=0.0, authority=1.0, enabled=True, active=True, valid=True, speed=_V_EGO,
-            pause_on_signal=False, turn_signal_active=False):
+            pause_on_signal=False, turn_signal_active=False, driver_override=False):
   return controller.update(0.0, model, speed, enabled, offset, authority, active, valid,
-                           pause_on_signal, turn_signal_active)
+                           pause_on_signal, turn_signal_active, driver_override)
 
 
 def _converge(model, *, offset=0.0, authority=1.0):
@@ -76,6 +76,18 @@ def test_turn_signal_pause_can_be_disabled():
   controller, _ = _converge(model, authority=0.0)
   signaled = _update(controller, model, authority=0.0, turn_signal_active=True)
   assert signaled == pytest.approx(output, abs=1e-7)
+
+
+def test_driver_override_clears_filtered_correction():
+  model = _model(left=-1.5, right=2.1)
+  controller, centered = _converge(model, authority=0.0)
+  assert centered > 0.0
+
+  overridden = _update(controller, model, authority=0.0, driver_override=True)
+  assert overridden == 0.0
+
+  reacquired = _update(controller, model, authority=0.0)
+  assert 0.0 < reacquired < centered
 
 
 @pytest.mark.parametrize(
@@ -174,3 +186,25 @@ def test_correction_is_smoothed_and_capped():
   _, steady = _converge(model, authority=0.0)
   assert 0.0 < first < steady
   assert np.isclose(steady, 0.004 * 0.30, atol=1e-6)
+
+
+def test_visual_direction_matches_curvature_sign():
+  # Positive curvature is right in this tree's convention.
+  assert get_lane_centering_visual_direction(_model(left=-1.5, right=2.1), _V_EGO, 0.0, 0.0, True, True) == 1
+  assert get_lane_centering_visual_direction(_model(left=-2.1, right=1.5), _V_EGO, 0.0, 0.0, True, True) == -1
+
+
+def test_visual_direction_requires_both_primary_lane_lines():
+  model = _model(left=-1.5, right=2.1)
+  model.laneLineProbs[2] = 0.2
+  assert get_lane_centering_visual_direction(model, _V_EGO, 0.0, 0.0, True, True) == 0
+
+
+def test_visual_direction_uses_filtered_correction_in_deadband():
+  model = _model()
+  assert get_lane_centering_visual_direction(model, _V_EGO, 0.0, 0.0, True, True, applied_correction=0.001) == 1
+
+
+def test_visual_direction_follows_applied_correction():
+  model = _model(left=-1.5, right=2.1)
+  assert get_lane_centering_visual_direction(model, _V_EGO, 0.0, 0.0, True, True, applied_correction=-0.001) == -1

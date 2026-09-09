@@ -71,10 +71,36 @@ get_accel_from_plan_tomb_raider = get_accel_from_plan
 
 def get_lateral_active(enabled: bool, active: bool, always_on_lateral_enabled: bool,
                        steer_fault_temporary: bool, steer_fault_permanent: bool,
-                       standstill: bool, steer_at_standstill: bool, lateral_check: bool) -> bool:
+                       standstill: bool, steer_at_standstill: bool, lateral_check: bool,
+                       steer_fault_latched: bool = False) -> bool:
   lateral_allowed = (enabled and active) or always_on_lateral_enabled
   return lateral_allowed and not steer_fault_temporary and not steer_fault_permanent and \
-         (not standstill or steer_at_standstill) and lateral_check
+         not steer_fault_latched and (not standstill or steer_at_standstill) and lateral_check
+
+
+def update_lateral_fault_latch(previous_latched: bool, lateral_requested: bool,
+                               steer_fault_temporary: bool, reset: bool = False) -> bool:
+  """Keep a temporary-fault latch until lateral is no longer requested or reset explicitly."""
+  if not lateral_requested or reset:
+    return False
+  return previous_latched or steer_fault_temporary
+
+
+def get_kona_non_scc_lateral_active(enabled: bool, active: bool, always_on_lateral_enabled: bool,
+                                    steer_fault_temporary: bool, steer_fault_permanent: bool,
+                                    standstill: bool, steer_at_standstill: bool, lateral_check: bool,
+                                    steering_pressed: bool, previous_lateral_active: bool,
+                                    steer_fault_latched: bool = False) -> bool:
+  """Avoid the Kona EPS torque fault when AOL is enabled over driver steering input."""
+  lateral_active = get_lateral_active(enabled, active, always_on_lateral_enabled,
+                                      steer_fault_temporary, steer_fault_permanent,
+                                      standstill, steer_at_standstill, lateral_check)
+  if not lateral_active or steer_fault_latched:
+    return False
+
+  aol_rising_edge = always_on_lateral_enabled and not enabled and not previous_lateral_active
+  return not (aol_rising_edge and steering_pressed)
+
 
 def curv_from_psis(psi_target, psi_rate, vego, action_t):
   vego = np.clip(vego, MIN_SPEED, np.inf)

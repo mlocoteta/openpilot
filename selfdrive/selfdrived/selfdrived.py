@@ -34,7 +34,13 @@ from openpilot.system.hardware import HARDWARE
 
 from openpilot.starpilot.common.starpilot_utilities import contains_event_type
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
+from openpilot.starpilot.common.lateral_only_experimental import experimental_mode_available
 from openpilot.starpilot.common.vision_bsm import get_fresh_vasm_state
+from openpilot.starpilot.system.wheel_controls import (
+  CONTROLLER_ACTION_COUNTERS,
+  CONTROLLER_ACTION_DISENGAGE,
+  CONTROLLER_ACTION_ENGAGE,
+)
 
 REPLAY = "REPLAY" in os.environ
 SIMULATION = "SIMULATION" in os.environ
@@ -75,6 +81,14 @@ def commanded_torque_at_max_for_saturation(CP, output: float) -> bool:
                        CP.lateralTuning.which() == "torque")
   has_controller_grace = CP.carFingerprint == HYUNDAI_CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN
   return torque_controller and not has_controller_grace and abs(output) > 0.99
+
+
+def controller_openpilot_event(CP, CS, enabled: bool, engage_requested: bool, disengage_requested: bool):
+  if disengage_requested and enabled:
+    return EventName.buttonCancel
+  if engage_requested and not enabled and CS.canValid and (not CP.pcmCruise or CS.cruiseState.enabled):
+    return EventName.buttonEnable
+  return None
 
 
 def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles, combined_left_bsm=None, combined_right_bsm=None) -> bool:
@@ -217,7 +231,7 @@ class SelfdriveD:
     # cleanup old params
     if not self.CP.alphaLongitudinalAvailable:
       self.params.remove("AlphaLongitudinalEnabled")
-    if not self.CP.openpilotLongitudinalControl:
+    if not experimental_mode_available(self.CP):
       self.params.remove("ExperimentalMode")
 
     self.CS_prev = car.CarState.new_message()
@@ -254,6 +268,10 @@ class SelfdriveD:
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prev_pedal_long_active = False
+    self._controller_openpilot_counters = {
+      action: self.params_memory.get_int(CONTROLLER_ACTION_COUNTERS[action])
+      for action in (CONTROLLER_ACTION_ENGAGE, CONTROLLER_ACTION_DISENGAGE)
+    }
 
     # Determine startup event
     self.startup_event = StarPilotEventName.customStartupAlert
@@ -340,12 +358,21 @@ class SelfdriveD:
     if str(extra).strip().lower() == "longitudinal":
       self.params.remove("Offroad_ExcessiveActuation")
 
+  def _consume_controller_openpilot_action(self, action: str) -> bool:
+    counter = self.params_memory.get_int(CONTROLLER_ACTION_COUNTERS[action])
+    previous = self._controller_openpilot_counters[action]
+    self._controller_openpilot_counters[action] = counter
+    return counter > previous
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
     self.update_ecu_disable_failed()
     self.events.clear()
     self.starpilot_events.clear()
+
+    controller_engage_requested = self._consume_controller_openpilot_action(CONTROLLER_ACTION_ENGAGE)
+    controller_disengage_requested = self._consume_controller_openpilot_action(CONTROLLER_ACTION_DISENGAGE)
 
     switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")
     switchback_mode_cooldown = max(0.0, float(getattr(self.starpilot_toggles, "switchback_mode_cooldown", 0.0)))
@@ -414,6 +441,12 @@ class SelfdriveD:
     # Don't add any more events while in dashcam mode
     if self.CP.passive:
       return
+
+    controller_event = controller_openpilot_event(
+      self.CP, CS, self.enabled, controller_engage_requested, controller_disengage_requested,
+    )
+    if controller_event is not None:
+      self.events.add(controller_event)
 
     # Block resume if cruise never previously enabled
     resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
@@ -926,6 +959,7 @@ class SelfdriveD:
     fpss.alertSize = self.starpilot_AM.current_alert.alert_size
     fpss.alertStatus = self.starpilot_AM.current_alert.alert_status
     fpss.alertType = self.starpilot_AM.current_alert.alert_type
+    fpss.vEgo = CS.vEgo
     fpss.alertSound, self.forcing_stop_chime_played = filter_forcing_stop_alert_sound(
       fpss.alertType,
       self.starpilot_AM.current_alert.audible_alert,
@@ -964,7 +998,7 @@ class SelfdriveD:
       if self.safe_mode:
         self.experimental_mode = False
       elif not self.starpilot_toggles.conditional_experimental_mode:
-        self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
+        self.experimental_mode = self.params.get_bool("ExperimentalMode") and experimental_mode_available(self.CP)
       self.personality = log.LongitudinalPersonality.relaxed if self.safe_mode else self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 

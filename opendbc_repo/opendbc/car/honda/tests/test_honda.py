@@ -2,7 +2,7 @@ import re
 from types import SimpleNamespace
 import pytest
 
-from opendbc.car import structs
+from opendbc.car import Bus, structs
 from opendbc.car.structs import CarParams
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.honda.interface import CarInterface
@@ -195,6 +195,16 @@ class TestHondaFingerprint:
     assert CP.openpilotLongitudinalControl
     assert CP.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD
     assert CP.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_LONG
+
+  def test_mvl_handover_is_scoped_to_accord_11g(self):
+    toggles = get_test_toggles()
+    accord_cp = CarInterface.get_params(CAR.HONDA_ACCORD_11G, gen_empty_fingerprint(), [], True, False, False, toggles)
+    crv_cp = CarInterface.get_params(CAR.HONDA_CRV_6G, gen_empty_fingerprint(), [], True, False, False, toggles)
+
+    assert Bus.radar in DBC[accord_cp.carFingerprint]
+    assert Bus.radar not in DBC[crv_cp.carFingerprint]
+    assert accord_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
+    assert not crv_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
 
   def test_nidec_pedal_detection_enables_interceptor_path(self):
     toggles = get_test_toggles()

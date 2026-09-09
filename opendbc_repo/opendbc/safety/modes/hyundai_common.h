@@ -51,6 +51,9 @@ bool hyundai_has_lda_button = false;
 extern bool hyundai_aol_lkas_on_engage;
 bool hyundai_aol_lkas_on_engage = false;
 
+extern bool hyundai_aol_main_lkas_on_engage;
+bool hyundai_aol_main_lkas_on_engage = false;
+
 extern bool hyundai_non_scc;
 bool hyundai_non_scc = false;
 
@@ -59,6 +62,12 @@ bool hyundai_cancel_button_enable = false;
 
 extern bool hyundai_can_refresh_msgs;
 bool hyundai_can_refresh_msgs = false;
+
+extern bool hyundai_has_lkas12;
+bool hyundai_has_lkas12 = false;
+
+extern bool hyundai_elantra_hev_2024;
+bool hyundai_elantra_hev_2024 = false;
 
 extern bool hyundai_aol_main_lkas_sync;
 bool hyundai_aol_main_lkas_sync = false;
@@ -78,6 +87,7 @@ void hyundai_common_init(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_ALT_LIMITS_2 = 512;
 
   const int HYUNDAI_PARAM_HAS_LDA_BUTTON = 1024;
+  const uint16_t HYUNDAI_PARAM_AOL_MAIN_LKAS_ON_ENGAGE = 128;
   const uint16_t HYUNDAI_PARAM_AOL_LKAS_ON_ENGAGE = 2048;
   const uint16_t HYUNDAI_PARAM_NON_SCC = 4096;
   const uint16_t HYUNDAI_PARAM_CAN_CANFD_BLENDED = 8192;
@@ -94,10 +104,13 @@ void hyundai_common_init(uint16_t param) {
   hyundai_can_canfd_blended = GET_FLAG(param, HYUNDAI_PARAM_CAN_CANFD_BLENDED);
 
   hyundai_has_lda_button = GET_FLAG(param, HYUNDAI_PARAM_HAS_LDA_BUTTON);
+  hyundai_aol_main_lkas_on_engage = GET_FLAG(param, HYUNDAI_PARAM_AOL_MAIN_LKAS_ON_ENGAGE);
   hyundai_aol_lkas_on_engage = GET_FLAG(param, HYUNDAI_PARAM_AOL_LKAS_ON_ENGAGE);
   hyundai_non_scc = GET_FLAG(param, HYUNDAI_PARAM_NON_SCC);
   hyundai_cancel_button_enable = GET_FLAG(param, HYUNDAI_PARAM_CANCEL_BTN_ENABLE);
   hyundai_can_refresh_msgs = GET_FLAG(param, HYUNDAI_PARAM_CAN_REFRESH_MSGS);
+  hyundai_has_lkas12 = false;
+  hyundai_elantra_hev_2024 = hyundai_can_refresh_msgs && hyundai_hybrid_gas_signal && hyundai_camera_scc;
   hyundai_aol_main_lkas_sync = false;
 
   hyundai_last_button_interaction = HYUNDAI_PREV_BUTTON_SAMPLES;
@@ -165,7 +178,12 @@ void hyundai_common_cruise_buttons_check(const int cruise_button, const bool mai
 
   if (main_button && !main_button_prev) {
     if (!hyundai_aol_main_lkas_sync) {
-      acc_main_on = !acc_main_on;
+      const bool main_turning_on = !acc_main_on;
+      acc_main_on = main_turning_on;
+      if (main_turning_on && hyundai_aol_main_lkas_on_engage &&
+          ((alternative_experience & ALT_EXP_ALWAYS_ON_LATERAL) != 0)) {
+        lkas_on = true;
+      }
     }
   }
   main_button_prev = main_button;
@@ -221,7 +239,8 @@ uint32_t get_acc_main_on_mismatches(void) {
 }
 
 void hyundai_lkas_button_check(const bool lkas_button) {
-  if (lkas_button && !lkas_button_prev) {
+  const bool lkas_button_controls_aol = !hyundai_elantra_hev_2024 || hyundai_aol_lkas_on_engage;
+  if (lkas_button_controls_aol && lkas_button && !lkas_button_prev) {
     lkas_on = !lkas_on;
   }
   lkas_button_prev = lkas_button;

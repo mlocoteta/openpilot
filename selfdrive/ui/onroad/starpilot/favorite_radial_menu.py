@@ -54,6 +54,7 @@ class FavoriteRadialMenu:
   CORNER_HINT_OUTER_RADIUS = 62.0
   CORNER_HINT_RING_RADIUS = 42.0
   CORNER_HINT_EDGE_MARGIN = 6.0
+  _ELLIPSIS = "..."
 
   _PURPLE = (161, 112, 255)
   _PANEL = rl.Color(13, 11, 23, 236)
@@ -262,9 +263,9 @@ class FavoriteRadialMenu:
   def _layout_slot_rects(self) -> None:
     scale = self._scale_for(self._rect)
     origin = self.corner_center(self._rect)
-    orbit_radius = 425.0 * scale
+    orbit_radius = 515.0 * scale
     node_radius = 52.0 * scale
-    slot_angles_deg = (78.0, 41.0, 18.0)
+    slot_angles_deg = (66.0, 40.0, 18.0)
     blade_w = 450.0 * scale
     blade_h = 104.0 * scale
 
@@ -696,28 +697,113 @@ class FavoriteRadialMenu:
       lines[-1] = FavoriteRadialMenu._append_ellipsis(font, lines[-1], font_size, max_width)
     return lines
 
-  def _draw_corner_hint(self) -> None:
-    center = self.corner_center(self._rect)
-    scale = self._scale_for(self._rect)
-    purple = self._PURPLE
-    for radius, alpha in ((self.CORNER_HINT_OUTER_RADIUS, 16), (48, 28), (36, 48)):
-      rl.draw_circle_v(center, radius * scale, rl.Color(*purple, alpha))
-    rl.draw_ring(center, 38 * scale, self.CORNER_HINT_RING_RADIUS * scale, 0, 360, 32, rl.Color(*purple, 150))
+  @staticmethod
+  def _sample_aether_color(t: float, alpha: int) -> rl.Color:
+    """Sample from the tri-stop Aether gradient (#C49EFF -> #AC7DFF -> #58329E)."""
+    if t <= 0.5:
+      w = t * 2.0
+      r = int(196 - 24 * w)
+      g = int(158 - 33 * w)
+      b = 255
+    else:
+      w = (t - 0.5) * 2.0
+      r = int(172 - 84 * w)
+      g = int(125 - 75 * w)
+      b = int(255 - 97 * w)
+    return rl.Color(r, g, b, alpha)
 
-    tail = rl.Vector2(center.x - 18 * scale, center.y + 18 * scale)
-    tip = rl.Vector2(center.x + 26 * scale, center.y - 26 * scale)
-    arrow_color = rl.Color(240, 231, 255, 214)
-    rl.draw_line_ex(tail, tip, 4.5 * scale, arrow_color)
-    rl.draw_line_ex(tip, rl.Vector2(tip.x - 18 * scale, tip.y + 1 * scale), 4.5 * scale, arrow_color)
-    rl.draw_line_ex(tip, rl.Vector2(tip.x - 1 * scale, tip.y + 18 * scale), 4.5 * scale, arrow_color)
+  def _draw_corner_hint(self) -> None:
+    scale = self._scale_for(self._rect)
+    x0 = self._rect.x
+    y0 = self._rect.y + self._rect.height
+    is_pressed = self._corner_press is not None
+
+    size = 150.0 * scale
+    steps = 48
+
+    # 1. Precompute edge vertices to minimize per-frame allocations
+    v_origin = rl.Vector2(x0, y0)
+    inv_steps = 1.0 / steps
+    pts_top = [rl.Vector2(x0, y0 - size * (k * inv_steps)) for k in range(steps + 1)]
+    pts_right = [rl.Vector2(x0 + size * (k * inv_steps), y0) for k in range(steps + 1)]
+
+    # 2. Pass 0 (Smoked Obsidian Base) & Pass 1 (Tri-Stop Aether Gradient Mesh)
+    # Borderless design: smooth monotonic decay into exact 0 alpha at hypotenuse
+    base_max_alpha = 200 if is_pressed else 160
+    purple_max_alpha = 145 if is_pressed else 105
+
+    for i in range(steps):
+      t_mid = (i + 0.5) * inv_steps
+      v_ta, v_tb = pts_top[i], pts_top[i + 1]
+      v_ra, v_rb = pts_right[i], pts_right[i + 1]
+
+      base_a = int(base_max_alpha * ((1.0 - t_mid) ** 1.40))
+      purple_a = int(purple_max_alpha * ((1.0 - t_mid) ** 1.75))
+
+      for col in (rl.Color(8, 6, 18, base_a) if base_a > 0 else None,
+                  self._sample_aether_color(t_mid, purple_a) if purple_a > 0 else None):
+        if col is None:
+          continue
+        if i == 0:
+          rl.draw_triangle(v_origin, v_rb, v_tb, col)
+        else:
+          rl.draw_triangle(v_ta, v_ra, v_tb, col)
+          rl.draw_triangle(v_tb, v_ra, v_rb, col)
+
+    # 3. Ultra-Polished Frosted-Glass Vector Arrow (Nestled deep in purple corner)
+    cx = x0 + 34.0 * scale
+    cy = y0 - 34.0 * scale
+
+    tip = rl.Vector2(cx + 15.0 * scale, cy - 15.0 * scale)
+    tail = rl.Vector2(cx - 15.0 * scale, cy + 15.0 * scale)
+    wing1 = rl.Vector2(tip.x - 14.0 * scale, tip.y + 1.2 * scale)
+    wing2 = rl.Vector2(tip.x - 1.2 * scale, tip.y + 14.0 * scale)
+
+    line_w = 4.6 * scale
+
+    # Tier 1: Deep Subsurface Ambient Occlusion Shadow
+    s_off = 1.6 * scale
+    s_tip = rl.Vector2(tip.x + s_off, tip.y + s_off)
+    s_tail = rl.Vector2(tail.x + s_off, tail.y + s_off)
+    s_w1 = rl.Vector2(wing1.x + s_off, wing1.y + s_off)
+    s_w2 = rl.Vector2(wing2.x + s_off, wing2.y + s_off)
+    shadow_w = line_w + 2.0 * scale
+    shadow_col = rl.Color(8, 6, 16, 130 if is_pressed else 105)
+
+    # Tier 2: Aether Violet Refractive Halo / Glass Bloom
+    halo_w = line_w + 3.2 * scale
+    halo_col = rl.Color(185, 145, 255, 75 if is_pressed else 55)
+
+    # Tier 3: Radiant High-Luminance Frost White Body
+    arrow_col = rl.Color(255, 255, 255, 245 if is_pressed else 225)
+
+    # Tier 4: Specular Spine Highlight
+    spec_w = 2.0 * scale
+    spec_col = rl.Color(255, 255, 255, 255 if is_pressed else 240)
+
+    # Render multi-pass optical stack
+    layers = (
+      (s_tail, s_tip, s_w1, s_w2, shadow_w, shadow_col),
+      (tail, tip, wing1, wing2, halo_w, halo_col),
+      (tail, tip, wing1, wing2, line_w, arrow_col),
+      (tail, tip, wing1, wing2, spec_w, spec_col),
+    )
+
+    for p_tail, p_tip, p_w1, p_w2, width, col in layers:
+      rl.draw_line_ex(p_tail, p_tip, width, col)
+      rl.draw_line_ex(p_tip, p_w1, width, col)
+      rl.draw_line_ex(p_tip, p_w2, width, col)
+      r_cap = width * 0.5
+      for pt in (p_tail, p_tip, p_w1, p_w2):
+        rl.draw_circle_v(pt, r_cap, col)
 
   def _draw_radial_menu(self) -> None:
     scale = self._scale_for(self._rect)
     origin = self.corner_center(self._rect)
     purple = self._PURPLE
 
-    rail_r = 380.0 * scale
-    rail_start_rl = 278.0
+    rail_r = 460.0 * scale
+    rail_start_rl = 289.0
     rail_end_rl = 348.0
     segments = 44
 
@@ -1083,7 +1169,7 @@ class FavoriteRadialMenu:
       return ""
     if FavoriteRadialMenu._measure_text(font, text, font_size).x <= max_width:
       return text
-    ellipsis = "..."
+    ellipsis = FavoriteRadialMenu._ELLIPSIS
     if FavoriteRadialMenu._measure_text(font, ellipsis, font_size).x > max_width:
       return ""
     shortened = text
@@ -1101,7 +1187,7 @@ class FavoriteRadialMenu:
 
   @staticmethod
   def _append_ellipsis(font: Any, text: str, font_size: int, max_width: float) -> str:
-    ellipsis = "…"
+    ellipsis = FavoriteRadialMenu._ELLIPSIS
     if max_width <= 0 or FavoriteRadialMenu._measure_text(font, ellipsis, font_size).x > max_width:
       return ""
 

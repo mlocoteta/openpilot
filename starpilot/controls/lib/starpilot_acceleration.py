@@ -10,6 +10,7 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, 
 
 from openpilot.starpilot.common.accel_profile import (
   ACCELERATION_PROFILES,
+  A_CRUISE_MAX_BP_CUSTOM,
   A_CRUISE_MAX_VALS_TRAFFIC_ALL,
   DECELERATION_PROFILES,
   coerce_custom_accel_profile_values,
@@ -104,9 +105,16 @@ def get_max_accel_standard(v_ego, ev_tuning=True, truck_tuning=False):
 def get_max_accel_traffic(v_ego):
   return interpolate_accel_profile(v_ego, A_CRUISE_MAX_VALS_TRAFFIC_ALL)
 
-def get_max_accel_custom(v_ego, custom_curve, acceleration_profile, ev_tuning=True, truck_tuning=False):
-  curve_values = coerce_custom_accel_profile_values(custom_curve, acceleration_profile, ev_tuning, truck_tuning)
-  return interpolate_accel_profile(v_ego, curve_values)
+def get_max_accel_custom(v_ego, custom_curve, acceleration_profile, ev_tuning=True, truck_tuning=False, custom_breakpoints=None):
+  curve_breakpoints = A_CRUISE_MAX_BP_CUSTOM if custom_breakpoints is None else custom_breakpoints
+  curve_values = coerce_custom_accel_profile_values(
+    custom_curve,
+    acceleration_profile,
+    ev_tuning,
+    truck_tuning,
+    point_count=len(curve_breakpoints),
+  )
+  return interpolate_accel_profile(v_ego, curve_values, curve_breakpoints)
 
 def get_max_allowed_accel(v_ego, ev_tuning=True, truck_tuning=False):
   return float(get_profile_max_allowed_accel(v_ego, ev_tuning, truck_tuning))
@@ -252,14 +260,21 @@ class StarPilotAcceleration:
     truck_tuning = getattr(starpilot_toggles, "truck_tuning", False)
     custom_accel_profile = getattr(starpilot_toggles, "custom_accel_profile", False)
     custom_accel_profile_values = getattr(starpilot_toggles, "custom_accel_profile_values", [])
+    custom_accel_profile_breakpoints = getattr(starpilot_toggles, "custom_accel_profile_breakpoints", A_CRUISE_MAX_BP_CUSTOM)
     deceleration_profile = normalize_deceleration_profile(
       getattr(starpilot_toggles, "deceleration_profile", DECELERATION_PROFILES["STANDARD"])
     )
-
     if sm["starpilotCarState"].trafficModeEnabled:
       self.max_accel = get_max_accel_traffic(v_ego)
     elif custom_accel_profile:
-      self.max_accel = get_max_accel_custom(v_ego, custom_accel_profile_values, starpilot_toggles.acceleration_profile, ev_tuning, truck_tuning)
+      self.max_accel = get_max_accel_custom(
+        v_ego,
+        custom_accel_profile_values,
+        starpilot_toggles.acceleration_profile,
+        ev_tuning,
+        truck_tuning,
+        custom_accel_profile_breakpoints,
+      )
     elif starpilot_toggles.map_acceleration:
       # Drive mode is authoritative while mapping is on, normal gear included. Letting
       # normal fall through to the profile param instead leaves the car on a stale eco

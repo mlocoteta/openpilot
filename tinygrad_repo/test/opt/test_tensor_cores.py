@@ -79,7 +79,8 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
-      helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+      with self.subTest(tc=tc):
+        helper_tc_allclose(tc.dims[0], tc.dims[1], tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_nested_reduce(self):
@@ -185,13 +186,13 @@ class TestTensorCores(unittest.TestCase):
     # skip fp8 tcs: the unoptimized ALU baseline quantizes products to fp8 (JAX promotion), which legitimately
     # differs from the MFMA path (f32 accumulation), so the baseline-vs-TC numerical gate can't hold for fp8.
     tc = next(tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in not in dtypes.fp8s)
-    x, y = Tensor.rand(64, 64, dtype=tc.dtype_in), Tensor.rand(64, 64, dtype=tc.dtype_in)
+    x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UPCAST, 4, 2)]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -199,14 +200,13 @@ class TestTensorCores(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "CPU does not support using a different type for accumulation")
   def test_tensor_cores_unroll_casted_phi(self):
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
-    x, y = Tensor.rand(64, 64, dtype=tc.dtype_in), Tensor.rand(64, 64, dtype=tc.dtype_in)
+    x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out)
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UPCAST, 4, 2)]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(ALLOW_TF32=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "slow on EMULATED device")
@@ -215,14 +215,13 @@ class TestTensorCores(unittest.TestCase):
   def test_tensor_cores_unroll_casted_phi_with_children(self):
     # all STORE children are outside the loop
     tc = [tc for tc in Device[Device.DEFAULT].renderer.tensor_cores if tc.dtype_in != tc.dtype_out and tc.dtype_in not in dtypes.fp8s][0]
-    x, y = Tensor.rand(64, 64, dtype=tc.dtype_in), Tensor.rand(64, 64, dtype=tc.dtype_in)
+    x, y = Tensor.rand(16, 64, dtype=tc.dtype_in), Tensor.rand(64, 16, dtype=tc.dtype_in)
     r = x.matmul(y, dtype=tc.dtype_out).relu()
-    opts = [Opt(OptOps.UNROLL, 0, 2)]
-    ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src):
-      if u.op is Ops.WMMA:
-        #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
-        assert u.src[-1].src[0].op != Ops.STORE
+    opts = [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UPCAST, 4, 2)]
+    ast = helper_linearizer_opt(r, [opts[1:]], apply_tc=True, atol=3e-2, rtol=1e-3, check_default_opt=False)
+    wmmas = [u for u in tuple(to_program(replace_opts(ast, opts), Device[Device.DEFAULT].renderer).src[1].src) if u.op is Ops.WMMA]
+    self.assertGreater(len(wmmas), 0)
+    for u in wmmas: assert u.src[-1].src[0].op != Ops.STORE
 
 if __name__ == '__main__':
   unittest.main()

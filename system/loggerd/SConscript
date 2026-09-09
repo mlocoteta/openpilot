@@ -5,7 +5,9 @@ libs = [common, messaging, visionipc,
         'pthread', 'z', 'm', 'zstd']
 
 src = ['logger.cc', 'zstd_writer.cc', 'video_writer.cc', 'encoder/encoder.cc', 'encoder/v4l_encoder.cc', 'encoder/jpeg_encoder.cc']
-if arch != "larch64":
+if arch == "larch64":
+  src += ['clip_encoder.cc', 'encoder/v4l_decoder.cc']
+else:
   src += ['encoder/ffmpeg_encoder.cc']
   libs += ['yuv']
 

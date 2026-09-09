@@ -1,4 +1,6 @@
 """ AUTO-FORMATTED USING opendbc/car/debug/format_fingerprints.py, EDIT STRUCTURE THERE."""
+# Provenance: portions of HKG firmware data are adapted from sunnypilot/opendbc master at
+# f95f996f5 and its hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md.
 from opendbc.car.structs import CarParams
 from opendbc.car.hyundai.values import CAR
 
@@ -1402,6 +1404,14 @@ FW_VERSIONS = {
       b'\xf1\x00JK__ RDR -----      1.00 1.01 99110-DS500         ',
     ],
   },
+  CAR.GENESIS_GV70_2026: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00JK  MFC  AT USA LHD 1.00 1.11 99211-IY600 241125',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00JK__ RDR -----      1.00 1.01 99110-AR600         ',
+    ],
+  },
   CAR.GENESIS_GV80_2025: {
     (Ecu.fwdRadar, 0x7d0, None): [
       b'\xf1\x00JX__ RDR -----      1.00 1.03 99110-T6500         ',
@@ -1686,6 +1696,11 @@ FW_VERSIONS = {
   CAR.HYUNDAI_BAYON_1ST_GEN_NON_SCC: {
     (Ecu.fwdCamera, 0x7c4, None): [
       b'\xf1\x00BC3 LKA  AT EUR LHD 1.00 1.01 99211-Q0100 261',
+    ],
+  },
+  CAR.KIA_RAY_EV: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00TAM MFC  AT KOR LHD 1.00 1.02 99211-E2000 230901',
     ],
   },
 }

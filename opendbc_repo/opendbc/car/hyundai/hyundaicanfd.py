@@ -1,9 +1,11 @@
 import copy
+# Provenance: portions of HKG angle-command construction are adapted from sunnypilot/opendbc's
+# hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 import numpy as np
 from opendbc.car import CanBusBase, CanData
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.crc import CRC16_XMODEM
-from opendbc.car.hyundai.values import HyundaiFlags, CAR
+from opendbc.car.hyundai.values import HyundaiFlags, CAR, CANFD_ALT_BUTTONS_RESUME_CAR
 
 
 def _set_value(msg: bytearray, sig, ival: int) -> None:
@@ -63,61 +65,6 @@ def _update_checksum(packer, address: int, dat: bytearray) -> None:
   _set_value(dat, sig_checksum, checksum)
 
 
-def _set_little_endian_bits(dat: bytearray, lsb: int, size: int, value: int) -> None:
-  """Write the legacy HDA-II field layout without changing the generated DBC aliases."""
-  value &= (1 << size) - 1
-  bit = lsb
-  remaining = size
-  while remaining:
-    byte = bit // 8
-    shift = bit % 8
-    chunk_size = min(remaining, 8 - shift)
-    mask = ((1 << chunk_size) - 1) << shift
-    dat[byte] = (dat[byte] & ~mask) | ((value & ((1 << chunk_size) - 1)) << shift)
-    value >>= chunk_size
-    bit += chunk_size
-    remaining -= chunk_size
-
-
-def _create_gv70_lka_status_msg(packer, CAN, message_name: str, bus: int, enabled: bool,
-                                lat_active: bool, apply_torque: int):
-  values = {
-    "LKA_MODE": 2,
-    "LKA_ICON": 2 if enabled else 1,
-    "TORQUE_REQUEST": apply_torque,
-    "STEER_REQ": 1 if lat_active else 0,
-    "LKA_ASSIST": 0,
-    "STEER_MODE": 0,
-    "DAMP_FACTOR": 100,
-  }
-  address, raw, _ = packer.make_can_msg(message_name, bus, values)
-  dat = bytearray(raw)
-
-  legacy_fields = (
-    (24, 3, 2),
-    (27, 3, 0),
-    (30, 2, 0),
-    (32, 2, 0),
-    (34, 2, 0),
-    (36, 2, 0),
-    (38, 3, 2 if enabled else 1),
-    (52, 2, 1 if lat_active else 0),
-    (54, 2, 0),
-    (56, 1, 0),
-    (60, 4, 0),
-    (80, 2, 0),
-  )
-  for lsb, size, value in legacy_fields:
-    _set_little_endian_bits(dat, lsb, size, value)
-
-  _set_little_endian_bits(dat, 64 if message_name == "LKAS" else 104, 8, 100)
-  if message_name == "LKAS":
-    _set_little_endian_bits(dat, 84, 3, 0)
-
-  _update_checksum(packer, address, dat)
-  return address, bytes(dat), bus
-
-
 def _create_angle_lfa_msg(packer, CAN, values, apply_angle: float, lat_active: bool, torque_reduction_gain: float):
   address = packer.dbc.name_to_msg["LFA"].address
   dat = packer.pack(address, values)
@@ -153,18 +100,11 @@ def create_angle_adas_cmd(packer, CAN, apply_angle: float, lat_active: bool, tor
 
 def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle,
                              lfa_base_values=None, lkas_base_values=None, lka_icon=None,
-                             send_lfa_status=False, lfa_only=False):
+                             longitudinal_active=None):
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
-
-  if CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN and CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
-    ret = []
-    if CP.openpilotLongitudinalControl or send_lfa_status:
-      ret.append(_create_gv70_lka_status_msg(packer, CAN, "LFA", CAN.ECAN, enabled, lat_active, apply_torque))
-    if lfa_only:
-      return ret
-    ret.append(_create_gv70_lka_status_msg(packer, CAN, "LKAS", CAN.ACAN, enabled, lat_active, apply_torque))
-    return ret
+  if longitudinal_active is None:
+    longitudinal_active = CP.openpilotLongitudinalControl
 
   angle_lkas_alt = CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT
 
@@ -258,10 +198,8 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
   ret = []
   if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
     lkas_msg = "LKAS_ALT" if CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT else "LKAS"
-    if (CP.openpilotLongitudinalControl and not CP.flags & HyundaiFlags.CAN_CANFD_BLENDED) or send_lfa_status:
+    if longitudinal_active and not CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, lfa_values))
-    if lfa_only:
-      return ret
     ret.append(packer.make_can_msg(lkas_msg, CAN.ACAN, lkas_values))
   else:
     if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
@@ -311,16 +249,27 @@ def create_suppress_lfa(packer, CAN, lfa_block_msg, lka_steering_alt):
 
 
 def create_buttons(packer, CP, CAN, cnt, btn=0, base_values=None, left_paddle=False, right_paddle=False):
-  values = {k: v for k, v in base_values.items() if k not in ("_CHECKSUM", "COUNTER")} if base_values else {}
+  values = {k: v for k, v in base_values.items() if k not in ("CHECKSUM", "_CHECKSUM", "COUNTER")} if base_values else {}
   values.update({
     "COUNTER": cnt,
     "SET_ME_1": 1,
     "CRUISE_BUTTONS": btn,
-    "LEFT_PADDLE": int(left_paddle),
-    "RIGHT_PADDLE": int(right_paddle),
   })
+  if not (CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS and CP.carFingerprint in CANFD_ALT_BUTTONS_RESUME_CAR):
+    values.update({
+      "LEFT_PADDLE": int(left_paddle),
+      "RIGHT_PADDLE": int(right_paddle),
+    })
 
   bus = CAN.ECAN if CP.flags & HyundaiFlags.CANFD_LKA_STEERING else CAN.CAM
+  if CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS and CP.carFingerprint in CANFD_ALT_BUTTONS_RESUME_CAR:
+    address, dat, bus = packer.make_can_msg("CRUISE_BUTTONS_ALT", bus, values)
+    dat = bytearray(dat)
+    checksum = hkg_can_fd_checksum(address, None, dat)
+    dat[0] = checksum & 0xFF
+    dat[1] = (checksum >> 8) & 0xFF
+    return address, bytes(dat), bus
+
   return packer.make_can_msg("CRUISE_BUTTONS", bus, values)
 
 

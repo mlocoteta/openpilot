@@ -1,10 +1,16 @@
 import random
 from collections.abc import Iterable
+from types import SimpleNamespace
 
 from hypothesis import settings, given, strategies as st
 from parameterized import parameterized
+import pytest
 
-from opendbc.car import gen_empty_fingerprint
+from opendbc.car import Bus, gen_empty_fingerprint
+from opendbc.can import CANPacker
+from opendbc.car.ford import fordcan
+from opendbc.car.ford.carcontroller import FordStockCruiseButton
+from opendbc.car.gps import FORD_MACH_E_GPS_MESSAGES, get_car_gps_config, parse_ford_can_gps
 from opendbc.car.structs import CarParams
 from opendbc.car.fw_versions import build_fw_dict
 from opendbc.car.ford.interface import CarInterface
@@ -12,6 +18,24 @@ from opendbc.car.ford.values import CAR, FW_QUERY_CONFIG, FW_PATTERN, FordSafety
 from opendbc.car.ford.fingerprints import FW_VERSIONS
 
 Ecu = CarParams.Ecu
+
+
+def test_stock_cruise_button_latches_context_until_release():
+  button = FordStockCruiseButton()
+
+  assert button.update(True, cruise_available=True, cruise_enabled=True) == (True, False)
+  assert button.update(True, cruise_available=True, cruise_enabled=False) == (True, False)
+  assert button.update(False, cruise_available=True, cruise_enabled=False) == (False, False)
+
+  assert button.update(True, cruise_available=True, cruise_enabled=False) == (False, True)
+  assert button.update(True, cruise_available=True, cruise_enabled=True) == (False, True)
+  assert button.update(False, cruise_available=True, cruise_enabled=True) == (False, False)
+
+
+def test_stock_cruise_button_ignores_press_with_cruise_master_off():
+  button = FordStockCruiseButton()
+
+  assert button.update(True, cruise_available=False, cruise_enabled=False) == (False, False)
 
 
 ECU_ADDRESSES = {
@@ -172,3 +196,142 @@ def test_mach_e_longitudinal_toggle_controls_stock_acc_selection():
   assert enhanced.alphaLongitudinalAvailable
   assert enhanced.openpilotLongitudinalControl
   assert enhanced.safetyConfigs[-1].safetyParam & FordSafetyFlags.LONG_CONTROL
+
+
+def test_mach_e_can_gps_decode():
+  nav1 = {
+    "GpsHsphLattSth_D_Actl": 2,
+    "GpsHsphLongEast_D_Actl": 2,
+    "GPS_Latitude_Degrees": 37,
+    "GPS_Latitude_Minutes": 57,
+    "GPS_Latitude_Min_dec": 0.8864,
+    "GPS_Longitude_Degrees": -121,
+    "GPS_Longitude_Minutes": 44,
+    "GPS_Longitude_Min_dec": 0.22,
+  }
+  nav2 = {
+    "GpsUtcYr_No_Actl": 2026,
+    "GpsUtcMnth_No_Actl": 8,
+    "GpsUtcDay_No_Actl": 26,
+    "GPS_UTC_hours": 0,
+    "GPS_UTC_minutes": 24,
+    "GPS_UTC_seconds": 38,
+    "Gps_B_Falt": 0,
+  }
+  nav3 = {
+    "GPS_dimension": 2,
+    "GPS_Hdop": 0.6,
+    "GPS_Vdop": 0.8,
+    "GPS_Sat_num_in_view": 31,
+    "GPS_MSL_altitude": 90,
+    "GPS_Speed": 10,
+    "GPS_Heading": 180,
+  }
+
+  gps = parse_ford_can_gps(nav1, nav2, nav3)
+
+  assert gps is not None
+  assert gps["latitude"] == 37.96477333333333
+  assert gps["longitude"] == -121.737
+  assert abs(gps["altitude"] - 27.432) < 1e-9
+  assert abs(gps["speed"] - 10 * 0.44704) < 1e-9
+  assert gps["hasFix"]
+  assert gps["satelliteCount"] == 0  # 31 is Ford's invalid sentinel.
+
+
+def test_mach_e_can_gps_fault_invalidates_fix():
+  nav1 = {
+    "GpsHsphLattSth_D_Actl": 2,
+    "GpsHsphLongEast_D_Actl": 2,
+    "GPS_Latitude_Degrees": 37,
+    "GPS_Latitude_Minutes": 57,
+    "GPS_Latitude_Min_dec": 0.8864,
+    "GPS_Longitude_Degrees": -121,
+    "GPS_Longitude_Minutes": 44,
+    "GPS_Longitude_Min_dec": 0.22,
+  }
+  nav2 = {
+    "GpsUtcYr_No_Actl": 2026,
+    "GpsUtcMnth_No_Actl": 8,
+    "GpsUtcDay_No_Actl": 26,
+    "GPS_UTC_hours": 0,
+    "GPS_UTC_minutes": 24,
+    "GPS_UTC_seconds": 38,
+    "Gps_B_Falt": 1,
+  }
+  nav3 = {
+    "GPS_dimension": 2,
+    "GPS_Hdop": 0.6,
+    "GPS_Vdop": 0.8,
+    "GPS_Sat_num_in_view": 31,
+    "GPS_MSL_altitude": 90,
+    "GPS_Speed": 0,
+    "GPS_Heading": 180,
+  }
+
+  gps = parse_ford_can_gps(nav1, nav2, nav3)
+
+  assert gps is not None
+  assert not gps["hasFix"]
+  assert gps["latitude"] == 37.96477333333333
+  assert gps["altitude"] == 0.0
+
+
+def test_mach_e_can_gps_messages_are_optional_main_bus_inputs():
+  cp = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, gen_empty_fingerprint(), [], False, False, False, None)
+  parser = CarInterface.CarState.get_can_parsers(cp)[Bus.pt]
+  gps_config = get_car_gps_config(cp)
+
+  assert gps_config is not None
+  assert gps_config.messages == FORD_MACH_E_GPS_MESSAGES
+  assert gps_config.decoder is parse_ford_can_gps
+  assert set(parser.addresses) >= {0x462, 0x463, 0x464}
+  assert set(FORD_MACH_E_GPS_MESSAGES) == set(gps_config.messages) == {
+    parser.dbc.addr_to_msg[0x462].name,
+    parser.dbc.addr_to_msg[0x463].name,
+    parser.dbc.addr_to_msg[0x464].name,
+  }
+  assert all(parser.message_states[address].ignore_alive for address in (0x462, 0x463, 0x464))
+
+
+def test_lightning_low_rate_camera_messages_use_declared_frequencies():
+  cp = CarInterface.get_params(CAR.FORD_F_150_LIGHTNING_MK1, gen_empty_fingerprint(), [], True, False, False, None)
+  cp.enableBsm = True
+  parser = CarInterface.CarState.get_can_parsers(cp)[Bus.cam]
+
+  expected_frequencies = {
+    "IPMA_Data": 1,
+    "Traffic_RecognitnData": 1,
+    "Side_Detect_L_Stat": 5,
+    "Side_Detect_R_Stat": 5,
+  }
+  for message, frequency in expected_frequencies.items():
+    state = parser.message_states[parser.dbc.name_to_msg[message].address]
+    assert state.frequency == frequency
+    assert state.timeout_threshold == pytest.approx(10e9 / frequency)
+
+
+def test_hands_free_cluster_status_is_opt_in():
+  packer = CANPacker("ford_lincoln_base_pt")
+  CAN = SimpleNamespace(main=0)
+  CP = SimpleNamespace(openpilotLongitudinalControl=False)
+  hud = SimpleNamespace(leftLaneDepart=False, rightLaneDepart=False)
+  stock_values = dict.fromkeys([
+    "HaDsply_No_Cs", "HaDsply_No_Cnt", "AccStopStat_D_Dsply", "AccTrgDist2_D_Dsply",
+    "AccStopRes_B_Dsply", "TjaWarn_D_Rq", "TjaMsgTxt_D_Dsply", "IaccLamp_D_Rq",
+    "AccMsgTxt_D2_Rq", "FcwDeny_B_Dsply", "FcwMemStat_B_Actl", "AccTGap_B_Dsply",
+    "CadsAlignIncplt_B_Actl", "AccFllwMde_B_Dsply", "CadsRadrBlck_B_Actl",
+    "CmbbPostEvnt_B_Dsply", "AccStopMde_B_Dsply", "FcwMemSens_D_Actl",
+    "FcwMsgTxt_D_Rq", "AccWarn_D_Dsply", "FcwVisblWarn_B_Rq", "FcwAudioWarn_B_Rq",
+    "AccTGap_D_Dsply", "AccMemEnbl_B_RqDrv", "FdaMem_B_Stat",
+  ], 0)
+
+  regular = fordcan.create_acc_ui_msg(
+    packer, CAN, CP, True, True, False, False, False, hud, stock_values)
+  hands_free = fordcan.create_acc_ui_msg(
+    packer, CAN, CP, True, True, False, False, False, hud, stock_values, True)
+  expected_regular = packer.make_can_msg("ACCDATA_3", 0, {"Tja_D_Stat": 2})
+  expected_hands_free = packer.make_can_msg("ACCDATA_3", 0, {"Tja_D_Stat": 7})
+
+  assert regular == expected_regular
+  assert hands_free == expected_hands_free

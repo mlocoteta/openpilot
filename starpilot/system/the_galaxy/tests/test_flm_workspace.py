@@ -272,6 +272,24 @@ def test_analysis_is_rejected_while_onroad(tmp_path):
   assert module.start_flm_background_analysis(["route"], [str(tmp_path)]) is False
 
 
+def test_analysis_requires_lane_centering_off(tmp_path):
+  module, fake_params_cls = _load_flm_workspace_module(tmp_path)
+  fake_params_cls._store = {"LaneCentering": True}
+
+  with pytest.raises(module.FLMAnalysisCancelled, match="Lane Centering"):
+    module._require_flm_lane_centering_off()
+  assert module.start_flm_background_analysis(["route"], [str(tmp_path)]) is False
+
+
+def test_init_param_enabled_accepts_boolean_values(tmp_path):
+  module, _ = _load_flm_workspace_module(tmp_path)
+
+  assert module._init_param_enabled({"LaneCentering": "1"}, "LaneCentering")
+  assert module._init_param_enabled({"LaneCentering": "true"}, "LaneCentering")
+  assert not module._init_param_enabled({"LaneCentering": "0"}, "LaneCentering")
+  assert not module._init_param_enabled({}, "LaneCentering")
+
+
 def test_segment_analysis_stops_on_mid_run_onroad_transition(tmp_path, monkeypatch):
   module, _ = _load_flm_workspace_module(tmp_path)
 

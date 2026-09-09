@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.lib.starpilot_status import (
   CEM_OVERRIDE_COLOR, ENGAGED_COLOR, EXPERIMENTAL_COLOR, TRAFFIC_COLOR
 )
+from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_roundness
 
 
 
@@ -39,6 +40,7 @@ _GREEN = rl.Color(34, 197, 94, 255)
 _AMBER = rl.Color(251, 191, 36, 255)
 _ORANGE = rl.Color(234, 88, 12, 255)
 _RED = rl.Color(201, 34, 49, 255)
+_TRAINING = rl.Color(112, 192, 216, 255)
 
 _last_was_active = False
 _activation_start = 0.0
@@ -57,7 +59,9 @@ def _csc_state():
 
   plan = sm["starpilotPlan"]
   params = ui_state.ui_params
-  if plan.speedLimitChanged or not params.get_bool("ShowCSCStatus"):
+
+
+  if not params.get_bool("ShowCSCStatus"):
     return None
 
   car_state = sm["carState"]
@@ -113,7 +117,8 @@ def _render_csc_glow(border_rect: rl.Rectangle, border_width: float = UI_BORDER_
   state = _csc_state()
   now = rl.get_time()
 
-  if state is None or not state['active']:
+  visible = state is not None and (state['active'] or state['training'])
+  if not visible:
     if _last_was_active:
       _fade_out_start = now
       _last_was_active = False
@@ -131,9 +136,9 @@ def _render_csc_glow(border_rect: rl.Rectangle, border_width: float = UI_BORDER_
       _fade_out_start = 0.0
     _last_was_active = True
 
-    intensity = _intensity(state['curvature'])
+    intensity = _intensity(state['curvature']) if state['active'] else _GLOW_BASE_INTENSITY
     period = _glow_period(intensity)
-    color = _glow_color(intensity)
+    color = _glow_color(intensity) if state['active'] else _TRAINING
     t_norm = max(0.0, min(1.0, (intensity - _GLOW_BASE_INTENSITY) / (1.0 - _GLOW_BASE_INTENSITY)))
     _last_state = (intensity, period, color, t_norm)
     fade = min(1.0, (now - _activation_start) / _GLOW_FADE_IN_DURATION)
@@ -216,6 +221,7 @@ def get_traffic_border_colors() -> tuple[rl.Color, rl.Color] | None:
 def render_background_effects(rect: rl.Rectangle, border_width: float):
   global _smoothed_steer
   sm = ui_state.sm
+  border_roundness = get_border_roundness(rect, border_width)
 
   # 1. Turn Signal and Blind Spot indicators
   colors = get_traffic_border_colors()
@@ -223,11 +229,11 @@ def render_background_effects(rect: rl.Rectangle, border_width: float):
     left_color, right_color = colors
     if left_color.a > 0:
       rl.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width // 2), int(rect.height))
-      rl.draw_rectangle_rounded(rect, 0.12, 10, left_color)
+      rl.draw_rectangle_rounded(rect, border_roundness, 10, left_color)
       rl.end_scissor_mode()
     if right_color.a > 0:
       rl.begin_scissor_mode(int(rect.x + rect.width // 2), int(rect.y), int(rect.width // 2), int(rect.height))
-      rl.draw_rectangle_rounded(rect, 0.12, 10, right_color)
+      rl.draw_rectangle_rounded(rect, border_roundness, 10, right_color)
       rl.end_scissor_mode()
 
   # 2. Steering Torque Border
@@ -260,7 +266,7 @@ def render_background_effects(rect: rl.Rectangle, border_width: float):
         else:
           rl.begin_scissor_mode(int(rect.x + rect.width - border_width), y_pos, int(border_width), int(visible_height))
 
-        rl.draw_rectangle_rounded(rect, 0.12, 10, col)
+        rl.draw_rectangle_rounded(rect, border_roundness, 10, col)
         rl.end_scissor_mode()
 
 

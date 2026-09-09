@@ -7,6 +7,16 @@ import pyray as rl
 from openpilot.common.params import Params
 
 
+_BORDER_ROUNDNESS = 0.12
+_BORDER_RADIUS_MULTIPLE = 3.0
+
+
+def get_border_roundness(rect: rl.Rectangle, border_width: float) -> float:
+  """Keep a rectangular camera inset inside the rounded frame at thin widths."""
+  min_dimension = max(1.0, min(rect.width, rect.height))
+  return min(_BORDER_ROUNDNESS, 2.0 * _BORDER_RADIUS_MULTIPLE * border_width / min_dimension)
+
+
 def blend_colors(a: rl.Color, b: rl.Color, f: float) -> rl.Color:
   h0, s0, v0 = (hsv0 := rl.color_to_hsv(a)).x, hsv0.y, hsv0.z
   h1, s1, v1 = (hsv1 := rl.color_to_hsv(b)).x, hsv1.y, hsv1.z

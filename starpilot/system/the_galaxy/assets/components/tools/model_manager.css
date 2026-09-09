@@ -219,6 +219,18 @@
   color: var(--danger-fg);
 }
 
+.mm-chip-egpu {
+  background: rgba(224, 85, 119, 0.12);
+  border-color: rgba(224, 85, 119, 0.45);
+  color: var(--danger-fg);
+}
+
+.mm-chip-device-gpu {
+  background: rgba(94, 170, 224, 0.12);
+  border-color: rgba(94, 170, 224, 0.45);
+  color: var(--text-color);
+}
+
 .mm-icon-btn,
 .mm-star {
   background: transparent;

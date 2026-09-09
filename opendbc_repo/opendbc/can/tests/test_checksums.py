@@ -1,5 +1,6 @@
 import copy
 from opendbc.can import CANPacker, CANParser
+from opendbc.car.honda.hondacan import honda_checksum
 
 
 class TestCanChecksums:
@@ -89,6 +90,13 @@ class TestCanChecksums:
 
       assert parser.vl['LKAS_HUD']['CHECKSUM'] == std
       assert parser.vl['LKAS_HUD_A']['CHECKSUM'] == ext
+
+  def test_honda_canfd_checksum_offset_is_scoped_to_mvl_messages(self):
+    # Existing high-ID Honda messages retain the legacy extended-ID offset;
+    # only the Accord MVL replacement-radar IDs use the CAN-FD offset.
+    payload = bytearray(8)
+    assert honda_checksum(0xF31AA54, None, payload) == 11  # existing radarless LKAS_HUD_2
+    assert honda_checksum(0xF31AA52, None, payload) == 4   # Accord MVL RADAR_LEAD2
 
   def verify_volkswagen_mqb_crc(self, subtests, msg_name: str, msg_addr: int, test_messages: list[bytes], counter_field: str = 'COUNTER'):
     """Test AUTOSAR E2E Profile 2 CRCs"""

@@ -3,6 +3,11 @@ import cereal.messaging as messaging
 from cereal import car
 from openpilot.common.params import Params
 from openpilot.system.manager.process_config import managed_processes
+from openpilot.selfdrive.ui.feedback.feedbackd import FEEDBACKD_SERVICES
+
+
+def test_feedbackd_does_not_consume_car_state_reader():
+  assert "carState" not in FEEDBACKD_SERVICES
 
 
 @pytest.mark.skip("tmp disabled")

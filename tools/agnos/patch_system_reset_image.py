@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Build StarPilot AGNOS from the exact upstream system image.
+"""Legacy verifier for the pre-builder StarPilot AGNOS image path.
+
+Production images are built by agnos-builder. Keep this module only for
+auditing the previously published 19.6.13 image; do not use it for releases.
 
 The output starts with comma's pinned AGNOS system partition, adds the Python
 packages required by StarPilot's older runtime and C3 support, and customizes
@@ -13,6 +16,7 @@ import hashlib
 import json
 import lzma
 import os
+import posixpath
 import re
 import shutil
 import struct
@@ -78,6 +82,61 @@ ALLOWED_IMAGE_MUTATIONS = frozenset({
   *LEGACY_RUNTIME_LIBRARY_PATHS,
   *FACTORY_INSTALL_PATHS,
 })
+BLUETOOTH_RUNTIME_PATHS = frozenset({
+  "/etc/alsa/conf.d/20-bluealsa.conf",
+  "/etc/bluetooth/input.conf",
+  "/etc/bluetooth/main.conf",
+  "/etc/bluetooth/network.conf",
+  "/etc/default/bluetooth",
+  "/etc/default/bluez-alsa",
+  "/etc/init.d/bluetooth",
+  "/etc/dbus-1/system.d/starpilot-bluetooth.conf",
+  "/usr/bin/bluealsa",
+  "/usr/bin/bluealsa-aplay",
+  "/usr/bin/bluemoon",
+  "/usr/bin/bluetoothctl",
+  "/usr/bin/btattach",
+  "/usr/bin/btmgmt",
+  "/usr/bin/btmon",
+  "/usr/bin/ciptool",
+  "/usr/bin/gatttool",
+  "/usr/bin/hciattach",
+  "/usr/bin/hciconfig",
+  "/usr/bin/hcitool",
+  "/usr/bin/hex2hcd",
+  "/usr/bin/l2ping",
+  "/usr/bin/l2test",
+  "/usr/bin/mpris-proxy",
+  "/usr/bin/obexctl",
+  "/usr/bin/rctest",
+  "/usr/bin/rfcomm",
+  "/usr/bin/sdptool",
+  "/usr/comma/bluetooth-enabled",
+  "/usr/comma/bluetooth-radio",
+  "/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_ctl_bluealsa.so",
+  "/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_bluealsa.so",
+  "/usr/lib/aarch64-linux-gnu/libldacBT_abr.so.2",
+  "/usr/lib/aarch64-linux-gnu/libldacBT_abr.so.2.0.2",
+  "/usr/lib/aarch64-linux-gnu/libldacBT_enc.so.2",
+  "/usr/lib/aarch64-linux-gnu/libldacBT_enc.so.2.0.2",
+  "/usr/lib/aarch64-linux-gnu/libsbc.so.1",
+  "/usr/lib/aarch64-linux-gnu/libsbc.so.1.3.1",
+  "/usr/lib/systemd/system/bluealsa-aplay.service",
+  "/usr/lib/systemd/system/bluealsa.service",
+  "/usr/lib/systemd/system/bluetooth.service",
+  "/usr/lib/systemd/system/starpilot-bluetooth-radio.service",
+  "/usr/lib/udev/hid2hci",
+  "/usr/lib/udev/rules.d/97-hid2hci.rules",
+  "/usr/libexec/bluetooth/bluetoothd",
+  "/usr/sbin/bluetoothd",
+  "/usr/sbin/rfkill",
+  "/usr/share/apport/package-hooks/source_bluez.py",
+  "/usr/share/dbus-1/system-services/org.bluez.service",
+  "/usr/share/dbus-1/system.d/bluealsa.conf",
+  "/usr/share/dbus-1/system.d/bluetooth.conf",
+  "/usr/share/zsh/site-functions/_bluetoothctl",
+})
+BLUETOOTH_RUNTIME_DIRECTORIES = frozenset({"/usr/lib/firmware/qca"})
 
 # Exact system partition pinned by ~/openpilot as of the 19.6 AGNOS release.
 UPSTREAM_VERSION = "19.6"
@@ -161,6 +220,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--c3-deps-url", default=C3_DEPENDENCY_SOURCE_URL,
                       help="Exact prior StarPilot image containing the compatibility packages")
   parser.add_argument("--c3-deps-image", help="Use a local exact StarPilot dependency source image")
+  parser.add_argument("--bluetooth-rootfs", help="Validated additive Bluetooth rootfs overlay")
   parser.add_argument("--set-version", required=True, help="StarPilot revision, for example 19.6.5")
   parser.add_argument("--work-dir", default=".cache/agnos_upstream_system")
   parser.add_argument("--output-xz", help="Output .img.xz path")
@@ -263,6 +323,12 @@ def install_bundled_installer(owner: str, branch: str, installer_url: str) -> No
 
   source = replace_exactly(
     source,
+    'USER_AGENT = f"AGNOSSetup-{HARDWARE.get_os_version()}"',
+    'USER_AGENT = f"AGNOSSetup-{\'.\'.join(HARDWARE.get_os_version().split(\'.\')[:2])}"',
+  )
+
+  source = replace_exactly(
+    source,
     '''    # autocomplete incomplete URLs
     if re.match("^([^/.]+)/([^/]+)$", url):
       url = f"https://installer.comma.ai/{url}"
@@ -273,7 +339,7 @@ def install_bundled_installer(owner: str, branch: str, installer_url: str) -> No
     # installer.comma.ai binary targets Wayland and cannot run in this AGNOS.
     self.installer_url = ("https://installer.comma.ai/firestar5683/StarPilot" if url == OPENPILOT_URL else url)
     self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)
-    match = re.fullmatch(r"(?:https://installer\\.comma\\.ai/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", url)
+    match = re.fullmatch(r"(?:https://installer\\.comma\\.ai/)?([A-Za-z0-9_-]+)/([A-Za-z0-9_.-]+)", url)
     if match:
       self.bundled_installer_target = match.groups()
       self.installer_url = f"https://installer.comma.ai/{'/'.join(self.bundled_installer_target)}"
@@ -444,6 +510,7 @@ def validate_factory_install_payloads(setup: Path, installer: Path) -> None:
       if "CONNECTIVITY_URL = \"https://openpilot.comma.ai\"" not in source:
         raise RuntimeError(f"Connectivity check changed unexpectedly in {member}")
       for expected in (
+        'USER_AGENT = f"AGNOSSetup-{\'.\'.join(HARDWARE.get_os_version().split(\'.\')[:2])}"',
         "patch_bundled_installer(tmpfile, *self.bundled_installer_target)",
         "install_bundled_installer(*bundled_target, self.installer_url)",
         'self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)',
@@ -739,7 +806,8 @@ def add_path_to_image(debugfs: str, image: Path, source: Path, destination: str)
   if source.is_symlink():
     ensure_image_directory(debugfs, image, str(Path(destination).parent))
     target = os.readlink(source)
-    if "/" in target or target in ("", ".", ".."):
+    resolved_target = posixpath.normpath(posixpath.join(posixpath.dirname(destination), target))
+    if posixpath.isabs(target) or target in ("", ".", "..") or not resolved_target.startswith("/"):
       raise RuntimeError(f"Unsafe compatibility-library symlink target: {target!r}")
     run_debugfs(debugfs, image, f"symlink {destination} {target}", write=True)
     stat = run_debugfs(debugfs, image, f"stat {destination}")
@@ -759,6 +827,55 @@ def add_path_to_image(debugfs: str, image: Path, source: Path, destination: str)
   mode = "0100755" if source.stat().st_mode & 0o111 else "0100644"
   for field, value in (("mode", mode), ("uid", "0"), ("gid", "0")):
     run_debugfs(debugfs, image, f"set_inode_field <{inode}> {field} {value}", write=True)
+
+
+def validate_bluetooth_rootfs(source: Path) -> dict[str, dict[str, object]]:
+  if not source.is_dir():
+    raise RuntimeError(f"Bluetooth rootfs overlay not found: {source}")
+  paths = {
+    "/" + path.relative_to(source).as_posix()
+    for path in source.rglob("*")
+    if path.is_file() or path.is_symlink()
+  }
+  if paths != BLUETOOTH_RUNTIME_PATHS:
+    missing = sorted(BLUETOOTH_RUNTIME_PATHS - paths)
+    unexpected = sorted(paths - BLUETOOTH_RUNTIME_PATHS)
+    raise RuntimeError(f"Bluetooth overlay inventory mismatch: missing={missing}, unexpected={unexpected}")
+  missing_directories = [path for path in BLUETOOTH_RUNTIME_DIRECTORIES if not (source / path.removeprefix("/")).is_dir()]
+  if missing_directories:
+    raise RuntimeError(f"Bluetooth overlay is missing directories: {sorted(missing_directories)}")
+
+  manifest: dict[str, dict[str, object]] = {}
+  for image_path in sorted(paths):
+    local_path = source / image_path.removeprefix("/")
+    if local_path.is_symlink():
+      target = os.readlink(local_path)
+      manifest[image_path] = {"type": "symlink", "target": target}
+    else:
+      manifest[image_path] = {
+        "type": "file",
+        "sha256": sha256_file(local_path),
+        "mode": oct(local_path.stat().st_mode & 0o777),
+      }
+  return manifest
+
+
+def add_bluetooth_rootfs(debugfs: str, image: Path, source: Path) -> dict[str, dict[str, object]]:
+  manifest = validate_bluetooth_rootfs(source)
+  conflicts = [
+    path for path in (*BLUETOOTH_RUNTIME_DIRECTORIES, *BLUETOOTH_RUNTIME_PATHS)
+    if image_path_exists(debugfs, image, path)
+  ]
+  if conflicts:
+    raise RuntimeError(f"Bluetooth overlay overlaps the base image: {sorted(conflicts)}")
+  for image_path in sorted(BLUETOOTH_RUNTIME_DIRECTORIES):
+    ensure_image_directory(debugfs, image, image_path)
+  for image_path in sorted(BLUETOOTH_RUNTIME_PATHS):
+    add_path_to_image(debugfs, image, source / image_path.removeprefix("/"), image_path)
+  missing = [path for path in BLUETOOTH_RUNTIME_PATHS if not image_path_exists(debugfs, image, path)]
+  if missing:
+    raise RuntimeError(f"Candidate image is missing Bluetooth runtime paths: {sorted(missing)}")
+  return manifest
 
 
 def replace_image_file(debugfs: str, image: Path, source: Path, destination: str) -> None:
@@ -845,6 +962,10 @@ def main() -> int:
   debugfs, e2fsck = find_debugfs(), find_e2fsck()
   work_dir = Path(args.work_dir).resolve()
   work_dir.mkdir(parents=True, exist_ok=True)
+  bluetooth_rootfs = Path(args.bluetooth_rootfs).resolve() if args.bluetooth_rootfs else None
+  bluetooth_manifest = validate_bluetooth_rootfs(bluetooth_rootfs) if bluetooth_rootfs else {}
+  bluetooth_mutations = BLUETOOTH_RUNTIME_PATHS | BLUETOOTH_RUNTIME_DIRECTORIES
+  allowed_image_mutations = ALLOWED_IMAGE_MUTATIONS | (bluetooth_mutations if bluetooth_rootfs else frozenset())
 
   if args.source_image:
     source = Path(args.source_image).resolve()
@@ -938,6 +1059,8 @@ def main() -> int:
     add_path_to_image(debugfs, candidate_raw, legacy_runtime_dir / Path(image_path).name, image_path)
   replace_image_file(debugfs, candidate_raw, customized_setup, SETUP_PATH_IN_IMAGE)
   replace_image_file(debugfs, candidate_raw, customized_installer, INSTALLER_PATH_IN_IMAGE)
+  if bluetooth_rootfs:
+    bluetooth_manifest = add_bluetooth_rootfs(debugfs, candidate_raw, bluetooth_rootfs)
 
   if read_image_text(debugfs, candidate_raw, VERSION_PATH_IN_IMAGE) != target_version:
     raise RuntimeError("Failed to write the StarPilot AGNOS version marker")
@@ -979,7 +1102,7 @@ def main() -> int:
     "base_version": UPSTREAM_VERSION,
     "base_raw_sha256": UPSTREAM_RAW_SHA256,
     "target_version": target_version,
-    "allowed_image_mutations": sorted(ALLOWED_IMAGE_MUTATIONS),
+    "allowed_image_mutations": sorted(allowed_image_mutations),
     "raw_sha256": raw_hash,
     "raw_size": candidate_raw.stat().st_size,
     "xz_sha256": sha256_file(output_xz),
@@ -990,6 +1113,7 @@ def main() -> int:
     "starpilot_dependency_paths": list(STAR_PILOT_DEPENDENCY_PATHS),
     "c3_dependency_paths": list(C3_DEPENDENCY_PATHS),
     "legacy_runtime_library_paths": list(LEGACY_RUNTIME_LIBRARY_PATHS),
+    "bluetooth_runtime": bluetooth_manifest,
     "protected_payloads": candidate_payloads,
     "factory_install_payloads": candidate_factory_payloads,
     "factory_reset_stack": (
@@ -1008,7 +1132,10 @@ def main() -> int:
   print(f"  raw sha256:     {raw_hash}")
   print(f"  xz sha256:      {metadata['xz_sha256']}")
   print(f"  metadata:       {metadata_path}")
-  print("  only mutations: /VERSION, additive StarPilot runtime/C3 compatibility, and factory setup/installer branding")
+  mutation_summary = "/VERSION, additive StarPilot runtime/C3 compatibility, and factory setup/installer branding"
+  if bluetooth_rootfs:
+    mutation_summary += ", plus the validated additive Bluetooth runtime"
+  print(f"  only mutations: {mutation_summary}")
 
   if args.new_url:
     manifest_path = Path(args.manifest).resolve()

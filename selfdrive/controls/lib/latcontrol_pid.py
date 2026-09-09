@@ -8,6 +8,7 @@ from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import (
   RAV4_TSS2_CARS,
   SUBARU_IMPREZA_CARS,
+  get_honda_crv_5g_pid_output,
   get_rav4_tss2_pid_output,
   get_subaru_impreza_pid_output_scale,
 )
@@ -103,6 +104,7 @@ class LatControlPID(LatControl):
     self.honda_lateral_pid_kp_scale = 1.0
     self.honda_lateral_pid_ki_scale = 1.0
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
+    self.is_honda_crv_5g = CP.carFingerprint == HONDA.HONDA_CRV_5G
     self.is_subaru_impreza = CP.carFingerprint in SUBARU_IMPREZA_CARS
     self.is_rav4_tss2 = CP.carFingerprint in RAV4_TSS2_CARS
     self.prev_angle_steers_des_no_offset = 0.0
@@ -169,6 +171,12 @@ class LatControlPID(LatControl):
       if self.is_subaru_impreza:
         raw_output_torque = self.pid.p + self.pid.i + self.pid.d + self.pid.f
         output_torque = raw_output_torque * get_subaru_impreza_pid_output_scale(error)
+        output_torque = float(max(min(output_torque, self.steer_max), -self.steer_max))
+
+      if self.is_honda_crv_5g:
+        output_torque = get_honda_crv_5g_pid_output(
+          output_torque, self.prev_output_torque, angle_steers_des_no_offset, CS.vEgo,
+        )
         output_torque = float(max(min(output_torque, self.steer_max), -self.steer_max))
 
       if self.is_rav4_tss2:

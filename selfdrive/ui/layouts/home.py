@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.widgets.drive_stats import DriveStatsDashboard
 from openpilot.selfdrive.ui.widgets.home_info_card import HomeInfoCard
 from openpilot.selfdrive.ui.widgets.setup import SetupWidget
 from openpilot.selfdrive.ui.lib.starpilot_version import home_screen_name, starpilot_display_description
+from openpilot.starpilot.common.model_lab import model_lab_pair_display_name_from_params
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.multilang import tr, trn
@@ -265,7 +266,9 @@ class HomeLayout(Widget):
     description = starpilot_display_description(self.params.get("UpdaterCurrentDescription"))
     version_text = f"{brand} {description}" if description else brand
 
-    model_name = self.params.get("DrivingModelName", encoding="utf-8") or self.params.get_default_value("DrivingModelName")
+    model_name = (model_lab_pair_display_name_from_params(self.params) or
+                  self.params.get("DrivingModelName", encoding="utf-8") or
+                  self.params.get_default_value("DrivingModelName"))
     if isinstance(model_name, bytes):
       model_name = model_name.decode("utf-8", errors="ignore")
     model_name = str(model_name or "").replace("_default", "").replace("(Default)", "").strip()

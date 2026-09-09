@@ -1667,10 +1667,6 @@
         <translation>Прив'язати прискорення/сповільнення до передач</translation>
     </message>
     <message>
-        <source>Reverse Cruise Increase</source>
-        <translation>Змінити довге натискання</translation>
-    </message>
-    <message>
         <source>Speed Limit Controller</source>
         <translation>Контролер лімітів швидк.</translation>
     </message>

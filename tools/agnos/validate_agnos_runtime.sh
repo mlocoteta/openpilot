@@ -42,6 +42,8 @@ with zipfile.ZipFile("/usr/comma/setup") as setup:
     source = setup.read(member).decode("utf-8")
     assert 'OPENPILOT_URL = "file:///usr/comma/installer"' in source, member
     assert 'CONNECTIVITY_URL = "https://openpilot.comma.ai"' in source, member
+    assert 'USER_AGENT = f"AGNOSSetup-{\'.\'.join(HARDWARE.get_os_version().split(\'.\')[:2])}"' in source, member
+    assert 're.fullmatch(r"(?:https://installer\\.comma\\.ai/)?([A-Za-z0-9_-]+)/([A-Za-z0-9_.-]+)", url)' in source, member
     assert "StarPilot" in source, member
     assert "install_bundled_installer(*bundled_target, self.installer_url)" in source, member
     assert 'self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)' in source, member
@@ -80,7 +82,7 @@ c548c10b875b8841637017503ac73b1d466a36926df59fc5382221c021738d90  /usr/local/lib
 41b0a5e7807506779f2163d23d5120949efaeeaf96fb9b69758551c9af7c7c1a  /usr/local/lib/libswresample.so.3.5.100
 370d154aaf7e1e9ee433c069348ae885036a9d8cc4c8babfbfae12c8d5b3f2e8  /usr/comma/installer
 934f74ab4b2ac06048418c2857be3a041e192ec03c09979987691c23c91353bd  /usr/comma/setup_keys
-6565acac9eb8167931f6ad50c62254b64f037d21a7944456bd8ec328c7f4af0b  /usr/comma/setup
+d3f66148cb25ce381f5abf33cd9e0a2eb5e7fa20b137eeb1bf226d05534fc32f  /usr/comma/setup
 bcba2b336cf0ca852786f8a58bbce407e0e9fe952c26fc5d903f6d9a34b44b4f  /usr/comma/comma.sh
 HASHES
 

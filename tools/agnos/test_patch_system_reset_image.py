@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import zipfile
 from pathlib import Path
 
@@ -120,7 +121,8 @@ def _setup_source(member: str) -> str:
       'error_msg = "Ensure the entered URL is valid, and the device\'s internet connection is good."\n'
       '      self.download_failed(self.download_url, error_msg)'
     )
-  return f'''OPENPILOT_URL = "https://openpilot.comma.ai"
+  return f'''USER_AGENT = f"AGNOSSetup-{{HARDWARE.get_os_version()}}"
+OPENPILOT_URL = "https://openpilot.comma.ai"
 {connectivity}
 {labels}
   def download(self, url: str):
@@ -178,6 +180,9 @@ def test_patch_setup_zipapp_preserves_prefix_and_custom_flow(tmp_path):
   assert 'ButtonRadio("StarPilot"' in tici
   assert "urllib.request.urlopen(CONNECTIVITY_URL" in tici
   for setup_source in (mici, tici):
+    assert 'USER_AGENT = f"AGNOSSetup-{\'.\'.join(HARDWARE.get_os_version().split(\'.\')[:2])}"' in setup_source
+    assert 're.fullmatch(r"(?:https://installer\\.comma\\.ai/)?([A-Za-z0-9_-]+)/([A-Za-z0-9_.-]+)", url)' in setup_source
+    assert "install.sunnypilot.ai/release-mici" in setup_source
     assert "patch_bundled_installer(tmpfile, *self.bundled_installer_target)" in setup_source
     assert "install_bundled_installer(*bundled_target, self.installer_url)" in setup_source
     assert 'self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)' in setup_source
@@ -187,6 +192,19 @@ def test_patch_setup_zipapp_preserves_prefix_and_custom_flow(tmp_path):
     assert 'open("/usr/comma/installer", "rb")' in setup_source
     assert "self.download_url == OPENPILOT_URL" in setup_source
     assert 'url = f"https://installer.comma.ai/{url}"' not in setup_source
+
+  shorthand_pattern = r"(?:https://installer\.comma\.ai/)?([A-Za-z0-9_-]+)/([A-Za-z0-9_.-]+)"
+  assert re.fullmatch(shorthand_pattern, "sunnypilot/release-mici").groups() == ("sunnypilot", "release-mici")
+  assert re.fullmatch(shorthand_pattern, "https://installer.comma.ai/sunnypilot/release-mici").groups() == (
+    "sunnypilot", "release-mici",
+  )
+  for installer_url in (
+    "install.sunnypilot.ai/release-mici",
+    "https://install.sunnypilot.ai/release-mici",
+    "staging.sunnypilot.ai",
+    "dev.sunnypilot.ai",
+  ):
+    assert re.fullmatch(shorthand_pattern, installer_url) is None
 
 
 def test_patch_installer_binary_keeps_elf_layout_and_targets_starpilot(tmp_path):

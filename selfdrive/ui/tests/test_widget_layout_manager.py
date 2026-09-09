@@ -179,6 +179,19 @@ class TestWidgetLayoutManager(unittest.TestCase):
     self.assertEqual(w2.rect.x, 1934)
     self.assertEqual(w2.rect.y, 290)
 
+  def test_right_center_zone_is_centered_on_the_right_widget_column(self):
+    w1 = DummyLayoutWidget("model_source", priority=1, width=300, height=208)
+    self.layout_manager.register_widget("right_center", w1)
+
+    self.layout_manager.update_layout(self.content_rect, is_rhd=False)
+
+    # The 300px widget needs a 150px inset to remain inside the content rect.
+    # center_x = 30 + 2100 - 150 = 1980; center_y = 30 + 1020 / 2 = 540
+    self.assertEqual(w1.rect.x, 1830)
+    self.assertEqual(w1.rect.y, 436)
+    self.assertEqual(w1.rect.width, 300)
+    self.assertEqual(w1.rect.height, 208)
+
 
 
 if __name__ == "__main__":

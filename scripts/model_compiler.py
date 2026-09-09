@@ -16,6 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
   sys.path.insert(0, str(REPO_ROOT))
 
+from openpilot.starpilot.common.model_versions import UNIFIED_ARTIFACT_FORMAT
+
 DEFAULT_INPUT_ROOT = Path("/data/openpilot/uncompiledmodels")
 DEFAULT_OUTPUT_ROOT = Path("/data/openpilot/compiledmodels")
 COMPILE_SCRIPT = REPO_ROOT / "tinygrad_repo/examples/openpilot/compile3.py"
@@ -44,8 +46,9 @@ MODEL_CONTEXT_FREQ = 5
 # GitHub/GitLab advertise a 100 MB per-file limit. Use the decimal limit so
 # artifacts such as a 104.4 MB PKL are split before they reach the remote.
 REPOSITORY_FILE_LIMIT = 100_000_000
-DEFAULT_MULTIPART_SIZE = 95 * 1024 * 1024
+DEFAULT_CHUNK_SIZE = 45 * 1024 * 1024
 USBGPU_PROBE_ATTEMPTS = 10
+DEFAULT_SUPERCOMBO_BEHAVIOR_VERSION = "v16"
 
 
 def build_compile_env(*, supercombo: bool = False) -> dict[str, str]:
@@ -66,10 +69,6 @@ def build_compile_env(*, supercombo: bool = False) -> dict[str, str]:
       int(str(env.get(key)), 0)
     except (TypeError, ValueError):
       env[key] = default
-  if supercombo:
-    # Unified supercombo artifacts must use upstream compile defaults. The
-    # legacy QCOM tuning causes a reproducible HCQ timeline failure here.
-    env.pop("QCOM_PRIORITY", None)
   return env
 
 
@@ -85,9 +84,14 @@ def wait_for_external_gpu() -> None:
 
 
 def external_gpu_compile_command(command: list[str]) -> list[str]:
-  """Pin USB-GPU compilation to AGNOS' isolated CPU without changing host builds."""
+  """Pin USB-GPU compilation when AGNOS exposes the isolated CPU."""
   if sys.platform == "linux" and platform.machine() == "aarch64":
-    return ["taskset", "-c", "7", *command]
+    try:
+      available_cpus = os.sched_getaffinity(0)
+      if 7 in available_cpus:
+        return ["taskset", "-c", "7", *command]
+    except (AttributeError, OSError):
+      pass
   return command
 
 
@@ -114,7 +118,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--gpu", "--external-gpu", dest="external_gpu", action="store_true",
                       help="Compile the driving artifact for the USB AMD GPU.")
   parser.add_argument("--split-artifact", type=Path, help="Split an existing oversized PKL without compiling.")
-  parser.add_argument("--chunk-size-mib", type=int, default=95, help="Multipart size in MiB; must be below 100.")
+  parser.add_argument("--chunk-size-mib", type=int, default=45, help="Native chunk size in MiB; must be below 100.")
   parser.add_argument("--no-split", action="store_true",
                       help="Keep a single .pkl even if >100 MiB (for local installs, which need one "
                            "file). Auto-enabled for local- model IDs.")
@@ -278,6 +282,13 @@ def infer_model_version(model_key: str, explicit_version: str | None) -> str:
   return ""
 
 
+def resolve_behavior_version(model_key: str, explicit_version: str | None, input_format: str) -> str:
+  version = infer_model_version(model_key, explicit_version)
+  if not version and input_format == "supercombo":
+    return DEFAULT_SUPERCOMBO_BEHAVIOR_VERSION
+  return version
+
+
 def select_input_format(requested: str, files: dict[str, Path]) -> str:
   if requested == "supercombo":
     if "driving_supercombo" not in files:
@@ -389,15 +400,42 @@ def multipart_output_paths(artifact: Path, output_dir: Path | None = None) -> li
   ]
 
 
-def install_local_artifact(artifact: Path, model_key: str, version: str) -> None:
+def chunked_output_paths(artifact: Path, output_dir: Path | None = None) -> list[Path]:
+  output_dir = output_dir or artifact.parent
+  return [
+    *sorted(output_dir.glob(f"{artifact.name}.chunk[0-9][0-9]of[0-9][0-9]")),
+    output_dir / f"{artifact.name}.chunkmanifest",
+    output_dir / f"{artifact.name}.sha256",
+  ]
+
+
+def _update_local_artifact_metadata(model_key: str, external_gpu: bool) -> None:
+  metadata_path = MODELS_PATH / ".model_artifacts.json"
+  try:
+    payload = json.loads(metadata_path.read_text()) if metadata_path.is_file() else {}
+    if not isinstance(payload, dict):
+      payload = {}
+    metadata = payload.get(model_key)
+    if not isinstance(metadata, dict):
+      metadata = {}
+    metadata["artifact_format"] = UNIFIED_ARTIFACT_FORMAT
+    metadata["uses_external_gpu"] = bool(external_gpu)
+    payload[model_key] = metadata
+    metadata_path.write_text(json.dumps(payload))
+  except Exception as error:
+    print(f"  WARN: could not update {metadata_path.name}: {error}")
+
+
+def install_local_artifact(artifact: Path, model_key: str, version: str, external_gpu: bool = False) -> None:
   """Copy a freshly compiled local- model into the runtime dir modeld loads from,
-  and ensure its <id>.json sidecar carries the correct version.
+  and ensure its <id>.json sidecar and artifact cache carry the correct metadata.
 
   The sidecar version is NOT cosmetic: without it _discover_local_models() records
   an empty version, which downstream parses on the wrong contract (a v15 model then
   drives like v11). Since we know the build version here, we write it so the local
-  install is correct by default. Local models must be a single is_file() in
-  /data/models to show in the picker. No-ops off-device (no /data/models).
+  install is correct by default. The GPU flag is equally important: it selects
+  the out-of-band loader and AMD queue at runtime. Local models must be a single
+  is_file() in /data/models to show in the picker. No-ops off-device.
   """
   if not MODELS_PATH.is_dir():
     print(f"  skipped auto-install: {MODELS_PATH} not present (not on device?)")
@@ -415,26 +453,25 @@ def install_local_artifact(artifact: Path, model_key: str, version: str) -> None
         info = loaded
     except Exception as error:
       print(f"  WARN: existing sidecar {sidecar.name} is malformed, rewriting: {error}")
-  if not version:
-    if not str(info.get("version") or "").strip():
-      print(f"  WARN: could not determine version -- set it by hand in {sidecar.name} "
-            "or the model may drive on the wrong version contract")
-    return
-  # keep any user-set name/series; only guarantee a correct, non-empty version
-  if str(info.get("version") or "").strip() == version and sidecar.is_file():
-    print(f"  sidecar ok: {sidecar.name} (version {version})")
-    return
-  info.setdefault("name", model_key[len("local-"):].replace("_", " ").replace("-", " ").strip())
-  info.setdefault("series", "Local")
-  info["version"] = version
-  sidecar.write_text(json.dumps(info, indent=2) + "\n")
-  print(f"  wrote sidecar {sidecar.name} (version {version})")
+  if version:
+    info.setdefault("name", model_key[len("local-"):].replace("_", " ").replace("-", " ").strip())
+    info.setdefault("series", "Local")
+    info["version"] = version
+  elif not str(info.get("version") or "").strip():
+    print(f"  WARN: could not determine version -- set it by hand in {sidecar.name} "
+          "or the model may drive on the wrong version contract")
+
+  info["uses_external_gpu"] = bool(external_gpu)
+  if version or sidecar.is_file() or external_gpu:
+    sidecar.write_text(json.dumps(info, indent=2) + "\n")
+    print(f"  wrote sidecar {sidecar.name} (gpu={bool(external_gpu)})")
+  _update_local_artifact_metadata(model_key, external_gpu)
 
 
 def split_oversized_artifact(
   artifact: Path,
   output_dir: Path | None = None,
-  chunk_size: int = DEFAULT_MULTIPART_SIZE,
+  chunk_size: int = DEFAULT_CHUNK_SIZE,
   force: bool = False,
 ) -> list[Path]:
   artifact = artifact.resolve()
@@ -442,46 +479,52 @@ def split_oversized_artifact(
   if not artifact.is_file():
     raise FileNotFoundError(artifact)
   if chunk_size <= 0 or chunk_size >= REPOSITORY_FILE_LIMIT:
-    raise ValueError("Multipart chunk size must be between 1 byte and 100 MiB.")
+    raise ValueError("Chunk size must be between 1 byte and 100 MiB.")
 
-  remove_paths(multipart_output_paths(artifact, output_dir))
+  remove_paths([*multipart_output_paths(artifact, output_dir), *chunked_output_paths(artifact, output_dir)])
   if artifact.stat().st_size <= REPOSITORY_FILE_LIMIT and not force:
     return []
 
   output_dir.mkdir(parents=True, exist_ok=True)
   digest = hashlib.sha256()
-  part_paths: list[Path] = []
+  chunk_paths: list[Path] = []
+  artifact_size = artifact.stat().st_size
+  chunk_count = (artifact_size + chunk_size - 1) // chunk_size
+  if chunk_count > 99:
+    raise ValueError(f"Artifact requires {chunk_count} chunks; two-digit chunk names support at most 99.")
   with open(artifact, "rb") as source:
-    for index in range(100):
-      part_path = output_dir / f"{artifact.name}.p{index:02d}"
-      part_size = 0
-      with open(part_path, "wb") as part_file:
-        while part_size < chunk_size:
-          chunk = source.read(min(1024 * 1024, chunk_size - part_size))
+    for index in range(chunk_count):
+      chunk_path = output_dir / f"{artifact.name}.chunk{index + 1:02d}of{chunk_count:02d}"
+      written = 0
+      with open(chunk_path, "wb") as chunk_file:
+        while written < chunk_size:
+          chunk = source.read(min(1024 * 1024, chunk_size - written))
           if not chunk:
             break
-          part_file.write(chunk)
+          chunk_file.write(chunk)
           digest.update(chunk)
-          part_size += len(chunk)
-      if part_size == 0:
-        part_path.unlink()
-        break
-      part_paths.append(part_path)
-  if not part_paths:
+          written += len(chunk)
+      if written == 0:
+        chunk_path.unlink()
+        raise RuntimeError("Unexpected end of artifact while chunking.")
+      chunk_paths.append(chunk_path)
+  if not chunk_paths:
     raise ValueError(f"Artifact is empty: {artifact}")
 
+  manifest_path = output_dir / f"{artifact.name}.chunkmanifest"
+  manifest_path.write_text(str(chunk_count))
   checksum_path = output_dir / f"{artifact.name}.sha256"
   checksum_path.write_text(f"{digest.hexdigest()}  {artifact.name}\n")
 
   verify_digest = hashlib.sha256()
-  for part_path in part_paths:
-    with open(part_path, "rb") as part_file:
-      for chunk in iter(lambda: part_file.read(1024 * 1024), b""):
+  for chunk_path in chunk_paths:
+    with open(chunk_path, "rb") as chunk_file:
+      for chunk in iter(lambda: chunk_file.read(1024 * 1024), b""):
         verify_digest.update(chunk)
   if verify_digest.hexdigest() != digest.hexdigest():
-    remove_paths([*part_paths, checksum_path])
-    raise RuntimeError("Split artifact failed checksum verification.")
-  return [*part_paths, checksum_path]
+    remove_paths([*chunk_paths, manifest_path, checksum_path])
+    raise RuntimeError("Chunked artifact failed checksum verification.")
+  return [manifest_path, *chunk_paths, checksum_path]
 
 
 def compile_driving(
@@ -501,6 +544,7 @@ def compile_driving(
   removed = remove_paths(sorted({
     output_path,
     *multipart_output_paths(output_path, output_dir),
+    *chunked_output_paths(output_path, output_dir),
     *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl"),
     *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl.p[0-9][0-9]"),
     *output_dir.glob(f"{model_key}_driving_*_tinygrad.pkl.sha256"),
@@ -525,16 +569,20 @@ def compile_driving(
     str(frame_skip),
     "--image-history-pipeline",
     image_history_pipeline,
+    "--out-of-band",
     *source_args,
   ]
   if version:
     command += ["--behavior-version", version]
   compile_env = build_compile_env(supercombo=input_format == "supercombo")
   if external_gpu:
+    gpu_debug = os.environ.get("STARPILOT_GPU_DEBUG", "1")
+    if gpu_debug not in {"1", "2"}:
+      gpu_debug = "1"
     for qcom_only_flag in ("IMAGE", "NOLOCALS", "OPENPILOT_HACKS"):
       compile_env.pop(qcom_only_flag, None)
     compile_env.update({
-      "DEBUG": "2",
+      "DEBUG": gpu_debug,
       "DEV": "USB+AMD:LLVM",
       "WARP_DEV": "QCOM",
       "FLOAT16": "1",
@@ -542,7 +590,6 @@ def compile_driving(
       "GMMU": "0",
       "TC_OPT": "2",
     })
-    command.append("--out-of-band")
     wait_for_external_gpu()
     command = external_gpu_compile_command(command)
   subprocess.run(command, cwd=REPO_ROOT, env=compile_env, check=True)
@@ -642,9 +689,7 @@ def main() -> int:
     source_path = Path(source)
     validate_onnx_source(source_path)
     print(f"  source {option.removeprefix('--')}: {source_path} ({source_path.stat().st_size} bytes)")
-  version = infer_model_version(model_key, args.version)
-  if not version and input_format == "supercombo":
-    version = "v15"
+  version = resolve_behavior_version(model_key, args.version, input_format)
   version_label = version or "unspecified behavior"
   will_install = model_key.startswith("local-") and not args.no_install
   target = f"{args.output_dir}" + (f" -> {MODELS_PATH} (auto-install)" if will_install else "")
@@ -665,15 +710,14 @@ def main() -> int:
         print(f"  --no-split: kept one {size_mb:.1f} MB file; over 100 MB, so split it "
               "before committing to a repo (re-run without --no-split, or --split-artifact)")
     if is_local and not args.no_install:
-      install_local_artifact(output, model_key, version)
+      install_local_artifact(output, model_key, version, args.external_gpu)
   else:
-    multipart_outputs = split_oversized_artifact(output)
-    if multipart_outputs:
-      print("  artifact exceeds 100 MB; created repository-safe multipart files:")
-      for multipart_output in multipart_outputs:
-        print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
-      output.unlink()
-      print(f"  removed oversized source artifact {output.name}")
+    chunked_outputs = split_oversized_artifact(output, force=True)
+    print("  created repository-safe native chunks:")
+    for chunked_output in chunked_outputs:
+      print(f"    {chunked_output.name} ({chunked_output.stat().st_size} bytes)")
+    output.unlink()
+    print(f"  removed source artifact {output.name}")
   print("Done.")
   return 0
 

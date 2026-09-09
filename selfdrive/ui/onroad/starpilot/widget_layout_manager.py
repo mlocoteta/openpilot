@@ -8,7 +8,8 @@ class WidgetLayoutManager:
     self.zones = {
       "left": [],
       "bottom": [],
-      "right": []
+      "right": [],
+      "right_center": [],
     }
     self.spacing = 15  # Spacing between widgets
 
@@ -23,6 +24,7 @@ class WidgetLayoutManager:
     self._layout_left()
     self._layout_bottom(is_rhd)
     self._layout_right()
+    self._layout_right_center()
 
   def _layout_left(self):
     active_widgets = [w for w in self.zones["left"] if w.is_visible]
@@ -65,6 +67,22 @@ class WidgetLayoutManager:
     active_widgets = [w for w in self.zones["right"] if w.is_visible]
     center_x = self.content_rect.x + self.content_rect.width - 146
     current_y = self.content_rect.y + 45
+    for widget in active_widgets:
+      w, h = widget.get_size()
+      widget.set_rect(rl.Rectangle(center_x - w / 2, current_y, w, h))
+      current_y += h + self.spacing
+
+  def _layout_right_center(self):
+    active_widgets = [w for w in self.zones["right_center"] if w.is_visible]
+    if not active_widgets:
+      return
+
+    total_h = sum(w.get_size()[1] for w in active_widgets) + self.spacing * (len(active_widgets) - 1)
+    widest_widget = max(w.get_size()[0] for w in active_widgets)
+    # Preserve the shared anchor unless a wide center widget would reach the border.
+    right_inset = max(float(WIDGET_ANCHOR_OFFSET), widest_widget / 2)
+    center_x = self.content_rect.x + self.content_rect.width - right_inset
+    current_y = self.content_rect.y + (self.content_rect.height - total_h) / 2
     for widget in active_widgets:
       w, h = widget.get_size()
       widget.set_rect(rl.Rectangle(center_x - w / 2, current_y, w, h))

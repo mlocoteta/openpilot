@@ -266,7 +266,6 @@ RelaxedJerkSpeedDecrease
 RelaxedPersonalityProfile
 RemapCancelToDistance
 RemoteStartBootsComma
-ReverseCruise
 RoadEdgesWidth
 RoadNameUI
 RotatingWheel
@@ -354,6 +353,7 @@ StoppingDecelRate
 StoppingDecelRateStock
 SubaruSNG
 SubaruSNGManualParkingBrake
+SubaruStopStartOff
 SwitchbackModeCooldown
 SwitchbackModeEnabled
 TacoTune

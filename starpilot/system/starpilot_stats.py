@@ -200,10 +200,6 @@ def send_stats():
     build_metadata = get_build_metadata()
     starpilot_toggles = get_starpilot_toggles()
 
-    frogs_go_moo = getattr(starpilot_toggles, "frogs_go_moo", False)
-    if frogs_go_moo:
-      return
-
     if starpilot_toggles.car_make == "mock":
       return
 

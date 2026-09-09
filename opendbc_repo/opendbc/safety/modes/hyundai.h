@@ -29,6 +29,7 @@ const LongitudinalLimits HYUNDAI_LONG_LIMITS = {
   {0x340, 0,                           8, .check_relay = true},   /* LKAS11 Bus 0                              */ \
   {0x4F1, scc_bus,                     4, .check_relay = false},  /* CLU11 Bus 0 (radar-SCC) or 2 (camera-SCC) */ \
   {0x485, 0,       (can_refresh) ? 8 : 4, .check_relay = true},   /* LFAHDA_MFC Bus 0                          */ \
+  {0x53E, 0,                           6, .check_relay = false},  /* LKAS12 replacement after camera advertises it */ \
 
 #define HYUNDAI_LONG_COMMON_TX_MSGS(scc_bus, can_refresh) \
   HYUNDAI_COMMON_TX_MSGS(scc_bus, can_refresh) \
@@ -138,6 +139,12 @@ static uint32_t hyundai_get_checksum(const CANPacket_t *msg) {
   } else {
   }
   return chksum;
+}
+
+static void hyundai_rx_all_hook(const CANPacket_t *msg) {
+  if ((msg->addr == 0x53EU) && (msg->bus == 2U) && (GET_LEN(msg) == 6U)) {
+    hyundai_has_lkas12 = true;
+  }
 }
 
 static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
@@ -283,6 +290,10 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED = HYUNDAI_LIMITS(404, 2, 3);
 
   bool tx = true;
+
+  if ((msg->addr == 0x53EU) && !hyundai_has_lkas12) {
+    tx = false;
+  }
 
   // FCA11: Block any potential actuation. The blended HDA II layout uses
   // different static fields, but its explicit AEB/FCA request bits stay zero.
@@ -695,6 +706,7 @@ static safety_config hyundai_legacy_init(uint16_t param) {
 const safety_hooks hyundai_hooks = {
   .init = hyundai_init,
   .rx = hyundai_rx_hook,
+  .rx_all = hyundai_rx_all_hook,
   .tx = hyundai_tx_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
@@ -704,6 +716,7 @@ const safety_hooks hyundai_hooks = {
 const safety_hooks hyundai_legacy_hooks = {
   .init = hyundai_legacy_init,
   .rx = hyundai_rx_hook,
+  .rx_all = hyundai_rx_all_hook,
   .tx = hyundai_tx_hook,
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,

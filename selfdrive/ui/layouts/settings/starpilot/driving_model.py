@@ -23,6 +23,7 @@ from openpilot.starpilot.assets.model_manager import (
   is_builtin_model_key,
   model_uses_external_gpu,
   model_key_aliases,
+  set_model_profile,
 )
 from openpilot.starpilot.common.starpilot_variables import MODELS_PATH, update_starpilot_toggles
 from openpilot.system.ui.lib.application import FontWeight, MouseEvent, MousePos, gui_app
@@ -41,6 +42,8 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   AetherListColors,
   AetherScrollbar,
   DEFAULT_PANEL_STYLE,
+  aether_begin_scissor_mode,
+  aether_end_scissor_mode,
   point_hits,
   draw_action_rail,
   draw_action_pill,
@@ -48,29 +51,19 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   draw_download_icon,
   draw_empty_state_card,
   draw_heart_icon,
-  draw_list_panel_shell,
   draw_list_group_shell,
-  build_list_panel_frame,
   draw_list_row_shell,
   draw_list_scroll_fades,
   draw_section_header,
-  draw_settings_list_row,
-  draw_settings_panel_header,
   draw_status_led,
   draw_overflow_dots,
-  draw_rounded_fill,
-  draw_rounded_stroke,
   init_list_panel,
-  draw_interactive_rect,
-  resolve_interactive_target,
-  wrap_text,
   with_alpha,
   SECTION_GAP,
   SECTION_HEADER_HEIGHT,
   SECTION_HEADER_GAP,
   ROW_HEIGHT,
 )
-UTILITY_ROW_HEIGHT = AETHER_LIST_METRICS.utility_row_height
 ROW_RADIUS = AETHER_LIST_METRICS.row_radius
 ACTION_WIDTH = AETHER_LIST_METRICS.action_width
 BUTTON_HEIGHT = AETHER_LIST_METRICS.header_button_height
@@ -79,9 +72,13 @@ DRIVING_MODEL_METRICS = replace(AETHER_LIST_METRICS, header_height=0)
 CONFIRM_TIMEOUT_SECONDS = 3.0
 TRANSITION_SECONDS = 0.24
 PANEL_STYLE = DEFAULT_PANEL_STYLE
-BANNER_HEIGHT = ROW_HEIGHT
-HEADER_BAR_HEIGHT = 107.0
-MANAGEMENT_STRIP_HEIGHT = 56.0
+BANNER_HEIGHT = 128.0
+BANNER_GAP = 14.0
+HEADER_BUTTON_HEIGHT = 80.0
+HEADER_BUTTON_GAP_Y = 14.0
+MANAGEMENT_STRIP_HEIGHT = 64.0
+MANAGEMENT_PILL_HEIGHT = 44.0
+EMPTY_STATE_HEIGHT = 240.0
 _SORT_MODES = ("alphabetical", "date", "date_oldest", "favorites", "community_picks")
 _SORT_LABELS = {
   "alphabetical":     "Alphabetical",
@@ -212,7 +209,7 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
         self._transition_starts.pop(key, None)
 
   def _target_at(self, mouse_pos: MousePos) -> str | None:
-    for prefix in ("menu:", "action:", "utility:", "row:"):
+    for prefix in ("menu:", "action:", "row:"):
       for target_id, rect in self._interactive_rects.items():
         if target_id.startswith(prefix):
           pad_y = 6 if prefix == "menu:" else 0
@@ -267,14 +264,6 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
         self._controller.toggle_favorite(model_key)
       return
 
-    if target.startswith("utility:"):
-      action = target.split(":", 1)[1]
-      if action == "blacklist":
-        self._controller._on_blacklist_clicked()
-      elif action == "ratings":
-        self._controller._on_scores_clicked()
-      return
-
     if target.startswith("mgmt:"):
       action = target.split(":", 1)[1]
       if action == "blacklist":
@@ -299,42 +288,37 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
     self._shell_rect = frame.shell
 
     current_entry = self._controller.current_entry()
-    use_banner = current_entry is not None
-    if use_banner:
+    if current_entry is not None:
       banner_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y, scroll_rect.width, BANNER_HEIGHT)
-      scroll_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y + BANNER_HEIGHT,
-                                  scroll_rect.width, scroll_rect.height - BANNER_HEIGHT)
+      scroll_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y + BANNER_HEIGHT + BANNER_GAP,
+                                 scroll_rect.width, scroll_rect.height - BANNER_HEIGHT - BANNER_GAP)
       self._draw_current_banner(banner_rect, current_entry)
 
     header_y = scroll_rect.y
     self._draw_relocated_header(scroll_rect.x, header_y, content_width)
-    scroll_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y + HEADER_BAR_HEIGHT,
-                                scroll_rect.width, scroll_rect.height - HEADER_BAR_HEIGHT)
+    scroll_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y + HEADER_BUTTON_HEIGHT + HEADER_BUTTON_GAP_Y,
+                               scroll_rect.width, scroll_rect.height - HEADER_BUTTON_HEIGHT - HEADER_BUTTON_GAP_Y)
 
     randomizer_on = self._controller._params.get_bool("ModelRandomizer")
     mgmt_y = scroll_rect.y
     self._draw_sort_strip(scroll_rect.x, mgmt_y, content_width, randomizer_on)
     scroll_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y + MANAGEMENT_STRIP_HEIGHT,
-                                scroll_rect.width, scroll_rect.height - MANAGEMENT_STRIP_HEIGHT)
+                               scroll_rect.width, scroll_rect.height - MANAGEMENT_STRIP_HEIGHT)
 
     self._scroll_rect = scroll_rect
 
-    self._draw_header(frame.header)
     self._content_height = self._measure_content_height(content_width)
     self._scroll_panel.set_enabled(lambda: not self._controller._is_download_active())
     self._scroll_offset = self._scroll_panel.update(scroll_rect, max(self._content_height, scroll_rect.height))
 
-    rl.begin_scissor_mode(int(scroll_rect.x), int(scroll_rect.y), int(scroll_rect.width), int(scroll_rect.height))
+    aether_begin_scissor_mode(int(scroll_rect.x), int(scroll_rect.y), int(scroll_rect.width), int(scroll_rect.height))
     self._draw_scroll_content(scroll_rect, content_width)
-    rl.end_scissor_mode()
+    aether_end_scissor_mode()
 
     if self._content_height > scroll_rect.height:
       self._draw_scrollbar(scroll_rect)
 
     draw_list_scroll_fades(scroll_rect, self._content_height, self._scroll_offset, AetherListColors.PANEL_BG, fade_height=FADE_HEIGHT)
-
-  def _draw_header(self, rect: rl.Rectangle):
-    pass
 
   def _draw_current_banner(self, rect: rl.Rectangle, entry: ModelCatalogEntry):
     draw_list_row_shell(
@@ -354,20 +338,18 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
       separator_inset=22,
     )
 
+    action_rect = draw_action_rail(rect, ACTION_WIDTH, current=True, alpha=255, fill=AetherListColors.ACTION_BG, separator=AetherListColors.ACTION_SEPARATOR, inset_y=18)
     info_rect = rl.Rectangle(rect.x + 24, rect.y + 18, rect.width - ACTION_WIDTH - 42, rect.height - 36)
     self._draw_model_info(info_rect, entry, current=True)
-
-    chip_rect = rl.Rectangle(rect.x + rect.width - ACTION_WIDTH + 35, rect.y + (rect.height - 61) / 2, ACTION_WIDTH - 70, 61)
-    AetherChip(tr("Current"), PANEL_STYLE.current_fill, PANEL_STYLE.current_border, AetherListColors.HEADER, font_size=26).render(chip_rect)
+    self._draw_current_action(action_rect)
 
   def _draw_relocated_header(self, x: float, y: float, width: float):
-    # Buttons placed horizontally
     btn_gap = float(AETHER_LIST_METRICS.header_button_gap)
     btn_w = (width - 16.0 - btn_gap * 2) / 3.0
-    
-    primary_rect = rl.Rectangle(x + 8, y, btn_w, BUTTON_HEIGHT)
-    secondary_rect = rl.Rectangle(x + 8 + btn_w + btn_gap, y, btn_w, BUTTON_HEIGHT)
-    random_rect = rl.Rectangle(x + 8 + (btn_w + btn_gap) * 2, y, btn_w, BUTTON_HEIGHT)
+
+    primary_rect = rl.Rectangle(x + 8, y, btn_w, HEADER_BUTTON_HEIGHT)
+    secondary_rect = rl.Rectangle(x + 8 + btn_w + btn_gap, y, btn_w, HEADER_BUTTON_HEIGHT)
+    random_rect = rl.Rectangle(x + 8 + (btn_w + btn_gap) * 2, y, btn_w, HEADER_BUTTON_HEIGHT)
 
     self._primary_header_button.render(primary_rect)
     self._secondary_header_button.render(secondary_rect)
@@ -380,7 +362,7 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
     draw_status_led(rl.Vector2(led_x, led_y), randomizer_on)
 
   def _draw_sort_strip(self, x: float, y: float, width: float, randomizer_on: bool):
-    pill_h = 48.0
+    pill_h = MANAGEMENT_PILL_HEIGHT
     pill_y = y + (MANAGEMENT_STRIP_HEIGHT - pill_h) / 2
     left = x + 16
     gap = 8.0
@@ -431,120 +413,68 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
       draw_action_pill(seg_rect, label, fill, border, AetherListColors.HEADER, font_size=28, roundness=0.3)
       self._interactive_rects[f"sortopt:{mode}"] = seg_rect
 
-  def _measure_content_height(self, width: float) -> float:
-    sections = self._build_sections(width)
-    if not sections:
-      return 260.0
-    return max(sum(height for _key, height in sections) - SECTION_GAP, 0.0)
-
-  def _build_sections(self, width: float) -> list[tuple[str, float]]:
-    sections: list[tuple[str, float]] = []
+  def _get_sections(self) -> list[tuple[str, list[ModelCatalogEntry]]]:
     sort_mode = self._controller._get_sort_mode()
 
     if sort_mode == "favorites":
-      fav = self._controller.favorites_entries()
-      if fav:
-        count = len(fav)
-        if self._controller.current_entry() is not None and self._controller.current_entry().user_favorite:
-          count = max(count - 1, 0)
-        sections.append(("favorites", SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + count * ROW_HEIGHT))
-      
-      fav_keys = {e.key for e in fav}
-      other_installed = [e for e in self._controller.installed_entries() if e.key not in fav_keys]
-      if other_installed:
-        count = len(other_installed)
-        if self._controller.current_entry() is not None and not self._controller.current_entry().user_favorite:
-          count = max(count - 1, 0)
-        if count > 0:
-          sections.append(("downloaded", SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + count * ROW_HEIGHT))
-    elif sort_mode == "community_picks":
-      community = self._controller.community_picks_entries()
-      if community:
-        count = len(community)
-        if self._controller.current_entry() is not None and self._controller.current_entry().community_favorite:
-          count = max(count - 1, 0)
-        sections.append(("community_picks", SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + count * ROW_HEIGHT))
-    else:
-      installed = self._controller.installed_entries()
-      available = self._controller.available_entries()
-      if self._controller._params.get_bool("ModelRandomizer"):
-        available = []
-      if installed:
-        installed_count = len(installed)
-        if self._controller.current_entry() is not None:
-          installed_count = max(installed_count - 1, 0)
-        sections.append(("installed", SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + installed_count * ROW_HEIGHT))
-      if available:
-        sections.append(("available", SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + len(available) * ROW_HEIGHT))
-
-    if not sections:
-      sections.append(("empty", 240))
-
-    return [(key, height + SECTION_GAP) for key, height in sections]
-
-  def _draw_scroll_content(self, rect: rl.Rectangle, width: float):
-    sort_mode = self._controller._get_sort_mode()
-    y = rect.y + self._scroll_offset
-
-    if sort_mode == "favorites":
-      fav_entries = self._controller.favorites_entries()
-      if self._controller.current_entry() is not None:
-        fav_entries = [e for e in fav_entries if not self._controller.is_current_model(e.key)]
-      
+      fav_entries = [e for e in self._controller.favorites_entries() if not self._controller.is_current_model(e.key)]
       fav_keys = {e.key for e in self._controller.favorites_entries()}
-      other_installed = [e for e in self._controller.installed_entries() if e.key not in fav_keys]
-      if self._controller.current_entry() is not None:
-        other_installed = [e for e in other_installed if not self._controller.is_current_model(e.key)]
+      other_installed = [e for e in self._controller.installed_entries() if e.key not in fav_keys and not self._controller.is_current_model(e.key)]
 
-      if fav_entries or other_installed:
-        if fav_entries:
-          y = self._draw_model_section(rect.x, y, width, tr("Favorites"), fav_entries)
-          y += SECTION_GAP
-        if other_installed:
-          y = self._draw_model_section(rect.x, y, width, tr("Downloaded"), other_installed)
-          y += SECTION_GAP
-      else:
-        self._draw_empty_state(rl.Rectangle(rect.x, y + 36, width, 200))
-      return
+      sections = []
+      if fav_entries:
+        sections.append((tr("Favorites"), fav_entries))
+      if other_installed:
+        sections.append((tr("Downloaded"), other_installed))
+      return sections
 
     if sort_mode == "community_picks":
-      entries = self._controller.community_picks_entries()
-      if self._controller.current_entry() is not None:
-        entries = [e for e in entries if not self._controller.is_current_model(e.key)]
+      entries = [e for e in self._controller.community_picks_entries() if not self._controller.is_current_model(e.key)]
       if entries:
-        y = self._draw_model_section(rect.x, y, width, tr("Community Picks"), entries)
-      else:
-        self._draw_empty_state(rl.Rectangle(rect.x, y + 36, width, 200))
-      return
+        return [(tr("Community Picks"), entries)]
+      return []
 
-    installed = self._controller.installed_entries()
-    if self._controller.current_entry() is not None:
-      installed = [e for e in installed if not self._controller.is_current_model(e.key)]
-    available = self._controller.available_entries()
-    if self._controller._params.get_bool("ModelRandomizer"):
-      available = []
+    # Standard sort modes (alphabetical, date, date_oldest)
+    installed = [e for e in self._controller.installed_entries() if not self._controller.is_current_model(e.key)]
+    available = [] if self._controller._params.get_bool("ModelRandomizer") else self._controller.available_entries()
 
-    if not installed and not available:
-      self._draw_empty_state(rl.Rectangle(rect.x, y + 36, width, 200))
-      return
-
+    sections = []
     if installed:
-      y = self._draw_model_section(rect.x, y, width, tr("On Device"), installed)
-      y += SECTION_GAP
+      sections.append((tr("On Device"), installed))
     if available:
-      y = self._draw_model_section(rect.x, y, width, tr("Available to Download"), available)
-      y += SECTION_GAP
+      sections.append((tr("Available to Download"), available))
+    return sections
+
+  def _measure_content_height(self, width: float) -> float:
+    sections = self._get_sections()
+    if not sections:
+      return EMPTY_STATE_HEIGHT
+    total_height = sum(SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP + len(entries) * ROW_HEIGHT for _title, entries in sections)
+    total_height += (len(sections) - 1) * SECTION_GAP
+    return float(total_height)
+
+  def _draw_scroll_content(self, rect: rl.Rectangle, width: float):
+    sections = self._get_sections()
+    if not sections:
+      self._draw_empty_state(rl.Rectangle(rect.x, rect.y + self._scroll_offset + 36, width, EMPTY_STATE_HEIGHT - 40))
+      return
+
+    y = rect.y + self._scroll_offset
+    for index, (title, entries) in enumerate(sections):
+      if index > 0:
+        y += SECTION_GAP
+      y = self._draw_model_section(rect.x, y, width, title, entries)
 
   def _draw_empty_state(self, rect: rl.Rectangle):
     draw_empty_state_card(
       rl.Rectangle(rect.x, rect.y, rect.width, rect.height),
       self._controller.empty_state_title(),
       self._controller.empty_state_body(),
-      title_size=46,
-      body_size=36,
+      title_size=34,
+      body_size=26,
       body_inset_x=48,
-      title_top_padding=42,
-      body_height=72,
+      title_top_padding=32,
+      body_height=60,
       style=PANEL_STYLE,
     )
 
@@ -618,46 +548,54 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
         self._draw_download_action(action_rect)
 
   def _draw_model_info(self, rect: rl.Rectangle, entry: ModelCatalogEntry, current: bool):
+    title_size = 36
+    meta_size = 26
+    inter_gap = 6
+    total_h = title_size + meta_size + inter_gap
+    start_y = rect.y + (rect.height - total_h) / 2
+
     heart_offset = 0
     if entry.user_favorite:
       heart_color = rl.Color(210, 100, 130, 230)
-      heart_center = rl.Vector2(rect.x + 22, rect.y + 25)
+      heart_center = rl.Vector2(rect.x + 14, start_y + title_size / 2)
       draw_heart_icon(heart_center, heart_color)
-      heart_offset = 49
-    title_rect = rl.Rectangle(rect.x + heart_offset, rect.y, rect.width - heart_offset, 49)
-    gui_label(title_rect, entry.name, 49, AetherListColors.HEADER, FontWeight.MEDIUM)
+      heart_offset = 36
 
-    meta_parts = [part for part in (entry.series, entry.released) if part]
-    meta_rect = rl.Rectangle(rect.x, rect.y + 61, rect.width, 35)
-    gui_label(meta_rect, " • ".join(meta_parts), 32, AetherListColors.SUBTEXT, FontWeight.NORMAL)
+    title_rect = rl.Rectangle(rect.x + heart_offset, start_y, rect.width - heart_offset, title_size)
+    gui_label(title_rect, entry.name, title_size, AetherListColors.HEADER, FontWeight.SEMI_BOLD)
 
-    badge_parts: list[str] = []
+    meta_parts: list[str] = []
+    if entry.series:
+      meta_parts.append(entry.series)
+    if entry.released:
+      meta_parts.append(entry.released)
+
     if self._controller._params.get_bool("ModelRandomizer"):
-      badge_parts.append(tr("In Pool"))
+      meta_parts.append(tr("In Pool"))
     elif current:
-      badge_parts.append(tr("Active"))
+      meta_parts.append(tr("Active"))
     elif entry.builtin:
-      badge_parts.append(tr("Built-in"))
-    if entry.partial:
-      badge_parts.append(tr("Incomplete"))
-    if entry.requires_external_gpu:
-      badge_parts.append(tr("GPU required"))
-    if entry.user_favorite:
-      badge_parts.append(tr("Saved"))
-    elif entry.community_favorite:
-      badge_parts.append(tr("Popular"))
+      meta_parts.append(tr("Built-in"))
 
-    if badge_parts:
-      badge_rect = rl.Rectangle(rect.x, rect.y + 113, rect.width, 32)
-      badge_color = AetherListColors.WARNING if entry.partial else AetherListColors.MUTED
-      gui_label(badge_rect, " • ".join(badge_parts), 30, badge_color, FontWeight.MEDIUM)
+    if entry.partial:
+      meta_parts.append(tr("Incomplete"))
+    if entry.requires_external_gpu:
+      meta_parts.append(tr("GPU required"))
+    if not entry.user_favorite and entry.community_favorite:
+      meta_parts.append(tr("Popular"))
+
+    if meta_parts:
+      meta_rect = rl.Rectangle(rect.x, start_y + title_size + inter_gap, rect.width, meta_size)
+      has_warning = entry.partial or entry.requires_external_gpu
+      text_color = AetherListColors.WARNING if has_warning else AetherListColors.SUBTEXT
+      gui_label(meta_rect, " • ".join(meta_parts), meta_size, text_color, FontWeight.NORMAL if not has_warning else FontWeight.MEDIUM)
 
   def _draw_download_action(self, rect: rl.Rectangle):
     center_x = rect.x + rect.width / 2
-    center_y = rect.y + rect.height / 2 - 8
+    center_y = rect.y + 42
     draw_download_icon(rl.Vector2(center_x, center_y), AetherListColors.HEADER)
     gui_label(
-      rl.Rectangle(rect.x + 16, rect.y + rect.height - 58, rect.width - 32, 32),
+      rl.Rectangle(rect.x + 16, rect.y + 72, rect.width - 32, 32),
       tr("Download"),
       26,
       AetherListColors.SUBTEXT,
@@ -666,15 +604,15 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
     )
 
   def _draw_downloading_action(self, rect: rl.Rectangle, progress_text: str):
-    center = rl.Vector2(rect.x + rect.width / 2, rect.y + rect.height / 2 - 8)
+    center = rl.Vector2(rect.x + rect.width / 2, rect.y + 42)
     phase = (time.monotonic() * 240.0) % 360.0
-    draw_busy_ring(center, phase, PANEL_STYLE.accent)
+    draw_busy_ring(center, phase, PANEL_STYLE.accent, inner_radius=14, outer_radius=20, thickness=24)
 
     label = progress_text if progress_text else tr("Downloading")
     gui_label(
-      rl.Rectangle(rect.x + 16, rect.y + rect.height - 58, rect.width - 32, 32),
+      rl.Rectangle(rect.x + 12, rect.y + 72, rect.width - 24, 32),
       label,
-      28,
+      24,
       AetherListColors.SUBTEXT,
       FontWeight.MEDIUM,
       alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
@@ -682,12 +620,11 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
 
   def _draw_menu_action(self, rect: rl.Rectangle, is_open: bool, entry: ModelCatalogEntry):
     if not is_open:
-      # Three-dot menu indicator
       center_x = rect.x + rect.width / 2
-      center_y = rect.y + rect.height / 2 - 10
+      center_y = rect.y + 42
       draw_overflow_dots(rl.Vector2(center_x, center_y), rl.Color(AetherListColors.HEADER.r, AetherListColors.HEADER.g, AetherListColors.HEADER.b, min(AetherListColors.HEADER.a, 200)))
       gui_label(
-        rl.Rectangle(rect.x + 16, rect.y + rect.height - 55, rect.width - 32, 32),
+        rl.Rectangle(rect.x + 16, rect.y + 72, rect.width - 32, 32),
         tr("Options"),
         26,
         AetherListColors.SUBTEXT,
@@ -695,65 +632,45 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
         alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
       )
     else:
-      # Expanded sub-button menu
-      btn_h = 64
-      gap = 12
+      btn_h = 48
+      gap = 8
       total_h = btn_h * 2 + gap
       start_y = rect.y + (rect.height - total_h) / 2
+      btn_w = rect.width - 28
 
-      delete_rect = rl.Rectangle(rect.x + 14, start_y, rect.width - 20, btn_h)
-      fav_rect = rl.Rectangle(rect.x + 14, start_y + btn_h + gap, rect.width - 20, btn_h)
+      delete_rect = rl.Rectangle(rect.x + 14, start_y, btn_w, btn_h)
+      fav_rect = rl.Rectangle(rect.x + 14, start_y + btn_h + gap, btn_w, btn_h)
 
       self._interactive_rects[f"menu:{entry.key}:delete"] = delete_rect
       self._interactive_rects[f"menu:{entry.key}:favorite"] = fav_rect
 
-      # Delete button
-      draw_action_pill(delete_rect, tr("Delete"), AetherListColors.DANGER_SOFT, rl.Color(AetherListColors.DANGER.r, AetherListColors.DANGER.g, AetherListColors.DANGER.b, min(AetherListColors.DANGER.a, 70)), AetherListColors.DANGER)
+      draw_action_pill(
+        delete_rect,
+        tr("Delete"),
+        AetherListColors.DANGER_SOFT,
+        rl.Color(AetherListColors.DANGER.r, AetherListColors.DANGER.g, AetherListColors.DANGER.b, min(AetherListColors.DANGER.a, 70)),
+        AetherListColors.DANGER,
+        font_size=24,
+      )
 
-      # Favorite toggle button
       is_fav = entry.user_favorite
       fav_fill = rl.Color(210, 100, 130, 44) if is_fav else rl.Color(PANEL_STYLE.accent.r, PANEL_STYLE.accent.g, PANEL_STYLE.accent.b, 26)
       fav_border = rl.Color((210 if is_fav else PANEL_STYLE.accent.r), (100 if is_fav else PANEL_STYLE.accent.g), (130 if is_fav else PANEL_STYLE.accent.b), min((255 if is_fav else PANEL_STYLE.accent.a), 70))
       fav_text_color = rl.Color(210, 100, 130, 255) if is_fav else PANEL_STYLE.accent
       fav_label = tr("Unfavorite") if is_fav else tr("Favorite")
-      draw_action_pill(fav_rect, fav_label, fav_fill, fav_border, fav_text_color)
+      draw_action_pill(fav_rect, fav_label, fav_fill, fav_border, fav_text_color, font_size=24)
 
   def _draw_current_action(self, rect: rl.Rectangle):
-    chip_rect = rl.Rectangle(rect.x + 35, rect.y + (rect.height - 61) / 2, rect.width - 70, 61)
+    chip_h = 52
+    chip_w = rect.width - 56
+    chip_rect = rl.Rectangle(rect.x + 28, rect.y + (rect.height - chip_h) / 2, chip_w, chip_h)
     AetherChip(tr("Current"), PANEL_STYLE.current_fill, PANEL_STYLE.current_border, AetherListColors.HEADER, font_size=26).render(chip_rect)
 
   def _draw_protected_action(self, rect: rl.Rectangle):
-    chip_rect = rl.Rectangle(rect.x + 29, rect.y + (rect.height - 61) / 2, rect.width - 58, 61)
+    chip_h = 52
+    chip_w = rect.width - 56
+    chip_rect = rl.Rectangle(rect.x + 28, rect.y + (rect.height - chip_h) / 2, chip_w, chip_h)
     AetherChip(tr("Protected"), rl.Color(255, 255, 255, 10), AetherListColors.MUTED, AetherListColors.SUBTEXT, font_size=26).render(chip_rect)
-
-  def _draw_utility_section(self, x: float, y: float, width: float, rows: list[dict]):
-    content_w = width
-    draw_section_header(rl.Rectangle(x, y, content_w, SECTION_HEADER_HEIGHT), tr("Automation and Tuning"), style=PANEL_STYLE)
-    y += SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
-
-    container_rect = rl.Rectangle(x, y, content_w, len(rows) * UTILITY_ROW_HEIGHT)
-    draw_list_group_shell(container_rect, style=PANEL_STYLE)
-
-    for index, row in enumerate(rows):
-      row_rect = rl.Rectangle(x, y + index * UTILITY_ROW_HEIGHT, content_w, UTILITY_ROW_HEIGHT)
-      self._draw_utility_row(row_rect, row, is_last=index == len(rows) - 1)
-
-  def _draw_utility_row(self, rect: rl.Rectangle, row: dict, is_last: bool):
-    mouse_pos = gui_app.last_mouse_event.pos
-    hovered = bool(point_hits(mouse_pos, rect, self._scroll_rect, pad_x=6, pad_y=0))
-    pressed = self._pressed_target == f"utility:{row['id']}"
-    self._interactive_rects[f"utility:{row['id']}"] = rect
-    draw_settings_list_row(
-      rect,
-      title=row["title"],
-      subtitle=row.get("subtitle", ""),
-      value="" if row["type"] == "toggle" else row["value"],
-      toggle_value=bool(row["value"]) if row["type"] == "toggle" else None,
-      hovered=hovered,
-      pressed=pressed,
-      is_last=is_last,
-      style=PANEL_STYLE,
-    )
 
   def _draw_scrollbar(self, rect: rl.Rectangle):
     self._scrollbar.render(rect, self._content_height, self._scroll_offset)
@@ -1150,31 +1067,6 @@ class StarPilotDrivingModelLayout(_SettingsPage):
       return tr("StarPilot is pulling the latest driving model list. This panel will populate automatically when the refresh completes.")
     return tr("Try refreshing the catalog once the device is offroad and connected.")
 
-  def utility_rows(self) -> list[dict]:
-    rows = []
-
-    if self._params.get_bool("ModelRandomizer"):
-      blacklist_count = len([m.strip() for m in (self._params.get("BlacklistedModels", encoding="utf-8") or "").split(",") if m.strip()])
-      rows.extend(
-        [
-          {
-            "id": "blacklist",
-            "title": tr("Blacklist"),
-            "subtitle": tr("Keep specific installed models out of the rotation."),
-            "type": "value",
-            "value": tr(f"{blacklist_count} blocked" if blacklist_count else "Manage"),
-          },
-          {
-            "id": "ratings",
-            "title": tr("Ratings"),
-            "subtitle": tr("Review recorded drives and model score history."),
-            "type": "value",
-            "value": tr("View"),
-          },
-        ]
-      )
-
-    return rows
 
   def select_model(self, model_key: str):
     selected_model = canonical_model_key(model_key)
@@ -1198,6 +1090,13 @@ class StarPilotDrivingModelLayout(_SettingsPage):
     resolved_version = resolved_version or entry.version or self._default_model_version()
     self._params.put("ModelVersion", resolved_version)
     self._params.put("DrivingModelVersion", resolved_version)
+    set_model_profile(
+      self._params,
+      "big" if entry.requires_external_gpu else "small",
+      selected_model,
+      entry.name,
+      resolved_version,
+    )
     update_starpilot_toggles()
     self._update_model_metadata()
     if ui_state.started:

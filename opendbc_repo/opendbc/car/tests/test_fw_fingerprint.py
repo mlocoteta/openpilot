@@ -283,6 +283,7 @@ class TestFwFingerprintTiming:
         'tesla': 0.1,
         'toyota': 0.7,
         'volkswagen': 0.65,
+        'volvo': 0.0,
         'rivian': 0.3,
         'psa': 0.1,
       },

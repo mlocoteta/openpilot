@@ -11,6 +11,10 @@ const state = reactive({
   factoryResetBusy: false,
   routeDeleteBusy: false,
   factoryResetStatus: null,
+  profiles: [],
+  profileBusy: "",
+  profileIsOnroad: false,
+  profileConfirm: null,
 })
 
 let initialized = false
@@ -98,6 +102,18 @@ async function fetchFactoryResetStatus() {
   }
 }
 
+async function fetchToggleProfiles() {
+  try {
+    const response = await fetch("/api/toggles/profiles", { cache: "no-store" })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.message || "Failed to load settings profiles.")
+    state.profiles = Array.isArray(payload.slots) ? payload.slots : []
+    state.profileIsOnroad = !!payload.isOnroad
+  } catch (error) {
+    state.profiles = []
+  }
+}
+
 async function restoreToggles(event) {
   const uploadedFile = event.target.files[0]
   if (!uploadedFile) return
@@ -155,6 +171,7 @@ function initialize() {
 export function ToggleControl() {
   initialize()
   fetchFactoryResetStatus()
+  fetchToggleProfiles()
 
   async function backupToggles() {
     try {
@@ -195,6 +212,33 @@ export function ToggleControl() {
 
   function triggerRestorePrompt() {
     fileInput.click()
+  }
+
+  function confirmProfileAction(profile, action) {
+    if (state.profileBusy || state.profileIsOnroad) return
+    state.profileConfirm = { profile, action }
+  }
+
+  async function runProfileAction() {
+    const pending = state.profileConfirm
+    state.profileConfirm = null
+    if (!pending || state.profileBusy) return
+
+    const { profile, action } = pending
+    state.profileBusy = `${action}-${profile.slot}`
+    try {
+      const response = await fetch(`/api/toggles/profiles/${encodeURIComponent(profile.slot)}/${action}`, { method: "POST" })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.message || `Failed to ${action} settings profile.`)
+      }
+      showSnackbar(payload.message || `${profile.label} ${action === "save" ? "saved" : "loaded"}.`)
+      await fetchToggleProfiles()
+    } catch (error) {
+      showSnackbar(error?.message || `Failed to ${action} settings profile.`, "error")
+    } finally {
+      state.profileBusy = ""
+    }
   }
 
   function confirmSaveMe() {
@@ -266,6 +310,35 @@ export function ToggleControl() {
         </p>
         <button class="toggle-control-button" @click="${backupToggles}">Backup Toggles</button>
         <button class="toggle-control-button" @click="${triggerRestorePrompt}">Restore Toggles</button>
+        <div class="toggle-profile-section">
+          <div class="toggle-control-title">Settings Profiles</div>
+          <p class="toggle-control-text">
+            Keep two local configurations for different vehicles, drivers, or troubleshooting. Pairing and sensitive device data are not included.
+          </p>
+          ${() => state.profileIsOnroad ? html`<p class="toggle-profile-warning">Park the vehicle to save or load a profile.</p>` : ""}
+          ${() => state.profiles.map(profile => html`
+            <div class="toggle-profile-row">
+              <div class="toggle-profile-heading">
+                <strong>${profile.label}</strong>
+                <span>${profile.invalid ? "Damaged" : profile.saved ? `${profile.settingsCount} settings` : "Empty"}</span>
+              </div>
+              <div class="toggle-profile-actions">
+                <button
+                  class="toggle-control-button"
+                  @click="${() => confirmProfileAction(profile, "save")}"
+                  disabled="${() => !!state.profileBusy || state.profileIsOnroad}">
+                  ${() => state.profileBusy === `save-${profile.slot}` ? "Saving..." : profile.saved ? "Overwrite" : "Save Current"}
+                </button>
+                <button
+                  class="toggle-control-button"
+                  @click="${() => confirmProfileAction(profile, "load")}"
+                  disabled="${() => !!state.profileBusy || state.profileIsOnroad || !profile.saved || profile.invalid}">
+                  ${() => state.profileBusy === `load-${profile.slot}` ? "Loading..." : "Load"}
+                </button>
+              </div>
+            </div>
+          `)}
+        </div>
       </section>
 
       <section class="toggle-control-widget" style="margin-left: 1.5rem">
@@ -337,6 +410,15 @@ export function ToggleControl() {
     onConfirm: deleteAllRoutes,
     onCancel: () => { state.showDeleteRoutesModal = false; },
     confirmText: "Delete Routes"
+  }) : ""}
+    ${() => state.profileConfirm ? Modal({
+    title: `${state.profileConfirm.action === "save" ? (state.profileConfirm.profile.saved ? "Overwrite" : "Save") : "Load"} ${state.profileConfirm.profile.label}?`,
+    message: state.profileConfirm.action === "save"
+      ? "This stores the current persistent StarPilot settings in this local slot."
+      : "This applies every saved setting in the slot to the device.",
+    onConfirm: runProfileAction,
+    onCancel: () => { state.profileConfirm = null; },
+    confirmText: state.profileConfirm.action === "save" ? "Save Settings" : "Load Settings"
   }) : ""}
   `
 }

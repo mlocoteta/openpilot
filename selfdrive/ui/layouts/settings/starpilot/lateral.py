@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from openpilot.system.hardware import HARDWARE
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
-from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
-from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.panel import _SettingsPage
 from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
@@ -73,13 +72,6 @@ class SteeringManagerView(CardHubManagerView):
         "on_click": lambda: self._controller._navigate_to("advanced"),
       },
     ]
-    if starpilot_state.car_state.isFord:
-      cards.append({
-        "title": tr("Ford Lateral Tuning"),
-        "desc": tr("Select the Ford steering strategy and tune prediction, lane-change, and speed response."),
-        "icon": "steering",
-        "on_click": lambda: self._controller._navigate_to("ford"),
-      })
     return cards
 
 
@@ -205,7 +197,8 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "LaneChangeCloseGap", "toggle", tr_noop("Close Gap On Lane Change"),
-        subtitle=tr_noop("Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly out of current lane, it will allow car to accelerate as it changes lanes."),
+        subtitle=tr_noop("Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly " +
+                         "out of current lane, it will allow car to accelerate as it changes lanes."),
         get_state=lambda: p.get_bool("LaneChangeCloseGap"),
         set_state=lambda s: p.put_bool("LaneChangeCloseGap", s),
         visible=lc_on,
@@ -292,8 +285,8 @@ class StarPilotLateralLayout(_SettingsPage):
       SettingRow(
         "SteerDelay", "value", tr_noop("Actuator Delay"),
         subtitle=tr_noop("Exact full delay between steering command and vehicle response."),
-        get_value=lambda: f"{p.get_float('SteerDelay'):.2f}s",
-        on_click=lambda: self._show_slider("SteerDelay", 0.01, 1.0, step=0.01, unit="s", value_type="float"),
+        get_value=lambda: f"{p.get_float('SteerDelay'):.3f}s",
+        on_click=lambda: self._show_slider("SteerDelay", 0.01, 1.0, step=0.001, unit="s", value_type="float"),
         enabled=lambda: not p.get_bool("UseAutoSteerDelay"),
         disabled_label=tr_noop("Disabled while auto-learned delay is enabled."),
         visible=lambda: alt_on() and cs.steerActuatorDelay != 0,
@@ -316,7 +309,8 @@ class StarPilotLateralLayout(_SettingsPage):
         "SteerLatAccel", "value", tr_noop("Lateral Acceleration"),
         subtitle=tr_noop("Maps steering torque to turning response."),
         get_value=lambda: f"{p.get_float('SteerLatAccel'):.2f}",
-        on_click=lambda: self._show_slider("SteerLatAccel", max(0.01, cs.latAccelFactor) * 0.5, max(0.01, cs.latAccelFactor) * 1.5, step=0.01, value_type="float"),
+        on_click=lambda: self._show_slider("SteerLatAccel", max(0.01, cs.latAccelFactor) * 0.5,
+                                           max(0.01, cs.latAccelFactor) * 1.5, step=0.01, value_type="float"),
         visible=lambda: alt_on() and cs.latAccelFactor != 0 and cs.isTorqueCar and not cs.isAngleCar,
       ),
       SettingRow(
@@ -378,88 +372,6 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
     ]
 
-    # ── 4. Ford Lateral Tuning ──
-    def ford_curvature_mode():
-      return p.get_int("FordLateralMode") == 1
-
-    def ford_angle_mode():
-      return p.get_int("FordLateralMode") == 2
-
-    def ford_enhanced_mode():
-      return p.get_int("FordLateralMode") != 0
-
-    self._ford_rows = [
-      SettingRow(
-        "FordLateralMode", "value", tr_noop("Steering Strategy"),
-        subtitle=tr_noop("Curvature is the tuned default. Angle is available for comparison; Native preserves the original controls."),
-        get_value=self._get_ford_lateral_mode,
-        on_click=self._show_ford_lateral_mode,
-      ),
-      SettingRow(
-        "FordHumanTurnDetection", "toggle", tr_noop("Manual Turn Release"),
-        subtitle=tr_noop("Release lateral control during a sustained hands-on turn, then ramp back in smoothly."),
-        get_state=lambda: p.get_bool("FordHumanTurnDetection"),
-        set_state=lambda s: p.put_bool("FordHumanTurnDetection", s),
-        visible=ford_enhanced_mode,
-      ),
-      SettingRow(
-        "FordCurvatureBlendLow", "value", tr_noop("Small-Curve Prediction"),
-        subtitle=tr_noop("Blend model-predicted curvature into gentle turns."),
-        get_value=lambda: f"{p.get_float('FordCurvatureBlendLow') * 100:.0f}%",
-        on_click=lambda: self._show_slider("FordCurvatureBlendLow", 0.0, 1.0, step=0.05, unit="", value_type="float"),
-        visible=ford_curvature_mode,
-      ),
-      SettingRow(
-        "FordCurvatureBlendHigh", "value", tr_noop("Large-Curve Prediction"),
-        subtitle=tr_noop("Blend model-predicted curvature into tighter turns."),
-        get_value=lambda: f"{p.get_float('FordCurvatureBlendHigh') * 100:.0f}%",
-        on_click=lambda: self._show_slider("FordCurvatureBlendHigh", 0.0, 1.0, step=0.05, unit="", value_type="float"),
-        visible=ford_curvature_mode,
-      ),
-      SettingRow(
-        "FordCurvatureLaneChangeFactor", "value", tr_noop("Curvature Lane-Change Factor"),
-        subtitle=tr_noop("Scale steering during high-speed lane changes in Curvature mode."),
-        get_value=lambda: f"{p.get_float('FordCurvatureLaneChangeFactor'):.2f}x",
-        on_click=lambda: self._show_slider("FordCurvatureLaneChangeFactor", 0.5, 1.25, step=0.05, unit="x", value_type="float"),
-        visible=ford_curvature_mode,
-      ),
-      SettingRow(
-        "FordAngleBlend", "value", tr_noop("Angle Prediction Blend"),
-        subtitle=tr_noop("Blend model prediction into the path-angle command."),
-        get_value=lambda: f"{p.get_float('FordAngleBlend') * 100:.0f}%",
-        on_click=lambda: self._show_slider("FordAngleBlend", 0.0, 1.0, step=0.05, unit="", value_type="float"),
-        visible=ford_angle_mode,
-      ),
-      SettingRow(
-        "FordAngleLowSpeedFactor", "value", tr_noop("Low-Speed Angle Response"),
-        subtitle=tr_noop("Adjust path-angle strength at lower speeds and higher curvature."),
-        get_value=lambda: f"{p.get_float('FordAngleLowSpeedFactor'):.2f}x",
-        on_click=lambda: self._show_slider("FordAngleLowSpeedFactor", 0.5, 1.5, step=0.05, unit="x", value_type="float"),
-        visible=ford_angle_mode,
-      ),
-      SettingRow(
-        "FordAngleHighSpeedFactor", "value", tr_noop("High-Speed Angle Response"),
-        subtitle=tr_noop("Adjust path-angle strength through larger highway curves."),
-        get_value=lambda: f"{p.get_float('FordAngleHighSpeedFactor'):.2f}x",
-        on_click=lambda: self._show_slider("FordAngleHighSpeedFactor", 0.5, 1.5, step=0.05, unit="x", value_type="float"),
-        visible=ford_angle_mode,
-      ),
-      SettingRow(
-        "FordAngleHighSpeedDamping", "value", tr_noop("High-Speed Damping"),
-        subtitle=tr_noop("Dampen small steering corrections at highway speed."),
-        get_value=lambda: f"{p.get_float('FordAngleHighSpeedDamping'):.2f}x",
-        on_click=lambda: self._show_slider("FordAngleHighSpeedDamping", 0.25, 1.25, step=0.05, unit="x", value_type="float"),
-        visible=ford_angle_mode,
-      ),
-      SettingRow(
-        "FordAngleLaneChangeFactor", "value", tr_noop("Angle Lane-Change Factor"),
-        subtitle=tr_noop("Scale steering during high-speed lane changes in Angle mode."),
-        get_value=lambda: f"{p.get_float('FordAngleLaneChangeFactor'):.2f}x",
-        on_click=lambda: self._show_slider("FordAngleLaneChangeFactor", 0.5, 1.5, step=0.05, unit="x", value_type="float"),
-        visible=ford_angle_mode,
-      ),
-    ]
-
     self._manager_view = SteeringManagerView(
       self,
       header_title=tr_noop("Steering"),
@@ -503,13 +415,6 @@ class StarPilotLateralLayout(_SettingsPage):
       parent_toggle=pt_advanced,
       panel_style=PANEL_STYLE,
     )
-    self._sub_panels["ford"] = AetherSettingsView(
-      self,
-      [SettingSection(title="", rows=self._ford_rows)],
-      header_title=tr_noop("Ford Lateral Tuning"),
-      header_subtitle=tr_noop("Tune Ford-specific polynomial steering while retaining the native strategy as a fallback."),
-      panel_style=PANEL_STYLE,
-    )
     self._wire_sub_panels()
 
   def _on_pause_lateral_speed_clicked(self):
@@ -550,17 +455,3 @@ class StarPilotLateralLayout(_SettingsPage):
     current = self._params.get_int("LaneChangeSmoothing") if self._params.get_int("LaneChangeSmoothing") > 0 else 5
     gui_app.push_widget(AetherSliderDialog(tr("Lane Change Smoothing"), 1, 10, 1, current, on_close,
                                             color=self.SLIDER_COLOR))
-
-  def _get_ford_lateral_mode(self) -> str:
-    return tr(("Native", "Curvature", "Angle")[max(0, min(2, self._params.get_int("FordLateralMode")))])
-
-  def _show_ford_lateral_mode(self):
-    options = [tr("Native"), tr("Curvature"), tr("Angle")]
-    current = options[max(0, min(2, self._params.get_int("FordLateralMode")))]
-
-    def on_select(res):
-      if res == DialogResult.CONFIRM and dialog.selection in options:
-        self._params.put_int("FordLateralMode", options.index(dialog.selection))
-
-    dialog = MultiOptionDialog(tr("Ford Steering Strategy"), options, current, callback=on_select)
-    gui_app.push_widget(dialog)

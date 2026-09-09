@@ -35,7 +35,7 @@ def test_galaxy_layout_removes_obsolete_and_duplicate_controls():
   all_keys = {key for params in sections.values() for key in params}
 
   assert "Model & Customization" not in sections
-  assert {"HumanAcceleration", "ReverseCruise"}.isdisjoint(all_keys)
+  assert "HumanAcceleration" not in all_keys
   assert "DisableWideRoad" in sections["Visual (Display & UI)"]
   assert sum(
     param.get("key") == "DisableWideRoad"
@@ -66,6 +66,47 @@ def test_galaxy_layout_contains_basic_mode_controls():
   assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode"} <= sections["Developer"].keys()
 
 
+def test_galaxy_new_ui_is_the_visible_default_choice():
+  galaxy_default = _params_by_section(_layout())["Developer"]["GalaxyMobileDefault"]
+
+  assert _declared_default("GalaxyMobileDefault") == "1"
+  assert galaxy_default["settings_tier"] == "simple"
+  assert galaxy_default["label"] == "Use Galaxy (new) by Default"
+  assert "Galaxy (old)" in galaxy_default["description"]
+
+
+def test_ford_lateral_controls_are_ford_only_and_galaxy_only():
+  lateral = _params_by_section(_layout())["Lateral (Steering)"]
+  ford_keys = {
+    "FordHumanTurnDetection",
+    "FordHandsFreeCluster",
+    "FordCurvatureBlendLow",
+    "FordCurvatureBlendHigh",
+    "FordCurvatureLaneChangeFactor",
+  }
+  retired_ford_keys = {
+    "FordLateralMode",
+    "FordAngleBlend",
+    "FordAngleLowSpeedFactor",
+    "FordAngleHighSpeedFactor",
+    "FordAngleHighSpeedDamping",
+    "FordAngleLaneChangeFactor",
+  }
+
+  assert ford_keys <= lateral.keys()
+  assert retired_ford_keys.isdisjoint(lateral)
+  assert all(lateral[key]["galaxy_only"] is True for key in ford_keys)
+  assert all(lateral[key]["vehicle_makes"] == ["Ford"] for key in ford_keys)
+  assert all(lateral[key]["settings_tier"] == "simple" for key in ford_keys)
+  assert all("visible_when_key" not in lateral[key] for key in ford_keys)
+  assert all("parent_key" not in lateral[key] for key in ford_keys)
+
+  device_ui_root = REPO_ROOT / "selfdrive/ui"
+  for path in device_ui_root.rglob("*.py"):
+    source = path.read_text(encoding="utf-8")
+    assert all(key not in source for key in ford_keys)
+
+
 def test_device_shutdown_uses_literal_hours():
   device_shutdown = _params_by_section(_layout())["Device & Data"]["DeviceShutdown"]
 
@@ -75,12 +116,90 @@ def test_device_shutdown_uses_literal_hours():
   assert device_shutdown["step"] == 1
 
 
+def test_speed_settings_follow_vehicle_units_with_one_unit_steps():
+  sections = _params_by_section(_layout())
+  speed_keys = {
+    "MinimumLaneChangeSpeed", "PauseLateralSpeed",
+    "CESpeed", "CESpeedLead", "CESignalSpeed",
+    "CustomCruise", "CustomCruiseLong", "SetSpeedOffset", "PulseGlideSpeedDelta",
+    "Offset1", "Offset2", "Offset3", "Offset4", "Offset5", "Offset6", "Offset7",
+    "CCMSpeed", "CCMSpeedLead", "CCMSetSpeedMargin",
+    "VisionSpeedLimitLowLimitThreshold", "TurnSteeringLimitMuteSpeed",
+  }
+  params = {
+    param["key"]: param
+    for section in sections.values()
+    for param in section.values()
+    if param["key"] in speed_keys
+  }
+
+  assert params.keys() == speed_keys
+  assert all(param["unit_type"] == "vehicle_speed" for param in params.values())
+
+  one_unit_keys = speed_keys - {"PulseGlideSpeedDelta", "VisionSpeedLimitLowLimitThreshold"}
+  assert all(params[key]["step"] == 1 for key in one_unit_keys)
+  assert params["PulseGlideSpeedDelta"]["step"] == 0.5
+  assert params["VisionSpeedLimitLowLimitThreshold"]["step"] == 5
+
+  for index in range(7):
+    offset = params[f"Offset{index + 1}"]
+    assert offset["unit_range_index"] == index
+    assert (offset["metric_min"], offset["metric_max"]) == (-150, 150)
+
+  assert params["CustomCruise"]["metric_max"] == 150
+  assert params["CCMSetSpeedMargin"]["metric_max"] == 30
+  assert params["PulseGlideSpeedDelta"]["imperial_max"] == 15
+
+
+def test_cruise_controls_are_split_between_toyota_and_software_cruise():
+  longitudinal = _params_by_section(_layout())["Longitudinal (Speed & Following)"]
+
+  assert longitudinal["CustomCruise"]["excluded_vehicle_makes"] == ["Lexus", "Toyota"]
+  assert longitudinal["CustomCruiseLong"]["excluded_vehicle_makes"] == ["Lexus", "Toyota"]
+  assert longitudinal["ReverseCruise"]["vehicle_makes"] == ["Lexus", "Toyota"]
+  assert _declared_default("ReverseCruise") == "0"
+
+
 def test_curve_speed_controller_no_lead_toggle_is_nested_under_csc():
   csc_no_lead = _params_by_section(_layout())["Longitudinal (Speed & Following)"]["CurveSpeedControllerNoLead"]
 
   assert csc_no_lead["parent_key"] == "CurveSpeedController"
   assert csc_no_lead["data_type"] == "bool"
   assert _declared_default("CurveSpeedControllerNoLead") == "0"
+
+
+def test_curve_speed_controller_readouts_are_display_only_and_nested():
+  csc = _params_by_section(_layout())["Longitudinal (Speed & Following)"]
+
+  for key, unit in (("CalibratedLateralAcceleration", " m/s²"), ("CalibrationProgress", "%")):
+    readout = csc[key]
+    assert readout["ui_type"] == "readout"
+    assert readout["parent_key"] == "CurveSpeedController"
+    assert readout["unit"] == unit
+    assert readout["settings_tier"] == "simple"
+
+
+def test_custom_accel_profile_exposes_variable_breakpoints():
+  longitudinal = _params_by_section(_layout())["Longitudinal (Speed & Following)"]
+  point_count = longitudinal["CustomAccelProfilePointCount"]
+
+  assert point_count["parent_key"] == "CustomAccelProfile"
+  assert point_count["min"] == 2
+  assert point_count["max"] == 12
+  assert _declared_default("CustomAccelProfilePointCount") == "7"
+
+  for point in range(1, 13):
+    speed = longitudinal[f"CustomAccelProfileBreakpoint{point}MPH"]
+    accel = longitudinal[f"CustomAccelProfilePoint{point}Accel"]
+    assert speed["parent_key"] == "CustomAccelProfile"
+    assert accel["parent_key"] == "CustomAccelProfile"
+    assert _declared_default(speed["key"]) is not None
+    assert _declared_default(accel["key"]) is not None
+
+    if point > 2:
+      expected_counts = list(range(point, 13))
+      assert speed["visible_when_values"] == expected_counts
+      assert accel["visible_when_values"] == expected_counts
 
 
 def test_every_galaxy_setting_has_a_shared_settings_tier():
@@ -178,6 +297,34 @@ def test_requested_simple_and_advanced_settings_tiers():
   assert sections["Visual (Display & UI)"]["HomeScreenName"]["max_length"] == 12
 
 
+def test_turn_steering_limit_mute_speed_is_galaxy_developer_only():
+  sections = _params_by_section(_layout())
+  setting = sections["Developer"]["TurnSteeringLimitMuteSpeed"]
+
+  assert setting["parent_key"] == "GalaxyDeveloperMode"
+  assert setting["settings_tier"] == "advanced"
+  assert setting["data_type"] == "int"
+  assert setting["min"] == 0.0
+  assert setting["max"] == 99.0
+  assert _declared_default("TurnSteeringLimitMuteSpeed") == "0"
+
+  physical_settings = (
+    REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/sounds.py",
+    REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/aethergrid.py",
+  )
+  assert all("TurnSteeringLimitMuteSpeed" not in path.read_text(encoding="utf-8") for path in physical_settings)
+
+
+def test_honda_pid_scale_controls_use_galaxy_fine_granularity():
+  developer = _params_by_section(_layout())["Developer"]
+
+  for key in ("HondaLateralPidKpScale", "HondaLateralPidKiScale"):
+    setting = developer[key]
+    assert setting["step"] == 0.01
+    assert setting["precision"] == 2
+    assert setting["settings_tier"] == "advanced"
+
+
 def test_hidden_feature_defaults_remain_enabled():
   assert _declared_default("GalaxyDeveloperMode") == "0"
   assert _declared_default("NavDesiresAllowed") == "1"
@@ -192,6 +339,13 @@ def test_hidden_feature_defaults_remain_enabled():
     "RelaxedPersonalityProfile",
   ):
     assert _declared_default(key) == "1"
+
+
+def test_toyota_auto_hold_is_galaxy_only():
+  setting = _params_by_section(_layout())["Vehicle"]["ToyotaAutoHold"]
+  assert setting["galaxy_only"] is True
+  assert setting["ui_type"] == "toggle"
+  assert setting["data_type"] == "bool"
 
 
 def test_human_acceleration_param_is_removed():
@@ -254,18 +408,25 @@ def test_pip_preview_is_under_driving_screen_widgets_and_configured_only_in_gala
   sections = _params_by_section(_layout())
   visual = sections["Visual (Display & UI)"]
 
-  assert {"PIPPreviewEnabled", "PIPPreviewShowOnBlinker", "PIPPreviewShowOnBSM"} <= visual.keys()
+  assert {"PIPPreviewEnabled", "PIPPreviewShowOnBlinker", "PIPPreviewShowOnBSM", "PIPPreviewInvert"} <= visual.keys()
   assert visual["PIPPreviewEnabled"]["parent_key"] == "CustomUI"
   assert visual["PIPPreviewShowOnBlinker"]["parent_key"] == "PIPPreviewEnabled"
   assert visual["PIPPreviewShowOnBSM"]["parent_key"] == "PIPPreviewEnabled"
+  assert visual["PIPPreviewInvert"]["parent_key"] == "PIPPreviewEnabled"
   assert visual["PIPPreviewEnabled"]["settings_tier"] == "advanced"
   assert visual["PIPPreviewShowOnBlinker"]["settings_tier"] == "advanced"
   assert visual["PIPPreviewShowOnBSM"]["settings_tier"] == "advanced"
+  assert visual["PIPPreviewInvert"]["settings_tier"] == "advanced"
 
   assert _declared_default("PIPPreviewEnabled") == "0"
   assert _declared_default("PIPPreviewShowOnBlinker") == "0"
   assert _declared_default("PIPPreviewShowOnBSM") == "0"
-  assert '"{\\"width\\":1928,\\"height\\":1208,\\"center_left\\":[315,548],\\"center_right\\":[1571,539],\\"crop_size\\":580}"' in PARAM_KEYS_PATH.read_text(encoding="utf-8")
+  assert _declared_default("PIPPreviewInvert") == "0"
+  annotation_default = (
+    '"{\\"width\\":1928,\\"height\\":1208,\\"center_left\\":[315,548],' +
+    '\\"center_right\\":[1571,539],\\"crop_size\\":580}"'
+  )
+  assert annotation_default in PARAM_KEYS_PATH.read_text(encoding="utf-8")
 
   physical_settings = (
     REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/aethergrid.py",

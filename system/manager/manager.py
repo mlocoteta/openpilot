@@ -70,7 +70,9 @@ STARPILOT_PARAMS_CACHE_MIGRATION_FLAG = Path("/data") / "starpilot_params_cache_
 STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG = Path("/data") / "starpilot_default_model_rdf_v4"
 STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG = Path("/data") / "starpilot_ce_model_stop_time_v2"
 STARPILOT_LEGACY_CACHE_MARKER_KEYS = ("RemapCancelToDistance",)
-STARPILOT_REMOVED_PARAM_KEYS = ("CoastUpToLeads", "HumanAcceleration", "HumanFollowing", "PrioritizeSmoothFollowing")
+STARPILOT_REMOVED_PARAM_KEYS = (
+  "CoastUpToLeads", "HumanAcceleration", "HumanFollowing", "PrioritizeSmoothFollowing",
+)
 LEGACY_CARMODEL_MIGRATIONS = {
   "CHEVROLET_BOLT_CC_2019_2021": "CHEVROLET_BOLT_CC_2018_2021",
 }

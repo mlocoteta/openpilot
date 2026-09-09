@@ -1,5 +1,9 @@
-from cereal import car
+from types import SimpleNamespace
 
+from cereal import car
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
+
+from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise, should_flag_cruise_mismatch
 
 
@@ -39,3 +43,16 @@ def test_pcm_cruise_behavior_is_unchanged():
   assert should_cancel_stock_cruise(cp, cruise_enabled=True, controls_enabled=False)
   assert not should_flag_cruise_mismatch(cp, cruise_enabled=True, controls_enabled=True, effective_pcm_cruise=True)
   assert should_flag_cruise_mismatch(cp, cruise_enabled=True, controls_enabled=False, effective_pcm_cruise=True)
+
+
+def test_kia_ray_ev_allows_stock_cruise_to_enable_controls():
+  for candidate, ignore_cruise_state in ((HYUNDAI_CAR.KIA_RAY_EV, True), (HYUNDAI_CAR.HYUNDAI_SONATA, False)):
+    cp = SimpleNamespace(brand="hyundai", carFingerprint=candidate, flags=0)
+    handler = CarSpecificEvents(cp)
+    captured = {}
+    handler.create_common_events = lambda *args, **kwargs: captured.update(kwargs)
+
+    handler.update(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+
+    assert captured["pcm_enable"] is True
+    assert captured["ignore_cruise_state"] is ignore_cruise_state

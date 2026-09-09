@@ -21,9 +21,14 @@ from typing import Any
 from openpilot.system.webrtc.helpers import StreamRequestBody
 from openpilot.system.webrtc.schema import generate_field
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from cereal import messaging, log
 
 SESSION_TIMEOUT_SECONDS = 300
+
+
+def _ice_candidates(sdp: str) -> list[str]:
+  return [line.removeprefix("a=") for line in sdp.splitlines() if line.startswith("a=candidate:")]
 
 # socket trick: route lookup for 8.8.8.8 (nothing is sent or actually connected to)
 # return the source interfaces IP which is the default interface of the device
@@ -252,7 +257,7 @@ class StreamSession:
     self.run_task: asyncio.Task | None = None
     self._cleanup_lock = asyncio.Lock()
     self._cleanup_done = False
-    self.logger = logging.getLogger("webrtcd")
+    self.logger = cloudlog
     self.logger.info(
       "New stream session (%s), video cameras %s, video enabled %s, incoming services %s, outgoing services %s",
       self.identifier, [t.id for t in self.video_tracks], body.enabled, body.bridge_services_in, body.bridge_services_out,
@@ -329,9 +334,11 @@ class StreamSession:
   async def run(self):
     try:
       self.params.put("LivestreamRequestKeyframe", True)
+
+      self.stream.set_message_handler(self.message_handler)
+
       await asyncio.wait_for(self.stream.wait_for_connection(), timeout=15)
       if self.stream.has_messaging_channel():
-        self.stream.set_message_handler(self.message_handler)
         if self.incoming_bridge is not None:
           await self.shared_pub_master.add_services_if_needed(self.incoming_bridge_services)
         if self.outgoing_bridge is not None:
@@ -348,7 +355,10 @@ class StreamSession:
         await self.run_normal_session()
       self.logger.info("Stream session (%s) ended", self.identifier)
     except Exception:
-      self.logger.exception("Stream session failure")
+      pc = self.stream.peer_connection
+      with cloudlog.ctx(session_id=self.identifier, connection_state=str(pc.state()), ice_state=str(pc.ice_state()),
+                        gathering_state=str(pc.gathering_state())):
+        cloudlog.exception("webrtcd.session.failure")
     finally:
       await self.post_run_cleanup()
 
@@ -395,9 +405,15 @@ def _text_response(text: str, status: int = 200) -> tuple[int, bytes, str]:
   return (status, text.encode(), "text/plain; charset=utf-8")
 
 
-async def handle_get_stream(state: ServerState, raw_body: bytes) -> tuple[int, bytes, str]:
+async def handle_get_stream(state: ServerState, raw_body: bytes, content_type: str) -> tuple[int, bytes, str]:
+  if content_type != "application/json":
+    return _json_response({"error": "unsupported media type"}, status=415)
+
   stream_dict = state.streams
-  body = StreamRequestBody(**json.loads(raw_body))
+  parsed_dict = json.loads(raw_body)
+  valid_fields = {f.name for f in StreamRequestBody.__dataclass_fields__.values()}
+  filtered_dict = {k: v for k, v in parsed_dict.items() if k in valid_fields}
+  body = StreamRequestBody(**filtered_dict)
 
   async with state.stream_lock:
     # don't remove existing connection on prewarm request
@@ -419,6 +435,8 @@ async def handle_get_stream(state: ServerState, raw_body: bytes) -> tuple[int, b
     stream_dict[session.identifier] = session
     try:
       answer = await asyncio.wait_for(session.get_answer(), timeout=30)
+      cloudlog.event("webrtcd.session.ice_candidates", session_id=session.identifier,
+                     offer_candidates=_ice_candidates(body.sdp), answer_candidates=_ice_candidates(answer.sdp))
     except TimeoutError:
       await session.stop()
       stream_dict.pop(session.identifier, None)
@@ -508,7 +526,7 @@ class WebrtcdHandler(BaseHTTPRequestHandler):
         services = parse_qs(parsed.query).get("services", [""])[0]
         result = self._run(handle_get_schema(self.server.state, services))
       elif parsed.path == "/stream":
-        result = self._run(handle_get_stream(self.server.state, self._read_body()))
+        result = self._run(handle_get_stream(self.server.state, self._read_body(), self.headers.get_content_type()))
       else:  # /notify
         try:
           payload = json.loads(self._read_body())
@@ -611,7 +629,7 @@ def webrtcd_thread(host: str, port: int):
 
 def main():
   parser = argparse.ArgumentParser(description="WebRTC daemon")
-  parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to listen on")
+  parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to listen on")
   parser.add_argument("--port", type=int, default=5001, help="Port to listen on")
   args = parser.parse_args()
 

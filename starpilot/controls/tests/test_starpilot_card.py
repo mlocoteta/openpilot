@@ -83,6 +83,7 @@ def make_toggles(**overrides):
     "conditional_experimental_mode": False,
     "experimental_mode_via_lkas": False,
     "force_coast_via_lkas": False,
+    "ford_lkas_aol_toggle": False,
     "pulse_and_glide_available": False,
     "pulse_and_glide_via_cancel": False,
     "pulse_and_glide_via_cancel_long": False,
@@ -103,7 +104,6 @@ def make_toggles(**overrides):
 
 def test_pulse_and_glide_requires_developer_access_and_active_longitudinal(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -123,12 +123,42 @@ def test_pulse_and_glide_requires_developer_access_and_active_longitudinal(monke
 
   car_state = make_car_state(gas_pressed=True)
   result = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert result.pulseAndGlide is True
+
+
+def test_pulse_and_glide_survives_temporary_disengagement(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
+  sm = make_sm()
+  sm["carControl"].longActive = True
+  toggles = make_toggles(
+    pulse_and_glide_available=True,
+    pulse_and_glide_via_lkas=True,
+  )
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+
+  card.handle_button_event("lkas", sm, toggles)
+  assert card.pulse_and_glide is True
+
+  sm["carControl"].longActive = False
+  result = card.update(make_car_state(brake_pressed=True), starpilot_car_state, sm, toggles)
+  assert result.pulseAndGlide is True
+
+  sm["carControl"].longActive = True
+  result = card.update(make_car_state(), starpilot_car_state, sm, toggles)
+  assert result.pulseAndGlide is True
+
+  sm["carControl"].longActive = False
+  off_press = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  result = card.update(off_press, starpilot_car_state, sm, toggles)
   assert result.pulseAndGlide is False
+  assert off_press.buttonEvents == []
 
 
 def test_pulse_and_glide_consumes_native_cancel_when_mapped(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -155,7 +185,6 @@ def test_pulse_and_glide_consumes_native_cancel_when_mapped(monkeypatch, tmp_pat
 
 def test_pulse_and_glide_consumes_lkas_when_mapped(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -177,7 +206,6 @@ def test_pulse_and_glide_consumes_lkas_when_mapped(monkeypatch, tmp_path):
 
 def test_pulse_and_glide_long_cancel_consumes_release_after_threshold(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -201,6 +229,38 @@ def test_pulse_and_glide_long_cancel_consumes_release_after_threshold(monkeypatc
 
   assert card.pulse_and_glide is True
   assert release.buttonEvents == []
+
+
+@pytest.mark.parametrize(
+  ("pressed_field", "long_key", "very_long_key"),
+  (
+    ("distancePressed", "distance_long", "distance_very_long"),
+    ("cancelPressed", "cancel_long", "cancel_very_long"),
+    ("modePressed", "mode_long", "mode_very_long"),
+    ("customPressed", "star_long", "star_very_long"),
+  ),
+)
+def test_very_long_press_does_not_repeat_long_press_action(monkeypatch, tmp_path, pressed_field, long_key, very_long_key):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
+  sm = make_sm()
+  toggles = make_toggles(has_canfd_media_buttons=pressed_field in ("modePressed", "customPressed"))
+  starpilot_car_state = SimpleNamespace(
+    distancePressed=False,
+    cancelPressed=False,
+    modePressed=False,
+    customPressed=False,
+  )
+  setattr(starpilot_car_state, pressed_field, True)
+  handled = []
+  monkeypatch.setattr(card, "handle_button_event", lambda key, _sm, _toggles: handled.append(key) or False)
+
+  for _ in range(card.very_long_press_threshold):
+    card.update(make_car_state(), starpilot_car_state, sm, toggles)
+
+  assert handled == [long_key, very_long_key]
 
 
 def make_car_state(available=False, enabled=False, button_events=None, brake_pressed=False, gas_pressed=False):
@@ -230,7 +290,6 @@ def test_distance_release_normalization_is_limited_to_reported_elantra_hybrid(
     monkeypatch, tmp_path, car_fingerprint, expect_normalized_release,
 ):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -263,7 +322,6 @@ def test_distance_release_normalization_is_limited_to_reported_elantra_hybrid(
 
 def test_honda_lkas_button_can_toggle_always_on_lateral(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="honda"), SimpleNamespace(alternativeExperience=0))
@@ -279,9 +337,53 @@ def test_honda_lkas_button_can_toggle_always_on_lateral(monkeypatch, tmp_path):
   assert ret.pauseLateral is False
 
 
+def test_controller_actions_match_vehicle_button_behaviors(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="honda"), SimpleNamespace(alternativeExperience=0))
+  sm = make_sm()
+  sm["carControl"].longActive = True
+  toggles = make_toggles(
+    always_on_lateral=True,
+    lkas_allowed_for_aol=True,
+    openpilot_longitudinal=True,
+    pulse_and_glide_available=True,
+  )
+  for _key, counter in spc.CONTROLLER_ACTION_COUNTERS.items():
+    if counter != "WheelButtonBookmarkCounter":
+      card.params_memory.put_int(counter, 1)
+
+  ret = card.update(make_car_state(), SimpleNamespace(distancePressed=False), sm, toggles)
+
+  assert card.force_coast is True
+  assert card.pulse_and_glide is True
+  assert ret.alwaysOnLateralAllowed is True
+
+  ret = card.update(make_car_state(), SimpleNamespace(distancePressed=False), sm, toggles)
+  assert card.force_coast is True
+  assert card.pulse_and_glide is True
+  assert ret.alwaysOnLateralAllowed is True
+
+
+def test_controller_aol_does_not_require_physical_lkas_button_mapping(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="honda"), SimpleNamespace(alternativeExperience=0))
+  card.params_memory.put_int(spc.CONTROLLER_ACTION_COUNTERS[spc.CONTROLLER_ACTION_TOGGLE_AOL], 1)
+  ret = card.update(
+    make_car_state(),
+    SimpleNamespace(distancePressed=False),
+    make_sm(),
+    make_toggles(always_on_lateral=True, lkas_allowed_for_aol=False),
+  )
+
+  assert ret.alwaysOnLateralAllowed is True
+
+
 def test_hyundai_lkas_button_can_start_aol_before_normal_engagement(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -309,9 +411,33 @@ def test_hyundai_lkas_button_can_start_aol_before_normal_engagement(monkeypatch,
   assert ret.pauseLateral is False
 
 
+def test_volvo_aol_stays_disabled_even_with_stale_enabled_toggle(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="volvo"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  car_state = make_car_state(available=True, enabled=True)
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(
+    always_on_lateral=True,
+    always_on_lateral_main=True,
+    always_on_lateral_lkas=True,
+    lkas_allowed_for_aol=True,
+    main_cruise_aol_toggle=True,
+  )
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.alwaysOnLateralEnabled is False
+
+
 def test_sonata_hybrid_lkas_button_can_start_aol_before_normal_engagement(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -332,7 +458,6 @@ def test_sonata_hybrid_lkas_button_can_start_aol_before_normal_engagement(monkey
 
 def test_sonata_hybrid_preserves_aol_latch_across_reverse(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -363,7 +488,6 @@ def test_sonata_hybrid_preserves_aol_latch_across_reverse(monkeypatch, tmp_path)
 
 def test_hyundai_aol_does_not_auto_start_from_cruise_availability(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -380,7 +504,6 @@ def test_hyundai_aol_does_not_auto_start_from_cruise_availability(monkeypatch, t
 
 def test_genesis_g90_main_aol_can_start_before_set(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -398,7 +521,6 @@ def test_genesis_g90_main_aol_can_start_before_set(monkeypatch, tmp_path):
 
 def test_other_legacy_hyundai_main_aol_still_waits_for_set(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -415,7 +537,6 @@ def test_other_legacy_hyundai_main_aol_still_waits_for_set(monkeypatch, tmp_path
 
 def test_legacy_hyundai_main_aol_waits_for_main_button_permission(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -447,7 +568,6 @@ def test_legacy_hyundai_main_aol_waits_for_main_button_permission(monkeypatch, t
 
 def test_nissan_main_aol_can_start_before_normal_engagement(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -464,7 +584,6 @@ def test_nissan_main_aol_can_start_before_normal_engagement(monkeypatch, tmp_pat
 
 def test_hyundai_canfd_lkas_button_can_toggle_aol_before_engagement(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -485,7 +604,6 @@ def test_hyundai_canfd_lkas_button_can_toggle_aol_before_engagement(monkeypatch,
 
 def test_hyundai_canfd_lkas_button_wrapped_enum_can_toggle_aol(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -510,7 +628,6 @@ def test_hyundai_canfd_lkas_button_wrapped_enum_can_toggle_aol(monkeypatch, tmp_
 
 def test_kia_forte_non_scc_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -540,7 +657,6 @@ def test_kia_forte_non_scc_main_cruise_button_toggles_aol_immediately(monkeypatc
 
 def test_genesis_g90_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -566,7 +682,6 @@ def test_genesis_g90_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp
 
 def test_genesis_g70_main_cruise_button_waits_for_cruise_availability(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -604,7 +719,6 @@ def test_genesis_g70_main_cruise_button_waits_for_cruise_availability(monkeypatc
 
 def test_legacy_hyundai_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -630,7 +744,6 @@ def test_legacy_hyundai_main_cruise_button_toggles_aol_immediately(monkeypatch, 
 
 def test_hyundai_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -655,7 +768,6 @@ def test_hyundai_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_pat
 
 def test_hyundai_main_cruise_button_wrapped_enum_can_toggle_aol(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -688,7 +800,6 @@ def test_hyundai_main_cruise_button_wrapped_enum_can_toggle_aol(monkeypatch, tmp
 
 def test_hyundai_lda_platform_main_aol_waits_for_engagement_without_lkas_mapping(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -711,7 +822,6 @@ def test_hyundai_lda_platform_main_aol_waits_for_engagement_without_lkas_mapping
 
 def test_honda_mapped_main_cruise_button_keeps_immediate_toggle(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -729,7 +839,6 @@ def test_honda_mapped_main_cruise_button_keeps_immediate_toggle(monkeypatch, tmp
 
 def test_hyundai_main_cruise_button_adopts_slc_when_assigned_to_slc(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="hyundai"), SimpleNamespace(alternativeExperience=0))
@@ -749,7 +858,6 @@ def test_hyundai_main_cruise_button_adopts_slc_when_assigned_to_slc(monkeypatch,
 
 def test_honda_lkas_button_pauses_lateral_when_cruise_is_active(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -776,9 +884,204 @@ def test_honda_lkas_button_pauses_lateral_when_cruise_is_active(monkeypatch, tmp
   assert ret.pauseLateral is False
 
 
+def test_ford_lkas_button_pauses_lateral_when_cruise_is_active(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="ford"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  card.always_on_lateral_allowed = True
+
+  car_state = make_car_state(available=True, enabled=True, button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  sm["selfdriveState"].active = True
+  sm["carControl"].longActive = True
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True, pause_lateral_via_lkas=True)
+  card.prev_active = True
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is True
+  assert ret.pauseLongitudinal is False
+
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=False)]
+  card.update(car_state, starpilot_car_state, sm, toggles)
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is False
+  assert ret.pauseLongitudinal is False
+
+
+def test_ford_lkas_button_pauses_aol_with_only_cruise_master_on(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="ford"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True, pause_lateral_via_lkas=True)
+
+  master_on = make_car_state(available=True, enabled=False)
+  ret = card.update(master_on, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+
+  master_on.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(master_on, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is True
+  assert ret.pauseLongitudinal is False
+
+  sm["starpilotPlan"].lateralCheck = False
+  master_on.buttonEvents = []
+  ret = card.update(master_on, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is False
+
+  master_on.cruiseState.available = False
+  master_on.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(master_on, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.pauseLateral is True
+
+  sm["starpilotPlan"].lateralCheck = True
+  master_on.cruiseState.available = True
+  master_on.buttonEvents = []
+  ret = card.update(master_on, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+  assert ret.pauseLateral is False
+
+
+def test_ford_lkas_button_pauses_lateral_when_aol_is_disabled(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="ford"), SimpleNamespace(alternativeExperience=0))
+  car_state = make_car_state(available=True, enabled=True, button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  sm["selfdriveState"].active = True
+  sm["carControl"].longActive = True
+  toggles = make_toggles(pause_lateral_via_lkas=True)
+  card.prev_active = True
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.pauseLateral is True
+  assert ret.pauseLongitudinal is False
+
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=False)]
+  card.update(car_state, starpilot_car_state, sm, toggles)
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.pauseLateral is False
+  assert ret.pauseLongitudinal is False
+
+
+def test_ford_lkas_button_can_use_aol_mapping(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="ford"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  car_state = make_car_state(available=True)
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True, ford_lkas_aol_toggle=True, lkas_allowed_for_aol=True)
+
+  ret = card.update(car_state, SimpleNamespace(distancePressed=False), make_sm(), toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is False
+
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(car_state, SimpleNamespace(distancePressed=False), make_sm(), toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is True
+
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=False)]
+  card.update(car_state, SimpleNamespace(distancePressed=False), make_sm(), toggles)
+  car_state.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(car_state, SimpleNamespace(distancePressed=False), make_sm(), toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is False
+
+
+def test_ford_aol_mapping_pauses_lateral_when_aol_is_disabled(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="ford"), SimpleNamespace(alternativeExperience=0))
+  card.prev_cruise_enabled = True
+  car_state = make_car_state(available=True, enabled=True, button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  sm = make_sm()
+  sm["selfdriveState"].active = True
+  sm["carControl"].longActive = True
+
+  ret = card.update(car_state, SimpleNamespace(distancePressed=False), sm, make_toggles(ford_lkas_aol_toggle=True))
+
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.pauseLateral is True
+  assert ret.pauseLongitudinal is False
+
+
+def test_ford_lkas_button_can_keep_experimental_mapping(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="ford"), SimpleNamespace(alternativeExperience=0))
+  card.prev_cruise_enabled = True
+  car_state = make_car_state(available=True, enabled=True, button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  sm = make_sm()
+  sm["carControl"].longActive = True
+
+  ret = card.update(car_state, SimpleNamespace(distancePressed=False), sm, make_toggles(experimental_mode_via_lkas=True))
+
+  assert card.params.get_bool("ExperimentalMode") is True
+  assert ret.pauseLateral is False
+
+
+def test_ford_new_longitudinal_engagement_resumes_lateral(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="ford"), SimpleNamespace(alternativeExperience=0))
+  card.pause_lateral = True
+
+  car_state = make_car_state(available=True, enabled=True)
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  sm["selfdriveState"].active = True
+  sm["carControl"].longActive = True
+
+  ret = card.update(car_state, starpilot_car_state, sm, make_toggles())
+
+  assert ret.pauseLateral is False
+  assert ret.pauseLongitudinal is False
+
+
 def test_honda_main_aol_follows_cruise_main_without_manual_aol_button_mapping(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -795,7 +1098,6 @@ def test_honda_main_aol_follows_cruise_main_without_manual_aol_button_mapping(mo
 
 def test_hyundai_main_aol_persists_after_brake_disengage_without_manual_aol_button_mapping(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -823,7 +1125,6 @@ def test_hyundai_main_aol_persists_after_brake_disengage_without_manual_aol_butt
 
 def test_non_button_aol_platform_keeps_main_aol_when_main_cruise_is_mapped(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -840,7 +1141,6 @@ def test_non_button_aol_platform_keeps_main_aol_when_main_cruise_is_mapped(monke
 
 def test_main_aol_still_follows_cruise_main_for_other_platforms(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="toyota", carFingerprint="TOYOTA_TEST", pcmCruise=True),
@@ -855,7 +1155,6 @@ def test_main_aol_still_follows_cruise_main_for_other_platforms(monkeypatch, tmp
 
 def test_pacifica_hybrid_main_aol_waits_for_set_press(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(
@@ -890,7 +1189,6 @@ def test_pacifica_hybrid_main_aol_waits_for_set_press(monkeypatch, tmp_path):
 
 def test_conditional_chill_wheel_override_cycles_manual_state(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -907,7 +1205,6 @@ def test_conditional_chill_wheel_override_cycles_manual_state(monkeypatch, tmp_p
 
 def test_cancel_button_short_press_can_run_independent_mapping(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -933,7 +1230,6 @@ def test_cancel_button_short_press_can_run_independent_mapping(monkeypatch, tmp_
 
 def test_lkas_button_press_creates_bookmark(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="toyota"), SimpleNamespace(alternativeExperience=0))
@@ -946,7 +1242,6 @@ def test_lkas_button_press_creates_bookmark(monkeypatch, tmp_path):
 
 def test_favorite_wheel_action_toggles_hidden_onroad_slot(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -963,7 +1258,6 @@ def test_favorite_wheel_action_toggles_hidden_onroad_slot(monkeypatch, tmp_path)
 
 def test_favorite_wheel_action_can_press_virtual_resume(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -978,7 +1272,6 @@ def test_favorite_wheel_action_can_press_virtual_resume(monkeypatch, tmp_path):
 
 def test_favorite_action_toggles_traffic_mode_when_longitudinal_control_is_active(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
@@ -998,7 +1291,6 @@ def test_favorite_action_toggles_traffic_mode_when_longitudinal_control_is_activ
 
 def test_favorite_traffic_mode_action_is_consumed_when_not_active(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
-  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))

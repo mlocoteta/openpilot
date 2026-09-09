@@ -5,6 +5,7 @@ from cereal import messaging, car
 from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.constants import CV
+from openpilot.selfdrive.controls.lib.lane_centering import get_lane_centering_visual_direction
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.lib.starpilot_theme import get_param_color, get_theme_color, get_visual_color, is_stock_color_scheme, with_alpha
 from openpilot.selfdrive.ui.onroad.radar_tracks import project_radar_points
@@ -20,6 +21,7 @@ CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
 MAX_DRAW_DISTANCE = 100.0
 STOCK_LANE_LINES_COLOR = rl.Color(255, 255, 255, 255)
+OCEAN_BLUE_LANE_LINES_COLOR = rl.Color(0, 176, 220, 255)
 DEFAULT_LANE_LINES_WIDTH = 4.0
 DEFAULT_PATH_EDGE_WIDTH = 20.0
 DEFAULT_PATH_WIDTH = 6.1
@@ -143,12 +145,7 @@ class ModelRenderer(Widget):
     self._is_metric = self._params.get_bool('IsMetric')
     if self._use_rainbow and sm.valid.get('carState', False):
       self._rainbow_path.update(max(sm['carState'].vEgo, 0.0))
-    lead_info_enabled = self._lead_info_enabled
-    render_lead_indicator = (
-      (self._longitudinal_control or lead_info_enabled)
-      and radar_state is not None
-      and lead_indicator_enabled(self._params)
-    )
+    render_lead_indicator = self._should_render_lead_indicator(radar_state)
 
     # Update model data when needed
     model_updated = sm.updated['modelV2']
@@ -182,6 +179,9 @@ class ModelRenderer(Widget):
         self._draw_adjacent_leads()
 
     self._draw_radar_tracks()
+
+  def _should_render_lead_indicator(self, radar_state) -> bool:
+    return radar_state is not None and lead_indicator_enabled(self._params)
 
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
@@ -370,8 +370,34 @@ class ModelRenderer(Widget):
 
     return LeadVehicle(glow=glow, chevron=chevron, fill_alpha=int(fill_alpha))
 
+  def _lane_centering_direction(self) -> int:
+    toggles = ui_state.starpilot_toggles
+    sm = ui_state.sm
+    if (sm.recv_frame.get("modelV2", 0) < ui_state.started_frame or
+        sm.recv_frame.get("carState", 0) < ui_state.started_frame):
+      return 0
+
+    car_state = sm["carState"]
+    applied_correction = None
+    if sm.recv_frame.get("controlsState", 0) >= ui_state.started_frame:
+      try:
+        applied_correction = sm["controlsState"].desiredCurvature - sm["modelV2"].action.desiredCurvature
+      except (AttributeError, TypeError, ValueError):
+        pass
+    return get_lane_centering_visual_direction(
+      sm["modelV2"], car_state.vEgo,
+      toggles.get("lane_center_offset", 0.0),
+      toggles.get("lane_centering_e2e_authority", 1.0),
+      bool(toggles.get("lane_centering", False)),
+      ui_state.status == UIStatus.ENGAGED or ui_state.always_on_lateral_active,
+      bool(toggles.get("lane_centering_pause_on_signal", True)),
+      bool(car_state.leftBlinker or car_state.rightBlinker),
+      applied_correction,
+    )
+
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
+    lane_centering_direction = self._lane_centering_direction()
     lane_lines_override = get_param_color(self._params, "LaneLinesColor", STOCK_LANE_LINES_COLOR.a)
     if lane_lines_override is not None:
       lane_lines_color = lane_lines_override
@@ -385,7 +411,10 @@ class ModelRenderer(Widget):
         continue
 
       alpha = np.clip(self._lane_line_probs[i], 0.0, 0.7)
-      color = with_alpha(lane_lines_color, int(alpha * lane_lines_color.a))
+      lane_centering_line = (lane_centering_direction > 0 and i == 2) or \
+                            (lane_centering_direction < 0 and i == 1)
+      line_color = OCEAN_BLUE_LANE_LINES_COLOR if lane_centering_line else lane_lines_color
+      color = with_alpha(line_color, int(alpha * line_color.a))
       draw_polygon(self._rect, lane_line.projected_points, color)
 
     for i, road_edge in enumerate(self._road_edges):

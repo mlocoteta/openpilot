@@ -17,7 +17,12 @@ from openpilot.system.sentry import capture_flm_tune_submission, capture_report
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 from openpilot.system.hardware.hw import Paths
 
-from openpilot.starpilot.assets.model_manager import MODEL_DOWNLOAD_ALL_PARAM, MODEL_DOWNLOAD_PARAM, ModelManager
+from openpilot.starpilot.assets.model_manager import (
+  MODEL_DOWNLOAD_ALL_PARAM,
+  MODEL_DOWNLOAD_PARAM,
+  MODEL_LAB_DOWNLOAD_PARAM,
+  ModelManager,
+)
 from openpilot.starpilot.assets.theme_manager import THEME_COMPONENT_PARAMS, ThemeManager
 from openpilot.starpilot.common.starpilot_functions import update_maps, update_openpilot
 from openpilot.starpilot.common.safe_mode import (
@@ -102,6 +107,12 @@ def check_assets(now, model_manager, theme_manager, thread_manager, params, para
       model_to_download = model_to_download.decode("utf-8", errors="replace")
     if model_to_download:
       thread_manager.run_with_lock(model_manager.download_model, (model_to_download,))
+    else:
+      lab_model_to_download = params_memory.get(MODEL_LAB_DOWNLOAD_PARAM)
+      if isinstance(lab_model_to_download, bytes):
+        lab_model_to_download = lab_model_to_download.decode("utf-8", errors="replace")
+      if lab_model_to_download:
+        thread_manager.run_with_lock(model_manager.download_model_accelerator, (lab_model_to_download,))
 
   for asset_type, asset_param in THEME_COMPONENT_PARAMS.items():
     asset_to_download = params_memory.get(asset_param)
@@ -203,7 +214,7 @@ def transition_onroad(error_log):
     error_log.unlink()
 
 def update_checks(now, model_manager, theme_manager, thread_manager, params, params_memory, starpilot_toggles, boot_run=False):
-  while not (is_url_pingable("https://github.com") or is_url_pingable("https://gitlab.com")):
+  while not (is_url_pingable("https://huggingface.co") or is_url_pingable("https://github.com")):
     time.sleep(60)
 
   model_manager.update_models(boot_run)
@@ -285,6 +296,7 @@ def starpilot_thread():
   run_update_checks = False
   safe_mode_active = safe_mode_enabled(params_raw)
   started_previously = False
+  starpilot_tracking = None
   model_randomizer_previously = params.get_bool("ModelRandomizer")
   time_validated = False
 
@@ -304,6 +316,7 @@ def starpilot_thread():
     started = sm["deviceState"].started
 
     if not started and started_previously:
+      starpilot_tracking.flush(now, time_validated)
       starpilot_planner.shutdown()
 
       starpilot_toggles = update_toggles(starpilot_variables, started, theme_manager, thread_manager, time_validated, params, starpilot_toggles)

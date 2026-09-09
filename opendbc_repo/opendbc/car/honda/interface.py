@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import numpy as np
+from openpilot.common.params import Params, UnknownKeyName
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HONDA_BOSCH, HONDA_BOSCH_CANFD, \
+from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HONDA_BOSCH, HONDA_BOSCH_A, HONDA_BOSCH_A_RADAR_VERIFIED, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HondaSafetyFlags
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
@@ -117,7 +118,17 @@ class CarInterface(CarInterfaceBase):
         cfgs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
       ret.safetyConfigs = cfgs
 
-      ret.radarUnavailable = True
+      # HONDA_BOSCH_A describes the physical harness family. Radar remains unavailable until the
+      # exact platform is added to HONDA_BOSCH_A_RADAR_VERIFIED after real-capture validation.
+      try:
+        # The explicit default keeps the verified platform usable on installs that have not yet
+        # persisted the internal kill-switch parameter; the verified-platform set remains mandatory.
+        bosch_a_radar_tryout = not docs and Params().get_bool("HondaBoschARadar", default=True)
+      except UnknownKeyName:
+        bosch_a_radar_tryout = False
+      ret.radarUnavailable = not (candidate in HONDA_BOSCH_A and
+                                  candidate in HONDA_BOSCH_A_RADAR_VERIFIED and
+                                  bosch_a_radar_tryout)
       # Disable the radar and let openpilot control longitudinal
       # WARNING: THIS DISABLES AEB!
       # If Bosch radarless, this blocks ACC messages from the camera
@@ -228,9 +239,13 @@ class CarInterface(CarInterfaceBase):
         CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.1)
 
     elif candidate == CAR.HONDA_ACCORD_11G:
-      ret.steerActuatorDelay = 0.22
-      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 2560, 5200], [0, 2560, 12747]]
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      # MVL Boston sp-honda-dev-202608 tuning (48211d6a63).
+      ret.longitudinalActuatorDelay = 0.05
+      ret.steerActuatorDelay = 0.3
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 12789], [0, 12789]]
+      ret.lateralTuning.pid.kf = 0.000035
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.115], [0.052]]
+      CarControllerParams.BOSCH_GAS_LOOKUP_BP = [0.0, 2.0]
 
     elif candidate == CAR.ACURA_ILX:
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 3840], [0, 3840]]  # TODO: determine if there is a dead zone at the top end
@@ -399,6 +414,8 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.RADARLESS.value
     if candidate in HONDA_BOSCH_CANFD:
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.BOSCH_CANFD.value
+    if candidate == CAR.HONDA_ACCORD_11G:
+      ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.BOSCH_CANFD_MVL.value
 
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter. Otherwise, add 0.5 mph margin to not
@@ -430,6 +447,13 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def init(CP, can_recv, can_send, communication_control=None):
     if CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS) and CP.openpilotLongitudinalControl:
+      # CAN-FD radar ownership is handed over only after the comma relay is confirmed open.
+      # Disabling the radar here can create a gap before panda enters the Honda safety mode and
+      # replacement ACC_CONTROL is permitted, which can latch CRUISE_FAULT/DTCs in the brake module.
+      # deinit() still passes an explicit enable request and therefore falls through to disable_ecu.
+      if CP.carFingerprint == CAR.HONDA_ACCORD_11G and communication_control is None:
+        return
+
       # 0x80 silences response
       if communication_control is None:
         communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX,

@@ -615,6 +615,40 @@ class TestAethergridContracts(unittest.TestCase):
     view._activate_target(mod.BACK_BTN)
     app_mod.gui_app.pop_widget.assert_called_once()
 
+  def test_panel_manager_view_page_drag_eligibility_and_reset(self):
+    mod = _import_aethergrid()
+    view = mod.PanelManagerView()
+    view._page_count = 2
+    view._current_page = 1
+    view._page_clip_rect = mod.rl.Rectangle(1000, 100, 800, 800)
+    view._scroll_rect = mod.rl.Rectangle(0, 0, 1920, 1080)
+
+    # Press outside grid (e.g. at volume adjustor on left: x=200, y=200)
+    view._handle_mouse_press(types.SimpleNamespace(x=200, y=200))
+    self.assertFalse(view._page_drag_eligible)
+    self.assertFalse(view._page_drag_active)
+
+    # Move event while not eligible does not trigger drag offset
+    mouse_event = types.SimpleNamespace(pos=types.SimpleNamespace(x=500, y=200), left_pressed=False, left_down=True, left_released=False, slot=0)
+    view._handle_mouse_event(mouse_event)
+    self.assertFalse(view._page_drag_active)
+    self.assertEqual(view._page_drag_offset, 0.0)
+
+    # Press inside grid (e.g. at x=1200, y=200)
+    view._handle_mouse_press(types.SimpleNamespace(x=1200, y=200))
+    self.assertTrue(view._page_drag_eligible)
+
+    # Move event while eligible calculates drag offset (swipe right towards page 0)
+    drag_event = types.SimpleNamespace(pos=types.SimpleNamespace(x=1250, y=200), left_pressed=False, left_down=True, left_released=False, slot=0)
+    view._handle_mouse_event(drag_event)
+    self.assertTrue(view._page_drag_active)
+    self.assertEqual(view._page_drag_offset, 50.0)
+
+    # Release resets eligibility and active drag
+    view._handle_mouse_release(types.SimpleNamespace(x=1250, y=200))
+    self.assertFalse(view._page_drag_eligible)
+    self.assertFalse(view._page_drag_active)
+
 
 if __name__ == "__main__":
   unittest.main()

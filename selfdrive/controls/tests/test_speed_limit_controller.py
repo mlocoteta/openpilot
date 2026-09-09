@@ -557,6 +557,29 @@ def test_set_speed_mode_overrides_on_raise_without_gas():
     controller.shutdown()
 
 
+def test_set_speed_mode_waits_until_above_slc_target_with_offset():
+  controller = make_controller(
+    is_metric=True,
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+    speed_limit_offset2=3 * CV.KPH_TO_MS,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = 30 * CV.KPH_TO_MS
+    controller.last_valid_limit = controller.target
+
+    controller.update_override(30 * CV.KPH_TO_MS, 0.0, 30 * CV.KPH_TO_MS, 0.0, make_sm(gas_pressed=False))
+    controller.update_override(33 * CV.KPH_TO_MS, 0.0, 30 * CV.KPH_TO_MS, 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+
+    controller.update_override(35 * CV.KPH_TO_MS, 0.0, 30 * CV.KPH_TO_MS, 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(35 * CV.KPH_TO_MS)
+  finally:
+    controller.shutdown()
+
+
 def test_set_speed_override_clears_on_new_speed_zone():
   # Entering a new (lower) posted limit clears the override; a steady high set speed must not
   # re-arm it. Only a fresh +/- press re-arms.

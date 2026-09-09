@@ -8,6 +8,7 @@ import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tun
 from opendbc.car.gm.values import CAR, GMFlags
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
+from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.longcontrol import (
   LongControl,
   LongCtrlState,
@@ -764,6 +765,15 @@ def test_elantra_lead_stop_releases_stale_hard_brake_after_target_eases():
   assert tuning.shape_stopping_accel(-1.20, -0.25, True, 1.0, False, -0.85) == pytest.approx(-1.20)
 
 
+def test_elantra_final_stop_cap_softens_normal_low_speed_stop():
+  CP = make_longcontrol_cp(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  assert tuning.shape_stopping_accel(-0.85, -0.25, True, 0.5, False, -0.85) == pytest.approx(-0.35)
+  assert tuning.shape_stopping_accel(-0.85, -1.25, True, 0.5, False, -0.85) == pytest.approx(-0.85)
+  assert tuning.shape_stopping_accel(-0.85, -0.25, False, 0.5, False, -0.85) == pytest.approx(-0.85)
+
+
 def test_elantra_stopped_lead_handoff_holds_braking_direction_without_touching_brakes():
   CP = make_longcontrol_cp(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")
   tuning = vehicle_tunes.LongControlVehicleTuning(CP)
@@ -1235,6 +1245,17 @@ def test_toyota_sienna_target_filter_smooths_mild_high_speed_handoffs():
 
   assert -0.20 < filtered < 0.30
 
+
+def test_toyota_sienna_2019_target_filter_smooths_mild_high_speed_handoffs():
+  CP = make_longcontrol_cp(brand="toyota", carFingerprint="TOYOTA_SIENNA")
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  assert tuning.shape_toyota_sienna_accel_target(0.30, 20.0, False) == pytest.approx(0.30)
+  filtered = tuning.shape_toyota_sienna_accel_target(-0.20, 20.0, False)
+
+  assert -0.20 < filtered < 0.30
+
+
 def test_toyota_sienna_target_filter_smooths_nonurgent_low_speed_lead_braking():
   CP = make_longcontrol_cp(brand="toyota", carFingerprint=TOYOTA_CAR.TOYOTA_SIENNA_4TH_GEN)
   tuning = vehicle_tunes.LongControlVehicleTuning(CP)
@@ -1520,3 +1541,50 @@ def test_gm_stock_truck_update_gradually_releases_stale_brake_integral():
   )
 
   assert -0.66 < output_accel < -0.44
+
+
+def test_leaving_experimental_slews_positive_accel():
+  CP = make_longcontrol_cp()
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.pid
+  lc.experimental_mode = True
+  lc.current_mode = "blended"
+  lc.prev_mode = "acc"
+  lc.last_output_accel = 0.05
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.05, brakePressed=False)
+  CS.cruiseState.standstill = False
+
+  lc.experimental_mode = False
+  output_accel = lc.update(
+    active=True,
+    CS=CS,
+    a_target=1.5,
+    should_stop=False,
+    accel_limits=(-3.0, 2.0),
+    starpilot_toggles=make_toggles(),
+  )
+
+  assert lc.current_mode == "acc"
+  assert lc.transitioning
+  assert output_accel > 0.05
+  assert output_accel < 0.25
+
+
+def test_leaving_experimental_does_not_reset_mode_transition_timer():
+  CP = make_longcontrol_cp()
+  lc = LongControl(CP)
+  lc.current_mode = "blended"
+
+  lc.update_mpc_mode(False)
+  first = lc.mode_transition_timer
+  lc.update_mpc_mode(False)
+
+  assert lc.current_mode == "acc"
+  assert lc.transitioning
+  assert first == pytest.approx(DT_CTRL)
+  assert lc.mode_transition_timer == pytest.approx(2.0 * DT_CTRL)
+
+  for _ in range(int(lc.mode_transition_duration / DT_CTRL)):
+    lc.update_mpc_mode(False)
+
+  assert not lc.transitioning

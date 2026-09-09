@@ -104,11 +104,22 @@ class TestAthenadMethods:
       f.write(data)
     return fn
 
+  @staticmethod
+  def _video_clips(clip):
+    clips = object.__new__(athenad.VideoClips)
+    clips.lock = threading.Condition()
+    clips.clips = {clip.filename: clip}
+    clips.transcode_proc = None
+    return clips
+
 
   # *** test cases ***
 
   def test_echo(self):
     assert dispatcher["echo"]("bob") == "bob"
+
+  def test_video_clip_methods_registered(self):
+    assert {"createClip", "getClipState", "deleteClip", "getClipChunk"}.issubset(dispatcher)
 
   def test_get_message(self):
     with pytest.raises(TimeoutError) as _:
@@ -173,6 +184,44 @@ class TestAthenadMethods:
     resp = dispatcher["listDataDirectory"](prefix)
     assert resp, 'list empty!'
     assert len(resp) == len(expected)
+
+  def test_video_clip_hardware_encoder(self, mocker):
+    clip = athenad.VideoClips.Clip("route", "fcamera.hevc", 10, 130, 2, 4, "clip.mp4", 123)
+    clips = self._video_clips(clip)
+    process = mocker.Mock(stdin=None, returncode=0)
+    process.poll.return_value = 0
+    popen = mocker.patch("openpilot.system.athena.athenad.subprocess.Popen", return_value=process)
+    mocker.patch.object(athenad, "PC", False)
+
+    clips._encode(clip, ["segment0", "segment1"], "output.mp4", 10, 120)
+
+    metadata = json.dumps(asdict(clip), separators=(',', ':'))
+    assert popen.call_args.args[0] == [
+      os.path.join(athenad.BASEDIR, "openpilot/system/loggerd/encoderd"), "--clip", "output.mp4", "10", "120",
+      "--bitrate", "2000000", "--speedup", "4", "--metadata", metadata, "--", "segment0", "segment1",
+    ]
+    assert popen.call_args.kwargs["stdin"] == athenad.subprocess.DEVNULL
+    assert clips.transcode_proc is None
+
+  def test_video_clip_software_fallback(self, mocker):
+    clip = athenad.VideoClips.Clip("route", "fcamera.hevc", 10, 30, 3, 2, "clip.mp4", 123)
+    clips = self._video_clips(clip)
+    stdin = mocker.Mock()
+    process = mocker.Mock(stdin=stdin, returncode=0)
+    process.poll.return_value = 0
+    popen = mocker.patch("openpilot.system.athena.athenad.subprocess.Popen", return_value=process)
+    mocker.patch.object(athenad, "PC", True)
+
+    clips._encode(clip, ["segment'0", "segment1"], "output.mp4", 10, 20)
+
+    command = popen.call_args.args[0]
+    assert ["-r", "40"] == command[command.index("-r"):command.index("-r") + 2]
+    assert ["-ss", "5.0"] == command[command.index("-ss"):command.index("-ss") + 2]
+    assert ["-t", "10.0"] == command[command.index("-t"):command.index("-t") + 2]
+    assert ["-b:v", "3M"] == command[command.index("-b:v"):command.index("-b:v") + 2]
+    writes = [call.args[0] for call in stdin.write.call_args_list]
+    assert "file 'file:segment'\\''0'\n" in writes[1]
+    assert writes[-1].startswith("file 'file:segment1'")
 
   def test_strip_extension(self):
     # any requested log file with an invalid extension won't return as existing

@@ -147,101 +147,10 @@ function launch {
     while true; do sleep 1; done
   fi
 
-  function prebuilt_runtime_compatible {
-    python3 - <<'PY'
-import importlib
-import os
-from pathlib import Path
-import sys
-import time
-
-from openpilot.common.file_chunker import get_existing_chunks
-
-start = time.monotonic()
-last = start
-log_path = os.environ.get("SP_BOOT_TIMING_LOG")
-
-def emit(line):
-  print(line, flush=True)
-  if log_path:
-    try:
-      with open(log_path, "a") as f:
-        f.write(line + "\n")
-    except OSError:
-      pass
-
-def log_step(label):
-  global last
-  now = time.monotonic()
-  emit(f"SP_BOOT_TIMING prebuilt_compat {label} +{now - last:.3f}s total={now - start:.3f}s")
-  last = now
-
-mods = [
-  "openpilot.common.params_pyx",
-  "msgq.ipc_pyx",
-  "msgq.visionipc.visionipc_pyx",
-  "openpilot.common.transformations.transformations",
-  "openpilot.selfdrive.pandad.pandad_api_impl",
-  "openpilot.selfdrive.controls.lib.lateral_mpc_lib.c_generated_code.acados_ocp_solver_pyx",
-  "openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.c_generated_code.acados_ocp_solver_pyx",
-]
-
-for mod in mods:
-  try:
-    importlib.import_module(mod)
-  except Exception as e:
-    print(f"Prebuilt compatibility failure in {mod}: {e}", file=sys.stderr)
-    raise
-  log_step(f"import:{mod}")
-
-repo_root = Path.cwd().parents[1]
-required_model_artifacts = [
-  repo_root / "selfdrive/modeld/models/driving_tinygrad.pkl",
-  repo_root / "selfdrive/modeld/models/dmonitoring_model_metadata.pkl",
-  repo_root / "selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl",
-  repo_root / "selfdrive/modeld/models/dm_warp_1928x1208_tinygrad.pkl",
-  repo_root / "selfdrive/modeld/models/dm_warp_1344x760_tinygrad.pkl",
-]
-required_files = [
-  repo_root / "selfdrive/pandad/pandad_api_impl.so",
-  repo_root / "selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
-  repo_root / "selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/libacados_ocp_solver_lat.so",
-  repo_root / "selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so",
-  repo_root / "selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so",
-  repo_root / "opendbc_repo/opendbc/dbc/gm_global_a_powertrain_generated.dbc",
-]
-
-for path in required_model_artifacts:
-  try:
-    artifact_paths = [Path(p) for p in get_existing_chunks(path)]
-  except Exception as e:
-    raise FileNotFoundError(f"Missing prebuilt runtime artifact: {path}") from e
-  missing_chunks = [p for p in artifact_paths if not p.is_file()]
-  if missing_chunks:
-    missing = ", ".join(str(p) for p in missing_chunks)
-    raise FileNotFoundError(f"Missing prebuilt runtime artifact chunks for {path}: {missing}")
-log_step("required_model_artifacts")
-
-for path in required_files:
-  if not path.is_file():
-    raise FileNotFoundError(f"Missing prebuilt runtime artifact: {path}")
-log_step("required_files")
-PY
-  }
-
-  USE_PREBUILT=1
-  if [ -f /data/params/d/UsePrebuilt ]; then
-    USE_PREBUILT=$(tr -d '\n' < /data/params/d/UsePrebuilt)
-  fi
-
   sp_launch_timing "prebuilt_decision_done"
-  if [ "$USE_PREBUILT" = "1" ] && [ -f $DIR/prebuilt ] && ! prebuilt_runtime_compatible; then
-    echo "Prebuilt runtime artifacts are incompatible on this device; rebuilding locally."
-    USE_PREBUILT=0
-  fi
-  sp_launch_timing "prebuilt_compat_done"
-
-  if [ "$USE_PREBUILT" != "1" ] || [ ! -f $DIR/prebuilt ]; then
+  # Published trees carry this marker and must never compile on-device.
+  # Developers can remove it explicitly when working from a source tree.
+  if [ ! -f "$DIR/prebuilt" ]; then
     sp_launch_timing "build_start"
     ./build.py
     sp_launch_timing "build_done"

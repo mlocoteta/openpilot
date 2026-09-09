@@ -15,6 +15,7 @@ LEAF_ADAS_ECU_BUS = 0
 LEAF_ADAS_COMMAND_BUS = 1
 LEAF_ADAS_COMMAND_ADDRS = frozenset((0x1C3, 0x2B0))
 LEAF_2025_SV_PLUS_CAMERA_FW = b'6WK2CDB\x04\x18\x00\x00\x00\x00\x00R=1\x18\x99\x10\x00\x00\x00\x80'
+LEAF_2025_SV_PLUS_ALPHA_LONG_ENABLED = False
 
 LEAF_KWP_EXTENDED_REQUEST = b"\x10\xC0"
 LEAF_KWP_EXTENDED_RESPONSE = b"\x50\xC0"
@@ -26,7 +27,7 @@ LEAF_KWP_TAKEOVER_SESSIONS = (
 
 
 def is_leaf_2025_sv_plus_longitudinal(candidate, car_fw):
-  return candidate == CAR.NISSAN_LEAF and any(
+  return LEAF_2025_SV_PLUS_ALPHA_LONG_ENABLED and candidate == CAR.NISSAN_LEAF and any(
     fw.address == LEAF_ADAS_ECU_ADDR and bytes(fw.fwVersion) == LEAF_2025_SV_PLUS_CAMERA_FW
     for fw in car_fw
   )

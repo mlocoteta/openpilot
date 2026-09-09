@@ -132,6 +132,7 @@ class CANParser:
     self.dbc: DBC = DBC(dbc_name)
 
     self.vl: dict[int | str, dict[str, float]] = VLDict(self)
+    self.vl_raw: dict[int | str, bytes] = {}
     self.vl_all: dict[int | str, dict[str, list[float]]] = {}
     self.ts_nanos: dict[int | str, dict[str, int]] = {}
     self.addresses: set[int] = set()
@@ -166,6 +167,8 @@ class CANParser:
     signals_dict = {s: 0.0 for s in signal_names}
     dict.__setitem__(self.vl, msg.address, signals_dict)
     dict.__setitem__(self.vl, msg.name, signals_dict)
+    self.vl_raw[msg.address] = bytes(msg.size)
+    self.vl_raw[msg.name] = bytes(msg.size)
     self.vl_all[msg.address] = defaultdict(list)
     self.vl_all[msg.name] = self.vl_all[msg.address]
     self.ts_nanos[msg.address] = {s: 0 for s in signal_names}
@@ -247,6 +250,8 @@ class CANParser:
             vl_addr[sig.name] = state.vals[i]
             vl_all_addr[sig.name] = state.all_vals[i]
             ts_addr[sig.name] = state.timestamps[-1]
+          self.vl_raw[address] = bytes(dat)
+          self.vl_raw[state.name] = bytes(dat)
 
       if not bus_empty:
         self.last_nonempty_nanos = t

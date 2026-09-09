@@ -1,6 +1,8 @@
 import importlib.util
+import math
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "lib" / "starpilot_visuals.py"
@@ -9,6 +11,7 @@ MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 lead_indicator_enabled = MODULE.lead_indicator_enabled
+get_border_roundness = MODULE.get_border_roundness
 
 
 class FakeParams:
@@ -29,6 +32,21 @@ class FakeParams:
 
 
 class TestStarPilotVisuals(unittest.TestCase):
+  def test_border_roundness_contains_camera_corner(self):
+    rect = SimpleNamespace(width=2160, height=1080)
+    base_width = 30
+    min_dimension = min(rect.width, rect.height)
+
+    for scale in (25, 50, 65, 100, 250):
+      border_width = round(base_width * scale / 100)
+      roundness = get_border_roundness(rect, border_width)
+      radius = roundness * min_dimension / 2
+      self.assertLessEqual(math.sqrt(2) * (radius - border_width), radius)
+
+  def test_border_roundness_preserves_stock_geometry(self):
+    rect = SimpleNamespace(width=2160, height=1080)
+    self.assertAlmostEqual(get_border_roundness(rect, 30), 0.12)
+
   def test_lead_indicator_enabled_by_default(self):
     self.assertTrue(lead_indicator_enabled(FakeParams()))
 

@@ -16,6 +16,35 @@ class _FakeSubMaster:
     return self._plan
 
 
+class _FakeParams:
+  def __init__(self, *, hide_lead_marker=False):
+    self.hide_lead_marker = hide_lead_marker
+
+  def get(self, key):
+    return b"1" if key == "HideLeadMarker" else None
+
+  def get_bool(self, key):
+    assert key == "HideLeadMarker"
+    return self.hide_lead_marker
+
+
+def test_lead_indicator_renders_without_longitudinal_control():
+  renderer = object.__new__(model_renderer.ModelRenderer)
+  renderer._params = _FakeParams()
+  renderer._longitudinal_control = False
+  renderer._lead_info_enabled = False
+
+  assert renderer._should_render_lead_indicator(SimpleNamespace())
+
+
+def test_lead_indicator_still_honors_visibility_setting():
+  renderer = object.__new__(model_renderer.ModelRenderer)
+  renderer._params = _FakeParams(hide_lead_marker=True)
+
+  assert not renderer._should_render_lead_indicator(SimpleNamespace())
+  assert not renderer._should_render_lead_indicator(None)
+
+
 @pytest.mark.parametrize(
   ("lane_width_left", "lane_width_right", "expected_side"),
   [

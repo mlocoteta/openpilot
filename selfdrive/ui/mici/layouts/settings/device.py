@@ -93,6 +93,10 @@ class EngagedConfirmationButton(BigButton):
     self.set_click_callback(lambda: _engaged_confirmation_click(callback, action_text, icon, exit_on_confirm=exit_on_confirm, red=red))
 
 
+def _request_user_reboot(params: Params) -> None:
+  params.put_bool("DoUserReboot", True)
+
+
 class DeviceInfoLayoutMici(Widget):
   def __init__(self):
     super().__init__()
@@ -227,7 +231,7 @@ class DeviceLayoutMici(NavScroller):
       ui_state.params.put_bool("DoShutdown", True)
 
     def reboot_callback():
-      ui_state.params.put_bool("DoReboot", True)
+      _request_user_reboot(ui_state.params)
 
     def reset_calibration_callback():
       params = ui_state.params

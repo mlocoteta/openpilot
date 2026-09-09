@@ -1,4 +1,5 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
+import { formatNumericParamValue, resolveVehicleUnitParam } from "/assets/mobile/js/params.js"
 
 const endpointOptionsCache = {}
 const endpointOptionsInflight = {}
@@ -11,7 +12,7 @@ const FAVORITE_OPTION_COLLATOR = new Intl.Collator(undefined, { numeric: true, s
 const FAVORITE_ACTION_PREFIX = "__starpilot_favorite_action__:"
 const GALAXY_DEVELOPER_MODE_KEY = "GalaxyDeveloperMode"
 const HIDDEN_SECTION_NAMES = new Set(["Model & Customization"])
-const HIDDEN_SETTING_KEYS = new Set(["HumanAcceleration", "ReverseCruise"])
+const HIDDEN_SETTING_KEYS = new Set(["HumanAcceleration"])
 const GM_MAKES = ["Buick", "Cadillac", "Chevrolet", "GMC", "Holden"]
 const HKG_MAKES = ["Genesis", "Hyundai", "Kia"]
 const VEHICLE_SETTING_MAKES = {
@@ -39,6 +40,8 @@ const VEHICLE_SETTING_MAKES = {
   JeepBrakeHold: ["Jeep"],
   SubaruSNG: ["Subaru"],
   SubaruSNGManualParkingBrake: ["Subaru"],
+  SubaruStopStartOff: ["Subaru"],
+  SubaruRedneckCruise: ["Subaru"],
   ClusterOffset: ["Lexus", "Toyota"],
   SNGHack: ["Lexus", "Toyota"],
   ToyotaAutoHold: ["Lexus", "Toyota"],
@@ -52,6 +55,8 @@ let flmWorkspaceInflight = null
 let lastFlmWorkspaceFetch = 0
 let favoritePollInflight = null
 let favoritePollTimer = null
+let cscCalibrationPollInflight = null
+let cscCalibrationPollTimer = null
 const DYNAMIC_DEFAULT_DEP_KEYS = new Set(["AccelerationProfile", "EVTuning", "TruckTuning"])
 const PANDA_FIRMWARE_TOGGLE_KEYS = new Set(["IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"])
 const FLM_ADVANCED_LATERAL_KEYS = new Set([
@@ -96,16 +101,24 @@ function normalizeVehicleMake(value) {
 }
 
 function isVehicleSettingVisible(section, param) {
-  if (section.name !== "Vehicle") return true
-  const allowedMakes = VEHICLE_SETTING_MAKES[param.key]
-  if (!allowedMakes) return true
+  const allowedMakes = param.vehicle_makes || (section.name === "Vehicle" ? VEHICLE_SETTING_MAKES[param.key] : null)
   const selectedMake = normalizeVehicleMake(state.values.CarMake)
-  return allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
+  if (allowedMakes && !allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)) return false
+
+  const excludedMakes = param.excluded_vehicle_makes || []
+  return !excludedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
+}
+
+function matchesSettingValueCondition(param) {
+  if (!param.visible_when_key) return true
+  const allowedValues = Array.isArray(param.visible_when_values) ? param.visible_when_values : []
+  const currentValue = toSelectValue(state.values[param.visible_when_key])
+  return allowedValues.some(value => toSelectValue(value) === currentValue)
 }
 
 function isSettingVisible(section, param) {
   // This policy controls Galaxy rendering only; hidden params retain their stored values.
-  if (HIDDEN_SETTING_KEYS.has(param.key) || !isVehicleSettingVisible(section, param)) return false
+  if (HIDDEN_SETTING_KEYS.has(param.key) || !isVehicleSettingVisible(section, param) || !matchesSettingValueCondition(param)) return false
   if (param.requires_capability && !state.values[param.requires_capability]) return false
   if (RADAR_REQUIRED_KEYS.has(param.key) && !state.values.HasRadar) return false
   if (param.key === "AlphaLongitudinalEnabled" && !state.values.AlphaLongitudinalAvailable) return false
@@ -438,38 +451,14 @@ async function fetchLayoutAndParams() {
   scheduleSyncInputs()
 }
 
-function formatSliderValue(val, stepStr, precisionInt, key) {
-  if (val === null || val === undefined) return "--"
-  const v = parseFloat(val)
-  if (Number.isNaN(v)) return val
+function formatReadoutValue(p) {
+  const raw = state.values[p.key]
+  const v = parseFloat(raw)
+  if (raw === undefined || raw === null || Number.isNaN(v)) return "--"
 
-  if (key === "SwitchbackModeCooldown") {
-    if (v === 0) return "Off"
-    return v === 1 ? "1 min" : `${v} min`
-  }
-
-  if (key === "DeviceShutdown") {
-    return v === 1 ? "1 hour" : `${v} hours`
-  }
-
-  const volumeKeys = [
-    "BelowSteerSpeedVolume", "DisengageVolume", "EngageVolume", "PromptVolume",
-    "PromptDistractedVolume", "RefuseVolume",
-    "WarningImmediateVolume", "WarningSoftVolume",
-  ]
-  if (key && volumeKeys.includes(key)) {
-    if (v === 0) return "Muted"
-    if (v === 101) return "Auto"
-    return `${v}%`
-  }
-
-  if (precisionInt !== undefined && precisionInt !== null) {
-    return Number(v.toFixed(precisionInt)).toString()
-  }
-
-  if (!stepStr || !stepStr.includes(".")) return Math.round(v).toString()
-  const dec = stepStr.split(".")[1].length
-  return Number(v.toFixed(dec)).toString()
+  const precision = p.precision !== undefined && p.precision !== null ? Number(p.precision) : 2
+  const formatted = Number(v.toFixed(Math.max(0, precision))).toString()
+  return p.unit ? `${formatted}${p.unit}` : formatted
 }
 
 function formatNumericForInput(value, precision) {
@@ -485,6 +474,7 @@ function formatStepValue(step, precision) {
 }
 
 function numericBounds(param) {
+  param = resolveVehicleUnitParam(param, state.values)
   const defaultBounds = {
     min: param.min !== undefined ? param.min : (param.data_type === "float" ? 0.0 : 0),
     max: param.max !== undefined ? param.max : (param.data_type === "float" ? 100.0 : 100),
@@ -501,6 +491,10 @@ function numericBounds(param) {
   }
   if (param.key === "ScreenBrightnessOnroad") {
     return { min: 1, max: 101, step: 1 }
+  }
+
+  if (param.key === "LaneCenterOffset") {
+    return { min: -0.3, max: 0.3, step: 0.01 }
   }
 
   // Personality jerk params are stored as percentage-style integers (25..200).
@@ -663,6 +657,51 @@ function ensureFavoriteValuePolling() {
     }
     if (document.visibilityState === "visible") {
       refreshFavoriteValues()
+    }
+  }, 1000)
+}
+
+async function refreshCscCalibrationValues() {
+  if (cscCalibrationPollInflight || state.loadingValues) return cscCalibrationPollInflight
+
+  cscCalibrationPollInflight = Promise.all(
+    ["CalibratedLateralAcceleration", "CalibrationProgress"].map(async key => {
+      const response = await fetch(`/api/params_memory?key=${encodeURIComponent(key)}`, { cache: "no-store" })
+      if (!response.ok) return [key, null]
+      const raw = (await response.text()).trim()
+      const value = Number(raw)
+      return [key, Number.isFinite(value) && raw !== "" ? value : null]
+    }),
+  ).then(entries => {
+    const nextValues = { ...state.values }
+    let changed = false
+    for (const [key, value] of entries) {
+      if (value === null || nextValues[key] === value) continue
+      nextValues[key] = value
+      changed = true
+    }
+    if (changed) {
+      state.values = nextValues
+      scheduleSyncInputs()
+    }
+  }).catch(() => {}).finally(() => {
+    cscCalibrationPollInflight = null
+  })
+
+  return cscCalibrationPollInflight
+}
+
+function ensureCscCalibrationPolling() {
+  if (cscCalibrationPollTimer !== null) return
+
+  cscCalibrationPollTimer = setInterval(() => {
+    if (!window.location.pathname.startsWith("/device_settings")) {
+      clearInterval(cscCalibrationPollTimer)
+      cscCalibrationPollTimer = null
+      return
+    }
+    if (document.visibilityState === "visible") {
+      refreshCscCalibrationValues()
     }
   }, 1000)
 }
@@ -883,13 +922,7 @@ function syncNumericDisplay(param, rawValue) {
   const displayEl = document.getElementById(`ds-display-${param.key}`)
   if (!displayEl) return
 
-  const bounds = numericBounds(param)
-  displayEl.textContent = formatSliderValue(
-    rawValue,
-    String(bounds.step),
-    param.precision,
-    param.key,
-  )
+  displayEl.textContent = formatNumericParamValue(param, rawValue, state.values)
 }
 
 async function updateNumericParam(param, numericValue, options = {}) {
@@ -986,6 +1019,18 @@ function stepNumericParam(param, direction) {
   if (Math.abs(next - current) <= epsilon) return
 
   updateNumericParam(param, next)
+}
+
+function canStepNumericParam(param, direction) {
+  const bounds = numericBounds(param)
+  const min = Number(bounds.min)
+  const max = Number(bounds.max)
+  const current = resolveCurrentNumericValue(param, bounds)
+  const precision = stepPrecision(bounds.step, param.precision)
+  const epsilon = Math.pow(10, -(precision + 2))
+
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(current)) return false
+  return direction < 0 ? current > min + epsilon : current < max - epsilon
 }
 
 function applyManualNumericParam(param) {
@@ -1230,10 +1275,9 @@ function matchesFilter(p) {
   if (!state.filter) return true
   if (isGroupParam(p)) return false
   const q = state.filter.toLowerCase()
-  const label = String(p.label || "").toLowerCase()
-  const key = String(p.key || "").toLowerCase()
-  const description = String(p.description || "").toLowerCase()
-  return label.includes(q) || key.includes(q) || description.includes(q)
+  const displayParam = resolveVehicleUnitParam(p, state.values)
+  return [displayParam.label, displayParam.key, displayParam.description, displayParam.unit, displayParam.unit_search_terms]
+    .some(value => String(value || "").toLowerCase().includes(q))
 }
 
 function clearSearchFilter() {
@@ -1295,8 +1339,7 @@ function formatFlmValue(param, value) {
   if (value === undefined || value === null) return "not set"
   if (param.data_type === "bool") return value ? "On" : "Off"
   if (param.ui_type === "numeric") {
-    const bounds = numericBounds(param)
-    return formatSliderValue(value, String(bounds.step), param.precision, param.key)
+    return formatNumericParamValue(param, value, state.values)
   }
   return String(value)
 }
@@ -1481,11 +1524,14 @@ function renderSettingRow(p) {
     return ""
   }
 
+  p = resolveVehicleUnitParam(p, state.values)
+
   const isNumeric = p.ui_type === "numeric"
   const isSlider = isNumeric && p.control === "slider"
   const isText = p.ui_type === "text"
   const isColor = p.ui_type === "color"
   const isAction = p.ui_type === "action"
+  const isReadout = p.ui_type === "readout"
   const isGroup = isGroupParam(p)
   const isChild = p.parent_key ? "ds-child-modifier" : ""
   const lockReason = () => getSettingLockReason(p)
@@ -1522,8 +1568,8 @@ function renderSettingRow(p) {
           @input="${(event) => previewSliderParam(p, event.currentTarget.value)}"
           @change="${(event) => commitSliderParam(p, event.currentTarget.value)}" />
         <div class="ds-slider-scale">
-          <span>${formatSliderValue(numericBounds(p).min, String(numericBounds(p).step), p.precision, p.key)}</span>
-          <span>${formatSliderValue(numericBounds(p).max, String(numericBounds(p).step), p.precision, p.key)}</span>
+          <span>${formatNumericParamValue(p, numericBounds(p).min, state.values)}</span>
+          <span>${formatNumericParamValue(p, numericBounds(p).max, state.values)}</span>
         </div>
         <button
           class="ds-reset-btn"
@@ -1547,22 +1593,20 @@ function renderSettingRow(p) {
       const precision = stepPrecision(bounds.step, p.precision)
       const epsilon = Math.pow(10, -(precision + 2))
       const updating = isNumericUpdating(p.key)
-      const canDecrease = !updating && currentNumeric > (Number(bounds.min) + epsilon)
-      const canIncrease = !updating && currentNumeric < (Number(bounds.max) - epsilon)
       const defaultNumeric = resolveDefaultNumericValue(p, bounds)
       const defaultLabel = defaultNumeric !== null
-        ? formatSliderValue(defaultNumeric, String(bounds.step), p.precision, p.key)
+        ? formatNumericParamValue(p, defaultNumeric, state.values)
         : "N/A"
       const canReset = !updating && defaultNumeric !== null && Math.abs(defaultNumeric - currentNumeric) > epsilon
-      const stepLabel = p.key === "DeviceShutdown" ? "1 hour" : formatStepValue(bounds.step, precision)
+      const stepLabel = p.key === "DeviceShutdown" ? "1 hour" : `${formatStepValue(bounds.step, precision)}${p.unit || ""}`
       return html`
             <div class="ds-stepper">
               <button
                 class="ds-stepper-btn"
-                disabled="${() => isLocked() || !canDecrease || false}"
+                disabled="${() => isLocked() || isNumericUpdating(p.key) || !canStepNumericParam(p, -1)}"
                 @click="${() => stepNumericParam(p, -1)}">-</button>
               <div class="ds-stepper-meta">
-                <span>${formatSliderValue(bounds.min, String(bounds.step), p.precision, p.key)} to ${formatSliderValue(bounds.max, String(bounds.step), p.precision, p.key)}</span>
+                <span>${formatNumericParamValue(p, bounds.min, state.values)} to ${formatNumericParamValue(p, bounds.max, state.values)}</span>
                 <span class="ds-step-value">Step: ${stepLabel} per click</span>
                 <span class="ds-default-value">Default: ${defaultLabel}</span>
                 <div class="ds-manual-row">
@@ -1592,7 +1636,7 @@ function renderSettingRow(p) {
               </div>
               <button
                 class="ds-stepper-btn"
-                disabled="${() => isLocked() || !canIncrease || false}"
+                disabled="${() => isLocked() || isNumericUpdating(p.key) || !canStepNumericParam(p, 1)}"
                 @click="${() => stepNumericParam(p, 1)}">+</button>            </div>
           `
     })()}
@@ -1637,7 +1681,7 @@ function renderSettingRow(p) {
           @click="${() => resetColorParam(p)}">Stock</button>
       </div>
     `
-  } else if (!isGroup) {
+  } else if (!isGroup && !isReadout) {
     if (p.key === "IsRHD") {
       rowControl = html`
         <div style="display:flex; align-items:center; gap:0.75rem;">
@@ -1707,11 +1751,11 @@ function renderSettingRow(p) {
             </div>
           ` : ""}
         </div>
-        ${(isNumeric || isColor) ? html`<span class="ds-row-value" id="ds-display-${p.key}">${() => {
+        ${(isNumeric || isColor || isReadout) ? html`<span class="ds-row-value ${isReadout ? "ds-row-readout" : ""}" id="ds-display-${p.key}">${() => {
             if (isColor) return formatColorDisplayValue(p)
+            if (isReadout) return formatReadoutValue(p)
             const currentValue = state.sliderPreviewValues[p.key] ?? state.values[p.key]
-            const bounds = numericBounds(p)
-            return currentValue !== undefined ? formatSliderValue(currentValue, String(bounds.step), p.precision, p.key) : ".."
+            return currentValue !== undefined ? formatNumericParamValue(p, currentValue, state.values) : ".."
           }}</span>` : ""}
       </div>
 
@@ -1763,6 +1807,7 @@ export function DeviceSettings({ params }) {
 
   fetchFlmWorkspace()
   ensureFavoriteValuePolling()
+  ensureCscCalibrationPolling()
 
   if (!state.fetched) {
     state.fetched = true

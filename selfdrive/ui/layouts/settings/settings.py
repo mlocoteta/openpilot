@@ -8,10 +8,12 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.main_panel import StarPil
 from openpilot.selfdrive.ui.layouts.settings.software import SoftwareLayout
 from openpilot.selfdrive.ui.layouts.settings.toggles import TogglesLayout
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
+from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.wifi_manager import WifiManager
 from openpilot.system.ui.widgets import Widget
+from openpilot.system.ui.widgets.bluetooth import BluetoothManagerUI
 from openpilot.system.ui.widgets.network import NetworkUI
 
 # Constants
@@ -38,9 +40,10 @@ class PanelType(IntEnum):
   STARPILOT = 0
   DEVICE = 1
   NETWORK = 2
-  TOGGLES = 3
-  SOFTWARE = 4
-  DEVELOPER = 5
+  BLUETOOTH = 3
+  TOGGLES = 4
+  SOFTWARE = 5
+  DEVELOPER = 6
 
 
 @dataclass
@@ -68,11 +71,14 @@ class SettingsLayout(Widget):
     # Panel configuration
     wifi_manager = WifiManager()
     wifi_manager.set_active(False)
+    bluetooth_manager = BluetoothManager()
+    bluetooth_manager.set_active(False)
 
     self._panels = {
       PanelType.STARPILOT: PanelInfo(tr_noop("StarPilot"), StarPilotLayout()),
       PanelType.DEVICE: PanelInfo(tr_noop("Device"), DeviceLayout()),
       PanelType.NETWORK: PanelInfo(tr_noop("Network"), NetworkUI(wifi_manager)),
+      PanelType.BLUETOOTH: PanelInfo(tr_noop("Bluetooth"), BluetoothManagerUI(bluetooth_manager)),
       PanelType.TOGGLES: PanelInfo(tr_noop("Toggles"), TogglesLayout()),
       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
       PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),

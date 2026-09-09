@@ -4,6 +4,10 @@ from __future__ import annotations
 from cereal import log
 
 from openpilot.common.params import Params, UnknownKeyName
+from openpilot.starpilot.common.accel_profile import (
+  CUSTOM_ACCEL_PROFILE_BREAKPOINTS_INITIALIZED_KEY,
+  CUSTOM_ACCEL_PROFILE_CURVE_PARAM_KEYS,
+)
 
 SAFE_MODE_PARAM = "SafeMode"
 SAFE_MODE_BACKUP_PARAM = "SafeModeBackup"
@@ -18,6 +22,13 @@ SAFE_MODE_MANAGED_KEYS = (
   "DrivingModelName",
   "ModelVersion",
   "DrivingModelVersion",
+  "ActiveBigModel",
+  "ActiveBigModelName",
+  "ActiveBigModelVersion",
+  "ActiveSmallModel",
+  "ActiveSmallModelName",
+  "ActiveSmallModelVersion",
+  "ModelLabConfig",
   "ModelRandomizer",
   "LatSmoothSeconds",
   "LongSmoothSeconds",
@@ -70,6 +81,8 @@ SAFE_MODE_MANAGED_KEYS = (
   "CustomAccelProfile45MPH",
   "CustomAccelProfile56MPH",
   "CustomAccelProfile89MPH",
+  CUSTOM_ACCEL_PROFILE_BREAKPOINTS_INITIALIZED_KEY,
+  *CUSTOM_ACCEL_PROFILE_CURVE_PARAM_KEYS,
   "LongitudinalActuatorDelay",
   "MaxDesiredAcceleration",
   "StartAccel",
@@ -91,7 +104,6 @@ SAFE_MODE_MANAGED_KEYS = (
   "MapGears",
   "MapAcceleration",
   "MapDeceleration",
-  "ReverseCruise",
   "SetSpeedOffset",
   "WeatherPresets",
   "IncreaseFollowingLowVisibility",
@@ -192,6 +204,8 @@ SAFE_MODE_MANAGED_KEYS = (
   "ToyotaAutoHold",
   "SubaruSNG",
   "SubaruSNGManualParkingBrake",
+  "SubaruStopStartOff",
+  "SubaruRedneckCruise",
   "VoltSNG",
   "JeepBrakeHold",
   "GMAutoHold",
@@ -209,6 +223,8 @@ SAFE_MODE_FIXED_VALUES = {
   "ExperimentalMode": False,
   "LongitudinalPersonality": int(log.LongitudinalPersonality.relaxed),
   "UseAutoSteerDelay": True,
+  "SubaruStopStartOff": False,
+  "SubaruRedneckCruise": False,
 }
 
 SAFE_MODE_STOCK_PARAM_MAP = {

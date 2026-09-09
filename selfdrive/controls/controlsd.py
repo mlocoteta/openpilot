@@ -13,9 +13,16 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import CAR as GM_CAR
 from opendbc.car.honda.values import CAR as HONDA_CAR
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.nissan.values import CAR as NISSAN_CAR
 from opendbc.car.vehicle_model import VehicleModel
-from openpilot.selfdrive.controls.lib.drive_helpers import MAX_LATERAL_JERK, clip_curvature, get_lateral_active
+from openpilot.selfdrive.controls.lib.drive_helpers import (
+  MAX_LATERAL_JERK,
+  clip_curvature,
+  get_kona_non_scc_lateral_active,
+  get_lateral_active,
+  update_lateral_fault_latch,
+)
 from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
@@ -163,12 +170,27 @@ CURVATURE_HOLD_OPPOSITE_RELEASE = 0.01  # 1/m
 CURVATURE_HOLD_CONFIRM_MIN = 0.003  # 1/m (~7 deg) of wound curvature before capture
 CURVATURE_HOLD_CONFIRM_SWEPT = 0.6  # rad of heading swept this blinker cycle; past this the push is exit-shaping, not initiation
 
+# Suppress low-speed action spikes while the model's spatial path remains straight.
+TWITCH_GUARD_MAX_SPEED = 4.0
+TWITCH_GUARD_FADE_SPEED = 3.0
+TWITCH_GUARD_DURATION = 1.5
+TWITCH_GUARD_PLAN_RATIO = 4.0
+TWITCH_GUARD_FLOOR = 0.002
+TWITCH_GUARD_STRAIGHT_LO = 0.005
+TWITCH_GUARD_STRAIGHT_HI = 0.014
+TWITCH_GUARD_MIN_REACH = 12.0
+
 
 def _plan_circle_curvature(xs, ys, lookahead: float) -> float:
-  # curvature of the circle through the origin, tangent to the car's heading, passing
-  # through the plan point ~lookahead meters ahead: kappa = 2y / (x^2 + y^2)
+  # Fit curvature through the plan point at the requested lookahead.
   px, py = 0.0, 0.0
-  for x, y in zip(xs, ys):
+  for x, y in zip(xs, ys, strict=False):
+    try:
+      x, y = float(x), float(y)
+    except (TypeError, ValueError, OverflowError):
+      return 0.0
+    if not (math.isfinite(x) and math.isfinite(y)):
+      return 0.0
     px, py = x, y
     if math.hypot(x, y) >= lookahead:
       break
@@ -179,11 +201,7 @@ def _plan_circle_curvature(xs, ys, lookahead: float) -> float:
 
 
 def _plan_dual_probe(model_v2, d_near: float, d_far: float) -> float:
-  # Min-magnitude of a near and a far circle fit. The far probe alone assumes the turn
-  # starts immediately, which over-winds wide turns whose arc begins several meters out
-  # (wide multi-lane lefts): the near probe reads ~straight there and only grows as the
-  # car approaches the arc, so the readout self-scales to the turn geometry. Sign
-  # disagreement means no coherent turn ahead: contribute nothing.
+  # Use the smaller magnitude of near and far probes to avoid early turn bias.
   xs, ys = model_v2.position.x, model_v2.position.y
   near = _plan_circle_curvature(xs, ys, d_near)
   far = _plan_circle_curvature(xs, ys, d_far)
@@ -216,8 +234,52 @@ def get_plan_turn_onset_dist(model_v2) -> float:
 
 
 def get_plan_reach(model_v2) -> float:
-  xs = model_v2.position.x
-  return xs[-1] if len(xs) else 0.0
+  try:
+    xs = model_v2.position.x
+    return float(xs[-1]) if len(xs) else 0.0
+  except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+    return 0.0
+
+
+def _plan_positions_are_finite(model_v2) -> bool:
+  try:
+    xs, ys = model_v2.position.x, model_v2.position.y
+    return len(xs) == len(ys) and all(
+      math.isfinite(float(x)) and math.isfinite(float(y)) for x, y in zip(xs, ys, strict=True)
+    )
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return False
+
+
+def limit_curvature_to_plan(model_v2, curvature: float, v_ego: float) -> float:
+  if not (math.isfinite(curvature) and math.isfinite(v_ego)):
+    return curvature
+  if v_ego >= TWITCH_GUARD_MAX_SPEED or curvature == 0.0:
+    return curvature
+  if not _plan_positions_are_finite(model_v2):
+    return curvature
+  reach = get_plan_reach(model_v2)
+  if not math.isfinite(reach) or reach < TWITCH_GUARD_MIN_REACH:
+    return curvature
+  plan = abs(_plan_circle_curvature(model_v2.position.x, model_v2.position.y,
+                                    CURVATURE_HOLD_PLAN_LOOKAHEAD_FAR))
+  if not math.isfinite(plan):
+    return curvature
+  straightness = (plan - TWITCH_GUARD_STRAIGHT_LO) / (TWITCH_GUARD_STRAIGHT_HI - TWITCH_GUARD_STRAIGHT_LO)
+  limit = max(TWITCH_GUARD_PLAN_RATIO * plan * min(max(straightness, 0.0), 1.0), TWITCH_GUARD_FLOOR)
+  if abs(curvature) <= limit:
+    return curvature
+  fade = (TWITCH_GUARD_MAX_SPEED - v_ego) / (TWITCH_GUARD_MAX_SPEED - TWITCH_GUARD_FADE_SPEED)
+  fade = min(max(fade, 0.0), 1.0)
+  return curvature + (math.copysign(limit, curvature) - curvature) * fade
+
+
+def update_twitch_guard(remaining: float, v_ego: float, standstill: bool) -> float:
+  if not (math.isfinite(remaining) and math.isfinite(v_ego)):
+    return 0.0
+  if standstill or abs(v_ego) <= 0.3:
+    return TWITCH_GUARD_DURATION
+  return max(remaining - DT_CTRL, 0.0)
 
 
 def get_control_lateral_smooth_seconds(brand: str, v_ego: float, vehicle_smooth_seconds: float) -> float:
@@ -340,6 +402,11 @@ class Controls:
     self.turn_hold_handoff_t = 0.0
     self.turn_hold_done = False
     self.turn_blinker_swept = 0.0
+    self.twitch_guard_remaining = 0.0
+    self.kona_non_scc_lateral_active = False
+    self.kona_non_scc_lateral_faulted = False
+    self.elantra_hev_2024_lateral_faulted = False
+    self.elantra_hev_2024_previous_cruise_enabled = False
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -423,6 +490,7 @@ class Controls:
 
   def state_control(self):
     CS = self.sm['carState']
+    self.twitch_guard_remaining = update_twitch_guard(self.twitch_guard_remaining, CS.vEgo, CS.standstill)
 
     # Update VehicleModel
     lp = self.sm['liveParameters']
@@ -463,15 +531,56 @@ class Controls:
 
     # Check which actuators can be enabled
     standstill = abs(CS.vEgo) <= max(self.CP.minSteerSpeed, 0.3) or CS.standstill
-    CC.latActive = get_lateral_active(CC.enabled, self.sm['selfdriveState'].active,
-                                      self.sm['starpilotCarState'].alwaysOnLateralEnabled,
-                                      CS.steerFaultTemporary, CS.steerFaultPermanent,
-                                      standstill, self.CP.steerAtStandstill,
-                                      self.sm['starpilotPlan'].lateralCheck)
+    if self.CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_KONA_NON_SCC:
+      always_on_lateral_enabled = self.sm['starpilotCarState'].alwaysOnLateralEnabled
+      lateral_requested = (CC.enabled and self.sm['selfdriveState'].active) or always_on_lateral_enabled
+      if not lateral_requested:
+        self.kona_non_scc_lateral_faulted = False
+      elif CS.steerFaultTemporary:
+        self.kona_non_scc_lateral_faulted = True
+      CC.latActive = get_kona_non_scc_lateral_active(
+        CC.enabled, self.sm['selfdriveState'].active,
+        always_on_lateral_enabled,
+        CS.steerFaultTemporary, CS.steerFaultPermanent,
+        standstill, self.CP.steerAtStandstill,
+        self.sm['starpilotPlan'].lateralCheck,
+        CS.steeringPressed, self.kona_non_scc_lateral_active,
+        self.kona_non_scc_lateral_faulted,
+      )
+      self.kona_non_scc_lateral_active = CC.latActive
+    elif self.CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2024:
+      always_on_lateral_enabled = self.sm['starpilotCarState'].alwaysOnLateralEnabled
+      lateral_requested = (CC.enabled and self.sm['selfdriveState'].active) or always_on_lateral_enabled
+      cruise_reenabled = CS.cruiseState.enabled and not self.elantra_hev_2024_previous_cruise_enabled
+      self.elantra_hev_2024_lateral_faulted = update_lateral_fault_latch(
+        self.elantra_hev_2024_lateral_faulted,
+        lateral_requested,
+        CS.steerFaultTemporary,
+        reset=cruise_reenabled,
+      )
+      CC.latActive = get_lateral_active(
+        CC.enabled, self.sm['selfdriveState'].active,
+        always_on_lateral_enabled,
+        CS.steerFaultTemporary, CS.steerFaultPermanent,
+        standstill, self.CP.steerAtStandstill,
+        self.sm['starpilotPlan'].lateralCheck,
+        self.elantra_hev_2024_lateral_faulted,
+      )
+      self.elantra_hev_2024_previous_cruise_enabled = CS.cruiseState.enabled
+    else:
+      CC.latActive = get_lateral_active(CC.enabled, self.sm['selfdriveState'].active,
+                                        self.sm['starpilotCarState'].alwaysOnLateralEnabled,
+                                        CS.steerFaultTemporary, CS.steerFaultPermanent,
+                                        standstill, self.CP.steerAtStandstill,
+                                        self.sm['starpilotPlan'].lateralCheck)
     # EcuDisableFailed is set when car started in READY mode (ECU disable was rejected)
     # Disable longitudinal so stock ACC works instead
     self.update_ecu_disable_failed()
-    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and not self.sm['starpilotCarState'].pauseLongitudinal and self.CP.openpilotLongitudinalControl and not self.ecu_disable_failed
+    CC.longActive = (
+      CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and
+      not self.sm['starpilotCarState'].pauseLongitudinal and self.CP.openpilotLongitudinalControl and
+      not self.ecu_disable_failed
+    )
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -510,6 +619,9 @@ class Controls:
     # here is positive for RIGHT turns (pauseturn log: left turn at +148 deg steering
     # angle logs desiredCurvature -0.07), so the blinker maps right=+1, left=-1.
     blinker_dir = float(CS.rightBlinker) - float(CS.leftBlinker)
+    if (CC.latActive and self.twitch_guard_remaining > 0.0 and
+        blinker_dir == 0.0 and self.turn_hold_curvature == 0.0):
+      new_desired_curvature = limit_curvature_to_plan(model_v2, new_desired_curvature, CS.vEgo)
     # heading swept in the blinker's direction over the whole blinker cycle (any speed):
     # discriminates a turn not yet made from one being exited (see the re-arm below)
     if blinker_dir == 0.0:
@@ -666,7 +778,8 @@ class Controls:
       CC.latActive,
       bool(self.sm.all_checks(['modelV2'])),
       self.starpilot_toggles.lane_centering_pause_on_signal,
-      bool(CS.leftBlinker or CS.rightBlinker))
+      bool(CS.leftBlinker or CS.rightBlinker),
+      bool(CS.steeringPressed))
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:

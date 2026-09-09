@@ -20,7 +20,7 @@ from openpilot.selfdrive.controls.lib.lead_behavior import (
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_lead_follow_jerk_scale
 
-from openpilot.starpilot.common.starpilot_utilities import calculate_lane_width, calculate_road_curvature
+from openpilot.starpilot.common.starpilot_utilities import calculate_lane_width, calculate_road_curvature, extract_curve_profile
 from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME, THRESHOLD
 from openpilot.starpilot.controls.lib.conditional_chill_mode import ConditionalChillMode
 from openpilot.starpilot.controls.lib.conditional_experimental_mode import ConditionalExperimentalMode
@@ -31,7 +31,10 @@ from openpilot.starpilot.controls.lib.starpilot_vcruise import StarPilotVCruise
 from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
 
 RADARLESS_TRACK_HOLD_TIME = 0.45
-FORCE_STOP_JERK_SCALE = 0.32  # accel-change cost multiplier while forcing_stop (125 -> ~40)
+FORCE_STOP_JERK_SCALE = 0.20  # accel-change cost multiplier for the whole stop approach,
+                              # envelope included (125 -> 25). Lower = reaches the braking
+                              # target sooner; it does not make the target deeper. Response
+                              # is super-linear here, so raise it if onset feels like a step.
 FORCE_STOP_JERK_SCALE_OVERRIDES = {
   # The Elantra's current force-stop ramp is smooth, but it waits too long
   # before building decel and then arrives at the initial brake too abruptly.
@@ -211,6 +214,7 @@ class StarPilotPlanner:
     self.model_stopped = self.raw_model_stopped or self.starpilot_vcruise.forcing_stop
 
     self.road_curvature, self.time_to_curve = calculate_road_curvature(sm["modelV2"], v_ego)
+    self.curve_profile = extract_curve_profile(sm["modelV2"])
 
     self.road_curvature_detected = (1 / abs(self.road_curvature))**0.5 < v_ego > CRUISING_SPEED and not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)
 
@@ -308,13 +312,11 @@ class StarPilotPlanner:
     except (KeyError, IndexError, TypeError, AttributeError):
       car_params = None
 
-    if self.starpilot_vcruise.forcing_stop:
+    # Also while the far-approach envelope is running: at onset the ramp reaches only
+    # ~-0.5 m/s^2 after a second, so the first seconds of a detected red are mostly lost.
+    if self.starpilot_vcruise.forcing_stop or self.starpilot_vcruise.approach_stop_length > 0.0:
       jerk_scale = get_force_stop_jerk_scale(car_params)
     elif self.tracking_lead:
-      # Elantra vision leads can hand off from cruise to lead0 while closing
-      # quickly. A slightly higher accel-change cost makes that handoff begin
-      # earlier instead of arriving as a sharp brake request, without changing
-      # the safety stop distance or the force-stop path.
       jerk_scale = get_lead_follow_jerk_scale(car_params)
     else:
       jerk_scale = 1.0
@@ -327,6 +329,9 @@ class StarPilotPlanner:
     starpilotPlan.cscControllingSpeed = self.starpilot_vcruise.csc_controlling_speed
     starpilotPlan.cscSpeed = float(self.starpilot_vcruise.csc_target)
     starpilotPlan.cscTraining = self.starpilot_vcruise.csc.enable_training
+    starpilotPlan.cscOverridden = self.starpilot_vcruise.csc_override
+    starpilotPlan.cscLearnedLatAccel = float(self.starpilot_vcruise.csc.learned_lat_accel(self.road_curvature))
+    starpilotPlan.cscBindingDistance = float(self.starpilot_vcruise.csc.binding_distance)
 
     starpilotPlan.desiredFollowDistance = int(self.starpilot_following.desired_follow_distance)
     starpilotPlan.disableThrottle = (
@@ -346,6 +351,7 @@ class StarPilotPlanner:
 
     starpilotPlan.forcingStop = self.starpilot_vcruise.forcing_stop
     starpilotPlan.forcingStopLength = self.starpilot_vcruise.tracked_model_length
+    starpilotPlan.approachStopLength = float(self.starpilot_vcruise.approach_stop_length)
     starpilotPlan.stopSignConfirmed = self.starpilot_vcruise.stop_sign_confirmed
 
     starpilotPlan.starpilotEvents = self.starpilot_events.events.to_msg()
