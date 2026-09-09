@@ -8767,12 +8767,11 @@ def setup(app):
         ["sudo", tailscale_binary, "--socket", socket, "up", "--force-reauth", "--json", "--timeout=30s"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
         preexec_fn=os.setsid
       )
 
       auth_url = None
-      output = []
+      output = ""
       selector = selectors.DefaultSelector()
       selector.register(proc.stdout, selectors.EVENT_READ)
       deadline = time.monotonic() + 20
@@ -8780,11 +8779,11 @@ def setup(app):
         events = selector.select(timeout=max(0, deadline - time.monotonic()))
         if not events:
           break
-        line = proc.stdout.readline()
-        if not line:
+        chunk = os.read(proc.stdout.fileno(), 4096)
+        if not chunk:
           break
-        output.append(line.strip())
-        match = re.search(r"https://login\.tailscale\.com/\S+", line)
+        output += chunk.decode(errors="replace")
+        match = re.search(r"https://login\.tailscale\.com/\S+", output)
         if match:
           auth_url = match.group(0)
           # The client must remain alive while browser authorization completes.
@@ -8794,7 +8793,7 @@ def setup(app):
       return jsonify({
         "message": "Tailscale setup started. Please authenticate in your browser." if auth_url else "Tailscale did not provide an authorization link yet.",
         "auth_url": auth_url,
-        "detail": "\\n".join(output[-10:])
+        "detail": output.strip()[-2000:]
       }), 200
 
     # A cancelled browser login leaves the daemon holding the original URL.
