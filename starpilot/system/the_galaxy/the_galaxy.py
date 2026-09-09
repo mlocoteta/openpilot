@@ -8712,6 +8712,47 @@ def setup(app):
 
     return jsonify({"installed": False})
 
+  @app.route("/api/tailscale/status", methods=["GET"])
+  def tailscale_status():
+    base = "/data/tailscale"
+    socket = f"{base}/tailscaled.sock"
+    tailscale_binary = f"{base}/tailscale"
+
+    def command_result(command):
+      try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        return {
+          "returncode": result.returncode,
+          "stdout": result.stdout.strip(),
+          "stderr": result.stderr.strip(),
+        }
+      except subprocess.TimeoutExpired:
+        return {"returncode": None, "stdout": "", "stderr": "command timed out"}
+
+    service = command_result(["sudo", "systemctl", "is-active", "tailscaled"])
+    cli = {"returncode": None, "stdout": "", "stderr": "Tailscale binary is not installed"}
+    if os.path.exists(tailscale_binary):
+      cli = command_result(["sudo", tailscale_binary, "--socket", socket, "status", "--json"])
+
+    status = {}
+    if cli["returncode"] == 0:
+      try:
+        raw_status = json.loads(cli["stdout"])
+        status = {
+          "backendState": raw_status.get("BackendState", ""),
+          "authUrl": raw_status.get("AuthURL", ""),
+          "selfOnline": raw_status.get("Self", {}).get("Online", False),
+        }
+      except json.JSONDecodeError:
+        cli["stderr"] = (cli["stderr"] + "\nInvalid JSON from tailscale status").strip()
+
+    return jsonify({
+      "installed": os.path.exists(tailscale_binary),
+      "service": service,
+      "cli": cli,
+      "status": status,
+    }), 200
+
   @app.route("/api/tailscale/setup", methods=["POST"])
   def tailscale_setup():
     arch = "arm64"
