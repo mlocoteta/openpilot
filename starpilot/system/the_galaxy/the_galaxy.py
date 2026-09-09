@@ -8721,7 +8721,7 @@ def setup(app):
 
     def start_tailscale_login():
       proc = subprocess.Popen(
-        ["sudo", tailscale_binary, "--socket", socket, "login", "--json", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
+        ["sudo", tailscale_binary, "--socket", socket, "login", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
