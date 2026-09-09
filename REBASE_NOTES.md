@@ -88,13 +88,20 @@ SCons hashes content, so `touch` will not force a rebuild. The keys live in `par
 → `libcommon.a`, so rebuilding `params_pyx.so` alone just relinks the stale archive.
 
 ```bash
-# verify after any merge that touches params_keys.h
-strings -a common/params_pyx.so | grep -c '^TorqueInterceptorEnabled$'   # must be 1
+# Verify after any merge that touches params_keys.h -- and after any AGNOS flash.
+# Ask the library; do NOT grep the binary. `strings` on params_pyx.so gives
+# FALSE NEGATIVES (observed reporting 0 for keys that resolve fine).
+PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -c "
+from openpilot.common.params import Params
+Params().get('TorqueInterceptorEnabled')"      # UnknownKeyName == stale build
 
-# if 0:
-rm -f common/libcommon.a common/params.o common/params_pyx.so
-python -m SCons --cache-disable -j4 common/params_pyx.so
+# if it raises:
+rm -f common/libcommon.a common/params.o common/params_pyx.so common/params_pyx.cpp
+PATH=/usr/local/venv/bin:$PATH python -m SCons --cache-disable -j4
 ```
+
+Compiling `params.cc` takes minutes. A short SSH timeout kills it and the output
+reads "Build interrupted", which looks like a build failure but is not. Run detached.
 
 **Honda conflicts are usually complementary, not competing.** StarPilot is adding
 `HONDA_ACCORD_11G` (Bosch CAN-FD) support; ours is `HONDA_ACCORD_9G` (Nidec). Both sides
@@ -157,6 +164,13 @@ curl -X POST 'http://<device>:8089/tap?x=1700&y=900'
 
 Note the stream (8088) is **down** during an AGNOS update — `updater_magic` owns the
 display, not the openpilot UI — but touch injection (8089) still works.
+
+**An AGNOS flash re-breaks the param key table.** Confirmed: after 19.6.10 -> 19.6.20,
+`TorqueInterceptorEnabled`, `HomeScreenName` and `TISigmoidEnabled` were all missing from
+the compiled table again, and the UI crash-looped on `UnknownKeyName: HomeScreenName`
+raised by `home_screen_name()` in the render path. That also kills the stream, because the
+streamer runs inside the UI process. The `TorqueInterceptorEnabled` **param file itself**
+was wiped too, so re-check the value, not just the key. Verify both after every AGNOS change.
 
 **AGNOS downloads do not consume `/data`.** It streams straight to the raw inactive
 partition. Free space stays flat during the download; don't chase it.
