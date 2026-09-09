@@ -43,7 +43,7 @@ export STREAM="1"
 export STREAM_PORT="8088"
 export STREAM_SCALE="2"
 export STREAM_QUALITY="50"
-export STREAM_FPS="20"
+export STREAM_FPS="60"
 
 # Virtual touchscreen for a device with a failed digitizer. Lives in /data and
 # reinstalls into the rootfs, which an AGNOS flash wipes. Idempotent, so this is
