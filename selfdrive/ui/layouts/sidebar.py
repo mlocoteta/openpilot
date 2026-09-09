@@ -70,7 +70,12 @@ class Sidebar(Widget):
     self._net_strength = 0
 
     self._temp_status = MetricData(tr_noop("TEMP"), "--°C", Colors.GOOD)
-    self._show_egpu_temp = Params().get_bool("SidebarEgpuTemp")
+    try:
+      self._show_egpu_temp = Params().get_bool("SidebarEgpuTemp")
+    except Exception:
+      # an unregistered key raises UnknownKeyName; never let that reach the
+      # render loop, which would crash-loop the UI (and the stream with it)
+      self._show_egpu_temp = False
     self._panda_status = MetricData(tr_noop("VEHICLE"), tr_noop("ONLINE"), Colors.GOOD)
     self._connect_status = MetricData(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
     self._recording_audio = False
@@ -143,13 +148,18 @@ class Sidebar(Widget):
     # Opt-in: show the external GPU instead. Deliberately does not replace the
     # SoC reading anywhere else -- hardwared still gates onroad on that, and the
     # eGPU temperature says nothing about whether the device itself is throttling.
-    if sm is not None and self._show_egpu_temp:
-      egpu = self._egpu_temp(sm)
-      if egpu is not None:
+    if self._show_egpu_temp:
+      egpu = self._egpu_temp(sm) if sm is not None else None
+      if egpu is None:
+        # No eGPU attached, or its telemetry is stale. Show a dimmed placeholder
+        # rather than silently falling back to the SoC number, which would read
+        # as a plausible GPU temperature and hide the fact that it is absent.
+        self._temp_status.update(tr_noop("GPU"), "--°C", Colors.WHITE_DIM)
+      else:
         # colour still tracks the device's own thermal state, not the eGPU
         colour = Colors.GOOD if thermal_status == ThermalStatus.ok else Colors.WARNING
         self._temp_status.update(tr_noop("GPU"), f"{int(egpu)}°C", colour)
-        return
+      return
 
     if thermal_status == ThermalStatus.ok:
       self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
