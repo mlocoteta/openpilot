@@ -8717,10 +8717,13 @@ def setup(app):
     arch = "arm64"
     base = "/data/tailscale"
 
-    result = subprocess.run(
-      "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
-      shell=True, capture_output=True, text=True
-    )
+    try:
+      result = subprocess.run(
+        "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
+        shell=True, capture_output=True, text=True, timeout=30
+      )
+    except subprocess.TimeoutExpired:
+      return jsonify({"error": "Timed out while checking for a Tailscale release."}), 504
 
     version = result.stdout.strip() or "1.84.0"
 
@@ -8777,17 +8780,30 @@ def setup(app):
     )
 
     auth_url = None
-    for line in proc.stdout:
+    output = []
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+      events = selector.select(timeout=max(0, deadline - time.monotonic()))
+      if not events:
+        break
+      line = proc.stdout.readline()
+      if not line:
+        break
+      output.append(line.strip())
       match = re.search(r"https://login\.tailscale\.com/\S+", line)
-      if match and not auth_url:
+      if match:
         auth_url = match.group(0)
         # `tailscale up` must remain running while the user completes this
         # browser authorization. Killing it here invalidates the handoff.
         break
+    selector.close()
 
     return jsonify({
-      "message": "Tailscale setup started. Please authenticate in your browser.",
-      "auth_url": auth_url
+      "message": "Tailscale setup started. Please authenticate in your browser." if auth_url else "Tailscale did not provide an authorization link yet.",
+      "auth_url": auth_url,
+      "detail": "\\n".join(output[-10:])
     }), 200
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
