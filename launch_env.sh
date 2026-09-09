@@ -34,3 +34,13 @@ export STAGING_ROOT="/data/safe_staging"
 if [ -x /data/openpilot/starpilot/system/environment_variables ]; then
   eval "$(/data/openpilot/starpilot/system/environment_variables)"
 fi
+
+# UI network stream (http://<device>:8088/). Self-contained -- it reads the UI's
+# own render texture and does not depend on the virtual-touchscreen workaround
+# used on devices with a dead digitizer, so either can be removed independently.
+# Capture only runs while a viewer is connected, so this is free when unused.
+export STREAM="1"
+export STREAM_PORT="8088"
+export STREAM_SCALE="2"
+export STREAM_QUALITY="50"
+export STREAM_FPS="20"
