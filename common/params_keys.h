@@ -734,6 +734,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Honda 9G Accord Torque Interceptor (TI) — opt-in via the StarPilot toggle.
     // OFF by default so a stock 9G Accord runs normal LKAS. When ON, the sigmoid
     // tune applies (a=15, b=0.72, c=0.16, Kp=1; sigmoid + live-update default ON).
+    // Show the external GPU (Chestnut) hotspot temperature in the sidebar TEMP
+    // box instead of the SoC temperature. Falls back to SoC when no eGPU.
+    {"SidebarEgpuTemp", {PERSISTENT, BOOL, "0", "0", 3}},
     {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1", "1", 3}},

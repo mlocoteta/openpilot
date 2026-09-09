@@ -72,6 +72,7 @@ class UIState:
         "liveTracks",
         "liveDelay",
         "liveTorqueParameters",
+        "chestnutState",
       ]
     )
 
