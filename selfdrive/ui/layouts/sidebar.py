@@ -176,7 +176,7 @@ class Sidebar(Widget):
         # plausible number for the wrong device, which is worse than nothing.
         egpu = self._egpu_temps(sm) if sm is not None else None
         text = self._top_two(egpu) if egpu else None
-        self._temp_status.update(tr_noop("GPU"), text or "--\u00b0C",
+        self._temp_status.update(tr_noop("eGPU"), text or "--\u00b0C",
                                  colour if text else Colors.WHITE_DIM)
         return
       text = self._top_two(getattr(device_state, "gpuTempC", []) or [])
