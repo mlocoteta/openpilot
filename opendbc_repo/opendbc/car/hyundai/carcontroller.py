@@ -860,7 +860,7 @@ class CarController(CarControllerBase):
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
-    lfa_status_cars = (CAR.HYUNDAI_IONIQ_6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN)
+    lfa_status_cars = (CAR.HYUNDAI_IONIQ_6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, CAR.KIA_EV6)
     lfa_longitudinal_active = self.CP.openpilotLongitudinalControl \
       if self.CP.carFingerprint in lfa_status_cars else longitudinal_active
     lka_steering_long = lka_steering and lfa_longitudinal_active
