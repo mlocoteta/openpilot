@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from opendbc.can import CANPacker, CANParser
-from opendbc.car import Bus, ButtonType, gen_empty_fingerprint, structs
+from opendbc.car import Bus, ButtonType, gen_empty_fingerprint, structs, uds
 from opendbc.car.structs import CarControl, CarParams
 from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.hyundai.carcontroller import CarController, CANCEL_BUTTON_DELAY_FRAMES, Ioniq6LongitudinalTuningState, GenesisG90LongitudinalTuningState, \
@@ -24,7 +24,7 @@ from opendbc.car.hyundai.carcontroller import CarController, CANCEL_BUTTON_DELAY
                                              clear_ioniq_6_torque_when_request_inactive
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
                                              get_canfd_cruise_available
-from opendbc.car.hyundai.interface import CarInterface, KIA_EV9_ACCEL_MAX
+from opendbc.car.hyundai.interface import CarInterface, KIA_EV9_ACCEL_MAX, get_communication_control_request
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus, hkg_can_fd_checksum
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
@@ -129,6 +129,14 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHyundaiFingerprint:
+  def test_ev6_uses_stock_hda2_communication_control_path(self):
+    stock_request = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x83, uds.MESSAGE_TYPE.NORMAL])
+    radar_keepalive_request = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL,
+                                     uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
+
+    assert get_communication_control_request(CAR.KIA_EV6) == stock_request
+    assert get_communication_control_request(CAR.HYUNDAI_IONIQ_6) == radar_keepalive_request
+
   def test_carnival_hev_low_speed_torque_rate_limits(self):
     CP = CarInterface.get_params(CAR.KIA_CARNIVAL_HEV_4TH_GEN, gen_empty_fingerprint(), [],
                                  False, False, False, None)
@@ -2552,9 +2560,10 @@ class TestHyundaiFingerprint:
                       if controller.packer.dbc.addr_to_msg[addr].name in ("LFA", "LKAS")]
     assert steering_names == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
 
-  def test_ioniq_6_keeps_lfa_status_when_longitudinal_is_inactive(self):
+  @pytest.mark.parametrize("car", [CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV6])
+  def test_egmp_keeps_lfa_status_when_longitudinal_is_inactive(self, car):
     CP = CarParams.new_message()
-    CP.carFingerprint = CAR.HYUNDAI_IONIQ_6
+    CP.carFingerprint = car
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_LKA_STEERING)
     CP.openpilotLongitudinalControl = True
 
