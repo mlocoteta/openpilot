@@ -49,7 +49,7 @@ export STREAM_FPS="60"
 # reinstalls into the rootfs, which an AGNOS flash wipes. Idempotent, so this is
 # a no-op once installed. Set to 0 (or delete this block) once a working display
 # is fitted -- the UI stream above is independent and keeps working either way.
-export LCD_FIX="1"
+export LCD_FIX="0"
 if [ "$LCD_FIX" = "1" ] && [ -x /data/openpilot/starpilot/system/lcd_fix/install_lcd_fix.sh ]; then
   /data/openpilot/starpilot/system/lcd_fix/install_lcd_fix.sh || true
 fi
