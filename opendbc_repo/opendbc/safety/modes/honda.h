@@ -24,6 +24,7 @@
 
 // Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
 #define HONDA_TI_STEERING_CONTROL 0x249U
+#define HONDA_TI_MAX_STEER 575  // matches TI_LIMITS.TI_STEER_MAX in opendbc/car/honda/values.py
 
 #define HONDA_N_COMMON_TX_MSGS            \
   {0xE4, 0, 5, .check_relay = true},    \
@@ -274,13 +275,30 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // STEER: safety check (0x249 = 9G Accord Torque Interceptor steering)
-  if ((msg->addr == 0xE4U) || (msg->addr == 0x194U) || (msg->addr == HONDA_TI_STEERING_CONTROL)) {
+  // STEER: safety check
+  if ((msg->addr == 0xE4U) || (msg->addr == 0x194U)) {
     if (!(aol_allowed || controls_allowed)) {
       bool steer_applied = msg->data[0] | msg->data[1];
       if (steer_applied) {
         tx = false;
       }
+    }
+  }
+
+  // TORQUE INTERCEPTOR STEER: safety check (0x249 = 9G Accord Torque Interceptor).
+  // LKAS_REQUEST is a 12-bit unsigned field with a +2048 offset (see the TI DBC), so a
+  // neutral command is 0x800 on the wire, not 0x000. The offset must be decoded before
+  // the zero check, otherwise neutral reads as non-zero and is blocked whenever controls
+  // are off. Enforce a hard magnitude cap too; rate/driver limiting is applied upstream.
+  if (msg->addr == HONDA_TI_STEERING_CONTROL) {
+    uint32_t ti_raw = (((uint32_t)msg->data[0] & 0x0FU) << 8) | (uint32_t)msg->data[1];
+    int ti_steer = (int)ti_raw - 2048;
+    if (!(aol_allowed || controls_allowed)) {
+      if (ti_steer != 0) {
+        tx = false;
+      }
+    } else if ((ti_steer > HONDA_TI_MAX_STEER) || (ti_steer < -HONDA_TI_MAX_STEER)) {
+      tx = false;
     }
   }
 

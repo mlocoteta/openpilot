@@ -119,7 +119,9 @@ def run_navigationd(started: bool, params: Params, CP: car.CarParams, starpilot_
 
 def run_mapd(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   if started:
-    return True
+    # mapd only feeds the map speed-limit and curve-speed controllers. It costs ~150MB RSS
+    # and this device has no swap, so don't run it when neither consumer is enabled.
+    return params.get_bool("SpeedLimitController") or params.get_bool("CurveSpeedController")
 
   memory_params = Params(memory=True)
   return memory_params.get_bool("DownloadMaps") or memory_params.get_bool("CancelDownloadMaps")
