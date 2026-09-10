@@ -4,6 +4,25 @@ Handoff notes for updating this fork onto a newer StarPilot base.
 Car: **2017 Honda Accord (`HONDA_ACCORD_9G`, Nidec)** with a **Torque Interceptor (TI)**.
 Device: **comma three (tici)** with a **failed digitizer** (touchscreen is dead).
 
+## State of play (2026-09-10)
+
+**The TI works.** Encoding, panda acceptance and board state are verified on car; the
+remaining work is tuning, and **every tuning number predating `f27c9eaf` is worthless**
+because it was measured through a broken encoding.
+
+Where the work lives — check this first, it is easy to edit the wrong tree:
+
+| where | branch | has the TI fix? |
+| --- | --- | --- |
+| **device** `/data/openpilot` | `starpilot-2017-accord-ti-c3-update` | **yes** — `f27c9eaf`, unpushed |
+| dev box `~/openpilot` | `starpilot-honda-accord-ti` | **no** — still the broken 16-bit layout |
+
+`f27c9eaf` exists only on the device and is not pushed to `origin`. Push it before doing
+anything that could reset the tree. Do not "fix" the TI from the dev-box branch; it is behind.
+
+Currently disabled on purpose, re-enable when wanted:
+`SpeedLimitController=0`, `CurveSpeedController=0` (gates mapd off for memory).
+
 ## Upstream
 
 | remote | url | role |
@@ -66,6 +85,63 @@ Roughly 47 source files diverge. The ones that matter:
 `starpilot/system/lcd_fix/install_lcd_fix.sh --uninstall`. The stream is unaffected.
 Do not let these two get coupled.
 
+## Torque Interceptor: board generation decides the message layout
+
+**Read this before touching anything TI.** This cost a full day and produced a car that
+yanked the wheel at full scale.
+
+There are two incompatible TI generations, and MoreTore's opendbc carries both:
+
+| gen | reference DBC | steering cmd | feedback |
+| --- | --- | --- | --- |
+| **gen1 (this car)** | `opendbc/dbc/mazda_2017.dbc` | 585, **12-bit, `(1,-2048)` offset** | **586** `TI_FEEDBACK` |
+| gen2/gen3 | `mazda_2019.dbc` / `mazda_2023.dbc` | 585 `EPS_LKAS`, 16-bit signed | 587, different layout |
+
+```
+# gen1 -- what 0x249 must look like
+SG_ LKAS_REQUEST : 3|12@0+ (1,-2048) [0|2048] "" XXX
+SG_ CHKSUM       : 19|12@0+ (1,-2048) [0|2048] "" XXX
+SG_ KEY          : 39|32@0+ (1,0)               ""  XXX   # value 3294744160 (0xC461CE60)
+```
+
+**Identify the board from the bus, never from the branch name.** Ours reports
+`VERSION_NUMBER=6` in `TI_FEEDBACK` (586). Presence of 586 at all == gen1.
+
+The `4_2026_ti` port brought the **gen2** 16-bit layout onto this gen1 car. Symptom: a
+**zero** command encodes as `0x0000`, the board reads `raw 0 - 2048 = -2048`, i.e. full-scale
+deflection with the sign effectively inverted. On car it pulls hard immediately, then the
+board latches `STATE=OFF` with `VIOL=17`. Fixed in `f27c9eaf`.
+
+Neutral on the wire is **`0800`**, not `0000`. If you see `0000` going out, the layout is wrong.
+
+**The panda safety hook must decode the offset too.** `honda.h`'s 0x249 `tx_hook` does
+`((data[0] & 0x0F) << 8) | data[1] - 2048` *before* its zero check; otherwise neutral (`0x800`)
+reads as non-zero and is blocked whenever controls are not allowed.
+
+**Sign: do not negate.** The TI drives the EPS motor in its own convention, matching
+`opendbc/car/mazda/carcontroller.py` (`torque * STEER_MAX`, no minus). A negation also puts
+the command and the TI torque sensor in opposite conventions, which makes
+`apply_ti_steer_torque_limits` fight the command instead of the driver.
+
+**State machine** (`TI_STATE` in `honda/values.py`): `DISCOVER=0 OFF=1 DRIVER_OVER=2 RUN=3`.
+`ti_lkas_allowed` requires `RUN`. The board recovers on its own -- once it receives
+well-formed frames it goes `OFF -> RUN` and clears `VIOL` to 0. No arming sequence needed.
+
+## Diagnosing "the TI gets no command"
+
+The panda echoes every TX back on `can` with `src` offset, which tells you *who* dropped it:
+
+| `src` | meaning |
+| --- | --- |
+| bus (0/1/2) | normal received frame |
+| **128** = `0x80 + bus` | TX **accepted** by panda |
+| **192** = `0xC0 + bus` | TX **rejected** by panda |
+
+Tally *all* TX addresses, not just 0x249. If `0xE4`/`0x1FA`/`0x30C`/`0x33D` come back `128`
+and only `0x249` comes back `192`, the panda is fine and the problem is specific to the TI
+message -- allow-list or `tx_hook`. If a **zero-torque** 0x249 is rejected while
+`controlsAllowed` is true, no safety rule can explain it and the running firmware is stale.
+
 ## Pain points
 
 **Build artifacts are committed.** 118 tracked binaries (`panda/board/obj/**`,
@@ -121,6 +197,12 @@ cd /data/openpilot && PATH=/usr/local/venv/bin:$PATH \
 # deploy to device
 git fetch origin <branch> && git checkout -f -B <branch> origin/<branch>
 
+# rebuild + flash panda firmware (REQUIRED after any opendbc/safety change)
+cd /data/openpilot/panda && PATH=/usr/local/venv/bin:$PATH \
+  PYTHONPATH=/data/openpilot:/data/openpilot/opendbc_repo \
+  /usr/local/venv/bin/scons -u -j1        # -j1: no swap, -j2+ thrashes to load 40+
+printf 1 > /data/params/d/FlashPanda && sudo systemctl restart comma
+
 # device state
 cat /VERSION                              # AGNOS version
 sudo abctl --boot_slot                    # A/B slot
@@ -134,7 +216,10 @@ Use `PYTHONPATH=/data/openpilot /usr/local/venv/bin/python`.
 ## Don't touch
 
 - **`panda/board/obj/**`** — signed panda firmware. Never hand-edit; rebuild it. The 0x249
-  TX allow-list for TI lives in the compiled binary, so a stale build silently blocks TI.
+  TX allow-list and `tx_hook` live in the compiled binary, so a stale build silently blocks TI.
+  **Rebuilding is not enough — pandad will not reflash on its own.** Arm it explicitly:
+  `printf 1 > /data/params/d/FlashPanda`, then restart `comma`. It flashed when the param
+  reads back `0`. A whole day was lost to a correct source tree and a stale flashed binary.
 - **`common/params_keys.h` ordering** — append new keys; existing entries are referenced by
   the compiled key table.
 - **`/data/media`, `/data/backups`** (device) — user drive footage and backups. openpilot
@@ -175,6 +260,20 @@ was wiped too, so re-check the value, not just the key. Verify both after every 
 **AGNOS downloads do not consume `/data`.** It streams straight to the raw inactive
 partition. Free space stays flat during the download; don't chase it.
 
+**Memory: 3.6 GB and no swap/zram at all.** Idle was 3360/3606 MB used with 245 MB free,
+and `scons -j2` thrashed the box to load 48 with SSH timing out. `run_mapd` in
+`system/manager/process_config.py` is gated on `SpeedLimitController or CurveSpeedController`
+so mapd (~150 MB) stays down when neither feature is on -- that alone freed ~1.7 GB.
+Re-enabling either param brings mapd back automatically; no code change needed.
+
+**`/data/backups` fills the disk.** StarPilot writes a ~4.2 GB auto-backup on *every* branch
+change and never prunes. Two of them plus the tree already left <5 GB free. Check before any
+branch switch; deleting superseded ones is safe (ask first -- they are the user's).
+
+**Beware self-matching `pgrep`.** `pgrep -f mapd` inside a shell one-liner matches its own
+command string and reports the process as running when it is not. Bit us twice. Use
+`ps -C <name>` or `pgrep -f <pat> | grep -v $$`.
+
 **`du` on this device lies.** Sparse files/hardlinks make `/data/media` report ~194 GB on a
 30 GB partition. Trust `df` only.
 
@@ -189,11 +288,14 @@ Needs the engine actually running — key-on is not enough.
 
 1. `TorqueInterceptorEnabled` is `True` **and** compiled into `params_pyx.so`
 2. Car fingerprints as `HONDA_ACCORD_9G`; `CarParams` set
-3. `TI_FEEDBACK` (586) appears once openpilot sends `TI_STEERING_CONTROL` (585)
-4. No `steerFaultPermanent` — a latched EPS fault needs an ignition cycle to clear
-5. `modelV2` publishing ~20 Hz (the external-GPU gate needs ≥10.0 V; it is an
+3. `TI_FEEDBACK` (586) appears once openpilot sends `TI_STEERING_CONTROL` (585), and
+   reports `STATE=3` (RUN) with `VIOL=0 ERROR=0`. `STATE=1` (OFF) with a non-zero `VIOL`
+   means the board is rejecting what you send -- check the 585 layout first.
+4. 0x249 comes back `src=128` (accepted). Neutral encodes as `0800`, and decodes to 0.
+5. No `steerFaultPermanent` — a latched EPS fault needs an ignition cycle to clear
+6. `modelV2` publishing ~20 Hz (the external-GPU gate needs ≥10.0 V; it is an
    **unbounded** wait, so a low rail hangs model load behind a "big model loading" spinner
    with nothing pointing at the cause)
-6. `commIssue` frequency — `starpilotPlan`/`liveParameters`/`radarState` late means CPU
+7. `commIssue` frequency — `starpilotPlan`/`liveParameters`/`radarState` late means CPU
    contention. `alertDebug` and `lateralManeuverPlan` appear in every `commIssue` log but
    are in selfdrived's ignore list; **they are never the cause.**
