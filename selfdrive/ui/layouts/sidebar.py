@@ -24,6 +24,9 @@ NetworkType = log.DeviceState.NetworkType
 
 
 # Color scheme
+TEMP_CYCLE_SECONDS = 3.0
+
+
 class Colors:
   WHITE = rl.WHITE
   WHITE_DIM = rl.Color(255, 255, 255, 85)
@@ -125,48 +128,58 @@ class Sidebar(Widget):
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
 
-  def _egpu_temp(self, sm):
-    """External GPU hotspot temp, or None when unavailable.
+  def _egpu_temps(self, sm):
+    """External GPU (hotspot, memory), or None when unavailable.
 
-    The sidebar's normal reading is the SoC (Adreno) temperature -- the eGPU is
-    driven in userspace over USB and has no thermal zone, so its temperature only
-    arrives via chestnutState. Returns None whenever that is missing, stale or
-    zero so the caller can fall back rather than show a bogus 0 C.
+    The eGPU is driven in userspace over USB and has no thermal zone, so its
+    temperatures only arrive via chestnutState. Returns None whenever that is
+    missing, stale or zero so the caller can fall back to the on-die readings.
     """
     try:
       if not sm.valid.get("chestnutState", False) or not sm.alive.get("chestnutState", False):
         return None
-      temp = float(sm["chestnutState"].tempC)
-      return temp if temp > 0 else None
+      cs = sm["chestnutState"]
+      temps = [float(cs.tempC), float(cs.memoryTempC)]
+      temps = [t for t in temps if t > 0]
+      return temps or None
     except Exception:
       return None
 
+  @staticmethod
+  def _top_two(values):
+    """Hottest two readings, formatted. Falls back gracefully to one or none."""
+    try:
+      vals = sorted((float(v) for v in values if float(v) > 0), reverse=True)[:2]
+    except Exception:
+      vals = []
+    if not vals:
+      return None
+    return "/".join(str(int(round(v))) for v in vals) + "\u00b0C"
+
   def _update_temperature_status(self, device_state, sm=None):
     thermal_status = device_state.thermalStatus
-    temperature = f"{int(device_state.maxTempC)}°C"
+    colour = Colors.GOOD if thermal_status == ThermalStatus.ok else (
+      Colors.WARNING if thermal_status == ThermalStatus.warmDEPRECATED else Colors.DANGER)
 
-    # Opt-in: show the external GPU instead. Deliberately does not replace the
-    # SoC reading anywhere else -- hardwared still gates onroad on that, and the
-    # eGPU temperature says nothing about whether the device itself is throttling.
-    if self._show_egpu_temp:
-      egpu = self._egpu_temp(sm) if sm is not None else None
-      if egpu is None:
-        # No eGPU attached, or its telemetry is stale. Show a dimmed placeholder
-        # rather than silently falling back to the SoC number, which would read
-        # as a plausible GPU temperature and hide the fact that it is absent.
-        self._temp_status.update(tr_noop("GPU"), "--°C", Colors.WHITE_DIM)
-      else:
-        # colour still tracks the device's own thermal state, not the eGPU
-        colour = Colors.GOOD if thermal_status == ThermalStatus.ok else Colors.WARNING
-        self._temp_status.update(tr_noop("GPU"), f"{int(egpu)}°C", colour)
-      return
+    # Alternate between CPU and GPU rather than showing a single aggregate, so
+    # both are visible in one box. Colour still tracks the device thermal state.
+    phase_cpu = int(time.monotonic() / TEMP_CYCLE_SECONDS) % 2 == 0
 
-    if thermal_status == ThermalStatus.ok:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
-    elif thermal_status == ThermalStatus.warmDEPRECATED:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.WARNING)
+    if phase_cpu:
+      text = self._top_two(getattr(device_state, "cpuTempC", []) or [])
+      if text is not None:
+        self._temp_status.update(tr_noop("CPU"), text, colour)
+        return
     else:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.DANGER)
+      # prefer the external GPU when it is actually reporting
+      egpu = self._egpu_temps(sm) if (sm is not None and self._show_egpu_temp) else None
+      text = self._top_two(egpu if egpu else (getattr(device_state, "gpuTempC", []) or []))
+      if text is not None:
+        self._temp_status.update(tr_noop("GPU"), text, colour)
+        return
+
+    # nothing usable this phase -- fall back to the aggregate rather than blanking
+    self._temp_status.update(tr_noop("TEMP"), f"{int(device_state.maxTempC)}\u00b0C", colour)
 
   def _update_connection_status(self, device_state):
     last_ping = device_state.lastAthenaPingTime
