@@ -219,17 +219,25 @@ class CarState(CarStateBase):
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     if self.ti_enabled:
-      # Override the driver-torque sensor with the TI device's reading, and derive
-      # lkas-allowed from the TI state machine (RUN and not ramping down).
-      ti = cp.vl["TI_FEEDBACK"]
-      ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
-      self.ti_version = ti["VERSION_NUMBER"]
-      self.ti_state = ti["STATE"]
-      self.ti_violation = ti["VIOL"]
-      self.ti_error = ti["ERROR"]
-      if self.ti_version > 1:
-        self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
-      ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
+      # Only consume TI_FEEDBACK when the board actually sent it. It is registered
+      # optional (freq 0), so an absent message decodes as all-zero -- which would
+      # drive ti_state to DISCOVER(0), leave ti_lkas_allowed False forever and
+      # silently disable the interceptor, and would also zero steeringTorque and
+      # so kill driver-override detection. Older TI firmware does not emit
+      # feedback at all, so treat "never seen" as the RUN default it starts in.
+      if cp.vl_all.get("TI_FEEDBACK", {}).get("STATE", []):
+        ti = cp.vl["TI_FEEDBACK"]
+        ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
+        self.ti_version = ti["VERSION_NUMBER"]
+        self.ti_state = ti["STATE"]
+        self.ti_violation = ti["VIOL"]
+        self.ti_error = ti["ERROR"]
+        if self.ti_version > 1:
+          self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
+        ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
+      else:
+        # no feedback: keep the stock EPS torque so steeringPressed still works
+        ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
       self.ti_lkas_allowed = (not self.ti_ramp_down) and (self.ti_state == TI_STATE.RUN)
     else:
       ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
