@@ -64,7 +64,7 @@ class HondaSafetyFlags(IntFlag):
 
 class TI_LIMITS:
   # Honda 9G Accord Torque Interceptor steering limits (separate CAN device).
-  TI_STEER_MAX = 575                 # theoretical max_steer 2047
+  TI_STEER_MAX = 599                 # theoretical max_steer 2047
   TI_STEER_DELTA_UP = 15             # torque increase per refresh
   TI_STEER_DELTA_DOWN = 15           # torque decrease per refresh
   TI_STEER_DRIVER_ALLOWANCE = 5      # allowed driver torque before start limiting

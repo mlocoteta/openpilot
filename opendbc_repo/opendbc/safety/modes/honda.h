@@ -24,7 +24,7 @@
 
 // Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
 #define HONDA_TI_STEERING_CONTROL 0x249U
-#define HONDA_TI_MAX_STEER 575  // matches TI_LIMITS.TI_STEER_MAX in opendbc/car/honda/values.py
+#define HONDA_TI_MAX_STEER 599  // matches TI_LIMITS.TI_STEER_MAX in opendbc/car/honda/values.py
 
 #define HONDA_N_COMMON_TX_MSGS            \
   {0xE4, 0, 5, .check_relay = true},    \
