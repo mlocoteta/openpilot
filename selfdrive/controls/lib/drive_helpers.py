@@ -89,13 +89,12 @@ def update_lateral_fault_latch(previous_latched: bool, lateral_requested: bool,
 def get_kona_non_scc_lateral_active(enabled: bool, active: bool, always_on_lateral_enabled: bool,
                                     steer_fault_temporary: bool, steer_fault_permanent: bool,
                                     standstill: bool, steer_at_standstill: bool, lateral_check: bool,
-                                    steering_pressed: bool, previous_lateral_active: bool,
-                                    steer_fault_latched: bool = False) -> bool:
+                                    steering_pressed: bool, previous_lateral_active: bool) -> bool:
   """Avoid the Kona EPS torque fault when AOL is enabled over driver steering input."""
   lateral_active = get_lateral_active(enabled, active, always_on_lateral_enabled,
                                       steer_fault_temporary, steer_fault_permanent,
                                       standstill, steer_at_standstill, lateral_check)
-  if not lateral_active or steer_fault_latched:
+  if not lateral_active:
     return False
 
   aol_rising_edge = always_on_lateral_enabled and not enabled and not previous_lateral_active

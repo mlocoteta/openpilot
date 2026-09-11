@@ -10,8 +10,9 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, HyundaiSafetyFlags, HyundaiStarPilotFlags, Buttons, CarControllerParams, CAR, CANFD_ANGLE_LONGITUDINAL_CAR, \
-                                        CANFD_RADAR_LIVE_LONGITUDINAL_CAR, CANFD_ALT_BUTTONS_RESUME_CAR, kia_ev6_gt_line_longitudinal_tuning, \
+from opendbc.car.hyundai.values import HyundaiFlags, HyundaiSafetyFlags, HyundaiStarPilotFlags, Buttons, CarControllerParams, CAR, \
+                                        CANFD_ANGLE_LONGITUDINAL_CAR, CANFD_RADAR_ECU_KEEPALIVE_CAR, CANFD_ALT_BUTTONS_RESUME_CAR, \
+                                        kia_ev6_gt_line_longitudinal_tuning, \
                                         KIA_EV6_GT_LINE_LONG_TUNING_TESTING_GROUND_ID
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.vehicle_model import VehicleModel
@@ -859,10 +860,9 @@ class CarController(CarControllerBase):
     can_sends = []
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
-    longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
-    lfa_status_cars = (CAR.HYUNDAI_IONIQ_6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, CAR.KIA_EV6)
+    persistent_lfa_status_cars = (CAR.HYUNDAI_IONIQ_6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN, CAR.KIA_EV6)
     lfa_longitudinal_active = self.CP.openpilotLongitudinalControl \
-      if self.CP.carFingerprint in lfa_status_cars else longitudinal_active
+      if self.CP.carFingerprint in persistent_lfa_status_cars else self.long_active_ecu
     lka_steering_long = lka_steering and lfa_longitudinal_active
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
@@ -889,11 +889,10 @@ class CarController(CarControllerBase):
 
     gear = getattr(getattr(CS, "out", None), "gearShifter", None)
     drive_gear = gear == structs.CarState.GearShifter.drive
-    if angle_lkas_alt:
+    if angle_lkas_alt and self.CP.carFingerprint != CAR.KIA_SPORTAGE_HEV_2026:
       steering_msg_active = bool(steering_msg_active and drive_gear)
     angle_lkas_alt_standstill_handoff = bool(getattr(CS.out, "standstill", False) and not CC.latActive)
-    forward_stock_lkas = (self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR or
-                          self.CP.carFingerprint == CAR.KIA_SPORTAGE_HEV_2026) and angle_lkas_alt and (
+    forward_stock_lkas = self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and angle_lkas_alt and (
       angle_lkas_alt_standstill_handoff or not (drive_gear and (CC.latActive or CC.enabled))
     )
     preserve_stock_lfa_status = preserve_stock_canfd_lfa_status(self.CP.carFingerprint)
@@ -920,7 +919,7 @@ class CarController(CarControllerBase):
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     suppress_lfa = bool(lka_steering)
-    if angle_lkas_alt:
+    if angle_lkas_alt and self.CP.carFingerprint != CAR.KIA_SPORTAGE_HEV_2026:
       suppress_lfa = bool(lka_steering and drive_gear and (CC.latActive or (ccnc_angle_long and CC.enabled)))
     if self.frame % 5 == 0 and suppress_lfa:
       can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg,
@@ -995,7 +994,7 @@ class CarController(CarControllerBase):
         # The front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
         # and stops publishing object tracks when it disappears.
         radar_heartbeat_step = 1 if ccnc_angle_long else 4
-        if self.CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and self.frame % radar_heartbeat_step == 0:
+        if self.CP.carFingerprint in CANFD_RADAR_ECU_KEEPALIVE_CAR and self.frame % radar_heartbeat_step == 0:
           can_sends.append(hyundaicanfd.create_accelerator_brake_alt_spoof(0, self.frame // radar_heartbeat_step,
                                                                             CS.out.brakePressed, CS.out.gasPressed,
                                                                             self.CP.carFingerprint))

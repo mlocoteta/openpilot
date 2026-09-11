@@ -129,12 +129,17 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHyundaiFingerprint:
-  def test_ev6_uses_stock_hda2_communication_control_path(self):
+  @pytest.mark.parametrize("car", [
+    CAR.HYUNDAI_IONIQ_5,
+    CAR.KIA_EV6,
+    CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN,
+  ])
+  def test_hda2_cars_without_radar_keepalive_use_stock_communication_control(self, car):
     stock_request = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x83, uds.MESSAGE_TYPE.NORMAL])
     radar_keepalive_request = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL,
                                      uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
 
-    assert get_communication_control_request(CAR.KIA_EV6) == stock_request
+    assert get_communication_control_request(car) == stock_request
     assert get_communication_control_request(CAR.HYUNDAI_IONIQ_6) == radar_keepalive_request
 
   def test_carnival_hev_low_speed_torque_rate_limits(self):
@@ -2560,7 +2565,7 @@ class TestHyundaiFingerprint:
                       if controller.packer.dbc.addr_to_msg[addr].name in ("LFA", "LKAS")]
     assert steering_names == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
 
-  @pytest.mark.parametrize("car", [CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV6])
+  @pytest.mark.parametrize("car", [CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV6, CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN])
   def test_egmp_keeps_lfa_status_when_longitudinal_is_inactive(self, car):
     CP = CarParams.new_message()
     CP.carFingerprint = car
@@ -2578,6 +2583,38 @@ class TestHyundaiFingerprint:
     cs = SimpleNamespace(
       stock_lfa_msg=None, stock_lkas_msg=None,
       out=SimpleNamespace(gearShifter=structs.CarState.GearShifter.park),
+    )
+
+    msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False,
+                                        cc.hudControl, cs, cc, get_test_toggles(), lka_icon=1, lfa_icon=1)
+    assert any(addr == 0x12A for addr, _, _ in msgs)
+
+  @pytest.mark.parametrize(("car", "powertrain_flag"), [
+    (CAR.HYUNDAI_IONIQ_5, HyundaiFlags.EV),
+    (CAR.KIA_CARNIVAL_2025, 0),
+    (CAR.KIA_CARNIVAL_HEV_4TH_GEN, HyundaiFlags.HYBRID),
+  ])
+  def test_hda2_keeps_lfa_status_while_longitudinal_ecu_is_disabled(self, car, powertrain_flag):
+    CP = CarParams.new_message()
+    CP.carFingerprint = car
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING | powertrain_flag)
+    CP.openpilotLongitudinalControl = True
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 1
+    controller.long_active_ecu = True
+    cc = SimpleNamespace(
+      enabled=False, latActive=False, longActive=False,
+      actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+      leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace(),
+    )
+    cs = SimpleNamespace(
+      stock_lfa_msg=None, stock_lkas_msg=None,
+      left_blindspot_from_radar=False, right_blindspot_from_radar=False,
+      out=SimpleNamespace(
+        brakePressed=False, gasPressed=False,
+        gearShifter=structs.CarState.GearShifter.park,
+      ),
     )
 
     msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False,
@@ -2716,7 +2753,7 @@ class TestHyundaiFingerprint:
     assert len([msg for msg in msgs if msg[0] == 0x110]) == expected_lkas_msgs
 
   @pytest.mark.parametrize("standstill", [False, True])
-  def test_sportage_angle_lkas_alt_forwards_stock_status_when_inactive(self, standstill):
+  def test_sportage_angle_lkas_alt_keeps_status_and_suppression_alive(self, standstill):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_SPORTAGE_HEV_2026
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.HYBRID | HyundaiFlags.CANFD_ANGLE_STEERING |
@@ -2724,16 +2761,67 @@ class TestHyundaiFingerprint:
     CP.openpilotLongitudinalControl = False
 
     controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 5
+    can_bus = CanBus(CP)
     cc = SimpleNamespace(enabled=False, latActive=False,
                          actuators=SimpleNamespace(longControlState=LongCtrlState.off),
                          leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace())
-    cs = SimpleNamespace(stock_lfa_msg=None, stock_lkas_msg={},
+    lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 32) if i != 7}
+    lfa_block_msg["COUNTER"] = 0
+    cs = SimpleNamespace(stock_lfa_msg=None, stock_lkas_msg={}, lfa_block_msg=lfa_block_msg,
                          out=SimpleNamespace(standstill=standstill, steeringAngleDeg=0.0,
                                              gearShifter=structs.CarState.GearShifter.drive))
 
     msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False, cc.hudControl, cs, cc,
                                         get_test_toggles(), lka_icon=1, lfa_icon=1)
-    assert not [msg for msg in msgs if msg[0] in (0x110, 0x12A)]
+    lkas_msgs = [msg for msg in msgs if msg[0] == 0x110]
+    assert len(lkas_msgs) == 1
+    assert len([msg for msg in msgs if msg[0] == 0x362]) == 1
+
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS_ALT", 0)], can_bus.ACAN)
+    parser.update([(1, lkas_msgs)])
+    assert parser.can_valid
+    assert parser.vl["LKAS_ALT"]["LKA_OptUsmSta"] == 0
+    assert parser.vl["LKAS_ALT"]["LKA_SysIndReq"] == 1
+    assert parser.vl["LKAS_ALT"]["LKA_RcgSta"] == 0
+    assert parser.vl["LKAS_ALT"]["Damping_Gain"] == 100
+    assert parser.vl["LKAS_ALT"]["LKAS_ANGLE_ACTIVE"] == 1
+    assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == 0.0
+
+  def test_sportage_angle_lkas_alt_active_status_matches_vehicle_contract(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_SPORTAGE_HEV_2026
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.HYBRID | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    CP.openpilotLongitudinalControl = False
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 5
+    can_bus = CanBus(CP)
+    cc = SimpleNamespace(enabled=True, latActive=True,
+                         actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+                         leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace())
+    lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 32) if i != 7}
+    lfa_block_msg["COUNTER"] = 0
+    cs = SimpleNamespace(stock_lfa_msg=None, stock_lkas_msg={}, lfa_block_msg=lfa_block_msg,
+                         out=SimpleNamespace(standstill=False, steeringAngleDeg=10.0,
+                                             gearShifter=structs.CarState.GearShifter.drive))
+
+    msgs = controller.create_canfd_msgs(0, True, 0.4, 12.0, 0.0, 0.0, False, cc.hudControl, cs, cc,
+                                        get_test_toggles(), lka_icon=2, lfa_icon=2)
+    lkas_msgs = [msg for msg in msgs if msg[0] == 0x110]
+    assert len(lkas_msgs) == 1
+    assert len([msg for msg in msgs if msg[0] == 0x362]) == 1
+
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS_ALT", 0)], can_bus.ACAN)
+    parser.update([(1, lkas_msgs)])
+    assert parser.can_valid
+    assert parser.vl["LKAS_ALT"]["LKA_OptUsmSta"] == 0
+    assert parser.vl["LKAS_ALT"]["LKA_SysIndReq"] == 2
+    assert parser.vl["LKAS_ALT"]["LKA_RcgSta"] == 3
+    assert parser.vl["LKAS_ALT"]["Damping_Gain"] == 100
+    assert parser.vl["LKAS_ALT"]["LKAS_ANGLE_ACTIVE"] == 2
+    assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.4)
 
   def test_ev9_inactive_angle_steering_does_not_suppress_stock_lfa(self):
     CP = CarParams.new_message()
