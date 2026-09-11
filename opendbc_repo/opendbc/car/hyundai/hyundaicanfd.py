@@ -142,7 +142,21 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     lkas_values["LKAS_ANGLE_ACTIVE"] = 2 if lat_active else 1
     lkas_values["ADAS_ACIAnglTqRedcGainVal"] = apply_torque if lat_active else 0.0
     if angle_lkas_alt:
-      if lat_active:
+      if CP.carFingerprint == CAR.KIA_SPORTAGE_HEV_2026:
+        lkas_values = {
+          "LKA_OptUsmSta": 0,
+          "LKA_SysIndReq": 2 if enabled else 1,
+          "StrTqReqVal": 0,
+          "LKA_SysWrn": 0,
+          "ActToiSta": 0,
+          "LKA_UsmMod": 0,
+          "LKA_RcgSta": 3 if lat_active else 0,
+          "Damping_Gain": 100,
+          "ADAS_StrAnglReqVal": apply_angle,
+          "LKAS_ANGLE_ACTIVE": 2 if lat_active else 1,
+          "ADAS_ACIAnglTqRedcGainVal": apply_torque if lat_active else 0.0,
+        }
+      elif lat_active:
         lkas_values = {
           "LKA_OptUsmSta": 0,
           "LKA_RcgSta": 3,
