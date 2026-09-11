@@ -35,9 +35,15 @@ def test_kona_non_scc_aol_gate_does_not_change_fault_or_normal_lateral_gates():
   )
 
 
-def test_kona_non_scc_does_not_retry_after_a_latched_temporary_fault():
+def test_kona_non_scc_recovers_after_temporary_fault_clears():
   assert not get_kona_non_scc_lateral_active(
-    False, False, True, False, False, False, False, True, False, False, True,
+    False, False, True, True, False, False, False, True, False, True,
+  )
+  assert not get_kona_non_scc_lateral_active(
+    False, False, True, False, False, False, False, True, True, False,
+  )
+  assert get_kona_non_scc_lateral_active(
+    False, False, True, False, False, False, False, True, False, False,
   )
 
 
