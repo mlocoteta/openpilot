@@ -53,6 +53,20 @@ def make_car_control(requested_angle, lat_active=True):
   return control
 
 
+def make_starpilot_car_control(controller):
+  message = messaging.new_message("starpilotCarControl", valid=True)
+  values = controller.get_steering_limit_info()
+  info = message.starpilotCarControl.steeringLimitInfo
+  info.valid = values["valid"]
+  info.modelLimitErrorDeg = values["modelLimitErrorDeg"]
+  info.resumeLimitErrorDeg = values["resumeLimitErrorDeg"]
+  info.cooperativeLimitErrorDeg = values["cooperativeLimitErrorDeg"]
+  info.cooperativeOffsetDeg = values["cooperativeOffsetDeg"]
+  info.monoTime = values["monoTime"]
+  info.combinedLimitErrorDeg = values["combinedLimitErrorDeg"]
+  return message
+
+
 def run_controller_frame(controller, requested_angle, torque, speed, measured_angle, frame,
                          lat_active=True, steering_disengage=False):
   now_nanos = START_NANOS + frame * 10_000_000
@@ -65,7 +79,8 @@ def run_controller_frame(controller, requested_angle, torque, speed, measured_an
   event = messaging.new_message("carOutput", valid=True)
   event.carOutput.actuatorsOutput = actuators
   restored = messaging.log_from_bytes(event.to_bytes())
-  return restored.carOutput, now_nanos
+  diagnostics = messaging.log_from_bytes(make_starpilot_car_control(controller).to_bytes())
+  return restored.carOutput, diagnostics, now_nanos
 
 
 def make_lateral_car_state(speed, measured_angle):
@@ -163,13 +178,13 @@ def test_recorded_light_torque_reproduction_no_longer_reaches_warning():
   output = None
   now_nanos = 0
   for frame in range(260):
-    output, now_nanos = run_controller_frame(
+    output, diagnostics, now_nanos = run_controller_frame(
       tesla_controller, REPRO_REQUESTED_ANGLE, REPRO_TORQUE, REPRO_SPEED, REPRO_MEASURED_ANGLE, frame,
     )
     if frame >= 210:
       legacy_limited = abs(REPRO_REQUESTED_ANGLE - output.actuatorsOutput.steeringAngleDeg) > 2.5
       corrected_limited = is_angle_steering_limited(
-        CP.as_reader(), REPRO_REQUESTED_ANGLE, output, True, now_nanos,
+        CP.as_reader(), REPRO_REQUESTED_ANGLE, output, diagnostics, True, now_nanos,
       )
       baseline_log = advance_angle_counter(
         baseline_counter, CP, lateral_state, legacy_limited, REPRO_DESIRED_CURVATURE,
@@ -178,7 +193,7 @@ def test_recorded_light_torque_reproduction_no_longer_reaches_warning():
         corrected_counter, CP, lateral_state, corrected_limited, REPRO_DESIRED_CURVATURE,
       )
 
-  info = output.actuatorsOutput.steeringLimitInfo
+  info = diagnostics.starpilotCarControl.steeringLimitInfo
   errors = (info.modelLimitErrorDeg, info.resumeLimitErrorDeg,
             info.cooperativeLimitErrorDeg, info.combinedLimitErrorDeg)
   assert info.valid
@@ -213,13 +228,13 @@ def test_persistent_real_model_limiting_with_light_torque_still_warns():
   angle_log = None
   output = None
   for frame in range(60):
-    output, now_nanos = run_controller_frame(
+    output, diagnostics, now_nanos = run_controller_frame(
       tesla_controller, requested_angle, REPRO_TORQUE, speed, 0.0, frame,
     )
-    limited = is_angle_steering_limited(CP.as_reader(), requested_angle, output, True, now_nanos)
+    limited = is_angle_steering_limited(CP.as_reader(), requested_angle, output, diagnostics, True, now_nanos)
     angle_log = advance_angle_counter(angle_counter, CP, lateral_state, limited, 0.01)
 
-  info = output.actuatorsOutput.steeringLimitInfo
+  info = diagnostics.starpilotCarControl.steeringLimitInfo
   assert info.valid
   assert info.modelLimitErrorDeg > 2.5
   assert info.combinedLimitErrorDeg > 2.5
@@ -238,18 +253,18 @@ def test_default_old_output_uses_legacy_warning_path():
   output_event = messaging.new_message("carOutput", valid=True)
   output_event.carOutput.actuatorsOutput.steeringAngleDeg = REPRO_MEASURED_ANGLE
   output = messaging.log_from_bytes(output_event.to_bytes()).carOutput
+  diagnostics = messaging.log_from_bytes(messaging.new_message("starpilotCarControl").to_bytes())
   lateral_state = make_lateral_car_state(REPRO_SPEED, REPRO_MEASURED_ANGLE)
   angle_counter = LatControlAngle(CP.as_reader(), None, DT_CTRL)
 
   for frame in range(50):
     limited = is_angle_steering_limited(
-      CP.as_reader(), REPRO_REQUESTED_ANGLE, output, True, START_NANOS + frame * 10_000_000,
+      CP.as_reader(), REPRO_REQUESTED_ANGLE, output, diagnostics, True, START_NANOS + frame * 10_000_000,
     )
     angle_log = advance_angle_counter(
       angle_counter, CP, lateral_state, limited, REPRO_DESIRED_CURVATURE,
     )
 
-  assert not output.actuatorsOutput.steeringLimitInfo.valid
   assert angle_log.saturated
   selfdrived = configure_selfdrived(CP)
   events, _ = run_selfdrived_warning_path(
@@ -265,15 +280,15 @@ def test_stale_real_offset_sample_uses_legacy_warning_path():
   angle_counter = LatControlAngle(CP.as_reader(), None, DT_CTRL)
 
   for frame in range(260):
-    output, now_nanos = run_controller_frame(
+    output, diagnostics, now_nanos = run_controller_frame(
       tesla_controller, REPRO_REQUESTED_ANGLE, REPRO_TORQUE, REPRO_SPEED, REPRO_MEASURED_ANGLE, frame,
     )
 
-  assert not is_angle_steering_limited(CP.as_reader(), REPRO_REQUESTED_ANGLE, output, True, now_nanos)
-  stale_now_nanos = output.actuatorsOutput.steeringLimitInfo.monoTime + 100_000_001
+  assert not is_angle_steering_limited(CP.as_reader(), REPRO_REQUESTED_ANGLE, output, diagnostics, True, now_nanos)
+  stale_now_nanos = diagnostics.starpilotCarControl.steeringLimitInfo.monoTime + 100_000_001
   for _ in range(50):
     limited = is_angle_steering_limited(
-      CP.as_reader(), REPRO_REQUESTED_ANGLE, output, True, stale_now_nanos,
+      CP.as_reader(), REPRO_REQUESTED_ANGLE, output, diagnostics, True, stale_now_nanos,
     )
     angle_log = advance_angle_counter(
       angle_counter, CP, lateral_state, limited, REPRO_DESIRED_CURVATURE,
@@ -291,24 +306,24 @@ def test_inactive_interval_clears_diagnostics_before_reengagement():
   CP = make_params()
   tesla_controller = CarController(DBC[CAR.TESLA_MODEL_3], CP)
 
-  active, _ = run_controller_frame(tesla_controller, 0.0, REPRO_TORQUE, REPRO_SPEED, 0.0, 0)
-  inactive, _ = run_controller_frame(
+  active, active_diagnostics, _ = run_controller_frame(tesla_controller, 0.0, REPRO_TORQUE, REPRO_SPEED, 0.0, 0)
+  inactive, inactive_diagnostics, _ = run_controller_frame(
     tesla_controller, 0.0, REPRO_TORQUE, REPRO_SPEED, 0.0, 1, lat_active=False,
   )
-  resumed, resumed_now = run_controller_frame(
+  resumed, resumed_diagnostics, resumed_now = run_controller_frame(
     tesla_controller, 0.0, REPRO_TORQUE, REPRO_SPEED, 0.0, 2,
   )
-  overridden, _ = run_controller_frame(
+  overridden, overridden_diagnostics, _ = run_controller_frame(
     tesla_controller, 0.0, REPRO_TORQUE, REPRO_SPEED, 0.0, 3, steering_disengage=True,
   )
 
-  assert active.actuatorsOutput.steeringLimitInfo.valid
-  assert not inactive.actuatorsOutput.steeringLimitInfo.valid
-  assert inactive.actuatorsOutput.steeringLimitInfo.monoTime == 0
-  assert resumed.actuatorsOutput.steeringLimitInfo.valid
-  assert resumed.actuatorsOutput.steeringLimitInfo.monoTime == resumed_now
-  assert not overridden.actuatorsOutput.steeringLimitInfo.valid
-  assert overridden.actuatorsOutput.steeringLimitInfo.monoTime == 0
+  assert active_diagnostics.starpilotCarControl.steeringLimitInfo.valid
+  assert not inactive_diagnostics.starpilotCarControl.steeringLimitInfo.valid
+  assert inactive_diagnostics.starpilotCarControl.steeringLimitInfo.monoTime == 0
+  assert resumed_diagnostics.starpilotCarControl.steeringLimitInfo.valid
+  assert resumed_diagnostics.starpilotCarControl.steeringLimitInfo.monoTime == resumed_now
+  assert not overridden_diagnostics.starpilotCarControl.steeringLimitInfo.valid
+  assert overridden_diagnostics.starpilotCarControl.steeringLimitInfo.monoTime == 0
 
 
 @pytest.mark.parametrize(("fault_field", "expected_event"), (

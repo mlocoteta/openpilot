@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import cereal.messaging as messaging
 import pytest
 
 from cereal import car, custom, log
@@ -27,7 +28,7 @@ class CapturePubMaster:
 
 
 class PublishSubMaster:
-  def __init__(self, car_output, selfdrive_time_nanos, output_healthy=True):
+  def __init__(self, car_output, starpilot_car_control, selfdrive_time_nanos, output_healthy=True):
     car_state = car.CarState.new_message()
     car_state.canValid = True
 
@@ -43,6 +44,7 @@ class PublishSubMaster:
       "starpilotCarState": custom.StarPilotCarState.new_message().as_reader(),
       "selfdriveState": selfdrive_state.as_reader(),
       "carOutput": car_output.as_reader(),
+      "starpilotCarControl": starpilot_car_control.as_reader(),
       "driverAssistance": log.DriverAssistance.new_message().as_reader(),
       "driverMonitoringState": log.DriverMonitoringState.new_message().as_reader(),
     }
@@ -69,19 +71,24 @@ def make_car_params():
 def make_car_output(real_limit_error=0.0):
   output = car.CarOutput.new_message()
   output.actuatorsOutput.steeringAngleDeg = OUTPUT_ANGLE
-  info = output.actuatorsOutput.steeringLimitInfo
+  return output
+
+
+def make_starpilot_car_control(real_limit_error=0.0):
+  message = messaging.new_message("starpilotCarControl", valid=True)
+  info = message.starpilotCarControl.steeringLimitInfo
   info.valid = True
   info.monoTime = SAMPLE_TIME_NANOS
   info.cooperativeOffsetDeg = 5.5
   info.modelLimitErrorDeg = real_limit_error
   info.combinedLimitErrorDeg = real_limit_error
-  return output
+  return message
 
 
-def make_controls(car_output, selfdrive_time_nanos, output_healthy=True):
+def make_controls(car_output, starpilot_car_control, selfdrive_time_nanos, output_healthy=True):
   controls = Controls.__new__(Controls)
   controls.CP = make_car_params()
-  controls.sm = PublishSubMaster(car_output, selfdrive_time_nanos, output_healthy)
+  controls.sm = PublishSubMaster(car_output, starpilot_car_control, selfdrive_time_nanos, output_healthy)
   controls.pm = CapturePubMaster()
   controls.curvature = 0.0
   controls.calibrated_pose = None
@@ -100,7 +107,9 @@ def run_publish(monkeypatch, replay, selfdrive_time_nanos, host_time_nanos=HOST_
                 output_healthy=True, real_limit_error=0.0):
   monkeypatch.setattr(controlsd, "REPLAY", replay, raising=False)
   monkeypatch.setattr(controlsd.time, "monotonic_ns", lambda: host_time_nanos)
-  controls = make_controls(make_car_output(real_limit_error), selfdrive_time_nanos, output_healthy)
+  controls = make_controls(
+    make_car_output(real_limit_error), make_starpilot_car_control(real_limit_error), selfdrive_time_nanos, output_healthy,
+  )
   cc = car.CarControl.new_message()
   cc.enabled = True
   cc.latActive = True

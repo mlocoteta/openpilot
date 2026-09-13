@@ -1,5 +1,6 @@
 import math
 
+import cereal.messaging as messaging
 import pytest
 
 from cereal import car
@@ -33,39 +34,44 @@ def make_case(candidate=CAR.TESLA_MODEL_3, cooperative_enabled=True):
 
   output = car.CarOutput.new_message()
   output.actuatorsOutput.steeringAngleDeg = OUTPUT_ANGLE
-  info = output.actuatorsOutput.steeringLimitInfo
+
+  diagnostics = messaging.new_message("starpilotCarControl", valid=True)
+  info = diagnostics.starpilotCarControl.steeringLimitInfo
   info.valid = True
   info.monoTime = SAMPLE_TIME_NANOS
   info.cooperativeOffsetDeg = 5.5
-  return cp, output
+  return cp, output, diagnostics
 
 
-def detect(cp, output, requested_angle=REQUESTED_ANGLE, output_healthy=True, now_nanos=FRESH_TIME_NANOS):
-  return is_angle_steering_limited(cp.as_reader(), requested_angle, output.as_reader(), output_healthy, now_nanos)
+def detect(cp, output, diagnostics, requested_angle=REQUESTED_ANGLE,
+           output_healthy=True, now_nanos=FRESH_TIME_NANOS):
+  return is_angle_steering_limited(
+    cp.as_reader(), requested_angle, output.as_reader(), diagnostics.as_reader(), output_healthy, now_nanos,
+  )
 
 
 def test_light_offset_does_not_count_as_limiting():
-  cp, output = make_case()
+  cp, output, diagnostics = make_case()
 
-  assert not detect(cp, output)
+  assert not detect(cp, output, diagnostics)
 
 
 @pytest.mark.parametrize("field", ERROR_FIELDS)
 def test_each_genuine_limit_is_visible_during_cooperation(field):
-  cp, output = make_case()
-  setattr(output.actuatorsOutput.steeringLimitInfo, field, 3.0)
+  cp, output, diagnostics = make_case()
+  setattr(diagnostics.starpilotCarControl.steeringLimitInfo, field, 3.0)
 
-  assert detect(cp, output)
+  assert detect(cp, output, diagnostics)
 
 
 def test_combined_small_limits_remain_visible():
-  cp, output = make_case()
-  info = output.actuatorsOutput.steeringLimitInfo
+  cp, output, diagnostics = make_case()
+  info = diagnostics.starpilotCarControl.steeringLimitInfo
   info.modelLimitErrorDeg = 1.5
   info.cooperativeLimitErrorDeg = 1.5
   info.combinedLimitErrorDeg = 3.0
 
-  assert detect(cp, output)
+  assert detect(cp, output, diagnostics)
 
 
 @pytest.mark.parametrize(("error", "expected"), (
@@ -73,24 +79,24 @@ def test_combined_small_limits_remain_visible():
   (NEXT_FLOAT32_AFTER_2_5, True),
 ))
 def test_diagnostic_threshold_is_strictly_greater(error, expected):
-  cp, output = make_case()
-  output.actuatorsOutput.steeringLimitInfo.modelLimitErrorDeg = error
+  cp, output, diagnostics = make_case()
+  diagnostics.starpilotCarControl.steeringLimitInfo.modelLimitErrorDeg = error
 
-  assert detect(cp, output) is expected
+  assert detect(cp, output, diagnostics) is expected
 
 
 @pytest.mark.parametrize("age_nanos", (0, MAX_DIAGNOSTIC_AGE_NANOS))
 def test_diagnostic_age_bounds_are_inclusive(age_nanos):
-  cp, output = make_case()
+  cp, output, diagnostics = make_case()
 
-  assert not detect(cp, output, now_nanos=SAMPLE_TIME_NANOS + age_nanos)
+  assert not detect(cp, output, diagnostics, now_nanos=SAMPLE_TIME_NANOS + age_nanos)
 
 
 def test_signed_cooperative_offset_is_valid_data():
-  cp, output = make_case()
-  output.actuatorsOutput.steeringLimitInfo.cooperativeOffsetDeg = -5.5
+  cp, output, diagnostics = make_case()
+  diagnostics.starpilotCarControl.steeringLimitInfo.cooperativeOffsetDeg = -5.5
 
-  assert not detect(cp, output)
+  assert not detect(cp, output, diagnostics)
 
 
 @pytest.mark.parametrize("scenario", (
@@ -104,29 +110,28 @@ def test_signed_cooperative_offset_is_valid_data():
   "cooperative_mode_disabled",
 ))
 def test_unusable_diagnostics_keep_legacy_warning(scenario):
-  cp, output = make_case()
+  cp, output, diagnostics = make_case()
   output_healthy = True
   now_nanos = FRESH_TIME_NANOS
 
   if scenario == "default_message":
-    output = car.CarOutput.new_message()
-    output.actuatorsOutput.steeringAngleDeg = OUTPUT_ANGLE
+    diagnostics = messaging.new_message("starpilotCarControl")
   elif scenario == "invalid_flag":
-    output.actuatorsOutput.steeringLimitInfo.valid = False
+    diagnostics.starpilotCarControl.steeringLimitInfo.valid = False
   elif scenario == "zero_timestamp":
-    output.actuatorsOutput.steeringLimitInfo.monoTime = 0
+    diagnostics.starpilotCarControl.steeringLimitInfo.monoTime = 0
   elif scenario == "future_timestamp":
-    output.actuatorsOutput.steeringLimitInfo.monoTime = now_nanos + 1
+    diagnostics.starpilotCarControl.steeringLimitInfo.monoTime = now_nanos + 1
   elif scenario == "stale_timestamp":
-    output.actuatorsOutput.steeringLimitInfo.monoTime = now_nanos - MAX_DIAGNOSTIC_AGE_NANOS - 1
+    diagnostics.starpilotCarControl.steeringLimitInfo.monoTime = now_nanos - MAX_DIAGNOSTIC_AGE_NANOS - 1
   elif scenario == "unhealthy_output":
     output_healthy = False
   elif scenario == "unsupported_model":
-    cp, output = make_case(CAR.TESLA_MODEL_Y)
+    cp, output, diagnostics = make_case(CAR.TESLA_MODEL_Y)
   elif scenario == "cooperative_mode_disabled":
-    cp, output = make_case(cooperative_enabled=False)
+    cp, output, diagnostics = make_case(cooperative_enabled=False)
 
-  assert detect(cp, output, output_healthy=output_healthy, now_nanos=now_nanos)
+  assert detect(cp, output, diagnostics, output_healthy=output_healthy, now_nanos=now_nanos)
 
 
 @pytest.mark.parametrize(("requested_angle", "expected"), (
@@ -134,10 +139,10 @@ def test_unusable_diagnostics_keep_legacy_warning(scenario):
   (OUTPUT_ANGLE - NEXT_FLOAT32_AFTER_2_5, True),
 ))
 def test_fallback_preserves_legacy_strict_threshold(requested_angle, expected):
-  cp, output = make_case()
-  output.actuatorsOutput.steeringLimitInfo.valid = False
+  cp, output, diagnostics = make_case()
+  diagnostics.starpilotCarControl.steeringLimitInfo.valid = False
 
-  assert detect(cp, output, requested_angle=requested_angle) is expected
+  assert detect(cp, output, diagnostics, requested_angle=requested_angle) is expected
 
 
 @pytest.mark.parametrize("field", NUMERIC_FIELDS)
@@ -147,15 +152,15 @@ def test_fallback_preserves_legacy_strict_threshold(requested_angle, expected):
   (-math.inf, OUTPUT_ANGLE, False),
 ))
 def test_nonfinite_diagnostic_values_use_legacy_fallback(field, bad_value, requested_angle, legacy_result):
-  cp, output = make_case()
-  setattr(output.actuatorsOutput.steeringLimitInfo, field, bad_value)
+  cp, output, diagnostics = make_case()
+  setattr(diagnostics.starpilotCarControl.steeringLimitInfo, field, bad_value)
 
-  assert detect(cp, output, requested_angle=requested_angle) is legacy_result
+  assert detect(cp, output, diagnostics, requested_angle=requested_angle) is legacy_result
 
 
 @pytest.mark.parametrize("field", ERROR_FIELDS)
 def test_negative_error_values_use_legacy_fallback(field):
-  cp, output = make_case()
-  setattr(output.actuatorsOutput.steeringLimitInfo, field, -0.1)
+  cp, output, diagnostics = make_case()
+  setattr(diagnostics.starpilotCarControl.steeringLimitInfo, field, -0.1)
 
-  assert detect(cp, output)
+  assert detect(cp, output, diagnostics)

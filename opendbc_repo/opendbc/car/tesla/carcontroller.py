@@ -49,15 +49,16 @@ class CarController(CarControllerBase):
     self.steering_limit_mono_time = 0
     self.combined_limit_error_deg = 0.0
 
-  def _write_steering_limit_info(self, actuators):
-    info = actuators.steeringLimitInfo
-    info.valid = self.steering_limit_info_valid
-    info.modelLimitErrorDeg = self.model_limit_error_deg
-    info.resumeLimitErrorDeg = self.resume_limit_error_deg
-    info.cooperativeLimitErrorDeg = self.cooperative_limit_error_deg
-    info.cooperativeOffsetDeg = self.cooperative_offset_deg
-    info.monoTime = self.steering_limit_mono_time
-    info.combinedLimitErrorDeg = self.combined_limit_error_deg
+  def get_steering_limit_info(self) -> dict[str, bool | float | int]:
+    return {
+      "valid": self.steering_limit_info_valid,
+      "modelLimitErrorDeg": self.model_limit_error_deg,
+      "resumeLimitErrorDeg": self.resume_limit_error_deg,
+      "cooperativeLimitErrorDeg": self.cooperative_limit_error_deg,
+      "cooperativeOffsetDeg": self.cooperative_offset_deg,
+      "monoTime": self.steering_limit_mono_time,
+      "combinedLimitErrorDeg": self.combined_limit_error_deg,
+    }
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
@@ -125,7 +126,6 @@ class CarController(CarControllerBase):
     # TODO: HUD control
     new_actuators = actuators.as_builder()
     new_actuators.steeringAngleDeg = self.apply_angle_command_last
-    self._write_steering_limit_info(new_actuators)
 
     self.frame += 1
     return new_actuators, can_sends
@@ -168,7 +168,6 @@ class CarController(CarControllerBase):
 
     new_actuators = actuators.as_builder()
     new_actuators.steeringAngleDeg = self.apply_angle_last
-    self._write_steering_limit_info(new_actuators)
 
     self.frame += 1
     return new_actuators, can_sends

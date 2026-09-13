@@ -3,8 +3,7 @@ import math
 from opendbc.car.tesla.values import CAR, TeslaSafetyFlags
 
 
-# TODO This is speed dependent
-STEER_ANGLE_SATURATION_THRESHOLD = 2.5  # Degrees
+STEER_ANGLE_SATURATION_THRESHOLD = 2.5
 _MAX_STEERING_LIMIT_INFO_AGE_NANOS = 100_000_000
 
 
@@ -13,7 +12,8 @@ def _legacy_angle_steering_limited(requested_angle: float, car_output) -> bool:
     STEER_ANGLE_SATURATION_THRESHOLD
 
 
-def is_angle_steering_limited(CP, requested_angle: float, car_output, output_healthy: bool, now_nanos: int) -> bool:
+def is_angle_steering_limited(CP, requested_angle: float, car_output, starpilot_car_control,
+                              output_healthy: bool, now_nanos: int) -> bool:
   legacy_limited = _legacy_angle_steering_limited(requested_angle, car_output)
 
   try:
@@ -24,7 +24,10 @@ def is_angle_steering_limited(CP, requested_angle: float, car_output, output_hea
     if CP.carFingerprint != CAR.TESLA_MODEL_3 or not cooperative_enabled or not output_healthy:
       return legacy_limited
 
-    info = car_output.actuatorsOutput.steeringLimitInfo
+    if not starpilot_car_control.valid:
+      return legacy_limited
+
+    info = starpilot_car_control.starpilotCarControl.steeringLimitInfo
     errors = (
       info.modelLimitErrorDeg,
       info.resumeLimitErrorDeg,

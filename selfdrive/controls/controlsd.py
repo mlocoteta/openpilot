@@ -390,6 +390,7 @@ class Controls:
 
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
+                                   'starpilotCarControl',
                                    'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState'], poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState', 'starpilotLateralState'])
 
@@ -884,7 +885,7 @@ class Controls:
         )
         now_nanos = self.sm.logMonoTime['selfdriveState'] if REPLAY else time.monotonic_ns()
         self.steer_limited_by_safety = is_angle_steering_limited(
-          self.CP, CC.actuators.steeringAngleDeg, CO, output_healthy, now_nanos,
+          self.CP, CC.actuators.steeringAngleDeg, CO, self.sm['starpilotCarControl'], output_healthy, now_nanos,
         )
       else:
         self.steer_limited_by_safety = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2
