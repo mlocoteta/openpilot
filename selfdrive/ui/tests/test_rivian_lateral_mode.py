@@ -91,7 +91,7 @@ def load_lateral_mode(monkeypatch, *, brand="rivian", angle_harness=True, longit
 def load_exp_button(monkeypatch):
   draws = {"textures": [], "rings": []}
   fake_pyray = ModuleType("pyray")
-  fake_pyray.Color = FakeColor
+  fake_pyray.Color = lambda *args: FakeColor(*args)
   fake_pyray.Rectangle = FakeRectangle
   fake_pyray.Texture = FakeTexture
   fake_pyray.Vector2 = lambda x, y: SimpleNamespace(x=x, y=y)
@@ -284,6 +284,7 @@ def test_inactive_lateral_is_not_classified(monkeypatch):
 
 def test_non_mici_wheel_icon_uses_rivian_tint(monkeypatch):
   module, draws = load_exp_button(monkeypatch)
+  assert not isinstance(module.rl.Color, type)
   button = module.ExpButton(192, 144)
   button.wheel_tint = FakeColor(0x4D, 0x9D, 0xFF, 255)
   button._update_state()
