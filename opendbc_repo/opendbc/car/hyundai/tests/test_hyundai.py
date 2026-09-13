@@ -2535,7 +2535,7 @@ class TestHyundaiFingerprint:
     assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.0)
     assert parser.vl["LKAS_ALT"]["ADAS_StrAnglReqVal"] == pytest.approx(8.5)
 
-  def test_gv70_electrified_uses_generic_lkas_status_payload(self):
+  def test_gv70_electrified_uses_clean_damped_lkas_status_payload(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_LKA_STEERING)
@@ -2580,11 +2580,11 @@ class TestHyundaiFingerprint:
     parser.update([(1, lkas_msgs)])
     assert parser.can_valid
     assert parser.vl["LKAS"]["HAS_LANE_SAFETY"] == 0
-    assert parser.vl["LKAS"]["DAMP_FACTOR"] == 0
+    assert parser.vl["LKAS"]["DAMP_FACTOR"] == 100
     assert parser.vl["LKAS"]["TORQUE_REQUEST"] == 0
     assert parser.vl["LKAS"]["STEER_REQ"] == 1
-    assert parser.vl["LKAS"]["STEER_MODE"] == 0
-    assert parser.vl["LKAS"]["NEW_SIGNAL_2"] == 0
+    assert parser.vl["LKAS"]["STEER_MODE"] == 2
+    assert parser.vl["LKAS"]["NEW_SIGNAL_2"] == 3
 
     lfa_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LFA", 0)], can_bus.ECAN)
     lfa_msgs = hyundaicanfd.create_steering_messages(controller.packer, CP, can_bus, True, True, 0, 0.0)
@@ -2607,6 +2607,27 @@ class TestHyundaiFingerprint:
     steering_names = [(controller.packer.dbc.addr_to_msg[addr].name, bus) for addr, _, bus in active_msgs
                       if controller.packer.dbc.addr_to_msg[addr].name in ("LFA", "LKAS")]
     assert steering_names == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
+
+  def test_gv70_electrified_stock_long_uses_damped_lkas_request(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_LKA_STEERING)
+    CP.openpilotLongitudinalControl = False
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS", 0)], can_bus.ACAN)
+    msgs = hyundaicanfd.create_steering_messages(controller.packer, CP, can_bus, True, True, 123, 0.0)
+
+    assert [(controller.packer.dbc.addr_to_msg[addr].name, bus) for addr, _, bus in msgs] == [("LKAS", can_bus.ACAN)]
+    parser.update([(1, msgs)])
+    assert parser.can_valid
+    assert parser.vl["LKAS"]["TORQUE_REQUEST"] == 123
+    assert parser.vl["LKAS"]["STEER_REQ"] == 1
+    assert parser.vl["LKAS"]["HAS_LANE_SAFETY"] == 0
+    assert parser.vl["LKAS"]["DAMP_FACTOR"] == 100
+    assert parser.vl["LKAS"]["STEER_MODE"] == 2
+    assert parser.vl["LKAS"]["NEW_SIGNAL_2"] == 3
 
   @pytest.mark.parametrize(("car", "powertrain_flag"), [
     (CAR.HYUNDAI_IONIQ_5, HyundaiFlags.EV),

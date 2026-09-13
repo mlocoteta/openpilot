@@ -480,6 +480,7 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
+  assert "methods: {" in destination and "secondaryLabel," in destination
   assert _read("js/components/LateralTuningPanel.js")
 
   # Shared API surface added for the second batch of ported pages.

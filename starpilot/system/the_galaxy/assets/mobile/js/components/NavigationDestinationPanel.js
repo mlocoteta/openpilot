@@ -108,6 +108,9 @@ export const NavigationDestinationPanel = {
       }).slice(0, 10)
     },
   },
+  methods: {
+    secondaryLabel,
+  },
   async mounted() {
     await this.load()
   },
