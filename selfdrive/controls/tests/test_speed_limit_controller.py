@@ -96,6 +96,30 @@ def mph(value):
   return value * CV.MPH_TO_MS
 
 
+def update_dashboard_limit(controller, now, current_limit, desired_limit, *, decel_pressed=False):
+  controller.update_limits(
+    mph(desired_limit), now, False, mph(current_limit), mph(current_limit),
+    make_sm(gas_pressed=False, decel_pressed=decel_pressed),
+  )
+
+
+def make_pending_lower_limit(current_limit, desired_limit):
+  controller = make_controller(
+    speed_limit_priority1="Dashboard",
+    speed_limit_confirmation_lower=True,
+  )
+  controller.source = "Dashboard"
+  controller.target = mph(current_limit)
+  controller.previous_source = "Dashboard"
+  controller.previous_target = mph(current_limit)
+  controller.last_valid_limit = mph(current_limit)
+
+  now = datetime.now(timezone.utc)
+  update_dashboard_limit(controller, now, current_limit, desired_limit)
+  assert controller.unconfirmed_speed_limit == pytest.approx(mph(desired_limit))
+  return controller, now
+
+
 @pytest.mark.parametrize("limit_mph", [15, 25])
 def test_low_vision_limit_filter_blocks_configured_boundary(limit_mph):
   controller = make_controller(
@@ -435,6 +459,70 @@ def test_unconfirmed_lower_limit_keeps_existing_override():
     assert controller.unconfirmed_speed_limit == pytest.approx(mph(45))
     assert controller.overridden_speed == pytest.approx(mph(65))
     assert controller.override_slc
+  finally:
+    controller.shutdown()
+
+
+def test_rejected_lower_limit_does_not_auto_apply_on_next_update():
+  controller, now = make_pending_lower_limit(65, 45)
+  try:
+    update_dashboard_limit(controller, now, 65, 45, decel_pressed=True)
+    assert controller.denied_target == pytest.approx(mph(45))
+
+    update_dashboard_limit(controller, now, 65, 45)
+
+    assert controller.source == "None"
+    assert controller.target == pytest.approx(mph(65))
+    assert controller.unconfirmed_speed_limit == 0
+  finally:
+    controller.shutdown()
+
+
+def test_timed_out_lower_limit_does_not_auto_apply():
+  controller, now = make_pending_lower_limit(55, 45)
+  try:
+    for _ in range(int(30 / DT_MDL)):
+      update_dashboard_limit(controller, now, 55, 45)
+
+    assert controller.denied_target == pytest.approx(mph(45))
+
+    update_dashboard_limit(controller, now, 55, 45)
+
+    assert controller.source == "None"
+    assert controller.target == pytest.approx(mph(55))
+    assert controller.unconfirmed_speed_limit == 0
+  finally:
+    controller.shutdown()
+
+
+def test_new_lower_limit_prompts_after_denial():
+  controller, now = make_pending_lower_limit(65, 45)
+  try:
+    update_dashboard_limit(controller, now, 65, 45, decel_pressed=True)
+    update_dashboard_limit(controller, now, 65, 45)
+
+    update_dashboard_limit(controller, now, 65, 40)
+
+    assert controller.source == "None"
+    assert controller.target == pytest.approx(mph(65))
+    assert controller.unconfirmed_speed_limit == pytest.approx(mph(40))
+    assert controller.denied_target == 0
+  finally:
+    controller.shutdown()
+
+
+def test_denial_discards_stale_widget_acceptance():
+  controller, now = make_pending_lower_limit(65, 45)
+  try:
+    controller.starpilot_planner.params_memory.values["SpeedLimitAccepted"] = True
+    update_dashboard_limit(controller, now, 65, 45, decel_pressed=True)
+    update_dashboard_limit(controller, now, 65, 45)
+
+    update_dashboard_limit(controller, now, 65, 40)
+    update_dashboard_limit(controller, now, 65, 40)
+
+    assert controller.target == pytest.approx(mph(65))
+    assert controller.unconfirmed_speed_limit == pytest.approx(mph(40))
   finally:
     controller.shutdown()
 

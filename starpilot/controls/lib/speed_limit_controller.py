@@ -303,6 +303,7 @@ class SpeedLimitController:
       self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
 
     elif speed_limit_denied:
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
       self.denied_target = desired_target
 
       self.previous_source = desired_source
@@ -436,8 +437,22 @@ class SpeedLimitController:
     # Do not trigger alerts when shifting to fallback or when re-obtaining the same speed limit
     is_fallback = desired_source == "None" or desired_target == 0
     same_speed = desired_target > 0 and current_speed > 0 and abs(desired_target - current_speed) < 1
+    confirmation_required = desired_source != "None" and (
+      (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
+      (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
+    )
+    denied_same_limit = (
+      confirmation_required and self.denied_target > 0 and
+      abs(desired_target - self.denied_target) < 1
+    )
 
-    if not is_fallback and not same_speed and (abs(desired_target - self.previous_target) >= 1 or current_speed == 0):
+    if not denied_same_limit:
+      self.denied_target = 0
+
+    if denied_same_limit:
+      self.speed_limit_changed_timer = 0
+      self.unconfirmed_speed_limit = 0
+    elif not is_fallback and not same_speed and (abs(desired_target - self.previous_target) >= 1 or current_speed == 0):
       self.handle_limit_change(desired_source, desired_target, current_road_name, v_ego, sm)
     else:
       self.speed_limit_changed_timer = 0
