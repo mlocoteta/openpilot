@@ -268,6 +268,46 @@ class TestGMCarState:
 
 
 class TestGMInterface:
+  def test_suburban_obd_and_ascm_integrations_remain_separate(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN][0].copy()
+
+    assert CAR.CHEVROLET_SUBURBAN_ASCM in ASCM_INT
+    assert FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_ASCM] == FINGERPRINTS[CAR.CHEVROLET_SUBURBAN]
+
+    obd_params = interfaces[CAR.CHEVROLET_SUBURBAN].get_params(
+      CAR.CHEVROLET_SUBURBAN,
+      fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+    ascm_params = interfaces[CAR.CHEVROLET_SUBURBAN_ASCM].get_params(
+      CAR.CHEVROLET_SUBURBAN_ASCM,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert obd_params.networkLocation == structs.CarParams.NetworkLocation.gateway
+    assert obd_params.openpilotLongitudinalControl
+    assert not obd_params.pcmCruise
+    assert obd_params.safetyConfigs[0].safetyParam == 0
+
+    assert ascm_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert not ascm_params.flags & GMFlags.SASCM.value
+    assert not ascm_params.alphaLongitudinalAvailable
+    assert not ascm_params.openpilotLongitudinalControl
+    assert ascm_params.pcmCruise
+    assert ascm_params.safetyConfigs[0].safetyParam == GMSafetyFlags.HW_CAM.value | GMSafetyFlags.HW_ASCM_INT.value
+    assert ascm_params.lateralTuning.torque.latAccelFactor == pytest.approx(obd_params.lateralTuning.torque.latAccelFactor)
+    assert ascm_params.lateralTuning.torque.friction == pytest.approx(obd_params.lateralTuning.torque.friction)
+
   def test_lacrosse_obd_and_ascm_integrations_remain_separate(self):
     obd_params = interfaces[CAR.BUICK_LACROSSE].get_params(
       CAR.BUICK_LACROSSE,

@@ -27,6 +27,7 @@ from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, dec
 from opendbc.car.hyundai.interface import CarInterface, KIA_EV9_ACCEL_MAX, get_communication_control_request
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus, hkg_can_fd_checksum
+from opendbc.car.hyundai.lead_data import CanLeadData, CanLeadDataState
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
                                              RADAR_START_ADDR, RadarInterface, get_radar_track_config, radar_tracks_available
 from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, DATELESS_FUZZY_CARS, \
@@ -2705,10 +2706,11 @@ class TestHyundaiFingerprint:
       actuators=SimpleNamespace(longControlState=LongCtrlState.pid),
       cruiseControl=SimpleNamespace(override=False, cancel=False, resume=False),
       leftBlinker=False, rightBlinker=False,
-      hudControl=SimpleNamespace(leadDistanceBars=3),
+      hudControl=SimpleNamespace(leadDistanceBars=3, leadVisible=True),
     )
     cs = SimpleNamespace(
       stock_lfa_msg=None, stock_lkas_msg=None,
+      openpilot_lead_visible=True, openpilot_lead_distance=37.5, openpilot_lead_rel_speed=-1.3,
       out=SimpleNamespace(steeringAngleDeg=0.0, gearShifter=structs.CarState.GearShifter.drive),
     )
 
@@ -2721,7 +2723,8 @@ class TestHyundaiFingerprint:
     parser.update([(1, scc_msgs)])
     assert parser.can_valid
     assert parser.vl["SCC_CONTROL"]["MainMode_ACC"] == 1
-    assert parser.vl["SCC_CONTROL"]["ACC_ObjDist"] == pytest.approx(1.0)
+    assert parser.vl["SCC_CONTROL"]["ACC_ObjDist"] == pytest.approx(37.5)
+    assert parser.vl["SCC_CONTROL"]["ACC_ObjRelSpd"] == pytest.approx(-1.3)
     assert parser.vl["SCC_CONTROL"]["ObjValid"] == 0
     assert parser.vl["SCC_CONTROL"]["aReqValue"] == pytest.approx(-0.1)
     assert parser.vl["SCC_CONTROL"]["aReqRaw"] == pytest.approx(-1.0)
@@ -3016,6 +3019,50 @@ class TestHyundaiFingerprint:
     assert parser.vl["SCC14"]["ComfortBandUpper"] == pytest.approx(0.0)
     assert parser.vl["SCC14"]["ComfortBandLower"] == pytest.approx(0.0)
     assert parser.vl["SCC14"]["JerkLowerLimit"] == pytest.approx(5.0)
+    assert parser.vl["SCC11"]["ObjValid"] == 0
+    assert parser.vl["SCC11"]["ACC_ObjDist"] == 0
+    assert parser.vl["SCC14"]["ObjGap"] == 0
+    assert parser.vl["SCC14"]["ObjDistStat"] == 0
+
+  def test_can_acc_commands_show_approaching_lead(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.HYUNDAI_ELANTRA_2021
+
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("SCC11", 0), ("SCC14", 0)], 0)
+    lead_data = CanLeadData(object_gap=4, lead_distance=27.5, lead_rel_speed=-1.3, lead_visible=True)
+
+    msgs = hyundaican.create_acc_commands(packer, enabled=True, accel=0.0, upper_jerk=1.0, idx=3,
+                                          hud_control=SimpleNamespace(leadDistanceBars=3), set_speed=42,
+                                          stopping=False, long_override=False, use_fca=False, CP=CP,
+                                          lead_data=lead_data)
+    parser.update([(1, msgs)])
+
+    assert parser.can_valid
+    assert parser.vl["SCC11"]["ObjValid"] == 1
+    assert parser.vl["SCC11"]["ACC_ObjStatus"] == 1
+    assert parser.vl["SCC11"]["ACC_ObjDist"] == pytest.approx(27.0)
+    assert parser.vl["SCC11"]["ACC_ObjRelSpd"] == pytest.approx(-1.3)
+    assert parser.vl["SCC14"]["ObjGap"] == 4
+    assert parser.vl["SCC14"]["ObjDistStat"] == 2
+
+  def test_can_lead_data_hysteresis_and_distance_bands(self):
+    state = CanLeadDataState()
+
+    for _ in range(state.LEAD_HYSTERESIS_FRAMES - 1):
+      lead_data = state.update(18.0, -0.5, True)
+    assert not lead_data.lead_visible
+    assert lead_data.object_gap == 0
+
+    lead_data = state.update(18.0, -0.5, True)
+    assert lead_data.lead_visible
+    assert lead_data.object_gap == 2
+    assert lead_data.object_rel_gap == 2
+
+    for _ in range(state.LEAD_HYSTERESIS_FRAMES):
+      lead_data = state.update(32.0, 0.5, True)
+    assert lead_data.object_gap == 5
+    assert lead_data.object_rel_gap == 1
 
   def test_can_acc_commands_follow_sonata_main_cruise_state(self):
     CP = CarParams.new_message()

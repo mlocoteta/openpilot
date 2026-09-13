@@ -357,6 +357,10 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Suburban Premier 2016-20")],
     CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
   )
+  CHEVROLET_SUBURBAN_ASCM = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Suburban Premier ASCM Harness 2016-20", "Adaptive Cruise Control (ACC) & LKAS")],
+    CHEVROLET_SUBURBAN.specs,
+  )
   GMC_YUKON_CC = GMPlatformConfig(
     [GMCarDocs("GMC Yukon No-ACC 2019-20")],
     CarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4),
@@ -593,9 +597,10 @@ CC_REGEN_PADDLE_CAR = {
 }
 CAMERA_ACC_CAR.update(CC_ONLY_CAR)
 
-# ASCM-INT paths are only enabled when SASCM (0x2FF) is detected at runtime
+# ASCM-intercept variants preserve stock ACC. SASCM (0x2FF) enables alpha-long where supported.
 ASCM_INT = {
   CAR.CHEVROLET_VOLT_ASCM,
+  CAR.CHEVROLET_SUBURBAN_ASCM,
   CAR.GMC_ACADIA_ASCM,
   CAR.CHEVROLET_MALIBU_ASCM,
   CAR.CADILLAC_ESCALADE_ASCM,
