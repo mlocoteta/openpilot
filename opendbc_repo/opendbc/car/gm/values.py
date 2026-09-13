@@ -361,6 +361,10 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Suburban Premier ASCM Harness 2016-20", "Adaptive Cruise Control (ACC) & LKAS")],
     CHEVROLET_SUBURBAN.specs,
   )
+  CHEVROLET_SUBURBAN_CAMERA = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Suburban Premier Camera Harness 2016-20", "Adaptive Cruise Control (ACC) & LKAS")],
+    CHEVROLET_SUBURBAN.specs,
+  )
   GMC_YUKON_CC = GMPlatformConfig(
     [GMCarDocs("GMC Yukon No-ACC 2019-20")],
     CarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4),
@@ -551,6 +555,7 @@ CAMERA_ACC_CAR = {
   CAR.CHEVROLET_SILVERADO,
   CAR.CHEVROLET_EQUINOX,
   CAR.CHEVROLET_TRAILBLAZER,
+  CAR.CHEVROLET_SUBURBAN_CAMERA,
   CAR.CHEVROLET_VOLT_CAMERA,
   CAR.CHEVROLET_BLAZER,
   CAR.CHEVROLET_TRAX,
@@ -558,7 +563,7 @@ CAMERA_ACC_CAR = {
 }
 
 # Alt ASCMActiveCruiseControlStatus
-ALT_ACCS = {CAR.GMC_YUKON, CAR.GMC_YUKON_CC}
+ALT_ACCS = {CAR.CHEVROLET_SUBURBAN_CAMERA, CAR.GMC_YUKON, CAR.GMC_YUKON_CC}
 
 # We're integrated at the Safety Data Gateway Module on these cars
 SDGM_CAR = {

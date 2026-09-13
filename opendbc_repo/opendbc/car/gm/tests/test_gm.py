@@ -28,7 +28,7 @@ import opendbc.car.gm.interface as gm_interface
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gps import CHEVROLET_BOLT_GPS_CARS, CHEVROLET_BOLT_GPS_MESSAGES, get_car_gps_config, parse_chevrolet_bolt_can_gps
 from opendbc.car.gm.fingerprints import FINGERPRINTS
-from opendbc.car.gm.values import ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, CarControllerParams, CruiseButtons, GMFlags, GMSafetyFlags
+from opendbc.car.gm.values import ALT_ACCS, ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, CarControllerParams, CruiseButtons, GMFlags, GMSafetyFlags
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
 
@@ -307,6 +307,54 @@ class TestGMInterface:
     assert ascm_params.safetyConfigs[0].safetyParam == GMSafetyFlags.HW_CAM.value | GMSafetyFlags.HW_ASCM_INT.value
     assert ascm_params.lateralTuning.torque.latAccelFactor == pytest.approx(obd_params.lateralTuning.torque.latAccelFactor)
     assert ascm_params.lateralTuning.torque.friction == pytest.approx(obd_params.lateralTuning.torque.friction)
+
+  def test_suburban_camera_harness_preserves_stock_acc(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN][0].copy()
+    fingerprint[2] = fingerprint[0].copy()
+
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA in CAMERA_ACC_CAR
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA in ALT_ACCS
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA not in CC_ONLY_CAR
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA not in ASCM_INT
+    assert all(fp[CAMERA_DIAGNOSTIC_ADDRESS] == 8 for fp in FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CAMERA])
+    assert all(fp[CAMERA_DIAGNOSTIC_ADDRESS + GM_RX_OFFSET] == 8 for fp in FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CAMERA])
+
+    camera_params = interfaces[CAR.CHEVROLET_SUBURBAN_CAMERA].get_params(
+      CAR.CHEVROLET_SUBURBAN_CAMERA,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert camera_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert camera_params.pcmCruise
+    assert not camera_params.alphaLongitudinalAvailable
+    assert not camera_params.openpilotLongitudinalControl
+    assert camera_params.safetyConfigs[0].safetyParam == GMSafetyFlags.HW_CAM.value
+
+  def test_suburban_cc_remains_no_acc_gateway_profile(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CC][0].copy()
+
+    cc_params = interfaces[CAR.CHEVROLET_SUBURBAN_CC].get_params(
+      CAR.CHEVROLET_SUBURBAN_CC,
+      fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert cc_params.networkLocation == structs.CarParams.NetworkLocation.gateway
+    assert cc_params.openpilotLongitudinalControl
+    assert not cc_params.pcmCruise
+    assert cc_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_CC_LONG.value
+    assert cc_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_NO_ACC.value
 
   def test_lacrosse_obd_and_ascm_integrations_remain_separate(self):
     obd_params = interfaces[CAR.BUICK_LACROSSE].get_params(
