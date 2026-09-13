@@ -349,7 +349,20 @@ def _create_volt_cc_spam_command(CS, actuators, ms_convert, lead_visible):
   deadband_mph = VOLT_CC_LEAD_REQUEST_DEADBAND_MPH if lead_visible else VOLT_CC_FREE_REQUEST_DEADBAND_MPH
   request_deadband = deadband_mph * (CV.MPH_TO_KPH if ms_convert == CV.MS_TO_KPH else 1.0)
 
-  if abs(requested_setpoint - speed_setpoint) <= request_deadband:
+  target_setpoint = None
+  v_cruise_kph = float(getattr(CS.out, "vCruise", 0.0))
+  if 0.0 < v_cruise_kph < 255.0:
+    is_metric = ms_convert == CV.MS_TO_KPH
+    target_setpoint = int(round(v_cruise_kph if is_metric else v_cruise_kph * CV.KPH_TO_MPH))
+
+  moving_toward_target = target_setpoint is not None and (
+    (accel > 0.0 and speed_setpoint < target_setpoint) or
+    (accel < 0.0 and speed_setpoint > target_setpoint)
+  )
+  if target_setpoint is not None and accel > 0.0 and speed_setpoint >= target_setpoint:
+    return CruiseButtons.INIT, float("inf")
+
+  if not moving_toward_target and abs(requested_setpoint - speed_setpoint) <= request_deadband:
     return CruiseButtons.INIT, float("inf")
 
   if accel == 0.0:

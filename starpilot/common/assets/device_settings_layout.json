@@ -2840,6 +2840,16 @@
         "settings_tier": "simple"
       },
       {
+        "key": "ShowBrakeStatus",
+        "label": "Show Brake Status",
+        "description": "Tint the on-screen steering-wheel icon red while the car reports that the brake pedal is pressed.",
+        "picker_description": "Tints the on-screen steering-wheel icon red while braking.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "settings_tier": "simple"
+      },
+      {
         "key": "ModelUI",
         "label": "Model UI",
         "description": "Model visualizations for the driving path, lane lines, path edges, and road edges.",

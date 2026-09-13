@@ -293,3 +293,32 @@ def test_non_mici_wheel_icon_uses_rivian_tint(monkeypatch):
   assert len(draws["textures"]) == 1
   texture_color = draws["textures"][0][-1]
   assert (texture_color.r, texture_color.g, texture_color.b, texture_color.a) == (0x4D, 0x9D, 0xFF, 255)
+
+
+def test_non_mici_wheel_icon_turns_red_when_brakes_are_pressed(monkeypatch):
+  module, draws = load_exp_button(monkeypatch)
+  button = module.ExpButton(192, 144)
+  button.wheel_tint = FakeColor(0x4D, 0x9D, 0xFF, 255)
+  module.ui_state.ui_params.get_bool = lambda key, *args, **kwargs: key == "ShowBrakeStatus"
+  module.ui_state.sm["carState"].brakePressed = True
+  button._update_state()
+
+  button._render(FakeRectangle(0, 0, 192, 192))
+
+  assert len(draws["textures"]) == 1
+  texture_color = draws["textures"][0][-1]
+  assert (texture_color.r, texture_color.g, texture_color.b, texture_color.a) == (255, 0, 0, 255)
+
+
+def test_non_mici_wheel_icon_brake_tint_is_disabled_by_default(monkeypatch):
+  module, draws = load_exp_button(monkeypatch)
+  button = module.ExpButton(192, 144)
+  button.wheel_tint = FakeColor(0x4D, 0x9D, 0xFF, 255)
+  module.ui_state.sm["carState"].brakePressed = True
+  button._update_state()
+
+  button._render(FakeRectangle(0, 0, 192, 192))
+
+  assert len(draws["textures"]) == 1
+  texture_color = draws["textures"][0][-1]
+  assert (texture_color.r, texture_color.g, texture_color.b, texture_color.a) == (0x4D, 0x9D, 0xFF, 255)

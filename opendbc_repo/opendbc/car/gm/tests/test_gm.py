@@ -947,7 +947,7 @@ class TestGMCarController:
 
     assert len(msgs) == 1
 
-  def test_volt_cc_redneck_holds_when_pseudo_speed_request_is_within_deadband(self):
+  def test_volt_cc_redneck_does_not_raise_stock_setpoint_above_max(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
     controller = SimpleNamespace(frame=int(2.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
     cs = SimpleNamespace(
@@ -960,7 +960,7 @@ class TestGMCarController:
       buttons_counter=2,
       out=SimpleNamespace(
         vEgo=100.0 * CV.KPH_TO_MS,
-        cruiseState=SimpleNamespace(speed=99.0 * CV.KPH_TO_MS),
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
         vCruise=100.0,
       ),
     )
@@ -970,11 +970,61 @@ class TestGMCarController:
     )
 
     assert msgs == []
-    assert controller.apply_speed == 99
+    assert controller.apply_speed == 100
 
-  def test_volt_cc_redneck_uses_smaller_request_deadband_with_lead(self):
+  def test_volt_cc_redneck_tracks_max_inside_request_deadband(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
-    controller = SimpleNamespace(frame=int(2.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=52.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=52.0 * CV.KPH_TO_MS),
+        vCruise=60.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=0.1), SimpleNamespace(is_metric=True),
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 53
+
+  def test_volt_cc_redneck_tracks_max_down_inside_request_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=68.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=68.0 * CV.KPH_TO_MS),
+        vCruise=60.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.1), SimpleNamespace(is_metric=True),
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 67
+
+  def test_volt_cc_redneck_holds_small_decel_request_at_max(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
     cs = SimpleNamespace(
       CP=SimpleNamespace(
         carFingerprint=CAR.CHEVROLET_VOLT_CC,
@@ -985,17 +1035,67 @@ class TestGMCarController:
       buttons_counter=2,
       out=SimpleNamespace(
         vEgo=100.0 * CV.KPH_TO_MS,
-        cruiseState=SimpleNamespace(speed=99.0 * CV.KPH_TO_MS),
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
         vCruise=100.0,
       ),
     )
 
     msgs = gmcan.create_gm_cc_spam_command(
-      packer, controller, cs, SimpleNamespace(accel=0.5), SimpleNamespace(is_metric=True), lead_visible=True,
+      packer, controller, cs, SimpleNamespace(accel=-0.1), SimpleNamespace(is_metric=True),
+    )
+
+    assert msgs == []
+    assert controller.apply_speed == 100
+
+  def test_volt_cc_redneck_holds_medium_decel_request_at_max_without_lead(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), lead_visible=False,
+    )
+
+    assert msgs == []
+    assert controller.apply_speed == 100
+
+  def test_volt_cc_redneck_brakes_for_lead_inside_free_road_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), lead_visible=True,
     )
 
     assert len(msgs) == 1
-    assert controller.apply_speed == 100
+    assert controller.apply_speed == 99
 
   def test_volt_cc_redneck_accelerates_when_pseudo_speed_request_exceeds_deadband(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
@@ -1043,7 +1143,7 @@ class TestGMCarController:
       out=SimpleNamespace(
         vEgo=50.7 * CV.KPH_TO_MS,
         cruiseState=SimpleNamespace(speed=49.0 * CV.KPH_TO_MS),
-        vCruise=50.0,
+        vCruise=49.0,
       ),
     )
 

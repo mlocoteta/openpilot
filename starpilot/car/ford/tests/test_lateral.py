@@ -170,6 +170,110 @@ def test_mach_e_turn_in_preview_is_not_carried_into_unwind(controller):
     desired=0.008, preview=0.009, current=0.004) == 0.0
 
 
+@pytest.mark.parametrize("speed,expected", (
+  (1.0, 0.80),
+  (2.0, 0.80),
+  (2.5, 1.20),
+  (3.0, 1.60),
+  (8.0, 1.60),
+  (9.0, 1.60),
+  (10.5, 1.20),
+  (12.0, 0.80),
+  (15.0, 0.80),
+))
+def test_mach_e_turn_in_lookahead_extra_fades_by_speed(controller, speed, expected):
+  assert controller._turn_in_lookahead_extra(speed) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("sign", (1.0, -1.0))
+def test_mach_e_direction_change_preview_leads_a_lagging_unwind(controller, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = sign * 0.002
+
+  weight = controller._direction_change_preview_weight(
+    desired=sign * 0.0015, preview=-sign * 0.002, current=sign * 0.003)
+
+  assert weight == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("desired,preview,current,last", (
+  (0.0015, 0.002, 0.003, 0.002),     # no predicted direction change
+  (0.002, -0.002, 0.003, 0.0015),    # desired curvature is still rising
+  (0.0015, -0.002, -0.001, 0.002),   # vehicle already changed direction
+  (0.0015, -0.002, 0.0022, 0.002),   # measured unwind lag is too small
+))
+def test_mach_e_direction_change_preview_rejects_unrelated_states(
+    controller, desired, preview, current, last):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = last
+
+  assert controller._direction_change_preview_weight(desired, preview, current) == 0.0
+
+
+def test_mach_e_direction_change_preview_can_cross_the_current_desired_path(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  requested, _ = controller._blend_and_scale(
+    0.0015, -0.002, 15.0, current=0.003, allow_opposite_preview=True)
+
+  assert requested == pytest.approx(0.0001)
+
+
+def test_mach_e_direction_change_preview_uses_far_path_when_unwind_lags(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.002
+  blend_inputs = []
+  monkeypatch.setattr(
+    controller, "_predicted_curvature",
+    lambda _v_ego, lookahead: 0.002 if lookahead < 1.0 else -0.002,
+  )
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=15.0, curvature=0.003),
+    SimpleNamespace(curvature=0.0015),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.0015), pytest.approx(-0.002), pytest.approx(15.0),
+                           pytest.approx(0.003), True)]
+
+
+@pytest.mark.parametrize("speed,steering_pressed,lane_change", (
+  (8.0, False, False),
+  (9.0, False, False),
+  (15.0, True, False),
+  (15.0, False, True),
+))
+def test_mach_e_direction_change_preview_is_bypassed_outside_its_operating_state(
+    controller, monkeypatch, speed, steering_pressed, lane_change):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.002
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda _v_ego, lookahead: -0.002)
+  monkeypatch.setattr(controller, "_lane_change", lambda: (lane_change, 2 if lane_change else 0))
+  monkeypatch.setattr(
+    controller, "_direction_change_preview_weight",
+    lambda *_args: pytest.fail("direction-change preview must be bypassed"),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True),
+    car_state(speed=speed, curvature=0.003, steering_pressed=steering_pressed),
+    SimpleNamespace(curvature=0.0015),
+  )
+
+
+def test_non_mach_e_direction_change_preview_is_unchanged(controller):
+  controller.desired_curvature_last = 0.002
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0015, preview=-0.002, current=0.003) == 0.0
+
+
 def test_mach_e_turn_in_preview_uses_extra_model_horizon(controller, monkeypatch):
   controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
   controller.sm["liveDelay"].lateralDelay = 0.4
@@ -183,7 +287,47 @@ def test_mach_e_turn_in_preview_uses_extra_model_horizon(controller, monkeypatch
     SimpleNamespace(curvature=0.010),
   )
 
+  assert lookaheads == [pytest.approx(0.4), pytest.approx(1.2), pytest.approx(2.0)]
+
+
+def test_mach_e_turn_in_preview_keeps_existing_horizon_above_fade_speed(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.007
+  lookaheads = []
+  monkeypatch.setattr(controller, "_predicted_curvature",
+                      lambda _v_ego, lookahead: lookaheads.append(lookahead) or 0.012)
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=15.0, curvature=0.002),
+    SimpleNamespace(curvature=0.010),
+  )
+
   assert lookaheads == [pytest.approx(0.4), pytest.approx(1.2)]
+
+
+def test_mach_e_low_speed_turn_in_preview_cannot_weaken_existing_preview(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.007
+  blend_inputs = []
+
+  def predicted_curvature(_v_ego, lookahead):
+    return {0.4: 0.006, 1.2: 0.010, 2.0: 0.004}[round(lookahead, 1)]
+
+  monkeypatch.setattr(controller, "_predicted_curvature", predicted_curvature)
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=8.0, curvature=0.002),
+    SimpleNamespace(curvature=0.008),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.008), pytest.approx(0.010))]
 
 
 def test_non_mach_e_does_not_request_extra_model_horizon(controller, monkeypatch):

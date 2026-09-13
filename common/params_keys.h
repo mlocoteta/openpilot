@@ -632,6 +632,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SafeModeBackup", {PERSISTENT, JSON, "{}", "{}"}},
     {"SetSpeedLimit", {PERSISTENT, BOOL, "0", "0", 1}},
     {"SetSpeedOffset", {PERSISTENT, FLOAT, "0.0", "0.0", 2, SETTINGS_SIMPLE}},
+    {"ShowBrakeStatus", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"ShowCEMStatus", {PERSISTENT, BOOL, "1", "0", 2, SETTINGS_SIMPLE}},
     {"ShowCCMStatus", {PERSISTENT, BOOL, "0", "0", 2}},
     {"ShowCPU", {PERSISTENT, BOOL, "0", "0", 3}},
