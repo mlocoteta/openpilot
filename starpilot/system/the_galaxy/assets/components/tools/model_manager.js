@@ -225,7 +225,6 @@ async function fetchStatus() {
   statusInFlight = generation;
 
   try {
-    // Remount readback must follow settlement of an already sent selection.
     if (selectionWrite) await selectionWrite.catch(() => {});
     if (generation !== statusGeneration || !isModelRouteActive()) return;
     const payload = await fetchJson("/api/models/status");
@@ -259,7 +258,6 @@ async function fetchStatus() {
 
     state.error = "";
     state.selectionUncertain = false;
-    // selected attributes cannot reset a select's dirty native value after a user edit.
     queueMicrotask(() => {
       if (generation !== statusGeneration || !isModelRouteActive()) return;
       for (const profile of ["small", "big"]) {
@@ -436,11 +434,10 @@ async function runAction(action, modelKey = "") {
     }
 
     if (action === "select" || action === "select-small" || action === "select-big") {
-      // Empty Active Big explicitly disables that profile; other selections require a model.
       if (!modelKey && action !== "select-big") return;
       const profile = action === "select-small" ? "small" : action === "select-big" ? "big" : "";
       state.selectionUncertain = true;
-      ++statusGeneration; // Invalidate pre-write polls, including their finalisers.
+      ++statusGeneration;
       const payload = await setActiveModel(modelKey, profile);
       if (generation !== viewGeneration || !isModelRouteActive()) return;
       notify(payload.message || `Selected "${modelKey}".`);
@@ -469,7 +466,6 @@ async function runAction(action, modelKey = "") {
   } catch (error) {
     if (generation !== viewGeneration || !isModelRouteActive()) return;
     notify(error?.message || String(error), "error");
-    // A failed response does not establish whether the server accepted the write.
     await fetchStatus();
   } finally {
     if (generation === viewGeneration && isModelRouteActive()) state.actionBusy = false;
@@ -508,7 +504,6 @@ function bindDomHandlers() {
       const modelKey = safeText(target.value, "");
       const profile = target.id === "mm-active-big-model-select" ? "big" : "small";
       if (!modelKey && profile !== "big") return;
-      // Native selects change before their event; display only verified state.
       target.value = profile === "big" ? state.activeBigModel : state.activeSmallModel;
       runAction(`select-${profile}`, modelKey).catch(() => {});
       return;
@@ -640,13 +635,10 @@ function ensureModelView() {
   ++statusGeneration;
   clearTimeout(pollingHandle);
   pollingHandle = null;
-  // Arrow has no unmount hook. Observe this mount's removal, not just pathname:
-  // a quick leave-and-return must not revive an old write/readback continuation.
   queueMicrotask(() => {
     if (generation !== viewGeneration) return;
     const observer = new MutationObserver(() => {
       if (generation !== viewGeneration) { observer.disconnect(); return; }
-      // Arrow may replace the wrapper during an ordinary reactive render.
       if (document.querySelector(".mm-wrapper") && isModelRouteActive()) return;
       observer.disconnect();
       if (generation !== viewGeneration) return;

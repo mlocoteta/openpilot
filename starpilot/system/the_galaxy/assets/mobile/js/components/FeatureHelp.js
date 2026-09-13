@@ -1,4 +1,3 @@
-// Shared confirmation dialog for model downloads.
 let activeDialog = null
 let dialogId = 0
 function installStyle() {
@@ -18,7 +17,6 @@ function installStyle() {
   document.head.appendChild(style)
 }
 
-// Native modal provides inert background, Escape and focus restoration. No settings writes.
 export function openGalaxyHelpDialog({ title, paragraphs = [], troubleshooting = [], confirmLabel = "Close", cancelLabel = "" }) {
   installStyle()
   activeDialog?.()
@@ -58,7 +56,6 @@ export function openGalaxyHelpDialog({ title, paragraphs = [], troubleshooting =
     }
     const cancel = () => finish(false)
     const resize = () => {
-      // CSS zoom changes available CSS-pixel space independently of device scale.
       let zoom = 1
       for (let node = document.body; node; node = node.parentElement) zoom *= parseFloat(getComputedStyle(node).zoom) || 1
       dialog.style.setProperty("--gx-help-height", `${Math.max(100, ((window.visualViewport?.height || innerHeight) - 24) / zoom)}px`)

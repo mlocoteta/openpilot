@@ -1,4 +1,3 @@
-/* Download status changes must not move the viewport to another card. */
 .gx-model-manager { overflow-anchor: none; }
 .gx-model-manager .gx-row .gx-field { min-width: 0; }
 

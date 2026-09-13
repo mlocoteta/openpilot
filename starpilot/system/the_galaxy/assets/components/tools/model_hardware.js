@@ -1,4 +1,3 @@
-// Presentation only. No Params writes, telemetry collection or inferred mileage.
 const FILTER_KEY = "galaxy.modelManager.hardwareFilter";
 const FILTERS = new Set(["both", "gpu", "comma"]);
 
@@ -13,7 +12,7 @@ export function readHardwareFilter() {
 
 export function saveHardwareFilter(value) {
   const filter = FILTERS.has(value) ? value : "both";
-  try { localStorage.setItem(FILTER_KEY, filter); } catch { /* View still works without storage. */ }
+  try { localStorage.setItem(FILTER_KEY, filter); } catch {}
   return filter;
 }
 
@@ -38,7 +37,6 @@ function formatBytes(value) {
 }
 
 export function fileSizeText(model) {
-  // modelSize is an architecture class, never a byte count.
   const installed = bytes(model?.fileSizeBytes);
   const declared = bytes(model?.declaredSizeBytes);
   const downloaded = bytes(model?.downloadedBytes);

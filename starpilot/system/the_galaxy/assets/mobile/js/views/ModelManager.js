@@ -13,7 +13,6 @@ function releasedTs(value) {
   return Number.isNaN(n) ? 0 : n
 }
 
-// Survives SPA unmount: a new instance must read after a sent write settles.
 let selectionWrite = null
 
 export const ModelManager = {
@@ -172,7 +171,6 @@ export const ModelManager = {
             confirmLabel: "Download anyway", cancelLabel: "Cancel",
           })
           if (!allowGpu || this.disposed) return
-          // The car can change state while a confirmation is open.
           await this.refresh()
           if (this.disposed || this.error || !this.actionAllowedOnroad(action) || this.status.downloading) {
             if (!this.disposed) showSnackbar("Download not started. Check the device status and try again while parked.", "error")
@@ -226,7 +224,6 @@ export const ModelManager = {
       } catch (e) {
         if (this.disposed) return
         showSnackbar(e?.message || String(e), "error")
-        // Reconcile a possibly accepted request before releasing the action lock.
         await this.refresh()
       } finally {
         if (!this.disposed) this.busy = ""

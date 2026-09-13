@@ -55,8 +55,6 @@ class ModelSizes:
     self.sizes = {}
 
   def size(self, path, declared):
-    # Short TTL avoids repeated directory scans on status polls, not stale sizes
-    # across completed downloads. Bad metadata is treated as unknown by helper.
     key = (str(path), repr(declared))
     with self.lock:
       cached = self.sizes.get(key)

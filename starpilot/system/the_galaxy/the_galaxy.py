@@ -4514,7 +4514,6 @@ def _build_troubleshoot_payload():
     for section_definition in _TROUBLESHOOT_SECTION_DEFINITIONS
   ]
 
-  # Use the same category and parent metadata as Settings, rather than a second short list.
   shown = {item['key'] for section in sections for item in section['items']}
   registered = {key for key, *_ in starpilot_default_params}
   for category in load_settings_catalog() or []:
@@ -6951,7 +6950,6 @@ def setup(app):
       return jsonify({"error": "Cannot change active models while driving."}), 403
 
     data = request.get_json(silent=True)
-    # An explicit empty model disables Active Big; malformed values must not.
     if not isinstance(data, dict) or not isinstance(data.get("model"), str):
       return jsonify({"error": "An explicit model string is required."}), 400
     profile = str(data.get("profile") or "").strip().lower()
