@@ -97,6 +97,7 @@ export const NavigationDestinationPanel = {
       navigationStarted: false,
       isMetric: false,
       mapboxPublic: "",
+      mapboxSecret: "",
       language: "",
       lastPosition: null,
       map: null,
@@ -110,6 +111,7 @@ export const NavigationDestinationPanel = {
   },
   computed: {
     hasMapbox() { return !!this.mapboxPublic },
+    hasRoutingKey() { return !!this.mapboxSecret },
     recentPlaces() {
       const seen = new Set()
       return [...this.favorites, ...this.recentDestinations].filter((place) => {
@@ -157,6 +159,7 @@ export const NavigationDestinationPanel = {
           api.getNavigationFavorites().catch(() => ({ favorites: [] })),
         ])
         this.mapboxPublic = String(nav?.mapboxPublic || "").trim()
+        this.mapboxSecret = String(nav?.mapboxSecret || "").trim()
         this.language = String(nav?.language || "").trim()
         this.isMetric = !!nav?.isMetric
         this.lastPosition = coordinates(nav?.lastPosition)
@@ -282,6 +285,10 @@ export const NavigationDestinationPanel = {
     async setDestination(place = null) {
       if (!this.hasMapbox) {
         showSnackbar("Add a Mapbox public key in App Keys first.", "error")
+        return
+      }
+      if (!this.hasRoutingKey) {
+        showSnackbar("Add a Mapbox secret key in App Keys first. It is required for the comma to calculate the on-device route and provide navigation turn desires.", "error")
         return
       }
       this.loadingRoute = true
@@ -419,11 +426,14 @@ export const NavigationDestinationPanel = {
       <div v-else ref="map" class="gx-navigation-map"></div>
 
       <div v-if="hasMapbox && !loading" class="gx-navigation-overlay">
+        <section v-if="!hasRoutingKey" class="gx-navigation-error gx-card">
+          The map and destination search only use your public Mapbox key. Add a <a href="#/navigation/keys">secret Mapbox key in App Keys</a> before starting navigation so the comma can calculate the on-device route and provide turn desires.
+        </section>
         <section class="gx-navigation-search gx-card">
           <div class="gx-navigation-search__row">
             <i class="bi bi-search" aria-hidden="true"></i>
             <input class="gx-field" v-model="query" @input="onInput" @keyup.enter="setDestination()" placeholder="Search here" aria-label="Search for a destination" autocomplete="off" />
-            <button type="button" class="gx-icon-btn gx-navigation-send" :disabled="loadingRoute || searching || !query.trim()" @click="setDestination()" aria-label="Send destination" title="Send destination"><i class="bi bi-send-fill"></i></button>
+            <button type="button" class="gx-icon-btn gx-navigation-send" :disabled="loadingRoute || searching || !query.trim() || !hasRoutingKey" @click="setDestination()" aria-label="Send destination" :title="hasRoutingKey ? 'Send destination' : 'A Mapbox secret key is required to start navigation'"><i class="bi bi-send-fill"></i></button>
           </div>
           <div v-if="searching" class="gx-navigation-status">Searching...</div>
           <div v-if="suggestions.length" class="gx-navigation-suggestions">
@@ -453,7 +463,7 @@ export const NavigationDestinationPanel = {
           </div>
           <div class="gx-navigation-summary__actions">
             <button v-if="navigationStarted" type="button" class="gx-btn gx-btn--danger" @click="cancelNavigation"><i class="bi bi-x-lg"></i> Cancel Navigation</button>
-            <button v-else type="button" class="gx-btn gx-btn--success" :disabled="loadingRoute" @click="setDestination(destination)"><i class="bi bi-sign-turn-right"></i> {{ loadingRoute ? 'Calculating...' : 'Start Navigation' }}</button>
+            <button v-else type="button" class="gx-btn gx-btn--success" :disabled="loadingRoute || !hasRoutingKey" :title="hasRoutingKey ? 'Start Navigation' : 'A Mapbox secret key is required to start navigation'" @click="setDestination(destination)"><i class="bi bi-sign-turn-right"></i> {{ loadingRoute ? 'Calculating...' : 'Start Navigation' }}</button>
             <button type="button" class="gx-btn gx-btn--favorite" :class="{ active: isFavorite }" @click="toggleFavorite"><i class="bi" :class="isFavorite ? 'bi-heart-fill' : 'bi-heart'"></i> {{ isFavorite ? 'Unfavorite' : 'Favorite' }}</button>
           </div>
         </section>

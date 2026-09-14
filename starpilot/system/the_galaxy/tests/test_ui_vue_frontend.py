@@ -504,7 +504,6 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
   assert destination.count("methods: {") == 1 and "secondaryLabel," in destination
   assert _read("js/components/LateralTuningPanel.js")
-
   # Shared API surface added for the second batch of ported pages.
   for method in ["selectTestingGround",
                  "getSentryStatus", "getSentryEvents", "deleteSentryEvent", "sentryPushSubscribe",
@@ -534,6 +533,20 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "inputRequired" in modal
   assert lateral.index('>Workspace status</span>') < lateral.index('>Saved Tunes</span>')
   assert lateral.index('>Saved Tunes</span>') < lateral.index('>Local Routes</span>')
+
+
+def test_navigation_requires_secret_key_before_starting_on_device_route():
+  destination = _read("js/components/NavigationDestinationPanel.js")
+  classic_destination = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/navigation/navigation_destination.js").read_text(encoding="utf-8")
+
+  assert 'mapboxSecret: ""' in destination
+  assert "hasRoutingKey()" in destination
+  assert "!query.trim() || !hasRoutingKey" in destination
+  assert "loadingRoute || !hasRoutingKey" in destination
+  assert "required for the comma to calculate the on-device route" in destination
+  assert "secret key lets your comma calculate the on-device route" in classic_destination
+  assert "if (!response.ok)" in classic_destination
+  assert 'result.message || "Failed to start navigation."' in classic_destination
 
 
 def test_ui_cameras_hub_vasm_and_pip_native_no_embed():

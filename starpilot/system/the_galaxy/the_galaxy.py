@@ -168,7 +168,7 @@ from openpilot.starpilot.common.testing_grounds import (
   TESTING_GROUNDS_SLOT_DEFINITIONS as SHARED_TESTING_GROUNDS_SLOT_DEFINITIONS,
   TESTING_GROUNDS_STATE_PATH as SHARED_TESTING_GROUNDS_STATE_PATH,
 )
-from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, update_recent_destinations
+from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, routing_configured, update_recent_destinations
 from openpilot.starpilot.system.the_galaxy.factory_reset import remove_path as _run_factory_reset_delete
 from openpilot.starpilot.system.the_galaxy import flm_workspace, utilities
 from openpilot.starpilot.system.the_galaxy.update_recovery import inspect_interrupted_update, public_recovery_status, recover_interrupted_update
@@ -5760,6 +5760,11 @@ def setup(app):
 
   @app.route("/api/navigation", methods=["POST"])
   def set_navigation():
+    if not routing_configured(params):
+      return {
+        "message": "A Mapbox secret key is required to calculate the on-device route and provide navigation turn desires. Add it in App Keys first."
+      }, 400
+
     destination = normalize_destination_payload(request.json)
     if destination is None:
       return {"message": "Invalid destination payload"}, 400
