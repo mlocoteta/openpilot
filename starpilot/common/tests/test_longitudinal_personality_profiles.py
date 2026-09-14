@@ -101,7 +101,7 @@ def test_disabling_without_a_stored_document_does_not_create_one():
   assert lpp.synchronise_profile_document_enabled(None, False, ev_tuning=False, truck_tuning=False) is None
 
 
-def test_every_state_affecting_personality_param_is_parked_only():
+def test_every_state_affecting_personality_param_is_included_in_bulk_restore_parked_guard():
   assert lpp.PERSONALITY_PARKED_PARAM_KEYS == (
     lpp.PERSONALITY_ADVANCED_PARAM_KEYS
     | lpp.PERSONALITY_FOLLOW_PARAM_KEYS

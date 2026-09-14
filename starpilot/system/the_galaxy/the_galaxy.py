@@ -3562,6 +3562,27 @@ def _safe_params_get_bool(key, default=False):
 def _personality_settings_write_locked():
   return _safe_params_get_bool("IsOnroad", default=True) or not _safe_params_get_bool("IsOffroad", default=False)
 
+def _personality_editor_write_locked():
+  def road_state(value):
+    if isinstance(value, bytes):
+      value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+      normalized = value.strip().lower()
+      if normalized in ("1", "true"):
+        return True
+      if normalized in ("0", "false"):
+        return False
+      return None
+    if isinstance(value, bool):
+      return value
+    if isinstance(value, int) and value in (0, 1):
+      return bool(value)
+    return None
+
+  is_onroad = road_state(_safe_params_get_live_raw("IsOnroad"))
+  is_offroad = road_state(_safe_params_get_live_raw("IsOffroad"))
+  return is_onroad is None or is_offroad is None or is_onroad == is_offroad
+
 def _normalize_vasm_config(data):
   if not isinstance(data, dict):
     raise ValueError("Configuration must be a JSON object.")
@@ -6040,8 +6061,8 @@ def setup(app):
     profiles = stored_document["profiles"] if configured else default_personality_profiles(ev_tuning, truck_tuning)
 
     if request.method == "PUT":
-      if _personality_settings_write_locked():
-        return jsonify({"error": "Longitudinal personality profiles can only be changed while off-road."}), 403
+      if _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       if current_document is None and stored_document is not None:
         return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before editing."}), 409
       data = request.get_json(silent=True)
@@ -6088,6 +6109,8 @@ def setup(app):
       except (KeyError, TypeError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
 
+      if _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       params.put(PERSONALITY_PROFILES_PARAM, profile_document(profiles, enabled=enabled))
       configured = True
       migration_required = False
@@ -6142,8 +6165,8 @@ def setup(app):
       key = str(data["key"]).strip()
       if key.lower() == PERSONALITY_PROFILES_PARAM.lower():
         return jsonify({"error": "Longitudinal personality profiles must be changed with the Driving Personalities editor."}), 403
-      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_settings_write_locked():
-        return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       if key in PERSONALITY_PROFILE_ENABLE_PARAM_KEYS and type(data["value"]) is not bool:
         return jsonify({"error": f"{key} must be a JSON boolean."}), 400
       if key in LONGITUDINAL_MODE_KEYS:
@@ -6235,8 +6258,8 @@ def setup(app):
           return jsonify({"error": "CustomPersonalities must be a JSON boolean."}), 400
         enabled = data["value"]
         with _PERSONALITY_PROFILES_WRITE_LOCK:
-          if _personality_settings_write_locked():
-            return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+          if _personality_editor_write_locked():
+            return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
           ev_tuning = _get_detected_ev_tuning()
           truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
           raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
@@ -6245,6 +6268,8 @@ def setup(app):
           document = synchronise_profile_document_enabled(
             raw_document, enabled, ev_tuning, truck_tuning,
           )
+          if _personality_editor_write_locked():
+            return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
           updated = {"CustomPersonalities": enabled}
           if enabled:
             if document is None:
@@ -6392,6 +6417,9 @@ def setup(app):
           validate_tesla_can_wake_firmware(params, enabled)
         except RuntimeError as exc:
           return jsonify({"error": str(exc)}), 409
+
+      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
 
       if key in {"LeadIndicator", "HideLeadMarker"}:
         enabled = str_val.strip() in ("1", "true", "True")

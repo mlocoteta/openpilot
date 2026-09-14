@@ -5,6 +5,12 @@ import { formatProfileSpeed, profileSpeedUnit, personalityProfileParamKey } from
 const PROFILES = ["traffic", "aggressive", "standard", "relaxed"]
 const CATEGORIES = { acceleration: "Acceleration", braking: "Braking", following: "Following" }
 
+function roadFlag(value) {
+  if (value === true || value === 1 || value === "1" || value === "true" || value === "True") return true
+  if (value === false || value === 0 || value === "" || value === "0" || value === "false" || value === "False") return false
+  return null
+}
+
 export const PersonalityProfiles = {
   name: "PersonalityProfiles",
   props: { manageOpen: { default: null } },
@@ -15,8 +21,13 @@ export const PersonalityProfiles = {
   },
   computed: {
     expanded: { get() { return this.manageOpen ?? this.localExpanded }, set(value) { this.localExpanded = value; this.$emit("manage") } },
-    offroad() { return [false, "", "0", "False", "false"].includes(this.values.IsOnroad) && [true, "1", "True", "true"].includes(this.values.IsOffroad) },
-    locked() { return !this.ready || this.busy || !this.offroad },
+    isOnroad() { return roadFlag(this.values.IsOnroad) === true },
+    roadStateKnown() {
+      const onroad = roadFlag(this.values.IsOnroad)
+      const offroad = roadFlag(this.values.IsOffroad)
+      return onroad !== null && offroad !== null && onroad !== offroad
+    },
+    locked() { return !this.ready || this.busy || !this.roadStateKnown },
     editingLocked() { return this.locked || this.curvePending || !!this.data?.migration_required },
   },
   async mounted() {
@@ -118,14 +129,22 @@ export const PersonalityProfiles = {
         this.contextRequest = api.getParams()
         const values = await this.contextRequest
         if (this.disposed) return
+        const previousOnroad = roadFlag(this.values.IsOnroad)
+        const nextOnroad = roadFlag(values?.IsOnroad)
         if (!this.busy) this.values = values
-        if (!this.offroad) { this.drag = null; this.drafts = {}; this.curveText = {} }
+        if (!this.roadStateKnown || (previousOnroad !== null && nextOnroad !== previousOnroad)) {
+          this.drag = null
+          this.drafts = {}
+          this.curveText = {}
+        }
       } catch (e) { this.ready = false; this.error = "Connection lost. Reconnecting…" }
       finally { this.contextPending = false; this.contextRequest = null }
     },
     async write(action, check = () => !this.editingLocked) {
+      if (!this.roadStateKnown) return false
+      const startingOnroad = this.isOnroad
       if (this.contextPending) { try { await this.contextRequest } catch { return } }
-      if (this.disposed || !check()) return
+      if (this.disposed || !this.roadStateKnown || this.isOnroad !== startingOnroad || !check()) return
       this.busy = true
       this.error = ""
       this.notice = ""
@@ -148,7 +167,7 @@ export const PersonalityProfiles = {
       } finally { this.busy = false }
       if (!this.disposed) await this.load()
     },
-    migrate() { return this.write(() => api.migratePersonalityProfiles(), () => !this.locked) },
+    migrate() { return this.write(() => api.migratePersonalityProfiles(), () => !this.locked && !this.isOnroad) },
     toggle(key, event) {
       const value = event.target.checked
       event.target.checked = this.enabled(this.values[key])
@@ -179,29 +198,32 @@ export const PersonalityProfiles = {
     discard(profile, category) { delete this.drafts[profile + category]; delete this.curveErrors[profile + category] },
     async saveCurve(profile, category, reset = false) {
       if (this.editingLocked || this.disposed) return
+      const startingOnroad = this.isOnroad
       const curve = reset ? [] : this.draft(profile, category)
       if (!Array.isArray(curve)) return
       const snapshot = [...curve]
       this.curvePending = true
       try {
         if (this.contextPending) { try { await this.contextRequest } catch { return } }
-        if (this.disposed) return
-        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, ...(reset ? { reset: true } : {}), expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
+        if (this.disposed || !this.roadStateKnown || this.isOnroad !== startingOnroad) return
+        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, ...(reset ? { reset: true } : {}), expected: this.data.profiles[profile][category] }), () => !this.locked && this.isOnroad === startingOnroad && !this.data?.migration_required)) this.notice = ""
       } finally {
         this.discard(profile, category)
         this.curvePending = false
       }
     },
     async setAdvanced(param, raw) {
+      if (!this.roadStateKnown) return
+      const startingOnroad = this.isOnroad
       if (this.contextPending) { try { await this.contextRequest } catch { return } }
-      if (this.disposed) return
+      if (this.disposed || !this.roadStateKnown || this.isOnroad !== startingOnroad) return
       const value = Number(raw)
       const { min, max, step } = this.bounds(param)
       if (String(raw).trim() === "" || !Number.isFinite(value) || value < min || value > max || Math.abs((value - min) / step - Math.round((value - min) / step)) > 1e-7) {
         this.advancedErrors[param.key] = `Enter ${min}–${max}% in increments of ${step}.`; return
       }
       delete this.advancedErrors[param.key]
-      return this.write(() => api.updateParam({ key: param.key, value }), () => !this.paramLocked(param.key))
+      return this.write(() => api.updateParam({ key: param.key, value }), () => !this.paramLocked(param.key) && this.isOnroad === startingOnroad)
     },
     graphMax(profile, category) {
       if (this.drag?.profile === profile && this.drag.category === category) return this.drag.max
@@ -277,10 +299,11 @@ export const PersonalityProfiles = {
       <p v-if="busy" role="status" class="gx-personalities__live">Saving…</p>
       <p v-if="!data && !error" role="status">Loading profiles…</p>
       <template v-if="data">
-        <p v-if="!offroad" role="note">Active driving personality can be switched on-road. Saved profile tuning is available off-road.</p>
+        <p v-if="!roadStateKnown" role="note">Driving state is not confirmed. Editing is temporarily disabled.</p>
+        <p v-else-if="isOnroad" role="note">Changes to the active profile can take effect immediately and alter acceleration, braking, or following behavior. Make adjustments only when it is safe, and stay ready to take control.</p>
         <div v-if="data.migration_required" role="alert" class="gx-personalities__error">
           <p>Stored profiles need migration before editing.</p>
-          <button type="button" class="gx-btn" :disabled="locked" @click="migrate">Migrate profiles</button>
+          <button type="button" class="gx-btn" :disabled="locked || isOnroad" @click="migrate">Migrate profiles</button>
         </div>
         <p v-if="!enabled(values.CustomPersonalities)">Enable to configure profiles. Existing defaults remain active while off.</p>
         <div class="gx-personalities__grid">

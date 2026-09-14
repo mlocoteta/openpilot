@@ -62,11 +62,13 @@ def test_malformed_reset_never_writes(monkeypatch, extra):
   assert params.writes == []
 
 
-def test_reset_obeys_offroad_and_stale_editor_guards(monkeypatch):
+def test_reset_and_stale_editor_guards_allow_onroad_editing(monkeypatch):
   client, params = _client(monkeypatch, {"IsOnroad": True})
   payload = {"profile": "standard", "category": "following", "preset": "custom", "curve": [], "reset": True}
-  assert client.put("/api/personality_profiles", json=payload).status_code == 403
-  assert params.writes == []
+  response = client.put("/api/personality_profiles", json=payload)
+  assert response.status_code == 200
+  assert params.writes
+  params.writes.clear()
   params.values.update(IsOnroad=False, IsOffroad=True)
   payload["expected"] = {"preset": "custom", "curve": [1.0] * 10}
   assert client.put("/api/personality_profiles", json=payload).status_code == 409

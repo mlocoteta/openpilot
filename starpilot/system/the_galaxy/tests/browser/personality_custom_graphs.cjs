@@ -50,7 +50,12 @@ module.exports = async ({page, data, values, writes, errors, output}) => {
   await page.reload();
   await page.getByRole('button',{name:'Manage',exact:true}).click();
   await profile.locator('.gx-personalities__advanced > summary').click();
-  for (const button of await profile.getByRole('button',{name:/reset to default/i}).all()) assert(await button.isDisabled());
+  const onroadReset = profile.getByRole('button',{name:/reset to default/i}).first();
+  assert(await onroadReset.isEnabled());
+  const writesBeforeOnroadReset = writes.length;
+  await onroadReset.click();
+  await settled();
+  assert.equal(writes.length, writesBeforeOnroadReset + 1);
   assert.deepEqual(errors,[]);
-  console.log('PASS: rendered reset controls, retained presets, reload persistence, per-category defaults/reference parity, narrow/wide layout and onroad lock');
+  console.log('PASS: rendered reset controls, retained presets, reload persistence, per-category defaults/reference parity, narrow/wide layout and onroad editing');
 };
