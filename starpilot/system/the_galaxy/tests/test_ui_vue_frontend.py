@@ -70,7 +70,7 @@ def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
   assert 'fetch("/_gateway/devices"' in picker
   assert "localStorage" in picker
   assert "Rename comma" in picker
-  assert "hasDevices" in picker
+  assert "hasMultipleDevices" in picker
   assert "window.location.assign(device.path)" in picker
   assert shell.index('<DevicePicker />') > shell.index('v-for="(links, section) in NAV"')
   assert "Local Galaxy instances do not have the gateway directory endpoint." in picker

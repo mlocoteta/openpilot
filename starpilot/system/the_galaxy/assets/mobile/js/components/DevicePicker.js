@@ -15,7 +15,7 @@ export const DevicePicker = {
     }
   },
   computed: {
-    hasDevices() { return this.devices.length > 0 },
+    hasMultipleDevices() { return this.devices.length > 1 },
   },
   methods: {
     loadCustomNames() {
@@ -89,7 +89,7 @@ export const DevicePicker = {
     this.loadDevices()
   },
   template: `
-    <div v-if="!loading && hasDevices" class="gx-device-picker">
+    <div v-if="!loading && hasMultipleDevices" class="gx-device-picker">
       <div class="gx-device-picker__heading">
         <div>
           <div class="gx-nav-section__title">Commas</div>
