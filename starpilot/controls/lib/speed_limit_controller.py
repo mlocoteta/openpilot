@@ -285,6 +285,7 @@ class SpeedLimitController:
       (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
       (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
     )
+    higher_confirmation = confirmation_required and desired_target > self.target
     speed_limit_accepted = accepted_by_accel_button
     if not speed_limit_accepted and self._slc_adopt_counter % 4 == 0:
       speed_limit_accepted = self.starpilot_planner.params_memory.get_bool("SpeedLimitAccepted")
@@ -297,6 +298,15 @@ class SpeedLimitController:
       self.source = desired_source
       self.target = desired_target
       self.clear_persistent_override_for_limit_change(previous_limit, desired_target)
+      set_speed_kph = float(sm["carState"].vCruise)
+      target_with_offset = self.target + self.offset
+      if (
+        higher_confirmation
+        and long_active
+        and 0 < set_speed_kph < V_CRUISE_UNSET
+        and set_speed_kph * CV.KPH_TO_MS < target_with_offset
+      ):
+        self.starpilot_planner.params_memory.put_float("SLCForceCruiseSpeed", target_with_offset)
       if accepted_by_accel_button and confirmation_required:
         self._set_speed_override_input_consumed = True
 
