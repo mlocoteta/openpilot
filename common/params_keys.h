@@ -744,6 +744,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TISigmoidB", {PERSISTENT, FLOAT, "0.72", "0.72", 3}},
     {"TISigmoidC", {PERSISTENT, FLOAT, "0.16", "0.16", 3}},
     {"TISteerKp", {PERSISTENT, FLOAT, "0.3", "0.3", 3}},
+    // Experimental Accord TI low-speed reversal damping. Disabled by default;
+    // it is deliberately independent of the static sigmoid A/B/C mapping.
+    {"TILowSpeedDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TILowSpeedDampingMax", {PERSISTENT, FLOAT, "0.12", "0.12", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},

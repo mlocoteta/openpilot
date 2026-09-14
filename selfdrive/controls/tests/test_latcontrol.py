@@ -101,6 +101,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_genesis_gv70_reversal_output_scale,
   get_genesis_gv70_unwind_ff_scale,
   get_honda_accord_ff_scale,
+  get_honda_accord_low_speed_damped_output,
   get_elantra_non_scc_ff_scale,
   get_honda_accord_steer_ratio_scale,
   get_palisade_ff_scale,
@@ -1920,6 +1921,21 @@ class TestLatControl:
     assert get_honda_accord_ff_scale(0.0) > get_honda_accord_ff_scale(0.8)
     assert get_honda_accord_ff_scale(-0.8) == pytest.approx(get_honda_accord_ff_scale(0.8))
     assert get_honda_accord_ff_scale(0.0) == pytest.approx(1.0, abs=0.01)
+
+  def test_honda_accord_low_speed_damping_is_bounded_and_local(self):
+    damped, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12)
+    highway, highway_scale, highway_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 12.0, 0.12)
+    strong_turn, strong_turn_scale, strong_turn_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 2.0, 4.0, 0.12)
+
+    assert 0.88 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    assert highway == pytest.approx(1.0)
+    assert highway_scale == pytest.approx(1.0)
+    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    assert strong_turn_scale > scale
+    assert strong_turn_envelope < envelope
+    assert strong_turn > damped
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0

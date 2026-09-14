@@ -79,6 +79,12 @@ HONDA_ACCORD_TORQUE_KI = 0.15
 HONDA_ACCORD_TURN_FF_REDUCTION_MAX = 0.10
 HONDA_ACCORD_TURN_FF_ONSET = 0.45
 HONDA_ACCORD_TURN_FF_WIDTH = 0.12
+HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED = 2.5
+HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED = 5.5
+HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH = 0.30
+HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL = 1.20
+HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH = 0.25
+HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION = 0.35
 VOLT_STANDARD_CARS = (
   GM_CAR.CHEVROLET_VOLT,
   GM_CAR.CHEVROLET_VOLT_2019,
@@ -2143,6 +2149,30 @@ def get_honda_accord_ff_scale(desired_lateral_accel: float) -> float:
   turn_weight = _sigmoid((abs(desired_lateral_accel) - HONDA_ACCORD_TURN_FF_ONSET) /
                          HONDA_ACCORD_TURN_FF_WIDTH)
   return 1.0 - (HONDA_ACCORD_TURN_FF_REDUCTION_MAX * turn_weight)
+
+
+def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_torque: float,
+                                              desired_lateral_accel: float, v_ego: float,
+                                              max_reduction: float) -> tuple[float, float, float]:
+  """Smooth TI output only in the observed low-speed reversal band.
+
+  The static sigmoid mapping stays untouched. This envelope fades out below crawl,
+  above 5.5 m/s, and for stronger turns. The returned scale/envelope are telemetry
+  values for rlog review; callers must keep this feature explicitly opt-in.
+  """
+  speed_weight = (_sigmoid((v_ego - HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED) /
+                           HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH) *
+                  _sigmoid((HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED - v_ego) /
+                           HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH))
+  lat_weight = _sigmoid((HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
+                        HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH)
+  envelope = speed_weight * lat_weight
+  reduction = min(max(float(max_reduction), 0.0), 0.25) * envelope
+  scale = 1.0 - reduction
+  # Limit abrupt command-to-command reversals without adding a second hard limiter.
+  alpha = 1.0 - HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION * envelope
+  damped = prev_output_torque + alpha * ((output_torque * scale) - prev_output_torque)
+  return float(damped), float(scale), float(envelope)
 
 
 def get_bolt_2017_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:

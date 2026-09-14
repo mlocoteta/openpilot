@@ -370,6 +370,20 @@ class StarPilotLateralLayout(_SettingsPage):
         on_click=lambda: self._show_slider("TISteerKp", 0.3, 3.0, step=0.05, value_type="float"),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
       ),
+      SettingRow(
+        "TILowSpeedDampingEnabled", "toggle", tr_noop("TI Low-speed Damping (Experimental)"),
+        subtitle=tr_noop("Smooths rapid TI torque reversals around 7–12 mph. Off by default; does not change A/B/C."),
+        get_state=lambda: p.get_bool("TILowSpeedDampingEnabled"),
+        set_state=lambda s: p.put_bool("TILowSpeedDampingEnabled", s),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
+      SettingRow(
+        "TILowSpeedDampingMax", "value", tr_noop("TI Low-speed Damping Maximum"),
+        subtitle=tr_noop("Maximum output reduction in the experimental low-speed envelope. Start at 0.12."),
+        get_value=lambda: f"{(p.get_float('TILowSpeedDampingMax') or 0.12):.2f}",
+        on_click=lambda: self._show_slider("TILowSpeedDampingMax", 0.02, 0.25, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TILowSpeedDampingEnabled"),
+      ),
     ]
 
     self._manager_view = SteeringManagerView(

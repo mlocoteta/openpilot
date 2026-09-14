@@ -98,6 +98,8 @@ class LatControlTorque(LatControl):
     self.debug_counter = 0
     self.prev_desired_lateral_accel = 0.0
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
+    self.honda_accord_low_speed_damping_enabled = False
+    self.honda_accord_low_speed_damping_max = 0.12
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -191,6 +193,12 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state.frictionJerkDeadzone = 0.0
     self.starpilot_lateral_state.lowSpeedFactor = 0.0
     self.starpilot_lateral_state.unwindDetected = False
+    self.starpilot_lateral_state.tiLowSpeedDampingActive = False
+    self.starpilot_lateral_state.tiLowSpeedDampingScale = 1.0
+
+  def update_honda_accord_low_speed_damping(self, enabled, max_reduction):
+    self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
+    self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     if self.is_palisade:
@@ -686,6 +694,13 @@ class LatControlTorque(LatControl):
         output_torque *= kia_stinger_2022_center_taper
       elif self.is_civic_bosch_modified and civic_bosch_modified_a_lateral_testing_ground_active():
         output_torque *= civic_bosch_modified_a_center_taper
+      ti_low_speed_damping_scale = 1.0
+      ti_low_speed_damping_envelope = 0.0
+      if self.honda_accord_low_speed_damping_enabled:
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_low_speed_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_low_speed_damping_max,
+        )
+
       pid_log.active = True
       pid_log.p = float(self.pid.p)
       pid_log.i = float(self.pid.i)
@@ -703,6 +718,8 @@ class LatControlTorque(LatControl):
       self.starpilot_lateral_state.frictionJerkDeadzone = float(friction_jerk_deadzone)
       self.starpilot_lateral_state.lowSpeedFactor = float(low_speed_factor)
       self.starpilot_lateral_state.unwindDetected = bool(unwind_detected)
+      self.starpilot_lateral_state.tiLowSpeedDampingActive = bool(ti_low_speed_damping_envelope > 0.05)
+      self.starpilot_lateral_state.tiLowSpeedDampingScale = float(ti_low_speed_damping_scale)
       pid_log.saturated = bool(self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited_by_safety, curvature_limited))
       self.prev_output_torque = float(output_torque)
 
