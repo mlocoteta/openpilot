@@ -947,7 +947,8 @@ function NavigationDestination({
       body: JSON.stringify({
         name,
         longitude: destinationCoordinates[0],
-        latitude: destinationCoordinates[1]
+        latitude: destinationCoordinates[1],
+        routeId,
       })
     });
     await loadFavorites();

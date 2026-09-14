@@ -167,6 +167,8 @@ export const NavigationDestinationPanel = {
         if (savedDestination) {
           const raw = saved || nav?.destination || {}
           const savedName = String(raw?.name || raw?.text || "").trim()
+          const savedRouteId = String(raw?.routeId || "main")
+          this.selectedRouteId = /^(?:main|alt-[1-9]\d*)$/.test(savedRouteId) ? savedRouteId : "main"
           this.destination = { ...raw, ...savedDestination, name: savedName || labelFor(raw) || "Current destination" }
           this.query = this.destination.name
           this.navigationStarted = true
@@ -259,6 +261,7 @@ export const NavigationDestinationPanel = {
     async chooseSuggestion(place) {
       this.searching = true
       try {
+        this.selectedRouteId = "main"
         this.destination = await this.resolvePlace(place)
         this.query = this.destination.name
         this.suggestions = []
@@ -285,11 +288,13 @@ export const NavigationDestinationPanel = {
       try {
         this.destination = place || await this.resolveQuery()
         if (!this.destination) throw new Error("Enter a destination first.")
+        const selectedRouteId = this.selectedRouteId || this.routeSummary?.routeId || "main"
+        this.destination = { ...this.destination, routeId: selectedRouteId }
         await api.setNavigation(this.destination)
         this.navigationStarted = true
         this.query = this.destination.name
         this.suggestions = []
-        await this.previewDestination(this.destination)
+        await this.previewDestination(this.destination, selectedRouteId)
         showSnackbar("Destination set.")
       } catch (e) {
         this.error = e?.message || "Failed to set destination."
@@ -351,6 +356,7 @@ export const NavigationDestinationPanel = {
     selectRoute(route, routeId = "main") {
       if (!route) return
       this.selectedRouteId = routeId
+      if (this.destination) this.destination = { ...this.destination, routeId }
       this.routeSummary = {
         distance: Number(route.distance) || 0,
         duration: Number(route.duration) || 0,
@@ -358,7 +364,7 @@ export const NavigationDestinationPanel = {
       }
       if (this.map && this.routes.length) highlightRoute(this.map, this.routes, routeId)
     },
-    async previewDestination(place) {
+    async previewDestination(place, preferredRouteId = null) {
       if (!this.mapReady || !this.map || !place) return
       const mapboxgl = window.mapboxgl
       this.destinationMarker?.remove()
@@ -374,8 +380,11 @@ export const NavigationDestinationPanel = {
         const payload = await api.mapboxDirections(this.lastPosition, place, this.mapboxPublic)
         const routes = Array.isArray(payload?.routes) ? payload.routes : []
         if (routes.length) {
+          const requestedRouteId = preferredRouteId || place.routeId || this.selectedRouteId || "main"
+          const selectedIndex = routes.findIndex((_, index) => this.routeId(index) === requestedRouteId)
+          const selectedRouteId = selectedIndex >= 0 ? requestedRouteId : "main"
           this.routes = routes
-          this.selectRoute(routes[0], "main")
+          this.selectRoute(routes[selectedIndex >= 0 ? selectedIndex : 0], selectedRouteId)
           removeRouteFromMap(this.map)
           addRouteToMap(
             this.map,
