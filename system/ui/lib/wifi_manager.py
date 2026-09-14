@@ -174,9 +174,9 @@ class WifiState:
 
 
 class WifiManager:
-  def __init__(self):
+  def __init__(self, active: bool = True):
     self._networks: list[Network] = []  # an unsorted list of available Networks. a Network can be comprised of multiple APs
-    self._active = True  # used to not run when not in settings
+    self._active = active  # network scans only run while settings are open
     self._exit = False
     self._fake_networking = False
     self._nmcli_networking = False
