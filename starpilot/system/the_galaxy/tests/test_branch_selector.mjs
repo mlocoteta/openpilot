@@ -168,6 +168,14 @@ test('GalaxySelect reads optional option descriptions without adding them to col
   assert.equal(instance.label, 'Dom')
 })
 
+test('GalaxySelect ignores a second open request while its menu is open', async () => {
+  const context = vm.createContext({document: {getElementById() {}}})
+  vm.runInContext(fs.readFileSync(js + 'components/GalaxySelect.js', 'utf8').replace('export const GalaxySelect =', 'globalThis.component ='), context)
+  const instance = {...context.component.data(), open: true, disabled: false, sync() { throw new Error('menu reopened') }}
+  await context.component.methods.show.call(instance)
+  assert.equal(instance.open, true)
+})
+
 test('unavailable branch and navigation values cannot become install targets', async () => {
   const {instance, calls, confirmations} = fixture()
   for (const branch of ['other:', '', 'deleted-branch']) instance.selectTargetBranch(branch)

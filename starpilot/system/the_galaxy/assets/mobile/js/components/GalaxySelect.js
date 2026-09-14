@@ -36,7 +36,7 @@ export const GalaxySelect = {
       if (this.disabled && this.open) this.close()
     },
     async show(event) {
-      if (this.disabled) return
+      if (this.disabled || this.open) return
       this.sync()
       this.open = true
       await this.$nextTick()

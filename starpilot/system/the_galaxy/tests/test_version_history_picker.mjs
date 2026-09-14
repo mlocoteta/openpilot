@@ -41,6 +41,13 @@ test('newly appended days stay collapsed while the current day keeps its state',
   assert.equal(instance.expanded['2026-09-10'], true)
   assert.equal(instance.expanded['2026-09-09'], false)
 })
+
+test('history picker ignores a second open request while its dialog is open', async () => {
+  const instance = {disabled: false, open: true}
+  await context.picker.methods.show.call(instance)
+  assert.equal(instance.open, true)
+})
+
 test('selection emits only an available exact SHA and disabled selection emits nothing', () => {
   assert.ok(context.picker)
   const calls = []

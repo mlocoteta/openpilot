@@ -73,7 +73,7 @@ export const VersionHistoryPicker = {
       this.expanded = expanded
     },
     async show() {
-      if (this.disabled) return
+      if (this.disabled || this.open) return
       const selectedDay = this.groups.find(group => group.commits.some(commit => commit.sha === this.value))
       if (selectedDay) this.expanded[selectedDay.key] = true
       this.open = true
