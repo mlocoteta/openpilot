@@ -1,5 +1,4 @@
 const SLUG_RE = /^[A-Za-z0-9]{16}$/
-const DEVICE_NAMES_KEY = "galaxy-device-names"
 const MAX_NAME_LENGTH = 40
 
 export const DevicePicker = {
@@ -8,9 +7,10 @@ export const DevicePicker = {
     return {
       devices: [],
       activeSlug: "",
-      customNames: {},
       draftName: "",
       editingSlug: "",
+      renameError: "",
+      saving: false,
       loading: true,
     }
   },
@@ -18,30 +18,10 @@ export const DevicePicker = {
     hasMultipleDevices() { return this.devices.length > 1 },
   },
   methods: {
-    loadCustomNames() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(DEVICE_NAMES_KEY) || "{}")
-        if (saved && typeof saved === "object" && !Array.isArray(saved)) {
-          this.customNames = Object.fromEntries(Object.entries(saved).filter(([slug, name]) => (
-            SLUG_RE.test(slug) && typeof name === "string" && name.trim()
-          )))
-        }
-      } catch (error) {
-        this.customNames = {}
-      }
-    },
-    saveCustomNames() {
-      try {
-        localStorage.setItem(DEVICE_NAMES_KEY, JSON.stringify(this.customNames))
-      } catch (error) {
-        // Private browsing can disable localStorage; the current name still works.
-      }
-    },
     displayName(device, index) {
-      return this.customNames[device.slug] || device.name || `Comma ${index + 1}`
+      return device.name || `Comma ${index + 1}`
     },
     async loadDevices() {
-      this.loadCustomNames()
       try {
         const response = await fetch("/_gateway/devices", { cache: "no-store" })
         if (!response.ok) return
@@ -59,6 +39,7 @@ export const DevicePicker = {
     startRename(device, index) {
       this.editingSlug = device.slug
       this.draftName = this.displayName(device, index)
+      this.renameError = ""
       this.$nextTick(() => {
         const input = this.$refs.deviceNameInput
         ;(Array.isArray(input) ? input[0] : input)?.focus()
@@ -67,18 +48,28 @@ export const DevicePicker = {
     cancelRename() {
       this.editingSlug = ""
       this.draftName = ""
+      this.renameError = ""
     },
-    saveRename(device) {
+    async saveRename(device) {
       if (!device) return
       const name = this.draftName.trim().slice(0, MAX_NAME_LENGTH)
-      if (name) this.customNames = { ...this.customNames, [device.slug]: name }
-      else {
-        const nextNames = { ...this.customNames }
-        delete nextNames[device.slug]
-        this.customNames = nextNames
+      this.saving = true
+      this.renameError = ""
+      try {
+        const response = await fetch(`/_gateway/devices/${encodeURIComponent(device.slug)}/name`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(data?.error || "Could not save the comma name.")
+        this.devices = this.devices.map((item) => item.slug === device.slug ? { ...item, name: data.name } : item)
+        this.cancelRename()
+      } catch (error) {
+        this.renameError = error?.message || "Could not save the comma name."
+      } finally {
+        this.saving = false
       }
-      this.saveCustomNames()
-      this.cancelRename()
     },
     selectDevice(device) {
       if (!device?.path || device.slug === this.activeSlug) return
@@ -114,9 +105,10 @@ export const DevicePicker = {
         <label class="gx-device-picker__editor-label" for="gx-device-name">Rename comma</label>
         <div class="gx-device-picker__editor-row">
           <input id="gx-device-name" ref="deviceNameInput" v-model="draftName" maxlength="40" autocomplete="off" autofocus />
-          <button type="submit" class="gx-device-picker__save">Save</button>
-          <button type="button" class="gx-device-picker__cancel" @click="cancelRename">Cancel</button>
+          <button type="submit" class="gx-device-picker__save" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
+          <button type="button" class="gx-device-picker__cancel" :disabled="saving" @click="cancelRename">Cancel</button>
         </div>
+        <div v-if="renameError" class="gx-device-picker__error">{{ renameError }}</div>
       </form>
     </div>
   `,

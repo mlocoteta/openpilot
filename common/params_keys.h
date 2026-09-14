@@ -318,6 +318,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DeveloperSidebarMetric7", {PERSISTENT, INT, "7", "0", 3}},
     {"DeveloperUI", {PERSISTENT, BOOL, "0", "0", 3}},
     {"GalaxyDeveloperMode", {PERSISTENT | DONT_LOG, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
+    {"GalaxyDeviceName", {PERSISTENT | DONT_LOG, STRING, "", "", 0}},
     {"GalaxyMobileDefault", {PERSISTENT | DONT_LOG, BOOL, "1", "1", 0, SETTINGS_SIMPLE}},
     {"DeveloperWidgets", {PERSISTENT, BOOL, "1", "0", 3}},
     {"DeviceManagement", {PERSISTENT, BOOL, "1", "0", 1, SETTINGS_SIMPLE}},

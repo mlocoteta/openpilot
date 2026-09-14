@@ -1285,6 +1285,12 @@ button.gx-chip:hover {
 
 .gx-drawer.open { transform: translateX(0); }
 
+.gx-drawer.open ~ .liquid-glass-nav {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(12px) translateZ(0);
+}
+
 .gx-drawer__header {
   align-items: center;
   display: flex;
@@ -1845,6 +1851,18 @@ button.gx-chip:hover {
   color: var(--on-surface);
 }
 
+.gx-device-picker__editor button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.gx-device-picker__error {
+  color: var(--error);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  margin-top: var(--sp-2);
+}
+
 .gx-scrim {
   align-items: center;
   background: rgba(0, 0, 0, 0.6);
@@ -2373,6 +2391,7 @@ button.gx-chip:hover {
 
 @media (max-width: 767px) {
   .liquid-glass-nav { display: flex; }
+  .gx-drawer { padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
   .gx-back-btn { display: inline-flex; }
   .gx-appbar__search { flex: 1; min-width: 0; }
   .gx-status-pill { display: none; }

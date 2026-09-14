@@ -66,13 +66,19 @@ def test_ui_index_wires_vue_and_mount_point():
 def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
   picker = _read("js/components/DevicePicker.js")
   shell = _read("js/components/AppShell.js")
+  css = _read("css/material.css")
+  param_keys = (REPO_ROOT / "common/params_keys.h").read_text(encoding="utf-8")
 
   assert 'fetch("/_gateway/devices"' in picker
-  assert "localStorage" in picker
+  assert 'method: "PUT"' in picker
+  assert "/name`" in picker
   assert "Rename comma" in picker
   assert "hasMultipleDevices" in picker
   assert "window.location.assign(device.path)" in picker
   assert shell.index('<DevicePicker />') > shell.index('v-for="(links, section) in NAV"')
+  assert '"GalaxyDeviceName", {PERSISTENT | DONT_LOG, STRING' in param_keys
+  assert "localStorage" not in picker
+  assert ".gx-drawer.open ~ .liquid-glass-nav" in css
   assert "Local Galaxy instances do not have the gateway directory endpoint." in picker
 
 
