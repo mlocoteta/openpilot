@@ -30,6 +30,9 @@ class TestTetheringNat(unittest.TestCase):
     self.assertEqual(tethering_nat._subnet_cidr("8.8.8.8", 32), "8.8.8.8/32")
     self.assertIsNone(tethering_nat._subnet_cidr("300.1.1.1", 24))
     self.assertIsNone(tethering_nat._subnet_cidr("1.2.3", 24))
+    self.assertIsNone(tethering_nat._subnet_cidr("-1.2.3.4", 24))
+    self.assertIsNone(tethering_nat._subnet_cidr("1.2.three.4", 24))
+    self.assertIsNone(tethering_nat._subnet_cidr("1.2.3.4", True))
 
   def test_interface_subnet_parses_ip_output(self):
     result = subprocess.CompletedProcess(
@@ -39,6 +42,11 @@ class TestTetheringNat(unittest.TestCase):
 
   def test_interface_subnet_no_address(self):
     result = subprocess.CompletedProcess([], 0, "", "")
+    with mock.patch.object(subprocess, "run", return_value=result):
+      self.assertIsNone(tethering_nat._interface_subnet("wlan0"))
+
+  def test_interface_subnet_ignores_malformed_address_lines(self):
+    result = subprocess.CompletedProcess([], 0, "11: wlan0 inet\n11: wlan0 inet not-an-address\n", "")
     with mock.patch.object(subprocess, "run", return_value=result):
       self.assertIsNone(tethering_nat._interface_subnet("wlan0"))
 

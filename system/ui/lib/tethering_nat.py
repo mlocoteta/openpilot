@@ -35,8 +35,9 @@ def _interface_subnet(interface: str) -> str | None:
   for line in result.stdout.splitlines():
     # Example: "11: wlan0    inet 10.42.0.1/24 brd ..."
     parts = line.split()
-    if "inet" in parts and "/" in parts[parts.index("inet") + 1]:
-      addr, prefix = parts[parts.index("inet") + 1].split("/", 1)
+    inet_index = parts.index("inet") if "inet" in parts else -1
+    if inet_index >= 0 and len(parts) > inet_index + 1 and "/" in parts[inet_index + 1]:
+      addr, prefix = parts[inet_index + 1].split("/", 1)
       try:
         prefix = int(prefix)
       except ValueError:
@@ -47,10 +48,13 @@ def _interface_subnet(interface: str) -> str | None:
 
 
 def _subnet_cidr(addr: str, prefix: int) -> str | None:
-  if prefix < 8 or prefix > 32 or len(addr.split(".")) != 4:
+  if not isinstance(prefix, int) or isinstance(prefix, bool) or prefix < 8 or prefix > 32:
     return None
-  octets = [int(o) for o in addr.split(".")]
-  if any(o > 255 for o in octets):
+  try:
+    octets = [int(o) for o in addr.split(".")]
+  except (AttributeError, TypeError, ValueError):
+    return None
+  if len(octets) != 4 or any(o < 0 or o > 255 for o in octets):
     return None
   mask = ((0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF)
   network = (octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]

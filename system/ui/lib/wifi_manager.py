@@ -320,7 +320,8 @@ class WifiManager:
       self._wifi_state = WifiState(ssid=ssid, status=status)
 
       # Hotspot may already be active (boot restore / autoconnect fallback)
-      if ssid == self._tethering_ssid:
+      tethering_ssid = getattr(self, "_tethering_ssid", None)
+      if tethering_ssid is not None and ssid == tethering_ssid:
         self._ensure_tethering_nat()
 
     if block:
@@ -597,7 +598,8 @@ class WifiManager:
 
       # AGNOS (no nf_tables — verified upstream) never installs shared-mode
       # NAT rules; ensure them on every hotspot activation path
-      if wifi_state.ssid == self._tethering_ssid:
+      tethering_ssid = getattr(self, "_tethering_ssid", None)
+      if tethering_ssid is not None and wifi_state.ssid == tethering_ssid:
         self._ensure_tethering_nat()
 
       # Persist volatile connections (created by AddAndActivateConnection2) to disk
