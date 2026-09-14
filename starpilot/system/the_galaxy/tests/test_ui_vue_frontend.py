@@ -477,10 +477,12 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
   destination = _read("js/components/NavigationDestinationPanel.js")
+  assert '"./views/Navigation.js?v=nav-destination-2"' in _read("js/app.js")
+  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-2"' in _read("js/views/Navigation.js")
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
-  assert "methods: {" in destination and "secondaryLabel," in destination
+  assert destination.count("methods: {") == 1 and "secondaryLabel," in destination
   assert _read("js/components/LateralTuningPanel.js")
 
   # Shared API surface added for the second batch of ported pages.

@@ -108,9 +108,6 @@ export const NavigationDestinationPanel = {
       }).slice(0, 10)
     },
   },
-  methods: {
-    secondaryLabel,
-  },
   async mounted() {
     await this.load()
   },
@@ -123,6 +120,7 @@ export const NavigationDestinationPanel = {
     }
   },
   methods: {
+    secondaryLabel,
     async load() {
       try {
         const [nav, favoritePayload] = await Promise.all([

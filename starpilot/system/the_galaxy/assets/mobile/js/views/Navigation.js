@@ -1,4 +1,4 @@
-import { NavigationDestinationPanel } from "../components/NavigationDestinationPanel.js"
+import { NavigationDestinationPanel } from "../components/NavigationDestinationPanel.js?v=nav-destination-2"
 import { MapsPanel } from "../components/MapsPanel.js"
 import { NavigationKeysPanel } from "../components/NavigationKeysPanel.js"
 import { SpeedLimitsPanel } from "../components/SpeedLimitsPanel.js"
