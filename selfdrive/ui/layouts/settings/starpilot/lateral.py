@@ -358,9 +358,9 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "TISigmoidC", "value", tr_noop("Linear Component (c)"),
-        subtitle=tr_noop("Base linear response at all lateral accelerations."),
-        get_value=lambda: f"{(p.get_float('TISigmoidC') or 0.16):.2f}",
-        on_click=lambda: self._show_slider("TISigmoidC", 0.01, 1.0, step=0.01, value_type="float"),
+        subtitle=tr_noop("Base linear response at all lateral accelerations. Lower values soften the outer tail."),
+        get_value=lambda: f"{(p.get_float('TISigmoidC') or 0.16):.3f}",
+        on_click=lambda: self._show_slider("TISigmoidC", 0.001, 1.0, step=0.001, value_type="float"),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TISigmoidEnabled"),
       ),
       SettingRow(
