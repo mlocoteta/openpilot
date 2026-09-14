@@ -44,6 +44,10 @@ MACH_E_TURN_IN_MIN_CURVATURE = 0.002
 MACH_E_TURN_IN_FULL_CURVATURE = 0.008
 MACH_E_TURN_IN_LAG_CURVATURE = 0.006
 MACH_E_DIRECTION_CHANGE_MIN_SPEED = 9.0
+MACH_E_DIRECTION_CHANGE_LOOKAHEAD_RAMP_SPEED = 10.0
+MACH_E_DIRECTION_CHANGE_LOOKAHEAD_FULL_SPEED = 12.0
+MACH_E_DIRECTION_CHANGE_LOOKAHEAD_FADE_SPEED = 15.0
+MACH_E_DIRECTION_CHANGE_LOOKAHEAD_EXTRA = 1.60
 MACH_E_DIRECTION_CHANGE_MIN_PREVIEW_CURVATURE = 0.0005
 MACH_E_DIRECTION_CHANGE_FULL_PREVIEW_CURVATURE = 0.002
 MACH_E_DIRECTION_CHANGE_MIN_LAG_CURVATURE = 0.0008
@@ -226,6 +230,16 @@ class FordLateralController:
        MACH_E_LOW_SPEED_TURN_IN_LOOKAHEAD_EXTRA, MACH_E_TURN_IN_LOOKAHEAD_EXTRA],
     ))
 
+  @staticmethod
+  def _direction_change_lookahead_extra(v_ego: float) -> float:
+    return float(np.interp(
+      v_ego,
+      [MACH_E_DIRECTION_CHANGE_MIN_SPEED, MACH_E_DIRECTION_CHANGE_LOOKAHEAD_RAMP_SPEED,
+       MACH_E_DIRECTION_CHANGE_LOOKAHEAD_FULL_SPEED, MACH_E_DIRECTION_CHANGE_LOOKAHEAD_FADE_SPEED],
+      [MACH_E_TURN_IN_LOOKAHEAD_EXTRA, MACH_E_DIRECTION_CHANGE_LOOKAHEAD_EXTRA,
+       MACH_E_DIRECTION_CHANGE_LOOKAHEAD_EXTRA, MACH_E_TURN_IN_LOOKAHEAD_EXTRA],
+    ))
+
   def _direction_change_preview_weight(self, desired: float, preview: float, current: float) -> float:
     if self.CP.carFingerprint not in FORD_CONSERVATIVE_PREVIEW_CARS:
       return 0.0
@@ -312,15 +326,18 @@ class FordLateralController:
     desired = float(actuators.curvature)
     allow_opposite_preview = False
     if self.CP.carFingerprint in FORD_CONSERVATIVE_PREVIEW_CARS:
-      direction_change_predicted = self._predicted_curvature(v_ego, lookahead + MACH_E_TURN_IN_LOOKAHEAD_EXTRA)
+      turn_in_predicted = self._predicted_curvature(v_ego, lookahead + MACH_E_TURN_IN_LOOKAHEAD_EXTRA)
+      direction_change_predicted = turn_in_predicted
       direction_change_weight = 0.0
       if v_ego > MACH_E_DIRECTION_CHANGE_MIN_SPEED and not CS.out.steeringPressed and not self._lane_change()[0]:
+        direction_change_lookahead_extra = self._direction_change_lookahead_extra(v_ego)
+        if direction_change_lookahead_extra > MACH_E_TURN_IN_LOOKAHEAD_EXTRA:
+          direction_change_predicted = self._predicted_curvature(v_ego, lookahead + direction_change_lookahead_extra)
         direction_change_weight = self._direction_change_preview_weight(desired, direction_change_predicted, current)
       if direction_change_weight > 0.0:
         predicted = float(np.interp(direction_change_weight, [0.0, 1.0], [predicted, direction_change_predicted]))
         allow_opposite_preview = True
       else:
-        turn_in_predicted = direction_change_predicted
         turn_in_lookahead_extra = self._turn_in_lookahead_extra(v_ego)
         if (turn_in_lookahead_extra > MACH_E_TURN_IN_LOOKAHEAD_EXTRA and
             desired * self.desired_curvature_last >= 0.0 and
