@@ -591,7 +591,11 @@ def test_ui_mobile_polish_regressions():
   assert "Automatically Install Updates" in system
   assert 'key: "AutomaticUpdates"' in system
   assert "!!fastStatus?.automaticUpdates" in system
-  assert "isOnroad || autoUpdateBusy || !!fastStatus?.running" in system
+  assert "isOnroad || autoUpdateBusy || updateInProgress" in system
+  assert "getGatewayDevices" in _read("js/api.js")
+  assert "rebootStorageScope" in system
+  assert "writeRebootMarker(this.rebootStorageScope" in system
+  assert "clearRebootMarker(this.rebootStorageScope" in system
 
   bluetooth = _read("js/components/BluetoothPanel.js")
   assert "methods: {\n    address," in bluetooth

@@ -18,10 +18,17 @@ function toPercent(value) {
 
 const CORE_UPDATE_BRANCHES = ["StarPilot", "Dom"]
 const REBOOT_PENDING_STORAGE_KEY = "galaxy-update-reboot-pending"
+const LOCAL_DEVICE_SCOPE = "local"
+const DEVICE_SLUG_RE = /^[A-Za-z0-9]{16}$/
 
-function readRebootMarker() {
+function rebootStorageKey(scope = LOCAL_DEVICE_SCOPE) {
+  const normalizedScope = String(scope || "").trim() || LOCAL_DEVICE_SCOPE
+  return REBOOT_PENDING_STORAGE_KEY + ":" + normalizedScope
+}
+
+function readRebootMarker(scope = LOCAL_DEVICE_SCOPE) {
   try {
-    const raw = localStorage.getItem(REBOOT_PENDING_STORAGE_KEY)
+    const raw = localStorage.getItem(rebootStorageKey(scope))
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const startedAt = Number(parsed?.startedAt)
@@ -31,12 +38,23 @@ function readRebootMarker() {
   }
 }
 
-function writeRebootMarker(startedAt) {
-  try { localStorage.setItem(REBOOT_PENDING_STORAGE_KEY, JSON.stringify({ startedAt })) } catch (e) {}
+function writeRebootMarker(scope, startedAt) {
+  try { localStorage.setItem(rebootStorageKey(scope), JSON.stringify({ startedAt })) } catch (e) {}
 }
 
-function clearRebootMarker() {
-  try { localStorage.removeItem(REBOOT_PENDING_STORAGE_KEY) } catch (e) {}
+function clearRebootMarker(scope) {
+  try { localStorage.removeItem(rebootStorageKey(scope)) } catch (e) {}
+}
+
+async function resolveDeviceScope() {
+  try {
+    const payload = await api.getGatewayDevices()
+    if (!payload) return LOCAL_DEVICE_SCOPE
+    return DEVICE_SLUG_RE.test(payload?.activeSlug || "") ? payload.activeSlug : LOCAL_DEVICE_SCOPE
+  } catch (e) {
+    // Direct/local Galaxy instances do not have the gateway directory endpoint.
+    return LOCAL_DEVICE_SCOPE
+  }
 }
 
 export const SystemTools = {
@@ -67,8 +85,9 @@ export const SystemTools = {
       isOnroad: false,
       fastStatus: null,
       statusUnavailable: false,
-      rebootPending: !!readRebootMarker(),
-      rebootStartedAt: readRebootMarker() || 0,
+      rebootStorageScope: LOCAL_DEVICE_SCOPE,
+      rebootPending: false,
+      rebootStartedAt: 0,
       rebootOfflineSeen: false,
       reconnectedNotice: false,
       checkedForUpdates: false,
@@ -82,14 +101,35 @@ export const SystemTools = {
     }
   },
   created() {
-    this.poll = usePolling(() => this.loadFastStatus(), {
-      interval: 1000,
-      enabled: () => this.statusPollingNeeded,
+    this.rebootScopeCancelled = false
+    this.rebootReady = resolveDeviceScope().then((scope) => {
+      if (this.rebootScopeCancelled) return
+      this.rebootStorageScope = scope
+      const marker = readRebootMarker(scope)
+      this.rebootPending = !!marker
+      this.rebootStartedAt = marker || 0
+    }).finally(() => {
+      if (this.rebootScopeCancelled) return
+      this.poll = usePolling(() => this.loadFastStatus(), {
+        interval: 1000,
+        enabled: () => this.statusPollingNeeded,
+      })
+      this.poll.start()
     })
-    this.poll.start()
   },
-  mounted() { this.loadBranches(); this.loadProfiles(); this.loadTailscale() },
-  beforeUnmount() { this.poll?.destroy(); this.resetVersions() },
+  mounted() {
+    this.rebootReady.then(() => {
+      if (this.rebootScopeCancelled) return
+      this.loadBranches()
+      this.loadProfiles()
+      this.loadTailscale()
+    })
+  },
+  beforeUnmount() {
+    this.rebootScopeCancelled = true
+    this.poll?.destroy()
+    this.resetVersions()
+  },
   computed: {
     primaryBranchValue() {
       if (this.otherBranchesOpen) return "other:"
@@ -198,13 +238,13 @@ export const SystemTools = {
       this.rebootStartedAt = Date.now()
       this.rebootOfflineSeen = false
       this.reconnectedNotice = false
-      writeRebootMarker(this.rebootStartedAt)
+      writeRebootMarker(this.rebootStorageScope, this.rebootStartedAt)
     },
     clearRebootPending(showNotice = true) {
       this.rebootPending = false
       this.rebootStartedAt = 0
       this.rebootOfflineSeen = false
-      clearRebootMarker()
+      clearRebootMarker(this.rebootStorageScope)
       if (showNotice) this.reconnectedNotice = true
     },
     async backupToggles() {

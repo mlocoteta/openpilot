@@ -42,6 +42,12 @@ function postOk(url, opts = {}) {
 }
 
 export const api = {
+  async getGatewayDevices() {
+    const response = await fetch("/_gateway/devices", { cache: "no-store" })
+    if (!response.ok) return null
+    return response.json()
+  },
+
   postAction(endpoint) { return request(endpoint, { method: "POST" }) },
   getOptions(endpoint) { return request(endpoint) },
 
