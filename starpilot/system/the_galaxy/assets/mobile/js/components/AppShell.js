@@ -2,6 +2,7 @@ import { store, navigate, goBack, toolHref, toggleTheme, toggleNavPinned } from 
 import { api } from "../api.js"
 import { usePolling } from "../composables.js"
 import { languageState, setLanguage, t } from "../i18n.js"
+import { DevicePicker } from "./DevicePicker.js"
 
 const NAV = {
   recordings: [
@@ -33,6 +34,7 @@ const BOTTOM_NAV = [
 
 export const AppShell = {
   name: "AppShell",
+  components: { DevicePicker },
   data() {
     return { store, BOTTOM_NAV, NAV }
   },
@@ -115,9 +117,6 @@ export const AppShell = {
           <i class="bi bi-arrow-left"></i>
         </button>
         <div class="gx-appbar__pill">
-          <button type="button" class="gx-icon-btn gx-menu-btn" :aria-label="tr('Menu')" @click="store.drawerOpen = true">
-            <i class="bi bi-list"></i>
-          </button>
           <span class="gx-appbar__home" role="button" tabindex="0"
             :aria-label="tr('Galaxy home')" @click="goHome" @keydown.enter="goHome" @keydown.space.prevent="goHome">
             <span class="gx-appbar__title">Galaxy</span>
@@ -140,10 +139,8 @@ export const AppShell = {
           :title="isLight ? tr('Dark mode') : tr('Light mode')" @click="themeToggle">
           <i class="bi" :class="isLight ? 'bi-moon-stars-fill' : 'bi-sun-fill'"></i>
         </button>
-        <button type="button" class="gx-icon-btn gx-appbar__pin" :aria-pressed="navPinned"
-          :aria-label="navPinned ? tr('Unpin navigation') : tr('Pin navigation')"
-          :title="navPinned ? tr('Unpin navigation') : tr('Pin navigation')" @click="toggleNavPin">
-          <i class="bi" :class="navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i>
+        <button type="button" class="gx-icon-btn gx-appbar__menu" :aria-label="tr('Menu')" :title="tr('Menu')" @click="store.drawerOpen = true">
+          <i class="bi bi-list"></i>
         </button>
       </header>
 
@@ -160,6 +157,7 @@ export const AppShell = {
             <i class="bi" :class="navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i>
           </button>
         </div>
+        <DevicePicker />
         <div class="gx-nav-section">
           <div class="gx-nav-section__title">{{ tr("Main") }}</div>
           <a class="gx-nav-item" :class="{ active: isActive('/') }" @click.prevent="navTo('/')">

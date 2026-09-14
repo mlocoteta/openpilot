@@ -26,6 +26,7 @@ def test_ui_app_shell_files_exist():
     "js/params.js",
     "js/i18n.js",
     "js/components/AppShell.js",
+    "js/components/DevicePicker.js",
     "js/components/GalaxyModal.js",
     "js/components/GalaxySection.js",
     "js/components/GalaxyEmbed.js",
@@ -60,6 +61,17 @@ def test_ui_index_wires_vue_and_mount_point():
   assert '"vue": "/assets/vendor/vue/vue.esm-browser.js"' in index
   assert '<title>Galaxy</title>' in index
   assert 'apple-mobile-web-app-title" content="Galaxy"' in index
+
+
+def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
+  picker = _read("js/components/DevicePicker.js")
+  shell = _read("js/components/AppShell.js")
+
+  assert 'fetch("/_gateway/devices"' in picker
+  assert "hasMultipleDevices" in picker
+  assert "window.location.assign(device.path)" in picker
+  assert '<DevicePicker />' in shell
+  assert "Local Galaxy instances do not have the gateway directory endpoint." in picker
 
 
 def test_ui_uses_same_backend_endpoints():

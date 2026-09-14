@@ -361,7 +361,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 
 .gx-appbar .gx-appbar__back,
 .gx-appbar .gx-theme-toggle,
-.gx-appbar .gx-appbar__pin {
+.gx-appbar .gx-appbar__menu {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -376,7 +376,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 }
 
 .gx-appbar .gx-appbar__back:active,
-.gx-appbar .gx-theme-toggle:active { transform: scale(0.92); }
+.gx-appbar .gx-theme-toggle:active,
+.gx-appbar .gx-appbar__menu:active { transform: scale(0.92); }
 
 .gx-appbar__title {
   background: linear-gradient(135deg, #8b6cc5 0%, #5ec8c8 55%, #d4789c 100%);
@@ -464,8 +465,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-icon-btn:active { transform: scale(0.9); }
 .gx-icon-btn i { font-size: 1.3rem; }
 .gx-back-btn { display: none; }
-.gx-menu-btn { display: inline-flex; }
-.gx-appbar .gx-appbar__pin { display: none; }
+.gx-appbar__menu { display: inline-flex; }
 
 .gx-searchwrap {
   align-items: center;
@@ -1724,6 +1724,24 @@ button.gx-chip:hover {
 
 .gx-nav-item i { font-size: 1.3rem; width: 24px; }
 
+.gx-device-picker__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gx-device-picker__current {
+  background: var(--glass-active-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  margin-left: auto;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
 .gx-scrim {
   align-items: center;
   background: rgba(0, 0, 0, 0.6);
@@ -2252,17 +2270,14 @@ button.gx-chip:hover {
 
 @media (max-width: 767px) {
   .liquid-glass-nav { display: flex; }
-  .gx-menu-btn { display: none; }
   .gx-back-btn { display: inline-flex; }
   .gx-appbar__search { flex: 1; min-width: 0; }
   .gx-status-pill { display: none; }
-  .gx-appbar .gx-appbar__pin { display: inline-flex; }
   .gx-content { padding-left: var(--sp-3); padding-right: var(--sp-3); }
 }
 
 @media (min-width: 768px) {
   .liquid-glass-nav { display: none; }
-  .gx-menu-btn { display: inline-flex; }
   .gx-back-btn { display: none; }
   .gx-content { padding-bottom: var(--sp-6); }
 }
