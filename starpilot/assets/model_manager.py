@@ -265,6 +265,25 @@ def model_accelerator_artifact_installed(model_key: str, accelerator: str = MODE
   )
 
 
+def selected_chestnut_artifacts_ready(params) -> bool:
+  """Return whether the selected Chestnut workload is installed for offroad diagnostics."""
+  big_model_id, _, _ = get_model_profile(params, "big")
+  if big_model_id and file_chunked_exists(MODELS_PATH / driving_artifact_filename(big_model_id)):
+    return True
+
+  config = load_model_lab_config(params)
+  lateral_model_id = canonical_model_key(config["lateralModel"])
+  longitudinal_model_id = canonical_model_key(config["longitudinalModel"])
+  return bool(
+    config["enabled"] and
+    lateral_model_id and
+    longitudinal_model_id and
+    lateral_model_id != longitudinal_model_id and
+    model_accelerator_artifact_installed(lateral_model_id) and
+    model_accelerator_artifact_installed(longitudinal_model_id)
+  )
+
+
 def external_gpu_available() -> bool:
   """Return whether the supported external GPU link is ready for modeld."""
   try:
