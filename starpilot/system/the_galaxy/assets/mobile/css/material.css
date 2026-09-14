@@ -1275,6 +1275,8 @@ button.gx-chip:hover {
   transition: transform var(--motion-slow);
   width: 84vw;
   z-index: calc(var(--z-drawer) + 1);
+  display: flex;
+  flex-direction: column;
 }
 
 [data-theme="light"] .gx-drawer {
@@ -1724,6 +1726,46 @@ button.gx-chip:hover {
 
 .gx-nav-item i { font-size: 1.3rem; width: 24px; }
 
+.gx-device-picker {
+  border-top: 1px solid var(--glass-border);
+  margin-top: auto;
+  padding-top: var(--sp-3);
+}
+
+.gx-device-picker__heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 var(--sp-2) var(--sp-1);
+}
+
+.gx-device-picker__heading .gx-nav-section__title {
+  padding: 0;
+}
+
+.gx-device-picker__heading-icon {
+  color: var(--primary);
+  font-size: var(--fs-sm);
+  padding-right: var(--sp-2);
+}
+
+.gx-device-picker__hint {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  padding: 0 var(--sp-2);
+}
+
+.gx-device-picker__row {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.gx-device-picker__item {
+  flex: 1;
+  min-width: 0;
+}
+
 .gx-device-picker__name {
   min-width: 0;
   overflow: hidden;
@@ -1740,6 +1782,67 @@ button.gx-chip:hover {
   margin-left: auto;
   padding: 3px 8px;
   white-space: nowrap;
+}
+
+.gx-device-picker__rename {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  height: 36px;
+  width: 36px;
+}
+
+.gx-device-picker__rename:hover {
+  color: var(--primary);
+}
+
+.gx-device-picker__editor {
+  background: var(--surface-container);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  margin: var(--sp-2) var(--sp-2) 0;
+  padding: var(--sp-3);
+}
+
+.gx-device-picker__editor-label {
+  color: var(--text-muted);
+  display: block;
+  font-size: var(--fs-xs);
+  margin-bottom: var(--sp-2);
+}
+
+.gx-device-picker__editor-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.gx-device-picker__editor input {
+  background: var(--surface-container-high);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  flex: 1 1 100%;
+  font: inherit;
+  min-width: 0;
+  padding: var(--sp-2);
+}
+
+.gx-device-picker__editor button {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.gx-device-picker__save {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.gx-device-picker__cancel {
+  background: transparent;
+  color: var(--on-surface);
 }
 
 .gx-scrim {

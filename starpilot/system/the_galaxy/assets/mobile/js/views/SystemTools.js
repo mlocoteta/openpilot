@@ -17,6 +17,27 @@ function toPercent(value) {
 }
 
 const CORE_UPDATE_BRANCHES = ["StarPilot", "Dom"]
+const REBOOT_PENDING_STORAGE_KEY = "galaxy-update-reboot-pending"
+
+function readRebootMarker() {
+  try {
+    const raw = localStorage.getItem(REBOOT_PENDING_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const startedAt = Number(parsed?.startedAt)
+    return Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null
+  } catch (e) {
+    return null
+  }
+}
+
+function writeRebootMarker(startedAt) {
+  try { localStorage.setItem(REBOOT_PENDING_STORAGE_KEY, JSON.stringify({ startedAt })) } catch (e) {}
+}
+
+function clearRebootMarker() {
+  try { localStorage.removeItem(REBOOT_PENDING_STORAGE_KEY) } catch (e) {}
+}
 
 export const SystemTools = {
   name: "SystemTools",
@@ -45,6 +66,11 @@ export const SystemTools = {
 
       isOnroad: false,
       fastStatus: null,
+      statusUnavailable: false,
+      rebootPending: !!readRebootMarker(),
+      rebootStartedAt: readRebootMarker() || 0,
+      rebootOfflineSeen: false,
+      reconnectedNotice: false,
       checkedForUpdates: false,
       busy: "",
       autoUpdateBusy: false,
@@ -80,8 +106,8 @@ export const SystemTools = {
       return this.branchLoading || this.isOnroad || !!this.fastStatus?.isOnroad || this.updateInProgress || !!this.busy
     },
     statusRebooting() { return String(this.fastStatus?.stage || "").trim().toLowerCase() === "rebooting" },
-    updateInProgress() { return !!this.fastStatus?.running || this.statusRebooting },
-    statusPollingNeeded() { return !this.fastStatus || this.updateInProgress },
+    updateInProgress() { return !!this.fastStatus?.running || this.statusRebooting || this.rebootPending },
+    statusPollingNeeded() { return !this.fastStatus || this.updateInProgress || this.rebootPending },
     versionChoices() { return this.targetBranch === "StarPilot" ? releaseVersions(this.versionCommits) : this.versionCommits },
     installVersionBlocked() {
       return this.branchSwitchBlocked || this.branchBusy || !this.branches.includes(this.targetBranch) ||
@@ -145,12 +171,41 @@ export const SystemTools = {
       try {
         const status = await api.getUpdateFastStatus()
         if (!status) throw new Error("Update status unavailable")
+        const stage = String(status.stage || "").trim().toLowerCase()
+        if (stage === "rebooting" && !this.rebootPending) {
+          this.rebootPending = true
+          this.rebootStartedAt = Date.now()
+          writeRebootMarker(this.rebootStartedAt)
+        }
+        const pendingAge = this.rebootStartedAt ? Date.now() - this.rebootStartedAt : 0
+        const deviceReturned = this.rebootPending && !status.running && stage !== "rebooting" &&
+          (this.statusUnavailable || pendingAge >= 30_000)
+        const updateFailed = this.rebootPending && stage === "error"
         this.fastStatus = status
+        this.statusUnavailable = false
         this.isOnroad = !!status.isOnroad
+        if (deviceReturned) this.clearRebootPending()
+        else if (updateFailed) this.clearRebootPending(false)
       } catch (e) {
-        this.fastStatus = null
+        this.statusUnavailable = true
+        if (this.rebootPending) this.rebootOfflineSeen = true
+        else this.fastStatus = null
         if (throwOnError) throw e
       }
+    },
+    markRebootPending() {
+      this.rebootPending = true
+      this.rebootStartedAt = Date.now()
+      this.rebootOfflineSeen = false
+      this.reconnectedNotice = false
+      writeRebootMarker(this.rebootStartedAt)
+    },
+    clearRebootPending(showNotice = true) {
+      this.rebootPending = false
+      this.rebootStartedAt = 0
+      this.rebootOfflineSeen = false
+      clearRebootMarker()
+      if (showNotice) this.reconnectedNotice = true
     },
     async backupToggles() {
       try {
@@ -228,6 +283,7 @@ export const SystemTools = {
       if (!(await GalaxyConfirm({ title: "Reset toggles to default?", message: "This resets all toggles to their default values and reboots.", confirmLabel: "Reset", danger: true }))) return
       try {
         await api.resetTogglesDefault()
+        this.markRebootPending()
         showSnackbar("Resetting toggles to default... rebooting.")
       } catch (e) {
         showSnackbar("Reset failed.", "error")
@@ -347,6 +403,7 @@ export const SystemTools = {
           return
         }
         const result = await api.installUpdateVersion(branch, commit)
+        this.markRebootPending()
         showSnackbar(result?.message || `Installing ${version} on ${branch}...`)
         await this.loadFastStatus()
       } catch (e) {
@@ -420,6 +477,7 @@ export const SystemTools = {
         }
         const fn = action === "fast" ? api.updateFast : action === "recover" ? api.updateRecover : api.updateRollback
         const payload = await fn()
+        this.markRebootPending()
         showSnackbar(payload?.message || "Update started.")
         await this.loadFastStatus()
       } catch (e) {
@@ -432,6 +490,7 @@ export const SystemTools = {
       if (!(await GalaxyConfirm({ title: "Factory reset (SAVE ME)?", message: "This wipes params, backups, themes, models, maps, and route data, then reboots. This cannot be undone.", confirmLabel: "Factory Reset", danger: true }))) return
       try {
         await api.factoryReset()
+        this.markRebootPending()
         showSnackbar("SAVE ME initiated — factory resetting...")
         await this.loadFastStatus()
       } catch (e) {
@@ -502,22 +561,26 @@ export const SystemTools = {
           <div v-if="branchLoading" class="gx-loading">Loading update info...</div>
           <template v-else>
             <GxNotice v-if="isOnroad" text="Updates and branch switching are only available while offroad." style="margin-bottom:12px;" />
+            <GxNotice v-if="rebootPending" tone="info" icon="bi-arrow-repeat gx-spin" title="Device rebooting"
+              :text="statusUnavailable ? 'The device is temporarily offline. Galaxy will keep checking until it reconnects.' : 'The update is complete. Waiting for the device to reconnect…'" />
+            <GxNotice v-else-if="reconnectedNotice" tone="info" icon="bi-check-circle-fill" title="Device reconnected"
+              text="Galaxy is connected again and the update status is current." />
 
             <div v-if="fastStatus" class="gx-card" style="margin-bottom:12px;">
               <div class="gx-section__header">
                 <i class="bi bi-arrow-repeat"></i>
                 <span class="gx-section__title">Update Status</span>
-                <span v-if="updateInProgress" class="gx-chip" style="background:var(--primary);color:var(--on-primary);">{{ statusRebooting ? 'Reconnecting…' : fastStatus.progressPercent + '%' }}</span>
+                <span v-if="updateInProgress" class="gx-chip" style="background:var(--primary);color:var(--on-primary);">{{ rebootPending || statusRebooting ? 'Reconnecting…' : fastStatus.progressPercent + '%' }}</span>
                 <span v-else-if="updateAvailable" class="gx-chip" style="background:var(--warning);color:var(--black);">Update available</span>
                 <span v-else-if="checkedForUpdates" class="gx-chip">Up to date</span>
                 <span v-else class="gx-chip">Not checked</span>
               </div>
               <div style="padding: var(--sp-3); display:grid; gap:6px;">
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Installed branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
-                <div v-if="updateInProgress" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
+                <div v-if="updateInProgress && !rebootPending" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Local</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.localCommit) }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.remoteCommit) }}</span></div>
-                <div v-if="updateInProgress" class="gx-update-progress" role="progressbar" aria-label="Update progress"
+                <div v-if="updateInProgress && !rebootPending" class="gx-update-progress" role="progressbar" aria-label="Update progress"
                   :aria-valuenow="Math.round(fastStatus.progressPercent || 0)" aria-valuemin="0" aria-valuemax="100">
                   <div class="gx-update-progress__track">
                     <div class="gx-update-progress__fill" :class="{ 'gx-update-progress__fill--error': fastStatus.stage === 'error' }"
@@ -530,6 +593,7 @@ export const SystemTools = {
                   <small v-if="fastStatus.progressDetail">{{ fastStatus.progressDetail }}</small>
                 </div>
                 <div v-if="fastStatus.message" class="gx-note">{{ fastStatus.message }}</div>
+                <div v-if="statusUnavailable" class="gx-note">Waiting for the device to reconnect. The last update status is being kept on screen.</div>
                 <div v-if="fastStatus.warning && (updateInProgress || fastStatus.updateAvailable)" class="gx-note gx-note--danger">{{ fastStatus.warning }}</div>
                 <div v-if="fastStatus.agnosUpdate?.available && fastStatus.agnosUpdate?.warnings?.length" style="margin-top:4px;">
                   <div v-for="w in fastStatus.agnosUpdate.warnings" :key="w" class="gx-note gx-note--danger"><i class="bi bi-exclamation-triangle-fill"></i> {{ w }}</div>

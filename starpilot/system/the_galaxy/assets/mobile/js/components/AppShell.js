@@ -157,7 +157,6 @@ export const AppShell = {
             <i class="bi" :class="navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i>
           </button>
         </div>
-        <DevicePicker />
         <div class="gx-nav-section">
           <div class="gx-nav-section__title">{{ tr("Main") }}</div>
           <a class="gx-nav-item" :class="{ active: isActive('/') }" @click.prevent="navTo('/')">
@@ -176,6 +175,7 @@ export const AppShell = {
             <i class="bi" :class="link.icon"></i><span>{{ tr(link.name, link.name) }}</span>
           </a>
         </div>
+        <DevicePicker />
       </aside>
 
       <main class="gx-content">
