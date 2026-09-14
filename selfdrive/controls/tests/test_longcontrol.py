@@ -8,6 +8,7 @@ import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tun
 from opendbc.car.gm.values import CAR, GMFlags
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
+from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.longcontrol import (
   LongControl,
@@ -1234,6 +1235,34 @@ def test_santa_fe_final_stop_cap_softens_only_last_kmh():
   assert tuning.shape_stopping_accel(-2.0, -0.2, True, 0.2, False, -2.0) == pytest.approx(-0.30)
   assert tuning.shape_stopping_accel(-2.0, -0.2, True, 1.5, False, -2.0) == pytest.approx(-2.0)
   assert tuning.shape_stopping_accel(-2.0, 0.3, False, 0.2, False, -2.0) == pytest.approx(-2.0)
+
+
+def test_taos_comfort_stop_cap_softens_non_urgent_moving_lead():
+  CP = make_longcontrol_cp(
+    brand="volkswagen",
+    carFingerprint=VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1,
+  )
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+  moving_lead = SimpleNamespace(status=True, dRel=7.0, vLead=2.6, yRel=0.0)
+
+  output = tuning.shape_stopping_accel(
+    -1.88, -2.12, True, 3.4, True, -0.55, leads=(moving_lead,)
+  )
+
+  assert output == pytest.approx(-0.94)
+
+
+def test_taos_comfort_stop_cap_preserves_urgent_lead_braking():
+  CP = make_longcontrol_cp(
+    brand="volkswagen",
+    carFingerprint=VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1,
+  )
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+  stopped_lead = SimpleNamespace(status=True, dRel=6.0, vLead=0.2, yRel=0.0)
+
+  assert tuning.shape_stopping_accel(
+    -1.88, -2.12, True, 3.4, True, -0.55, leads=(stopped_lead,)
+  ) == pytest.approx(-1.88)
 
 
 def test_toyota_sienna_target_filter_smooths_mild_high_speed_handoffs():

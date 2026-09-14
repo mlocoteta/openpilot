@@ -100,8 +100,8 @@ MIN_LAT_CONTROL_SPEED = 0.3
 BIG_MODEL_LOAD_WAIT_TIMEOUT_MS = 30000
 BIG_MODEL_RUN_WAIT_TIMEOUT_MS = 3000
 EXTERNAL_GPU_POWER_READY_MV = 10000
-EXTERNAL_GPU_EGMP_READY_MV = 12500
 EXTERNAL_GPU_POWER_STABLE_SECONDS = 3.0
+EXTERNAL_GPU_POWER_WAIT_TIMEOUT_SECONDS = 60.0
 EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS = 10.0
 LAT_SMOOTH_BP = [2.0, 8.0]
 
@@ -164,6 +164,7 @@ def wait_for_external_gpu_power_ready(CP=None) -> None:
   vehicle_ready = egmp_bus is None
   stable_since = None
   last_log = 0.0
+  wait_started = time.monotonic()
 
   while True:
     sm.update(1000)
@@ -174,16 +175,20 @@ def wait_for_external_gpu_power_ready(CP=None) -> None:
       vehicle_ready = True
 
     voltage = _external_gpu_power_voltage(device_type, sm["pandaStates"], sm["peripheralState"])
-    minimum_voltage = EXTERNAL_GPU_EGMP_READY_MV if egmp_bus is not None else EXTERNAL_GPU_POWER_READY_MV
     ready, stable_since = _external_gpu_power_ready(
       voltage,
       now,
       stable_since if vehicle_ready else None,
-      minimum_voltage,
     )
     if vehicle_ready and ready:
       cloudlog.warning(f"vehicle power stable at {voltage / 1000:.2f} V; starting external GPU load")
       return
+
+    if now - wait_started >= EXTERNAL_GPU_POWER_WAIT_TIMEOUT_SECONDS:
+      detail = "unavailable" if voltage is None else f"{voltage / 1000:.2f} V"
+      state = "READY" if vehicle_ready else "not READY"
+      raise TimeoutError(f"external GPU power did not become ready after {EXTERNAL_GPU_POWER_WAIT_TIMEOUT_SECONDS:.0f}s "
+                         f"(vehicle {state}, power {detail})")
 
     if now - last_log >= EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS:
       detail = "unavailable" if voltage is None else f"{voltage / 1000:.2f} V"
@@ -191,7 +196,7 @@ def wait_for_external_gpu_power_ready(CP=None) -> None:
         cloudlog.warning(f"external GPU load deferred: vehicle power is {detail}; waiting for e-GMP READY")
       else:
         cloudlog.warning(f"external GPU load deferred: vehicle power is {detail}; waiting for " +
-                         f"{minimum_voltage / 1000:.1f} V to remain stable")
+                         f"{EXTERNAL_GPU_POWER_READY_MV / 1000:.1f} V to remain stable")
       last_log = now
 
 

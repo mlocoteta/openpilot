@@ -27,6 +27,10 @@ add_panda_targets() {
     panda_h7_remote_can_ignition_only
     panda_hkg_remote_can_ignition_only
     panda_h7_hkg_remote_can_ignition_only
+    panda_tesla_wake
+    panda_h7_tesla_wake
+    panda_tesla_wake_can_ignition_only
+    panda_h7_tesla_wake_can_ignition_only
     panda_jungle_h7
     body_h7
   )

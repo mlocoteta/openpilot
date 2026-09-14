@@ -24,7 +24,9 @@ def test_ui_app_shell_files_exist():
     "js/store.js",
     "js/api.js",
     "js/params.js",
+    "js/i18n.js",
     "js/components/AppShell.js",
+    "js/components/DevicePicker.js",
     "js/components/GalaxyModal.js",
     "js/components/GalaxySection.js",
     "js/components/GalaxyEmbed.js",
@@ -35,6 +37,7 @@ def test_ui_app_shell_files_exist():
     "js/components/WheelControls.js",
     "js/components/BluetoothPanel.js",
     "js/components/DevModeBanner.js",
+    "js/components/LanguageSelector.js",
     "js/composables.js",
     "js/views/Home.js",
     "js/views/Settings.js",
@@ -60,6 +63,25 @@ def test_ui_index_wires_vue_and_mount_point():
   assert 'apple-mobile-web-app-title" content="Galaxy"' in index
 
 
+def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
+  picker = _read("js/components/DevicePicker.js")
+  shell = _read("js/components/AppShell.js")
+  css = _read("css/material.css")
+  param_keys = (REPO_ROOT / "common/params_keys.h").read_text(encoding="utf-8")
+
+  assert 'fetch("/_gateway/devices"' in picker
+  assert 'method: "PUT"' in picker
+  assert "/name`" in picker
+  assert "Rename comma" in picker
+  assert "hasMultipleDevices" in picker
+  assert "window.location.assign(device.path)" in picker
+  assert shell.index('<DevicePicker />') > shell.index('v-for="(links, section) in NAV"')
+  assert '"GalaxyDeviceName", {PERSISTENT | DONT_LOG, STRING' in param_keys
+  assert "localStorage" not in picker
+  assert ".gx-drawer.open ~ .liquid-glass-nav" in css
+  assert "Local Galaxy instances do not have the gateway directory endpoint." in picker
+
+
 def test_ui_uses_same_backend_endpoints():
   settings = _read("js/views/Settings.js")
   params = _read("js/params.js")
@@ -73,11 +95,32 @@ def test_ui_uses_same_backend_endpoints():
   assert '"/api/params/defaults"' in api
 
 
+def test_ui_language_selector_uses_shared_device_language_setting():
+  i18n = _read("js/i18n.js")
+  selector = _read("js/components/LanguageSelector.js")
+  settings = _read("js/views/Settings.js")
+
+  for code in ["en", "es", "fr", "ko", "zh-CHS"]:
+    assert f'value: "{code}"' in i18n
+  assert "localStorage" in i18n
+  assert "LanguageSetting" in selector
+  assert "main_${next}" in selector
+  assert "<LanguageSelector" in settings
+
+
 def test_ui_ports_developer_mode_gating():
   params = _read("js/params.js")
   assert "countAdvancedHiddenByDeveloperMode" in params
   assert "isSettingVisible" in params
   assert "isAdvancedHiddenByDeveloperMode" in params
+
+
+def test_ui_exposes_gm_auto_hold_to_buick():
+  params = _read("js/params.js")
+  device_settings = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/device_settings.js").read_text(encoding="utf-8")
+
+  assert 'GMAutoHold: ["Buick", "Chevrolet", "Holden"]' in params
+  assert 'GMAutoHold: ["Buick", "Chevrolet", "Holden"]' in device_settings
 
 
 def test_ui_restores_hierarchical_sub_toggle_rendering():
@@ -92,7 +135,9 @@ def test_ui_restores_hierarchical_sub_toggle_rendering():
   assert "hasChildParams" in params
 
   assert "SettingTree" in settings
-  assert '<SettingTree :params="activeSection.params"' in settings
+  assert '<SettingTree :params="ordinaryParams(activeSection)"' in settings
+  assert '<LongitudinalMode v-if="modeSection(activeSection)"' in settings
+  assert 's.params.filter(p => !this.isModeParam(p))' in settings
 
   # SettingTree recursively reveals children; subpanels are collapsed by default
   # (classic Galaxy behavior) and expand only when the user taps Manage/Close.
@@ -111,7 +156,7 @@ def test_ui_ports_all_tool_views():
     "js/views/Logs.js": ["getErrorLogs", "tmuxSnapshot"],
     "js/components/TroubleshootPanel.js": ["getTroubleshoot", "resetTroubleshootSection", "GalaxyConfirm"],
     "js/views/Tuning.js": ["LateralTuningPanel"],
-    "js/views/Navigation.js": ["getNavigation", "setNavigation", "MapsPanel", "NavigationKeysPanel"],
+    "js/views/Navigation.js": ["NavigationDestinationPanel", "MapsPanel", "NavigationKeysPanel"],
     "js/views/ToolEmbed.js": ["/manage_maps", "/manage_navigation_keys"],
     "js/views/SystemTools.js": [
       "backupToggles", "restoreToggles", "getToggleProfiles", "saveToggleProfile", "loadToggleProfile", "getUpdateBranches", "factoryReset",
@@ -277,7 +322,7 @@ def test_ui_eliminates_slider_toggle_flicker():
 
 def test_ui_developer_mode_banner_offers_unlock():
   banner = _read("js/components/DevModeBanner.js")
-  assert "Enable Developer Mode" in banner
+  assert "Go to Developer Tab" in banner
   assert 'navigate("/settings/developer")' in banner
   assert "advanced setting" in banner
 
@@ -295,6 +340,8 @@ def test_ui_has_bottom_navigation_and_drawer():
   assert "gx-appbar" in shell
   assert "Search toggles" in shell
   assert ">Galaxy</span>" in shell
+  assert "gx-appbar__home" in shell
+  assert "goHome" in shell and 'navigate("/")' in shell
 
 
 def test_ui_search_visible_on_mobile_and_content_full_width():
@@ -449,8 +496,14 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   tuning = _read("js/views/Tuning.js")
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
+  destination = _read("js/components/NavigationDestinationPanel.js")
+  assert '"./views/Navigation.js?v=nav-destination-2"' in _read("js/app.js")
+  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-2"' in _read("js/views/Navigation.js")
+  assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
+  assert "mapboxGeocode" in destination and "mapboxDirections" in destination
+  assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
+  assert destination.count("methods: {") == 1 and "secondaryLabel," in destination
   assert _read("js/components/LateralTuningPanel.js")
-
   # Shared API surface added for the second batch of ported pages.
   for method in ["selectTestingGround",
                  "getSentryStatus", "getSentryEvents", "deleteSentryEvent", "sentryPushSubscribe",
@@ -466,6 +519,34 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   for rel in ["js/components/MapsPanel.js", "js/components/NavigationKeysPanel.js",
               "js/components/LateralTuningPanel.js"]:
     assert "fetch(" not in _read(rel), f"{rel} should not use raw fetch()"
+
+  lateral = _read("js/components/LateralTuningPanel.js")
+  modal = _read("js/components/GalaxyModal.js")
+  assert "MAX_SEGMENTS = 5" in lateral
+  assert "segmentRanges" in lateral and "selectedSegmentRanges" in lateral
+  assert "flmAnalyze(this.selectedRoutes, this.selectedSegmentRanges())" in lateral
+  assert "routeSelectedSegmentCount" in lateral
+  assert "GalaxyPrompt" in lateral
+  assert "renameSavedTune(tune)" in lateral
+  assert "initialValue: tune.name" in lateral
+  assert "export function GalaxyPrompt" in modal
+  assert "inputRequired" in modal
+  assert lateral.index('>Workspace status</span>') < lateral.index('>Saved Tunes</span>')
+  assert lateral.index('>Saved Tunes</span>') < lateral.index('>Local Routes</span>')
+
+
+def test_navigation_requires_secret_key_before_starting_on_device_route():
+  destination = _read("js/components/NavigationDestinationPanel.js")
+  classic_destination = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/navigation/navigation_destination.js").read_text(encoding="utf-8")
+
+  assert 'mapboxSecret: ""' in destination
+  assert "hasRoutingKey()" in destination
+  assert "!query.trim() || !hasRoutingKey" in destination
+  assert "loadingRoute || !hasRoutingKey" in destination
+  assert "required for the comma to calculate the on-device route" in destination
+  assert "secret key lets your comma calculate the on-device route" in classic_destination
+  assert "if (!response.ok)" in classic_destination
+  assert 'result.message || "Failed to start navigation."' in classic_destination
 
 
 def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
@@ -507,6 +588,14 @@ def test_ui_mobile_polish_regressions():
   assert "checkedForUpdates && !!this.fastStatus?.updateAvailable" in system
   assert "gx-update-progress__fill" in system
   assert "linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%)" in css
+  assert "Automatically Install Updates" in system
+  assert 'key: "AutomaticUpdates"' in system
+  assert "!!fastStatus?.automaticUpdates" in system
+  assert "isOnroad || autoUpdateBusy || updateInProgress" in system
+  assert "getGatewayDevices" in _read("js/api.js")
+  assert "rebootStorageScope" in system
+  assert "writeRebootMarker(this.rebootStorageScope" in system
+  assert "clearRebootMarker(this.rebootStorageScope" in system
 
   bluetooth = _read("js/components/BluetoothPanel.js")
   assert "methods: {\n    address," in bluetooth
@@ -536,6 +625,110 @@ def test_ui_mobile_polish_regressions():
   c4_developer = (REPO_ROOT / "selfdrive/ui/layouts/settings/developer.py").read_text(encoding="utf-8")
   assert "LongitudinalManeuvers" not in tuning and "Long Maneuvers" not in classic_sidebar
   assert 'tr("Longitudinal Maneuver Mode")' not in c4_developer
+
+
+@pytest.mark.parametrize("native_scrollend", [False, True])
+def test_scroll_coordinator_gesture_lifecycle(native_scrollend):
+  node = _node_exe()
+  if node is None:
+    pytest.skip("no node.js runtime available")
+  script = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const native = process.argv[2] === 'true';
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const handlers = { document: {}, window: {} };
+const classes = new Set();
+const timers = new Map();
+let nextTimer = 0;
+const window = {
+  scrollY: 0,
+  addEventListener: (name, fn) => { handlers.window[name] = fn; },
+};
+class Element {
+  constructor(modal = false) { this.modal = modal; }
+  closest() { return this.modal ? this : null; }
+}
+const document = {
+  body: { classList: {
+    contains: k => classes.has(k), add: k => classes.add(k), remove: k => classes.delete(k),
+  } },
+  addEventListener: (name, fn) => { handlers.document[name] = fn; },
+};
+if (native) document.onscrollend = null;
+vm.runInNewContext(source.slice(source.indexOf('// Disable card blur'), source.indexOf('// Layer 2')), {
+  document, Element,
+  window,
+  setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; },
+  clearTimeout: id => timers.delete(id),
+});
+const fire = (scope, name, ids = [], modal = false) => handlers[scope][name]?.({
+  target: new Element(modal), changedTouches: ids.map(identifier => ({ identifier })),
+});
+const tick = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); };
+const active = () => classes.has('is-scrolling');
+// Inertial movement can continue between delivered scroll events after release.
+fire('window', 'touchstart', [10]);
+fire('document', 'scroll');
+fire('window', 'touchend', [10]);
+if (native) fire('document', 'scrollend');
+window.scrollY = 100;
+tick();
+assert.equal(active(), true, 'finger release must not end momentum scrolling');
+window.scrollY = 160;
+tick();
+assert.equal(active(), true, 'continued movement must keep blur disabled');
+tick();
+assert.equal(active(), false, 'restore after completion and a stable position');
+fire('document', 'scrollend');
+fire('window', 'wheel');
+assert.equal(active(), false, 'wheel without document movement');
+fire('window', 'touchstart', [1, 2]);
+fire('document', 'scroll');
+fire('window', 'touchend', [1]);
+fire('window', 'touchstart', [3], true);
+fire('window', 'touchend', [3], true);
+tick();
+assert.equal(active(), true, 'remaining page finger holds blur disabled');
+fire('window', 'touchcancel', [2]);
+tick();
+assert.equal(active(), native, 'native completion must be authoritative');
+fire('document', 'scrollend');
+tick();
+assert.equal(active(), false);
+// More scroll events after a completion signal invalidate its pending restore.
+fire('document', 'scroll');
+fire('document', 'scrollend');
+fire('document', 'scroll');
+tick();
+assert.equal(active(), native, 'new scrolling cancels the previous native completion');
+fire('document', 'scrollend');
+tick();
+assert.equal(active(), false);
+fire('window', 'touchstart', [4]);
+fire('document', 'scroll');
+fire('document', 'scrollend');
+assert.equal(active(), true, 'hold survives completion');
+fire('window', 'touchend', [4]);
+tick();
+assert.equal(active(), false, 'release after completion cannot leave state stuck');
+fire('document', 'scroll');
+fire('window', 'hashchange');
+tick();
+assert.equal(active(), false, 'navigation clears pending gesture');
+fire('document', 'scroll');
+tick();
+assert.equal(active(), native, 'fallback only on unsupported browsers');
+fire('document', 'scrollend');
+tick();
+assert.equal(active(), false);
+"""
+  result = subprocess.run(
+    [node, "-e", script, str(UI_ROOT / "js/app.js"), str(native_scrollend).lower()],
+    capture_output=True, text=True,
+  )
+  assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _node_exe():
@@ -570,6 +763,11 @@ assert(P.isSettingVisible(sec, sec.params[1], {}) === false, "advanced hidden (o
 assert(P.isSettingVisible(sec, sec.params[1], { GalaxyDeveloperMode: true }) === true, "advanced visible (on)")
 assert(P.countAdvancedHiddenByDeveloperMode([sec], {}) === 1, "count hidden (off)")
 assert(P.countAdvancedHiddenByDeveloperMode([sec], { GalaxyDeveloperMode: true }) === 0, "count hidden (on)")
+const developer = { name: "Developer", params: [] }
+const clusterOffset = { key: "ClusterOffset", parent_key: "GalaxyDeveloperMode", settings_tier: "advanced", data_type: "float" }
+assert(P.isVehicleSettingVisible(developer, clusterOffset, { CarMake: "gm" }) === true, "cluster offset has no vehicle filter")
+assert(P.isSettingVisible(developer, clusterOffset, { CarMake: "gm" }) === false, "cluster offset hidden without developer mode")
+assert(P.isSettingVisible(developer, clusterOffset, { CarMake: "gm", GalaxyDeveloperMode: true }) === true, "cluster offset visible in developer mode")
 const slider = { key: "DeviceShutdown", data_type: "int", min: 1, max: 30, step: 1 }
 assert(P.snapNumericToBoundsAndStep(17.9, P.numericBounds(slider, {}), 0) === 18, "snap")
 assert(P.formatSliderValue(6, "1", 0, "DeviceShutdown") === "6 hours", "format")

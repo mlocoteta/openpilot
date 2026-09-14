@@ -42,6 +42,7 @@ FLM_STATUS_PATH = Path("/tmp/galaxy_flm_status.json")
 FLM_LOG_PATH = Path("/tmp/galaxy_flm.log")
 FLM_STATUS_MAX_AGE_SECONDS = 3600.0
 FLM_ANALYZER_ROUTE_LIMIT = 8
+FLM_MAX_ANALYSIS_SEGMENTS = 5
 FLM_ANALYZER_PROCESS = None
 FLM_ANALYZER_LOCK = threading.Lock()
 FLM_PROGRESS_FILENAME = "progress.json"
@@ -553,6 +554,42 @@ def normalize_segment_ranges(route_names: list[str], segment_ranges: Any) -> dic
   return normalized
 
 
+def selected_segment_count(route_names: list[str], footage_paths: list[str],
+                           segment_ranges: dict[str, dict[str, int | None]] | None = None) -> int:
+  normalized = normalize_segment_ranges(route_names, segment_ranges)
+  total = 0
+  for route in route_names[:FLM_ANALYZER_ROUTE_LIMIT]:
+    route = str(route).strip()
+    if not route:
+      continue
+    segments = []
+    for footage_path in footage_paths:
+      candidate = utilities.get_segments_in_route(route, footage_path)
+      if candidate:
+        segments = candidate
+        break
+
+    segment_range = normalized.get(route, {})
+    start = segment_range.get("start")
+    end = segment_range.get("end")
+    if segments:
+      numbers = [_parse_segment_num(segment) for segment in segments]
+      lower = start if start is not None else min(numbers)
+      upper = end if end is not None else max(numbers)
+      total += sum(lower <= number <= upper for number in numbers)
+    elif start is not None and end is not None:
+      total += max(0, end - start + 1)
+  return total
+
+
+def enforce_segment_limit(route_names: list[str], footage_paths: list[str],
+                          segment_ranges: dict[str, dict[str, int | None]] | None = None) -> int:
+  count = selected_segment_count(route_names, footage_paths, segment_ranges)
+  if count > FLM_MAX_ANALYSIS_SEGMENTS:
+    raise ValueError(f"FLM analysis is limited to {FLM_MAX_ANALYSIS_SEGMENTS} segments at a time (requested {count}).")
+  return count
+
+
 def start_flm_background_analysis(route_names: list[str], footage_paths: list[str],
                                   segment_ranges: dict[str, dict[str, int | None]] | None = None) -> bool:
   global FLM_ANALYZER_PROCESS
@@ -566,6 +603,8 @@ def start_flm_background_analysis(route_names: list[str], footage_paths: list[st
     _require_flm_lane_centering_off()
   except FLMAnalysisCancelled:
     return False
+
+  enforce_segment_limit(route_names, footage_paths, segment_ranges)
 
   ensure_flm_workspace()
   process_to_watch = None
@@ -2424,6 +2463,7 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
   segment_ranges = normalize_segment_ranges(route_names, segment_ranges)
 
   sources, warnings = resolve_route_sources(route_names, footage_paths, segment_ranges)
+  enforce_segment_limit(route_names, footage_paths, segment_ranges)
   if not sources:
     raise RuntimeError("No local routes with qlogs or rlogs were found for the selected routes.")
 

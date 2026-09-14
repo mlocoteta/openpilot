@@ -77,13 +77,6 @@ SLC_FALLBACK_OPTIONS = [
   (2, "Previous Limit"),
 ]
 
-SLC_OVERRIDE_OPTIONS = [
-  (0, "None"),
-  (1, "Set With Gas Pedal"),
-  (2, "Max Set Speed"),
-]
-
-
 # ═══════════════════════════════════════════════════════════════
 # AdaptiveSpeedView — nested panel with two adaptive speed tiles
 # ═══════════════════════════════════════════════════════════════
@@ -599,11 +592,6 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  get_value=lambda: self._profile_label_for_value(self._params.get_int("SLCFallback"), SLC_FALLBACK_OPTIONS),
                  on_click=lambda: self._show_labeled_select("Fallback Speed", "SLCFallback", SLC_FALLBACK_OPTIONS,
                                                             self._params.get_int("SLCFallback"))),
-      SettingRow("SLCOverride", "value", tr_noop("Override Speed"),
-                 subtitle="",
-                 get_value=lambda: self._profile_label_for_value(self._params.get_int("SLCOverride"), SLC_OVERRIDE_OPTIONS),
-                 on_click=lambda: self._show_labeled_select("Override Speed", "SLCOverride", SLC_OVERRIDE_OPTIONS,
-                                                            self._params.get_int("SLCOverride"))),
       SettingRow("SLCPriority", "value", tr_noop("Source Priority"),
                  subtitle="",
                  get_value=self._get_priority_value,
@@ -780,7 +768,12 @@ class StarPilotLongitudinalLayout(_SettingsPage):
       SettingRow("PulseGlideSpeedDelta", "value", tr_noop("Pulse and Glide Delta"),
                  subtitle=tr_noop("Developer-only: coast this far below the current cruise target before accelerating back up."),
                  get_value=lambda: f"{self._params.get_float('PulseGlideSpeedDelta'):.1f}{self._speed_unit()}",
-                 on_click=lambda: self._show_slider("PulseGlideSpeedDelta"),
+                 on_click=lambda: self._show_slider("PulseGlideSpeedDelta", 0.5,
+                                                    30.0 if self._is_metric() else 15.0,
+                                                    step=0.5,
+                                                    unit=self._speed_unit(),
+                                                    value_type="float",
+                                                    title="Pulse and Glide Delta"),
                  visible=lambda: self._params.get_bool("QOLLongitudinal") and self._developer_feature_access()),
       SettingRow("MapGears", "toggle", tr_noop("Map Gears"),
                  subtitle="",
@@ -884,7 +877,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
       self,
       [SettingSection(title="", rows=self._slc_rows)],
       header_title=tr_noop("Speed Limit Controller"),
-      header_subtitle=tr_noop("Manage auto speed matching, confirmation, offsets, and source priority."),
+      header_subtitle=tr_noop("Press + above a limit for a persistent override; hold the gas pedal for a temporary override."),
       parent_toggle=pt_slc,
       panel_style=PANEL_STYLE,
     )
@@ -1103,7 +1096,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
   def _developer_feature_access(self) -> bool:
     return (
       starpilot_state.car_state.hasOpenpilotLongitudinal and
-      (self._params.get_bool("DeveloperUI") or self._params.get_bool("GalaxyDeveloperMode"))
+      (gui_app.big_ui() or self._params.get_bool("DeveloperUI") or self._params.get_bool("GalaxyDeveloperMode"))
     )
 
   def _speed_unit(self) -> str:

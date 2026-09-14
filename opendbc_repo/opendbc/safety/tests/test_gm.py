@@ -654,6 +654,31 @@ class TestGmCcLongitudinalNoCameraSafety(TestGmCcLongitudinalSafety):
     self.safety.init_tests()
 
 
+def test_gm_volt_cc_gateway_brake_threshold_matches_carstate():
+  safety = libsafety_py.libsafety
+  safety.set_safety_hooks(
+    CarParams.SafetyModel.gm,
+    GMSafetyFlags.FLAG_GM_NO_CAMERA |
+    GMSafetyFlags.FLAG_GM_NO_ACC |
+    GMSafetyFlags.FLAG_GM_CC_LONG |
+    GMSafetyFlags.FLAG_GM_VOLT_CC_GATEWAY,
+  )
+  safety.init_tests()
+  safety.set_controls_allowed(True)
+
+  cruise = common.make_msg(0, 0x3D1, 8, bytes([0, 0, 0, 0, 0x80, 0, 0, 0]))
+  safety.safety_rx_hook(cruise)
+  assert safety.get_controls_allowed()
+
+  noisy_brake = libsafety_py.make_CANPacket(0xF1, 0, b"\x34\x06\x05\x40\x00\x00")
+  safety.safety_rx_hook(noisy_brake)
+  assert safety.get_controls_allowed()
+
+  pressed_brake = libsafety_py.make_CANPacket(0xF1, 0, b"\x34\x15\x05\x40\x00\x00")
+  safety.safety_rx_hook(pressed_brake)
+  assert not safety.get_controls_allowed()
+
+
 class TestGmCcLongitudinalPandaSchedSafety(TestGmCcLongitudinalSafety):
   FWD_BLACKLISTED_ADDRS = {2: [0x180, 0x370], 0: [0x184, 0x3D1]}
   INTERCEPTOR_GAS_PRESSED = 596

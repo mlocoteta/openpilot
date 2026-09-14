@@ -67,6 +67,7 @@ def test_process_route_is_metadata_only_and_retains_fields(monkeypatch, tmp_path
     "isCustomName": True,
     "is_preserved": True,
     "segmentCount": 4,
+    "firstSegmentNum": 3,
     "approxDurationSeconds": 240,
   }
 

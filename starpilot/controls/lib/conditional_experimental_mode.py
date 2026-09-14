@@ -127,6 +127,17 @@ class ConditionalExperimentalMode:
     self.prev_open_road_triggered = False
     self.open_road_lead_hold_until = 0.0
 
+  def deactivate(self):
+    self.experimental_mode = False
+    self.prev_experimental_mode = False
+    self.mode_hold_until = 0.0
+    self.mode_false_since = 0.0
+    self.slow_lead_mode_hold_until = 0.0
+    self.open_road_triggered = False
+    self.prev_open_road_triggered = False
+    self.open_road_lead_hold_until = 0.0
+    self._prev_ce_status = None
+
   def update(self, v_ego, sm, starpilot_toggles, v_cruise=None):
     now = time.monotonic()
     standstill = bool(sm["carState"].standstill)

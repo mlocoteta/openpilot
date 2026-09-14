@@ -1,10 +1,16 @@
 import random
 import re
 
+import pytest
+
+from opendbc.can.packer import CANPacker
+from opendbc.car import Bus
 from opendbc.car.structs import CarParams
 from opendbc.car.volkswagen.interface import CarInterface
-from opendbc.car.volkswagen.values import CAR, FW_QUERY_CONFIG, WMI, VolkswagenFlags, VolkswagenSafetyFlags
 from opendbc.car.volkswagen.fingerprints import FW_VERSIONS
+from opendbc.car.volkswagen.mqbcan import volkswagen_meb_alt_crc_checksum, volkswagen_mqb_meb_checksum
+from opendbc.car.volkswagen.radar_interface import RadarInterface
+from opendbc.car.volkswagen.values import CAR, DBC, FW_QUERY_CONFIG, WMI, CanBus, VolkswagenFlags, VolkswagenSafetyFlags
 
 Ecu = CarParams.Ecu
 
@@ -59,6 +65,47 @@ class TestVolkswagenPlatformConfigs:
     assert cp.openpilotLongitudinalControl
     assert not cp.pcmCruise
     assert cp.safetyConfigs[-1].safetyParam & VolkswagenSafetyFlags.LONG_CONTROL
+
+  @pytest.mark.parametrize("data_hex", (
+    "fc03fcfcfc0f0000",
+    "e304fcfcfc0f0000",
+    "1105fcfcfc0f0000",
+  ))
+  def test_meb_klr_checksum(self, data_hex):
+    data = bytearray.fromhex(data_hex)
+    assert volkswagen_mqb_meb_checksum(0x25D, None, data) == data[0]
+
+  @pytest.mark.parametrize(("address", "data_hex"), (
+    (0x0DB, "bb0ffcf0fefe0000fd0fffc0ff0000000200000000000000010000000000000000000000000000000000000000000000"),
+    (0x0FC, "650b1f007ef0b10c0000000000000000ffff1019191c1cfefe0000000000000000e0fff40140ffeb7f0748e481af421f00000000000000000000000000000000"),
+    (0x102, "9f0e7cfa010500000020cb0402000000b703a00000ec0f00000000002cd3ff1f0020a60000000020000000007d5256ab"),
+    (0x10B, "9d06000000007efe000000010000ff01feff000000000000000000000090240000000000000000000000000000000000"),
+    (0x139, "ac0e850b0890132000d019800000000000000000000000003002000500000000"),
+    (0x13D, "2412111101d1060000d0d410d106000000000000000000000000000000000000"),
+  ))
+  def test_meb_gen2_checksum(self, address, data_hex):
+    data = bytearray.fromhex(data_hex)
+    assert volkswagen_meb_alt_crc_checksum(address, None, data) == data[0]
+
+  def test_meb_camera_radar_tracks(self):
+    cp = self._get_meb_params(CAR.SKODA_ENYAQ_MK1)
+    radar = RadarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.radar])
+    message = packer.make_can_msg("MEB_Distance_01", CanBus(cp).cam, {
+      "Distance_Status": 0,
+      "Same_Lane_01_ObjectID": 1,
+      "Same_Lane_01_Long_Distance": 25.0,
+      "Same_Lane_01_Lat_Distance": 0.5,
+      "Same_Lane_01_Rel_Velo": -2.0,
+    })
+
+    radar_data = radar.update([(1_000_000_000, [message])])
+    assert radar_data is not None
+    assert len(radar_data.points) == 1
+    assert radar_data.points[0].trackId == 0
+    assert radar_data.points[0].dRel == pytest.approx(25.0, abs=0.1)
+    assert radar_data.points[0].yRel == pytest.approx(0.5, abs=0.1)
+    assert radar_data.points[0].vRel == pytest.approx(-2.0, abs=0.1)
 
   def test_taos_longitudinal_actuator_delay(self):
     taos_cp = CarInterface.get_non_essential_params(CAR.VOLKSWAGEN_TAOS_MK1)

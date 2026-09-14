@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from enum import IntEnum
 
 import pyray as rl
 
@@ -9,6 +10,12 @@ from openpilot.common.params import Params
 
 _BORDER_ROUNDNESS = 0.12
 _BORDER_RADIUS_MULTIPLE = 3.0
+
+
+class LeadInfoMode(IntEnum):
+  OFF = 0
+  DISTANCE = 1
+  SPEED = 2
 
 
 def get_border_roundness(rect: rl.Rectangle, border_width: float) -> float:
@@ -43,3 +50,16 @@ def lead_indicator_enabled(params: Params | None = None, *, hide_by_default: boo
   if active_params.get("HideLeadMarker") is None:
     return not hide_by_default
   return not active_params.get_bool("HideLeadMarker")
+
+
+def lead_info_mode(params: Params | None = None) -> LeadInfoMode:
+  active_params = params if params is not None else Params()
+  if not active_params.get_bool("LeadInfo"):
+    return LeadInfoMode.OFF
+
+  try:
+    mode = LeadInfoMode(active_params.get_int("LeadInfoMode", return_default=True, default=LeadInfoMode.SPEED))
+  except ValueError:
+    mode = LeadInfoMode.SPEED
+
+  return LeadInfoMode.SPEED if mode == LeadInfoMode.OFF else mode

@@ -8,7 +8,13 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.gm import gmcan
-from opendbc.car.gm.carstate import CarState as GMCarState, get_hard_cruise_buttons, update_auto_hold_drive_timers
+from opendbc.car.gm.carstate import (
+  CarState as GMCarState,
+  get_hard_cruise_buttons,
+  is_gm_auto_hold_active,
+  update_auto_hold_drive_timers,
+  update_startup_acc_fault_suppression,
+)
 from opendbc.car.gm.carcontroller import (
   VisualAlert,
   get_acc_dashboard_always_one,
@@ -22,7 +28,7 @@ import opendbc.car.gm.interface as gm_interface
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gps import CHEVROLET_BOLT_GPS_CARS, CHEVROLET_BOLT_GPS_MESSAGES, get_car_gps_config, parse_chevrolet_bolt_can_gps
 from opendbc.car.gm.fingerprints import FINGERPRINTS
-from opendbc.car.gm.values import ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, CarControllerParams, CruiseButtons, GMFlags, GMSafetyFlags
+from opendbc.car.gm.values import ALT_ACCS, ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, CarControllerParams, CruiseButtons, GMFlags, GMSafetyFlags
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
 
@@ -204,7 +210,152 @@ class TestBoltGps:
     assert all(message in parsers[Bus.pt].vl for message in CHEVROLET_BOLT_GPS_MESSAGES)
 
 
+class TestGMCarState:
+  @parameterized.expand([
+    (CAR.BUICK_LACROSSE, True, True, True, True, False, True),
+    (CAR.CHEVROLET_VOLT, True, True, True, True, False, True),
+    (CAR.CHEVROLET_BOLT_CC_2017, True, True, True, True, False, False),
+    (CAR.BUICK_LACROSSE, True, True, True, False, False, False),
+    (CAR.BUICK_LACROSSE, True, True, True, True, True, False),
+  ])
+  def test_auto_hold_alert_state_requires_supported_complete_stop(self, car_fingerprint, engaged, in_drive,
+                                                                    cruise_available, standstill, gas_pressed, expected):
+    assert is_gm_auto_hold_active(
+      car_fingerprint, engaged, in_drive, cruise_available, standstill, gas_pressed,
+    ) is expected
+
+  def test_lacrosse_startup_acc_fault_is_suppressed(self):
+    timer, suppressed = update_startup_acc_fault_suppression(
+      CAR.BUICK_LACROSSE, 2, 0, 0.0, 3, False,
+    )
+
+    assert suppressed
+    assert timer == pytest.approx(5.0 - DT_CTRL)
+
+    timer, suppressed = update_startup_acc_fault_suppression(
+      CAR.BUICK_LACROSSE, 2, 2, timer, 0, False,
+    )
+
+    assert timer == 0.0
+    assert not suppressed
+
+  def test_lacrosse_persistent_acc_fault_is_reported_after_startup(self):
+    timer, suppressed = update_startup_acc_fault_suppression(
+      CAR.BUICK_LACROSSE, 2, 0, 0.0, 3, False,
+    )
+
+    for _ in range(int(5.0 / DT_CTRL)):
+      timer, suppressed = update_startup_acc_fault_suppression(
+        CAR.BUICK_LACROSSE, 2, 2, timer, 3, False,
+      )
+
+    assert timer == 0.0
+    assert not suppressed
+
+  def test_lacrosse_brake_unavailable_fault_is_never_suppressed(self):
+    _, suppressed = update_startup_acc_fault_suppression(
+      CAR.BUICK_LACROSSE, 2, 0, 0.0, 3, True,
+    )
+
+    assert not suppressed
+
+  def test_startup_acc_fault_suppression_is_scoped_to_lacrosse(self):
+    _, suppressed = update_startup_acc_fault_suppression(
+      CAR.BUICK_REGAL, 2, 0, 0.0, 3, False,
+    )
+
+    assert not suppressed
+
+
 class TestGMInterface:
+  def test_suburban_obd_and_ascm_integrations_remain_separate(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN][0].copy()
+
+    assert CAR.CHEVROLET_SUBURBAN_ASCM in ASCM_INT
+    assert FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_ASCM] == FINGERPRINTS[CAR.CHEVROLET_SUBURBAN]
+
+    obd_params = interfaces[CAR.CHEVROLET_SUBURBAN].get_params(
+      CAR.CHEVROLET_SUBURBAN,
+      fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+    ascm_params = interfaces[CAR.CHEVROLET_SUBURBAN_ASCM].get_params(
+      CAR.CHEVROLET_SUBURBAN_ASCM,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert obd_params.networkLocation == structs.CarParams.NetworkLocation.gateway
+    assert obd_params.openpilotLongitudinalControl
+    assert not obd_params.pcmCruise
+    assert obd_params.safetyConfigs[0].safetyParam == 0
+
+    assert ascm_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert not ascm_params.flags & GMFlags.SASCM.value
+    assert not ascm_params.alphaLongitudinalAvailable
+    assert not ascm_params.openpilotLongitudinalControl
+    assert ascm_params.pcmCruise
+    assert ascm_params.safetyConfigs[0].safetyParam == GMSafetyFlags.HW_CAM.value | GMSafetyFlags.HW_ASCM_INT.value
+    assert ascm_params.lateralTuning.torque.latAccelFactor == pytest.approx(obd_params.lateralTuning.torque.latAccelFactor)
+    assert ascm_params.lateralTuning.torque.friction == pytest.approx(obd_params.lateralTuning.torque.friction)
+
+  def test_suburban_camera_harness_preserves_stock_acc(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN][0].copy()
+    fingerprint[2] = fingerprint[0].copy()
+
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA in CAMERA_ACC_CAR
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA in ALT_ACCS
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA not in CC_ONLY_CAR
+    assert CAR.CHEVROLET_SUBURBAN_CAMERA not in ASCM_INT
+    assert all(fp[CAMERA_DIAGNOSTIC_ADDRESS] == 8 for fp in FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CAMERA])
+    assert all(fp[CAMERA_DIAGNOSTIC_ADDRESS + GM_RX_OFFSET] == 8 for fp in FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CAMERA])
+
+    camera_params = interfaces[CAR.CHEVROLET_SUBURBAN_CAMERA].get_params(
+      CAR.CHEVROLET_SUBURBAN_CAMERA,
+      fingerprint,
+      [],
+      alpha_long=True,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert camera_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert camera_params.pcmCruise
+    assert not camera_params.alphaLongitudinalAvailable
+    assert not camera_params.openpilotLongitudinalControl
+    assert camera_params.safetyConfigs[0].safetyParam == GMSafetyFlags.HW_CAM.value
+
+  def test_suburban_cc_remains_no_acc_gateway_profile(self):
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SUBURBAN_CC][0].copy()
+
+    cc_params = interfaces[CAR.CHEVROLET_SUBURBAN_CC].get_params(
+      CAR.CHEVROLET_SUBURBAN_CC,
+      fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert cc_params.networkLocation == structs.CarParams.NetworkLocation.gateway
+    assert cc_params.openpilotLongitudinalControl
+    assert not cc_params.pcmCruise
+    assert cc_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_CC_LONG.value
+    assert cc_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_NO_ACC.value
+
   def test_lacrosse_obd_and_ascm_integrations_remain_separate(self):
     obd_params = interfaces[CAR.BUICK_LACROSSE].get_params(
       CAR.BUICK_LACROSSE,
@@ -521,6 +672,43 @@ class TestGMInterface:
     assert car_params.openpilotLongitudinalControl
     assert car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED.value
 
+  def test_buick_lacrosse_auto_hold_sets_stock_hold_safety_bit_with_op_long_enabled(self):
+    params = Params()
+    try:
+      params.put_bool("GMAutoHold", True)
+      car_params = interfaces[CAR.BUICK_LACROSSE].get_params(
+        CAR.BUICK_LACROSSE,
+        _empty_fingerprint(),
+        [],
+        alpha_long=False,
+        is_release=False,
+        docs=False,
+        starpilot_toggles=_test_starpilot_toggles(),
+      )
+    finally:
+      params.remove("GMAutoHold")
+
+    assert car_params.openpilotLongitudinalControl
+    assert car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED.value
+
+  def test_buick_lacrosse_auto_hold_is_off_when_toggle_is_disabled(self):
+    params = Params()
+    try:
+      params.put_bool("GMAutoHold", False)
+      car_params = interfaces[CAR.BUICK_LACROSSE].get_params(
+        CAR.BUICK_LACROSSE,
+        _empty_fingerprint(),
+        [],
+        alpha_long=False,
+        is_release=False,
+        docs=False,
+        starpilot_toggles=_test_starpilot_toggles(),
+      )
+    finally:
+      params.remove("GMAutoHold")
+
+    assert not car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED.value
+
   def test_volt_auto_hold_does_not_set_stock_hold_safety_bit_with_op_long_disabled(self):
     CarInterface = interfaces[CAR.CHEVROLET_VOLT_ASCM]
     fingerprint = _empty_fingerprint()
@@ -819,7 +1007,7 @@ class TestGMCarController:
 
   def test_volt_cc_redneck_rate_limits_setpoint_changes_by_planner_acceleration(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
-    controller = SimpleNamespace(frame=int(0.5 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    controller = SimpleNamespace(frame=int(0.2 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
     cs = SimpleNamespace(
       CP=SimpleNamespace(
         carFingerprint=CAR.CHEVROLET_VOLT_CC,
@@ -835,17 +1023,224 @@ class TestGMCarController:
     )
 
     msgs = gmcan.create_gm_cc_spam_command(
-      packer, controller, cs, SimpleNamespace(accel=0.5), SimpleNamespace(is_metric=True),
+      packer, controller, cs, SimpleNamespace(accel=1.0), SimpleNamespace(is_metric=True),
     )
 
     assert msgs == []
 
-    controller.frame = int(0.7 / DT_CTRL)
+    controller.frame = int(0.3 / DT_CTRL)
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=1.0), SimpleNamespace(is_metric=True),
+    )
+
+    assert len(msgs) == 1
+
+  def test_volt_cc_redneck_does_not_raise_stock_setpoint_above_max(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(2.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
     msgs = gmcan.create_gm_cc_spam_command(
       packer, controller, cs, SimpleNamespace(accel=0.5), SimpleNamespace(is_metric=True),
     )
 
+    assert msgs == []
+    assert controller.apply_speed == 100
+
+  def test_volt_cc_redneck_tracks_max_inside_request_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=52.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=52.0 * CV.KPH_TO_MS),
+        vCruise=60.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=0.1), SimpleNamespace(is_metric=True),
+    )
+
     assert len(msgs) == 1
+    assert controller.apply_speed == 53
+
+  def test_volt_cc_redneck_tracks_max_down_inside_request_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=68.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=68.0 * CV.KPH_TO_MS),
+        vCruise=60.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.1), SimpleNamespace(is_metric=True),
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 67
+
+  def test_volt_cc_redneck_holds_small_decel_request_at_max(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.1), SimpleNamespace(is_metric=True),
+    )
+
+    assert msgs == []
+    assert controller.apply_speed == 100
+
+  def test_volt_cc_redneck_holds_strong_decel_request_at_max_during_free_cruise(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-1.2), SimpleNamespace(is_metric=True),
+    )
+
+    assert msgs == []
+    assert controller.apply_speed == 100
+
+  def test_volt_cc_redneck_brakes_for_active_lead_inside_free_road_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=100.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=100.0 * CV.KPH_TO_MS),
+        vCruise=100.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), longitudinal_adjustment_active=True,
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 99
+
+  def test_volt_cc_redneck_accelerates_when_pseudo_speed_request_exceeds_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(0.1 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=44.0 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=44.0 * CV.KPH_TO_MS),
+        vCruise=50.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=2.0), SimpleNamespace(is_metric=True),
+    )
+
+    assert msgs == []
+
+    controller.frame = int(0.3 / DT_CTRL)
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=2.0), SimpleNamespace(is_metric=True),
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 45
+
+  def test_volt_cc_redneck_brakes_when_pseudo_speed_request_exceeds_deadband(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(0.3 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_VOLT_CC,
+        flags=GMFlags.NO_CAMERA.value,
+        networkLocation=structs.CarParams.NetworkLocation.gateway,
+        minEnableSpeed=0.0,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=50.7 * CV.KPH_TO_MS,
+        cruiseState=SimpleNamespace(speed=49.0 * CV.KPH_TO_MS),
+        vCruise=49.0,
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(
+      packer, controller, cs, SimpleNamespace(accel=-1.36), SimpleNamespace(is_metric=True), longitudinal_adjustment_active=True,
+    )
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 48
 
   def test_volt_cc_no_camera_redneck_spam_stays_on_powertrain_bus(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])

@@ -6,7 +6,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.values import (
-  ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, CC_REGEN_PADDLE_CAR, DBC, EV_CAR, SDGM_CAR, AccState, CanBus, CarControllerParams,
+  ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, CC_REGEN_PADDLE_CAR, DBC, EV_CAR, GM_AUTO_HOLD_CARS, SDGM_CAR, AccState, CanBus, CarControllerParams,
   CruiseButtons, GMFlags, GMSafetyFlags,
 )
 from opendbc.car.interfaces import CarControllerBase
@@ -309,7 +309,7 @@ def supports_volt_auto_hold(CP, auto_hold_enabled: bool):
     auto_hold_enabled and
     getattr(CP, "openpilotLongitudinalControl", False) and
     stock_hold_safety_ready and
-    CP.carFingerprint in AUTO_HOLD_VOLT_CARS
+    CP.carFingerprint in GM_AUTO_HOLD_CARS
   )
 
 
@@ -1159,7 +1159,13 @@ class CarController(CarControllerBase):
           if should_send_cc_button_spam(self.CP, CC, CS):
             if self.CP.carFingerprint != CAR.CADILLAC_XT4_CC:
               # Using extend instead of append since the message is only sent intermittently
-              can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators, starpilot_toggles))
+              longitudinal_adjustment_active = bool(getattr(
+                CS, "openpilot_longitudinal_adjustment_active", CC.hudControl.leadVisible,
+              ))
+              can_sends.extend(gmcan.create_gm_cc_spam_command(
+                self.packer_pt, self, CS, actuators, starpilot_toggles,
+                longitudinal_adjustment_active=longitudinal_adjustment_active,
+              ))
           else:
             if (CS.out.cruiseState.enabled and CC.enabled and self.frame % 52 == 0 and
                 CS.cruise_buttons == CruiseButtons.UNPRESS and CS.out.gasPressed and CS.out.cruiseState.speed < CS.out.vEgo < hud_v_cruise):

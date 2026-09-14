@@ -60,6 +60,7 @@ static bool gm_panda_3d1_sched = false;
 static bool gm_panda_paddle_sched = false;
 static bool gm_bolt_2022_pedal = false;
 static bool gm_alt_brake = false;
+static bool gm_volt_cc_gateway = false;
 static bool gm_volt_auto_hold = false;
 static bool gm_volt_one_pedal = false;
 
@@ -261,7 +262,8 @@ static void gm_rx_hook(const CANPacket_t *msg) {
     }
 
     if ((msg->addr == 0xF1U) && gm_alt_brake) {
-      brake_pressed = msg->data[1] >= 6U;
+      const uint8_t brake_threshold = gm_volt_cc_gateway ? 21U : 6U;
+      brake_pressed = msg->data[1] >= brake_threshold;
     }
 
     if ((msg->addr == 0xC9U) && (gm_hw == GM_CAM) && !gm_force_brake_c9) {
@@ -720,7 +722,7 @@ static safety_config gm_init(uint16_t param) {
   gm_cc_long = GET_FLAG(param, GM_PARAM_CC_LONG);
   gm_has_acc = !GET_FLAG(param, GM_PARAM_NO_ACC);
   gm_pedal_long = GET_FLAG(param, GM_PARAM_PEDAL_LONG);
-  const bool gm_volt_cc_gateway = GET_FLAG(param, GM_PARAM_VOLT_CC_GATEWAY) && gm_no_camera && !gm_pedal_long && !gm_has_acc;
+  gm_volt_cc_gateway = GET_FLAG(param, GM_PARAM_VOLT_CC_GATEWAY) && gm_no_camera && !gm_pedal_long && !gm_has_acc;
   enable_gas_interceptor = GET_FLAG(param, GM_PARAM_PEDAL_INTERCEPTOR);
   gm_force_ascm = GET_FLAG(param, GM_PARAM_HW_ASCM_LONG);
   gm_force_brake_c9 = GET_FLAG(param, GM_PARAM_FORCE_BRAKE_C9);

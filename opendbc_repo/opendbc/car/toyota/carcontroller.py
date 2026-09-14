@@ -40,11 +40,14 @@ TOYOTA_NO_LEAD_CRUISE_SIGN_FLIP_MIN_SET_SPEED_ERROR = 0.35  # m/s
 TOYOTA_RAV4_LAUNCH_PEDAL_BLEND_SPEED = 5.0  # m/s
 TOYOTA_RAV4_LAUNCH_PEDAL_SCALE = 0.11
 TOYOTA_RAV4_LOW_SPEED_PEDAL_SCALE = 0.23
+TOYOTA_AUTO_HOLD_ACCEL = -1.0
+TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES = 100
 
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
 MAX_STEER_RATE = 100  # deg/s
 MAX_STEER_RATE_FRAMES = 18  # tx control frames needed before torque can be cut
+TOYOTA_COROLLA_TSS2_MAX_STEER_RATE_FRAMES = 8
 
 # EPS allows user torque above threshold for 50 frames before permanently faulting
 MAX_USER_TORQUE = 500
@@ -73,6 +76,11 @@ def should_bypass_toyota_long_pid(CP, starpilot_toggles=None) -> bool:
   return bool(CP.enableGasInterceptorDEPRECATED or (
     CP.carFingerprint == CAR.TOYOTA_CAMRY and not is_camry_hybrid(CP)
   ) or highlander_sdsu)
+
+
+def get_steer_rate_limit_frames(car_fingerprint) -> int:
+  return (TOYOTA_COROLLA_TSS2_MAX_STEER_RATE_FRAMES
+          if car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 else MAX_STEER_RATE_FRAMES)
 
 
 def supports_toyota_auto_hold(CP, auto_hold_enabled: bool) -> bool:
@@ -242,6 +250,7 @@ class CarController(CarControllerBase):
     self.standstill_req = False
     self.permit_braking = True
     self.steer_rate_counter = 0
+    self.steer_rate_limit_frames = get_steer_rate_limit_frames(self.CP.carFingerprint)
     self.distance_button = 0
 
     # *** start long control state ***
@@ -309,23 +318,24 @@ class CarController(CarControllerBase):
 
     self.last_standstill = CS.out.standstill
 
-  def create_auto_brake_hold_messages(self, CS: structs.CarState, brake_hold_allowed_timer: int = 100):
-    can_sends = []
-    brake_hold_allowed = (CS.out.standstill and CS.out.cruiseState.available and
+  def update_auto_hold_state(self, CS: structs.CarState, cancel_requested: bool = False,
+                             activation_frames: int = TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES):
+    brake_hold_allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
                           not CS.out.gasPressed and not CS.out.cruiseState.enabled and
                           CS.out.gearShifter not in (PARK, REVERSE))
 
     if brake_hold_allowed and not self.brake_hold_active and CS.out.brakePressed:
       self._brake_hold_counter += 1
-      self.brake_hold_active = self._brake_hold_counter > brake_hold_allowed_timer
+      self.brake_hold_active = self._brake_hold_counter > activation_frames
     elif not brake_hold_allowed:
       self._brake_hold_counter = 0
       self.brake_hold_active = False
 
-    if self.frame % 2 == 0:
-      can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
+    return self.brake_hold_active
 
-    return can_sends
+  def reset_auto_hold_state(self):
+    self._brake_hold_counter = 0
+    self.brake_hold_active = False
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     actuators = CC.actuators
@@ -360,7 +370,7 @@ class CarController(CarControllerBase):
     # >100 degree/sec steering fault prevention
     self.steer_rate_counter, apply_steer_req = common_fault_avoidance(
       abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, lat_active,
-      self.steer_rate_counter, MAX_STEER_RATE_FRAMES,
+      self.steer_rate_counter, self.steer_rate_limit_frames,
     )
 
     if not lat_active:
@@ -423,10 +433,9 @@ class CarController(CarControllerBase):
 
     self._update_standstill_request(CC, CS, actuators, starpilot_toggles)
     if supports_toyota_auto_hold(self.CP, getattr(starpilot_toggles, "toyota_auto_hold", False)):
-      can_sends.extend(self.create_auto_brake_hold_messages(CS))
-    elif self.brake_hold_active:
-      self._brake_hold_counter = 0
-      self.brake_hold_active = False
+      self.update_auto_hold_state(CS, pcm_cancel_cmd)
+    else:
+      self.reset_auto_hold_state()
 
     interceptor_gas_cmd = self._compute_interceptor_gas_cmd(CC, CS)
 
@@ -533,6 +542,11 @@ class CarController(CarControllerBase):
             pcm_accel_cmd = limit_prius_stopping_accel(pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, lead)
 
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
+
+        if self.brake_hold_active:
+          pcm_accel_cmd = TOYOTA_AUTO_HOLD_ACCEL
+          self.permit_braking = True
+          self.standstill_req = True
 
         main_accel_cmd = 0. if self.CP.flags & ToyotaFlags.SECOC.value else pcm_accel_cmd
         can_sends.append(toyotacan.create_accel_command(self.packer, main_accel_cmd, pcm_cancel_cmd, self.permit_braking, self.standstill_req, lead,

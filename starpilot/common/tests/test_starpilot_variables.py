@@ -293,6 +293,22 @@ def test_disabled_conditional_experimental_toggles_are_off(monkeypatch, tmp_path
   assert toggles.conditional_signal_lane_detection is False
 
 
+def test_big_ui_exposes_developer_toggles_without_persisting_developer_ui(monkeypatch, tmp_path):
+  params_cls = spv.Params
+
+  def isolated_params(_path=None, memory=False, return_defaults=False):
+    return params_cls(str(tmp_path / ("memory" if memory else "params")), return_defaults=return_defaults)
+
+  monkeypatch.setattr(spv, "Params", isolated_params)
+  monkeypatch.setattr(spv.HARDWARE, "get_device_type", lambda: "tici")
+  monkeypatch.delenv("BIG", raising=False)
+
+  variables = spv.StarPilotVariables()
+
+  assert variables.starpilot_toggles.developer_ui is True
+  assert variables.params_raw.get_bool("DeveloperUI") is False
+
+
 def test_device_shutdown_hours_convert_directly_to_seconds():
   assert spv.device_shutdown_seconds(6) == 6 * 60 * 60
   assert spv.device_shutdown_seconds(0) == 60 * 60

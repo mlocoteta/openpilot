@@ -7,7 +7,9 @@ uint32_t rx_buffer_overflow = 0;
 
 can_health_t can_health[PANDA_CAN_CNT] = {{0}, {0}, {0}};
 
-// Ignition detected from CAN meessages
+bool wake_on_can = false;
+uint32_t wake_on_can_cnt = 0U;
+
 bool ignition_can = false;
 uint32_t ignition_can_cnt = 0U;
 #ifdef PANDA_HKG_REMOTE_START
@@ -225,6 +227,23 @@ void ignition_can_hook(CANPacket_t *msg) {
         ignition_can_cnt = 0U;
       }
       prev_counter_tesla = counter;
+
+      #ifdef PANDA_TESLA_WAKE_ON_CAN
+      uint32_t checksum = (msg->addr & 0xFFU) + (msg->addr >> 8U);
+      for (uint8_t i = 0U; i < 7U; i++) {
+        checksum += msg->data[i];
+      }
+      static int prev_counter_tesla_wake = -1;
+      if (!msg->extended && (msg->data[7] == (checksum & 0xFFU))) {
+        if ((prev_counter_tesla_wake != -1) && (counter == ((prev_counter_tesla_wake + 1) % 16))) {
+          wake_on_can = ((msg->data[0] >> 5U) & 0x3U) != 0U;
+          wake_on_can_cnt = 0U;
+        }
+        prev_counter_tesla_wake = counter;
+      } else {
+        prev_counter_tesla_wake = -1;
+      }
+      #endif
     }
 
     // Tesla Model S pre-AP exception
@@ -247,6 +266,19 @@ void ignition_can_hook(CANPacket_t *msg) {
     if ((msg->addr == 0x9EU) && (len == 8)) {
       ignition_can = (msg->data[0] >> 5) == 0x6U;
       ignition_can_cnt = 0U;
+    }
+
+    // Volkswagen MEB exception
+    if ((msg->addr == 0x3C0U) && (len == 4)) {
+      int counter = msg->data[1] & 0xFU;
+
+      static int prev_counter_vw_meb = -1;
+      if ((counter == ((prev_counter_vw_meb + 1) % 16)) && (prev_counter_vw_meb != -1)) {
+        // Klemmen_Status_01->ZAS_Kl_15
+        ignition_can = ((msg->data[2] >> 1) & 1U) != 0U;
+        ignition_can_cnt = 0U;
+      }
+      prev_counter_vw_meb = counter;
     }
 
   }

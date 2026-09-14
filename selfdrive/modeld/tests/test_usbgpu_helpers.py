@@ -70,8 +70,34 @@ def test_external_gpu_power_must_remain_stable():
   assert ready
 
   ready, stable_since = modeld._external_gpu_power_ready(11900, 15.0, stable_since)
-  assert not ready
-  assert stable_since is None
+  assert ready
+  assert stable_since == 11.0
+
+
+def test_external_gpu_power_wait_times_out(monkeypatch):
+  panda_type = modeld.log.PandaState.PandaType
+
+  class FakeSubMaster:
+    def __init__(self, _services):
+      self.updated = {}
+      self.data = {
+        "pandaStates": [SimpleNamespace(pandaType=panda_type.cuatro, voltage=9000)],
+        "peripheralState": SimpleNamespace(pandaType=panda_type.cuatro, voltage=9000),
+      }
+
+    def update(self, _timeout):
+      pass
+
+    def __getitem__(self, key):
+      return self.data[key]
+
+  times = iter((10.0, 70.0))
+  monkeypatch.setattr(modeld.HARDWARE, "get_device_type", lambda: "mici")
+  monkeypatch.setattr(modeld, "SubMaster", FakeSubMaster)
+  monkeypatch.setattr(modeld, "time", SimpleNamespace(monotonic=lambda: next(times)))
+
+  with pytest.raises(TimeoutError, match="after 60s"):
+    modeld.wait_for_external_gpu_power_ready()
 
 
 def test_egmp_ready_uses_accelerator_ready_bit():
@@ -249,8 +275,10 @@ def test_external_gpu_load_finishes_before_native_model_can_start(monkeypatch):
   class FakeModelState:
     uses_external_gpu = True
 
-    def __init__(self, cam_w, cam_h, external_gpu_active, model_id_override, write_model_version):
-      calls.append(("model", cam_w, cam_h, external_gpu_active, model_id_override, write_model_version))
+    def __init__(self, cam_w, cam_h, external_gpu_active, model_id_override, write_model_version,
+                 model_version_override):
+      calls.append(("model", cam_w, cam_h, external_gpu_active, model_id_override,
+                    write_model_version, model_version_override))
 
     def warmup(self):
       calls.append("warmup")
@@ -266,14 +294,14 @@ def test_external_gpu_load_finishes_before_native_model_can_start(monkeypatch):
     lambda *_args: (_ for _ in ()).throw(AssertionError("runtime must not change tinygrad's process-global DEV")),
   )
 
-  loaded = modeld._load_external_gpu_model(1928, 1208, "big-model", "car-params")
+  loaded = modeld._load_external_gpu_model(1928, 1208, "big-model", "v15", "car-params")
 
   assert isinstance(loaded, FakeModelState)
   assert calls == [
     ("power", "car-params"),
     ("timeout", modeld.BIG_MODEL_LOAD_WAIT_TIMEOUT_MS),
     "link",
-    ("model", 1928, 1208, True, "big-model", False),
+    ("model", 1928, 1208, True, "big-model", False, "v15"),
     "warmup",
     "close_cache",
     ("timeout", modeld.BIG_MODEL_RUN_WAIT_TIMEOUT_MS),

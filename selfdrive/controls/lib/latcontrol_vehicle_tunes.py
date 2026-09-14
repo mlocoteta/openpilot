@@ -177,6 +177,9 @@ KIA_FORTE_CARS = (
 KONA_NON_SCC_CARS = (
   HYUNDAI_CAR.HYUNDAI_KONA_NON_SCC,
 )
+KONA_EV_2022_CARS = (
+  HYUNDAI_CAR.HYUNDAI_KONA_EV_2022,
+)
 PRIUS_CARS = (
   TOYOTA_CAR.TOYOTA_PRIUS,
   TOYOTA_CAR.TOYOTA_PRIUS_RETROFIT,
@@ -266,6 +269,17 @@ GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_CENTER_LAT_WIDTH = 0.08
 GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_MIN = 0.06
 GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_LAT = 0.12
 GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_LAT_WIDTH = 0.10
+GENESIS_GV70_OUTPUT_SMOOTHING_SPEED = 38.0 * CV.MPH_TO_MS
+GENESIS_GV70_OUTPUT_SMOOTHING_SPEED_WIDTH = 6.0 * CV.MPH_TO_MS
+GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_LAT = 0.48
+GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_LAT_WIDTH = 0.16
+GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_RC = 0.42
+GENESIS_GV70_OUTPUT_SMOOTHING_CURVE_RC = 0.14
+GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_RC = 0.12
+GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE = 0.04
+GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH = 0.08
+GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT = 0.55
+GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC = 0.065
 
 GENESIS_G70_FRICTION_THRESHOLD_GAIN = 0.10
 GENESIS_G70_FRICTION_SPEED_ONSET = 10.0
@@ -295,7 +309,7 @@ GENESIS_G70_CENTER_OUTPUT_TAPER_LAT = 0.30
 GENESIS_G70_CENTER_OUTPUT_TAPER_LAT_WIDTH = 0.10
 GENESIS_G70_CENTER_OUTPUT_TAPER_SPEED = 18.0
 GENESIS_G70_CENTER_OUTPUT_TAPER_SPEED_WIDTH = 3.0
-GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_MAX = 0.18
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_MAX = 0.24
 GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED = 45.0 * CV.MPH_TO_MS
 GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED_WIDTH = 8.0 * CV.MPH_TO_MS
 GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_LAT = 0.45
@@ -320,7 +334,7 @@ GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT = 0.14
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT_WIDTH = 0.05
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED = 6.0
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH = 1.5
-GENESIS_G70_CURVE_UNWIND_OUTPUT_REDUCTION_MAX = 0.08
+GENESIS_G70_CURVE_UNWIND_OUTPUT_REDUCTION_MAX = 0.10
 GENESIS_G70_CURVE_UNWIND_SPEED = 18.0
 GENESIS_G70_CURVE_UNWIND_SPEED_WIDTH = 3.0
 GENESIS_G70_CURVE_UNWIND_LAT = 0.25
@@ -334,13 +348,24 @@ GENESIS_G70_UNWIND_FF_JERK = 0.08
 GENESIS_G70_UNWIND_FF_JERK_WIDTH = 0.11
 GENESIS_G70_UNWIND_FF_SPEED = 18.0
 GENESIS_G70_UNWIND_FF_SPEED_WIDTH = 3.0
-GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_MAX = 0.15
+GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_MAX = 0.22
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_SPEED = 50.0 * CV.MPH_TO_MS
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_SPEED_WIDTH = 8.0 * CV.MPH_TO_MS
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_ERROR = 0.18
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_ERROR_WIDTH = 0.15
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_JERK = 0.15
 GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_JERK_WIDTH = 0.10
+GENESIS_G70_OUTPUT_SMOOTHING_SPEED = 40.0 * CV.MPH_TO_MS
+GENESIS_G70_OUTPUT_SMOOTHING_SPEED_WIDTH = 6.0 * CV.MPH_TO_MS
+GENESIS_G70_OUTPUT_SMOOTHING_CENTER_LAT = 0.42
+GENESIS_G70_OUTPUT_SMOOTHING_CENTER_LAT_WIDTH = 0.14
+GENESIS_G70_OUTPUT_SMOOTHING_CENTER_RC = 0.45
+GENESIS_G70_OUTPUT_SMOOTHING_CURVE_RC = 0.22
+GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_RC = 0.20
+GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_PHASE = 0.04
+GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH = 0.08
+GENESIS_G70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT = 0.45
+GENESIS_G70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC = 0.28
 GENESIS_G70_ANGLE_OUTPUT_TAPER_MIN = 0.45
 GENESIS_G70_ANGLE_OUTPUT_TAPER_START = 70.0
 GENESIS_G70_ANGLE_OUTPUT_TAPER_WIDTH = 6.0
@@ -635,6 +660,15 @@ KIA_CARNIVAL_UNWIND_FF_OVERSHOOT = 0.08
 KIA_CARNIVAL_UNWIND_FF_OVERSHOOT_WIDTH = 0.06
 KIA_CARNIVAL_UNWIND_FF_JERK = 0.45
 KIA_CARNIVAL_UNWIND_FF_JERK_WIDTH = 0.20
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_MAX = 0.28
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED = 8.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_WIDTH = 2.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF = 16.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF_WIDTH = 2.5
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT = 0.25
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT_WIDTH = 0.15
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK = 0.45
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK_WIDTH = 0.20
 
 TUCSON_4TH_GEN_CENTER_TAPER_MAX = 0.44
 TUCSON_4TH_GEN_CENTER_TAPER_LAT = 0.28
@@ -1288,6 +1322,16 @@ KONA_NON_SCC_CENTER_FRICTION_THRESHOLD_LAT = 0.28
 KONA_NON_SCC_CENTER_FRICTION_THRESHOLD_LAT_WIDTH = 0.07
 KONA_NON_SCC_CENTER_FRICTION_THRESHOLD_SPEED_ONSET = 11.0
 KONA_NON_SCC_CENTER_FRICTION_THRESHOLD_SPEED_WIDTH = 2.5
+KONA_EV_2022_CENTER_FRICTION_THRESHOLD_GAIN = 0.08
+KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT = 0.20
+KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT_WIDTH = 0.05
+KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED = 18.0
+KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED_WIDTH = 2.5
+KONA_EV_2022_CENTER_OUTPUT_TAPER_MAX = 0.045
+KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT = 0.20
+KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT_WIDTH = 0.05
+KONA_EV_2022_CENTER_OUTPUT_TAPER_SPEED = 18.0
+KONA_EV_2022_CENTER_OUTPUT_TAPER_SPEED_WIDTH = 2.5
 
 TRAILER_LOAD_FULL_ASSIST_KG = 15000.0 * CV.LB_TO_KG
 TRAILER_LATERAL_MIN_SPEED = 15.0 * CV.MPH_TO_MS
@@ -1990,6 +2034,29 @@ def get_kona_non_scc_center_taper_scale(desired_lateral_accel: float, v_ego: flo
   speed_weight = float(np.interp(v_ego, [KONA_NON_SCC_CENTER_TAPER_SPEED_ONSET, KONA_NON_SCC_CENTER_TAPER_SPEED_FULL], [0.0, 1.0]))
   center_weight = float(np.interp(abs(desired_lateral_accel), [0.0, KONA_NON_SCC_CENTER_TAPER_LAT], [1.0, 0.0]))
   return 1.0 - (KONA_NON_SCC_CENTER_TAPER_MAX * speed_weight * center_weight)
+
+
+def _kona_ev_2022_center_weights(desired_lateral_accel: float, v_ego: float) -> tuple[float, float]:
+  speed_weight = _sigmoid((v_ego - KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED) /
+                          KONA_EV_2022_CENTER_FRICTION_THRESHOLD_SPEED_WIDTH)
+  center_weight = _sigmoid((KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT - abs(desired_lateral_accel)) /
+                           KONA_EV_2022_CENTER_FRICTION_THRESHOLD_LAT_WIDTH)
+  return speed_weight, center_weight
+
+
+def get_kona_ev_2022_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0) -> float:
+  speed_weight, center_weight = _kona_ev_2022_center_weights(desired_lateral_accel, v_ego)
+  return get_standard_friction_threshold(v_ego) * (
+    1.0 + KONA_EV_2022_CENTER_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight
+  )
+
+
+def get_kona_ev_2022_center_output_scale(desired_lateral_accel: float, v_ego: float) -> float:
+  speed_weight = _sigmoid((v_ego - KONA_EV_2022_CENTER_OUTPUT_TAPER_SPEED) /
+                          KONA_EV_2022_CENTER_OUTPUT_TAPER_SPEED_WIDTH)
+  center_weight = _sigmoid((KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT - abs(desired_lateral_accel)) /
+                           KONA_EV_2022_CENTER_OUTPUT_TAPER_LAT_WIDTH)
+  return 1.0 - (KONA_EV_2022_CENTER_OUTPUT_TAPER_MAX * speed_weight * center_weight)
 
 
 def civic_bosch_modified_lateral_testing_ground_active() -> bool:
@@ -2884,6 +2951,27 @@ def get_kia_carnival_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
   return 1.0 - (KIA_CARNIVAL_UNWIND_FF_REDUCTION_MAX * speed_weight * overshoot_weight * jerk_weight)
 
 
+def get_kia_carnival_unwind_output_scale(setpoint: float, measured_lateral_accel: float,
+                                         desired_lateral_jerk: float, v_ego: float) -> float:
+  if (setpoint * desired_lateral_jerk >= 0.0 or
+      setpoint * measured_lateral_accel <= 0.0):
+    return 1.0
+
+  overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0)
+  if overshoot <= 0.0:
+    return 1.0
+
+  speed_weight = (_sigmoid((v_ego - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED) /
+                           KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_WIDTH) *
+                  _sigmoid((KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF - v_ego) /
+                           KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF_WIDTH))
+  overshoot_weight = _sigmoid((overshoot - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT) /
+                              KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT_WIDTH)
+  jerk_weight = _sigmoid((abs(desired_lateral_jerk) - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK) /
+                         KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK_WIDTH)
+  return 1.0 - (KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_MAX * speed_weight * overshoot_weight * jerk_weight)
+
+
 def _tucson_4th_gen_center_weights(desired_lateral_accel: float, v_ego: float) -> tuple[float, float]:
   speed_weight = _sigmoid((TUCSON_4TH_GEN_CENTER_TAPER_SPEED_MAX - v_ego) / TUCSON_4TH_GEN_CENTER_TAPER_SPEED_WIDTH)
   center_weight = _sigmoid((TUCSON_4TH_GEN_CENTER_TAPER_LAT - abs(desired_lateral_accel)) / TUCSON_4TH_GEN_CENTER_TAPER_LAT_WIDTH)
@@ -3156,8 +3244,6 @@ def get_genesis_gv70_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
     return 1.0
 
   overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0)
-  if overshoot <= 0.0:
-    return 1.0
   overshoot_weight = _sigmoid((overshoot - GENESIS_GV70_UNWIND_FF_OVERSHOOT) /
                               GENESIS_GV70_UNWIND_FF_OVERSHOOT_WIDTH)
   jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_GV70_UNWIND_FF_JERK) /
@@ -3219,6 +3305,32 @@ def get_genesis_gv70_low_speed_center_overshoot_scale(setpoint: float, measured_
                           GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_SPEED_CUTOFF_WIDTH)
   return 1.0 - (GENESIS_GV70_LOW_SPEED_CENTER_OVERSHOOT_MAX * overshoot_weight * center_weight *
                 speed_weight * speed_cutoff)
+
+
+def get_genesis_gv70_stabilized_output(output_torque: float, prev_output_torque: float,
+                                        desired_lateral_accel: float, desired_lateral_jerk: float,
+                                        v_ego: float, dt: float) -> float:
+  speed_weight = _sigmoid((max(v_ego, 0.0) - GENESIS_GV70_OUTPUT_SMOOTHING_SPEED) /
+                          GENESIS_GV70_OUTPUT_SMOOTHING_SPEED_WIDTH)
+  center_weight = _sigmoid((GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_LAT - abs(desired_lateral_accel)) /
+                           GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_LAT_WIDTH)
+  curve_weight = 1.0 - center_weight
+  response_time = (GENESIS_GV70_OUTPUT_SMOOTHING_CURVE_RC * curve_weight +
+                   GENESIS_GV70_OUTPUT_SMOOTHING_CENTER_RC * center_weight)
+
+  unwind_phase = -desired_lateral_accel * desired_lateral_jerk
+  unwind_weight = _sigmoid((unwind_phase - GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE) /
+                           GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH)
+  response_time += GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_RC * curve_weight * unwind_weight
+
+  changing_direction = (abs(desired_lateral_accel) >= GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT and
+                        prev_output_torque * desired_lateral_accel <= 0.0)
+  if changing_direction:
+    response_time = min(response_time, GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC)
+
+  output_alpha = dt / (max(response_time, 0.0) + dt)
+  smoothed_output = prev_output_torque + output_alpha * (output_torque - prev_output_torque)
+  return float(output_torque + speed_weight * (smoothed_output - output_torque))
 
 
 def get_genesis_g70_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
@@ -3380,6 +3492,32 @@ def get_genesis_g70_high_speed_error_scale(setpoint: float, measured_lateral_acc
   reduction = (GENESIS_G70_HIGH_SPEED_ERROR_DAMPING_MAX * speed_weight * error_weight *
                (0.35 + (0.65 * jerk_weight)) * phase_weight)
   return 1.0 - reduction
+
+
+def get_genesis_g70_stabilized_output(output_torque: float, prev_output_torque: float,
+                                      desired_lateral_accel: float, desired_lateral_jerk: float,
+                                      v_ego: float, dt: float) -> float:
+  speed_weight = _sigmoid((max(v_ego, 0.0) - GENESIS_G70_OUTPUT_SMOOTHING_SPEED) /
+                          GENESIS_G70_OUTPUT_SMOOTHING_SPEED_WIDTH)
+  center_weight = _sigmoid((GENESIS_G70_OUTPUT_SMOOTHING_CENTER_LAT - abs(desired_lateral_accel)) /
+                           GENESIS_G70_OUTPUT_SMOOTHING_CENTER_LAT_WIDTH)
+  curve_weight = 1.0 - center_weight
+  response_time = (GENESIS_G70_OUTPUT_SMOOTHING_CURVE_RC * curve_weight +
+                   GENESIS_G70_OUTPUT_SMOOTHING_CENTER_RC * center_weight)
+
+  unwind_phase = -desired_lateral_accel * desired_lateral_jerk
+  unwind_weight = _sigmoid((unwind_phase - GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_PHASE) /
+                           GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH)
+  response_time += GENESIS_G70_OUTPUT_SMOOTHING_UNWIND_RC * curve_weight * unwind_weight
+
+  changing_direction = (abs(desired_lateral_accel) >= GENESIS_G70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT and
+                        prev_output_torque * desired_lateral_accel <= 0.0)
+  if changing_direction:
+    response_time = max(response_time, GENESIS_G70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC)
+
+  output_alpha = dt / (max(response_time, 0.0) + dt)
+  smoothed_output = prev_output_torque + output_alpha * (output_torque - prev_output_torque)
+  return float(output_torque + speed_weight * (smoothed_output - output_torque))
 
 
 def _ioniq_5_sigmoid(x: float) -> float:

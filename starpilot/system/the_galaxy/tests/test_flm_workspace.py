@@ -232,11 +232,21 @@ def test_segment_ranges_limit_resolved_route_sources(tmp_path, monkeypatch):
   sources, warnings = module.resolve_route_sources(
     [route],
     [str(tmp_path)],
-    {route: {"start": 4, "end": 9}},
+    {route: {"start": 4, "end": 8}},
   )
 
-  assert [source.segment_num for source in sources] == [4, 5, 6, 7, 8, 9]
+  assert [source.segment_num for source in sources] == [4, 5, 6, 7, 8]
   assert warnings == []
+
+
+def test_segment_limit_rejects_more_than_five_selected_segments(tmp_path, monkeypatch):
+  module, _ = _load_flm_workspace_module(tmp_path)
+  route = "00000001--abcdef1234"
+  segment_names = [f"{route}--{segment}" for segment in range(12)]
+  monkeypatch.setattr(module.utilities, "get_segments_in_route", lambda *_args: segment_names)
+
+  with pytest.raises(ValueError, match="limited to 5 segments"):
+    module.enforce_segment_limit([route], [str(tmp_path)], {route: {"start": 4, "end": 9}})
 
 
 def test_segment_range_rejects_reversed_bounds(tmp_path):

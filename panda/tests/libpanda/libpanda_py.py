@@ -25,6 +25,12 @@ typedef struct {
 
 ffi.cdef("""
 int set_safety_hooks(uint16_t mode, uint16_t param);
+
+void ignition_can_hook(CANPacket_t *msg);
+void set_ignition_can_for_test(bool enabled);
+bool get_ignition_can_for_test(void);
+void set_ignition_can_cnt_for_test(uint32_t cnt);
+uint32_t get_ignition_can_cnt_for_test(void);
 """)
 
 ffi.cdef("""

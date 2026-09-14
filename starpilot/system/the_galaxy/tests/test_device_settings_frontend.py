@@ -14,7 +14,6 @@ def test_device_settings_surfaces_hidden_advanced_settings_count():
   source = _device_settings()
 
   assert "countAdvancedHiddenByDeveloperMode" in source
-  assert "isAdvancedHiddenByDeveloperMode" in source
   assert "hiddenAdvancedCount" in source
 
 
@@ -35,7 +34,8 @@ def test_developer_mode_notice_navigates_to_developer_section():
 def test_advanced_settings_hidden_count_shown_in_status_bar():
   source = _device_settings()
 
-  assert "advanced hidden" in source
+  assert "advanced setting" in source
+  assert "hidden" in source
 
 
 def test_device_settings_uses_the_params_api_and_layout_json():

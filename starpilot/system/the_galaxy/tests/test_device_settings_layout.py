@@ -44,6 +44,20 @@ def test_galaxy_layout_removes_obsolete_and_duplicate_controls():
   ) == 1
 
 
+def test_slc_override_method_is_not_exposed_in_either_settings_ui():
+  layout = _layout()
+  galaxy_keys = {
+    param["key"]
+    for section in layout
+    for param in section.get("params", [])
+  }
+  device_ui = (REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/longitudinal.py").read_text(encoding="utf-8")
+
+  assert "SLCOverride" not in galaxy_keys
+  assert 'SettingRow("SLCOverride"' not in device_ui
+  assert "SLC_OVERRIDE_OPTIONS" not in device_ui
+
+
 def test_galaxy_layout_contains_basic_mode_controls():
   sections = _params_by_section(_layout())
 
@@ -73,6 +87,37 @@ def test_galaxy_new_ui_is_the_visible_default_choice():
   assert galaxy_default["settings_tier"] == "simple"
   assert galaxy_default["label"] == "Use Galaxy (new) by Default"
   assert "Galaxy (old)" in galaxy_default["description"]
+
+
+def test_driving_personality_controls_are_not_parked_only():
+  params = {
+    param["key"]: param
+    for section in _layout()
+    for param in section.get("params", [])
+  }
+  personality_keys = {
+    "CustomPersonalities",
+    *{f"{profile}PersonalityProfile" for profile in ("Traffic", "Aggressive", "Standard", "Relaxed")},
+    "TrafficFollow", "AggressiveFollow", "AggressiveFollowHigh", "StandardFollow", "StandardFollowHigh",
+    "RelaxedFollow", "RelaxedFollowHigh",
+    *{
+      f"{profile}{suffix}"
+      for profile in ("Traffic", "Aggressive", "Standard", "Relaxed")
+      for suffix in ("JerkAcceleration", "JerkDeceleration", "JerkDanger", "JerkSpeedDecrease", "JerkSpeed")
+    },
+  }
+
+  assert personality_keys <= params.keys()
+  assert all(params[key].get("requires_offroad") is not True for key in personality_keys)
+
+
+def test_brake_status_toggle_is_galaxy_only():
+  setting = _params_by_section(_layout())["Visual (Display & UI)"]["ShowBrakeStatus"]
+
+  assert _declared_default("ShowBrakeStatus") == "0"
+  assert setting["galaxy_only"] is True
+  assert setting["settings_tier"] == "simple"
+  assert setting["ui_type"] == "toggle"
 
 
 def test_ford_lateral_controls_are_ford_only_and_galaxy_only():
@@ -347,6 +392,31 @@ def test_toyota_auto_hold_is_galaxy_only():
   assert setting["ui_type"] == "toggle"
   assert setting["data_type"] == "bool"
 
+
+def test_cluster_offset_is_in_galaxy_developer_section_only():
+  sections = _params_by_section(_layout())
+  assert "ClusterOffset" not in sections["Vehicle"]
+  setting = sections["Developer"]["ClusterOffset"]
+
+  assert setting["parent_key"] == "GalaxyDeveloperMode"
+  assert setting["settings_tier"] == "advanced"
+  assert setting["data_type"] == "float"
+  assert "1x = no offset" in setting["description"]
+  assert setting["unit"] == "x"
+  assert setting["min"] == 1.0
+  assert setting["max"] == 1.05
+  assert setting["step"] == 0.001
+
+  native_vehicle_settings = REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/vehicle.py"
+  native_source = native_vehicle_settings.read_text(encoding="utf-8")
+  assert 'SettingRow("ClusterOffset"' not in native_source
+  assert "def _show_offset_selector" not in native_source
+
+  for galaxy_source in (
+    REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/device_settings.js",
+    REPO_ROOT / "starpilot/system/the_galaxy/assets/mobile/js/params.js",
+  ):
+    assert "ClusterOffset:" not in galaxy_source.read_text(encoding="utf-8")
 
 def test_human_acceleration_param_is_removed():
   params_source = PARAM_KEYS_PATH.read_text(encoding="utf-8")

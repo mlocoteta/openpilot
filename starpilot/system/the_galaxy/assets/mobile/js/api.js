@@ -42,6 +42,12 @@ function postOk(url, opts = {}) {
 }
 
 export const api = {
+  async getGatewayDevices() {
+    const response = await fetch("/_gateway/devices", { cache: "no-store" })
+    if (!response.ok) return null
+    return response.json()
+  },
+
   postAction(endpoint) { return request(endpoint, { method: "POST" }) },
   getOptions(endpoint) { return request(endpoint) },
 
@@ -52,14 +58,19 @@ export const api = {
       .filter((section) => (section.params || []).length > 0)
   },
 
+  getPersonalityProfiles() { return request("/api/personality_profiles", { cache: "no-store" }) },
+  savePersonalityProfile(data) { return request("/api/personality_profiles", { method: "PUT", data }) },
+  migratePersonalityProfiles() { return request("/api/personality_profiles/migrate", { method: "POST" }) },
+
   getParams() { return request("/api/params/all") },
   async getDefaults() {
     const res = await fetch("/api/params/defaults")
     return res.ok ? parse(res) : {}
   },
 
-  updateParam({ key, value, label }) {
+  updateParam({ key, value, label, confirmedPandaFirmwareFlash }) {
     const data = { key, value }
+    if (confirmedPandaFirmwareFlash === true) data.confirmedPandaFirmwareFlash = true
     if (label) data.label = label
     return request("/api/params", { method: "PUT", data })
   },
@@ -67,7 +78,7 @@ export const api = {
   getFlmWorkspace() { return requestOk("/api/flm/workspace", { cache: "no-store" }) },
   getFavoritesSlots() { return request("/api/favorites/slots", { cache: "no-store" }) },
   saveFavoritesSlots(slots) { return request("/api/favorites/slots", { method: "PUT", data: { slots } }) },
-  activateFavoriteAction(key) { return request("/api/favorites/action", { method: "POST", data: { key } }) },
+  activateFavoriteAction(key, value) { return request("/api/favorites/action", { method: "POST", data: { key, ...(value == null ? {} : { value }) } }) },
 
   getDeviceStatus() { return requestOk("/api/device/status") },
   getStats() { return requestOk("/api/stats") },
@@ -180,11 +191,37 @@ export const api = {
 
   getNavigation() { return request("/api/navigation") },
   setNavigation(body) { return request("/api/navigation", { method: "POST", data: body }) },
+  clearNavigation() { return request("/api/navigation", { method: "DELETE" }) },
+  getNavigationFavorites() { return request("/api/navigation/favorite", { cache: "no-store" }) },
+  mapboxSuggest(query, accessToken, sessionToken, context = {}) {
+    const params = new URLSearchParams({ access_token: accessToken, session_token: sessionToken, q: query, limit: "4", ...context })
+    return request(`https://api.mapbox.com/search/searchbox/v1/suggest?${params.toString()}`, { cache: "no-store" })
+  },
+  mapboxRetrieve(mapboxId, accessToken, sessionToken) {
+    const params = new URLSearchParams({ access_token: accessToken, session_token: sessionToken })
+    return request(`https://api.mapbox.com/search/searchbox/v1/retrieve/${encodeURIComponent(mapboxId)}?${params.toString()}`, { cache: "no-store" })
+  },
+  mapboxGeocode(query, accessToken, context = {}) {
+    const params = new URLSearchParams({ access_token: accessToken, q: query, ...context })
+    return request(`https://api.mapbox.com/search/geocode/v6/forward?${params.toString()}`, { cache: "no-store" })
+  },
+  mapboxDirections(from, to, accessToken) {
+    const origin = `${from.longitude},${from.latitude}`
+    const destination = `${to.longitude},${to.latitude}`
+    const params = new URLSearchParams({ geometries: "geojson", annotations: "congestion", overview: "full", alternatives: "true", access_token: accessToken })
+    return request(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${origin};${destination}?${params.toString()}`, { cache: "no-store" })
+  },
   getNavigationKeys() { return request("/api/navigation_key") },
   setNavigationKey(body) { return request("/api/navigation_key", { method: "POST", data: body }) },
   navigationFavorite(body) { return request("/api/navigation/favorite", { method: "POST", data: body }) },
+  deleteNavigationFavorite(body) { return request("/api/navigation/favorite", { method: "DELETE", data: body }) },
   deleteNavigationKey(type) { return request(`/api/navigation_key?type=${encodeURIComponent(type)}`, { method: "DELETE" }) },
 
+  async systemMonitor(signal) {
+    const response = await fetch("/api/system/monitor", { signal, cache: "no-store" })
+    if (!response.ok) throw new Error("System monitor unavailable")
+    return response.json()
+  },
   async backupToggles() {
     const res = await fetch("/api/toggles/backup", { method: "POST" })
     if (!res.ok) {
@@ -196,11 +233,27 @@ export const api = {
   restoreToggles(data) { return request("/api/toggles/restore", { method: "POST", data }) },
   resetTogglesDefault() { return request("/api/toggles/reset_default", { method: "POST" }) },
 
-  getUpdateBranches() { return request("/api/update/branches") },
+  getUpdateBranches() {
+    return request("/api/update/branches", { cache: "no-store" }).then((data) => {
+      if (!Array.isArray(data?.branches)) throw new Error(data?.error || "Update branch list unavailable.")
+      return data
+    })
+  },
   getUpdateBranch() { return request("/api/update/branch") },
   setUpdateBranch(branch) { return request("/api/update/branch", { method: "POST", data: { branch } }) },
+  getUpdateVersions(branch, { page = 1, head = "", signal } = {}) {
+    const query = new URLSearchParams({ branch, page: String(page) })
+    if (head) query.set("head", head)
+    return request(`/api/update/versions?${query}`, { cache: "no-store", signal })
+  },
+  installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
-  getUpdateFastStatus() { return request("/api/update/fast/status") },
+  getUpdateFastStatus() {
+    return request("/api/update/fast/status", { cache: "no-store" }).then((data) => {
+      if (!data || typeof data !== "object" || typeof data.running !== "boolean") throw new Error(data?.error || "Update status unavailable.")
+      return data
+    })
+  },
   updateRecover() { return request("/api/update/recover", { method: "POST" }) },
   updateRollback() { return request("/api/update/rollback", { method: "POST" }) },
   factoryReset() { return request("/api/update/factory_reset", { method: "POST" }) },
@@ -269,6 +322,10 @@ export const api = {
 
   getPlotsLive() { return request("/api/plots/live") },
   getGalaxySession() { return request("/api/galaxy/session") },
+
+  getTailscaleInstalled() { return request("/api/tailscale/installed", { cache: "no-store" }) },
+  setupTailscale() { return request("/api/tailscale/setup", { method: "POST" }) },
+  uninstallTailscale() { return request("/api/tailscale/uninstall", { method: "POST" }) },
 
   getThemeList() { return request("/api/themes/list") },
   getThemeDefault() { return request("/api/themes/default") },
@@ -359,6 +416,9 @@ export function showSnackbar(message, level = "info") {
   }
   const el = document.createElement("div")
   el.className = "snackbar show"
+  el.setAttribute("role", level === "error" ? "alert" : "status")
+  el.setAttribute("aria-live", level === "error" ? "assertive" : "polite")
+  el.setAttribute("aria-atomic", "true")
   el.style.background = level === "error" ? "var(--error)" : "var(--color-confirm, #8b6cc5)"
   el.style.borderRadius = "var(--border-radius-base, 5px)"
   el.style.color = "var(--text-color, #fff)"

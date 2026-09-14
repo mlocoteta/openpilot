@@ -24,5 +24,21 @@ can_ring *tx1_q = &can_tx1_q;
 can_ring *tx2_q = &can_tx2_q;
 can_ring *tx3_q = &can_tx3_q;
 
+void set_ignition_can_for_test(bool enabled) {
+  ignition_can = enabled;
+}
+
+bool get_ignition_can_for_test(void) {
+  return ignition_can;
+}
+
+void set_ignition_can_cnt_for_test(uint32_t cnt) {
+  ignition_can_cnt = cnt;
+}
+
+uint32_t get_ignition_can_cnt_for_test(void) {
+  return ignition_can_cnt;
+}
+
 #include "comms_definitions.h"
 #include "can_comms.h"

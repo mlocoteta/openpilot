@@ -19,6 +19,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -619,6 +620,70 @@ def update_manifest(repo: Path, info: ReleaseInfo, result: dict, manifest_versio
   return path
 
 
+def manifest_models(payload: object) -> list[dict]:
+  models = payload.get("models") if isinstance(payload, dict) else payload
+  if not isinstance(models, list) or not models:
+    raise ReleaseError("Unsupported or empty Hugging Face manifest")
+  if any(not isinstance(model, dict) or not str(model.get("id") or "").strip() for model in models):
+    raise ReleaseError("Hugging Face manifest contains an invalid model entry")
+  model_ids = [str(model["id"]).strip() for model in models]
+  if len(model_ids) != len(set(model_ids)):
+    raise ReleaseError("Hugging Face manifest contains duplicate model IDs")
+  return models
+
+
+def accelerator_artifact_map(payload: object) -> dict[tuple[str, str], dict]:
+  artifacts: dict[tuple[str, str], dict] = {}
+  for model in manifest_models(payload):
+    model_id = str(model.get("id") or "").strip()
+    model_artifacts = model.get("accelerator_artifacts")
+    if not model_id or not isinstance(model_artifacts, dict):
+      continue
+    for accelerator, metadata in model_artifacts.items():
+      if isinstance(metadata, dict):
+        artifacts[(model_id, str(accelerator))] = metadata
+  return artifacts
+
+
+def validate_manifest_update(before: object, after: object, replacing_model_id: str) -> None:
+  before_by_id = {str(model["id"]).strip(): model for model in manifest_models(before)}
+  after_by_id = {str(model["id"]).strip(): model for model in manifest_models(after)}
+  before_ids = set(before_by_id)
+  after_ids = set(after_by_id)
+  expected_ids = before_ids | {replacing_model_id}
+  if after_ids != expected_ids:
+    missing = sorted(expected_ids - after_ids)
+    unexpected = sorted(after_ids - expected_ids)
+    raise ReleaseError(
+      "Refusing to publish a manifest with an unexpected model set"
+      + (f"; missing: {', '.join(missing)}" if missing else "")
+      + (f"; unexpected: {', '.join(unexpected)}" if unexpected else "")
+    )
+
+  before_artifacts = accelerator_artifact_map(before)
+  after_artifacts = accelerator_artifact_map(after)
+  regressions = [
+    f"{model_id}:{accelerator}"
+    for (model_id, accelerator), metadata in before_artifacts.items()
+    if model_id != replacing_model_id and after_artifacts.get((model_id, accelerator)) != metadata
+  ]
+  if regressions:
+    raise ReleaseError(
+      "Refusing to publish a manifest that removes or changes existing accelerator metadata for: "
+      + ", ".join(sorted(regressions))
+    )
+
+  unrelated_changes = sorted(
+    model_id for model_id, model in before_by_id.items()
+    if model_id != replacing_model_id and after_by_id[model_id] != model
+  )
+  if unrelated_changes:
+    raise ReleaseError(
+      "Refusing to publish a manifest that changes unrelated model entries: "
+      + ", ".join(unrelated_changes)
+    )
+
+
 def find_hf() -> str:
   candidates = [shutil.which("hf"), str(Path.home() / ".local/bin/hf")]
   for candidate in candidates:
@@ -633,15 +698,42 @@ def hf_copy(source: Path, bucket: str, remote_path: str) -> None:
   run([hf, "buckets", "cp", str(source), destination, "--format", "quiet"])
 
 
+def refresh_huggingface_manifest(manifest: Path, bucket: str) -> dict:
+  remote_path = f"manifests/{manifest.name}"
+  source = f"hf://buckets/{bucket}/{remote_path}"
+  manifest.parent.mkdir(parents=True, exist_ok=True)
+  with tempfile.TemporaryDirectory(prefix=".model-release-", dir=manifest.parent) as temporary_dir:
+    candidate = Path(temporary_dir) / manifest.name
+    run([find_hf(), "buckets", "cp", source, str(candidate), "--format", "quiet"])
+    try:
+      payload = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+      raise ReleaseError(f"Invalid live Hugging Face manifest: {error}") from error
+    accelerator_artifact_map(payload)
+    candidate.replace(manifest)
+  return payload
+
+
+def prepare_huggingface_manifest(manifest: Path, info: ReleaseInfo, result: dict,
+                                 bucket: str, manifest_version: str) -> Path:
+  live_payload = refresh_huggingface_manifest(manifest, bucket)
+  updated_manifest = update_manifest(manifest.parent, info, result, manifest_version)
+  updated_payload = json.loads(updated_manifest.read_text(encoding="utf-8"))
+  validate_manifest_update(live_payload, updated_payload, info.model_id)
+  return updated_manifest
+
+
 def upload_huggingface(info: ReleaseInfo, result: dict, workspace: Path, bucket: str, manifest_version: str,
-                       manifest: Path, upload_onnx: bool, source: Path) -> None:
+                       manifest: Path, upload_onnx: bool, source: Path) -> Path:
   artifact_dir = Path(result["path"])
   for filename in result["files"]:
     hf_copy(artifact_dir / filename, bucket, f"models/{manifest_version}/{info.model_id}/{filename}")
   if upload_onnx:
     hf_copy(source, bucket, f"onnx/{info.model_id}/{source.name}")
+  manifest = prepare_huggingface_manifest(manifest, info, result, bucket, manifest_version)
   hf_copy(manifest, bucket, f"manifests/{manifest.name}")
   print(f"Hugging Face upload complete: {bucket}/models/{manifest_version}/{info.model_id}/")
+  return manifest
 
 
 def git_output(repo: Path, args: list[str]) -> str:
@@ -777,9 +869,9 @@ def main() -> int:
     result = remote_compile(info, source, ip, workspace, args.keep_device_files)
     resources_repo = args.resources_repo.expanduser().resolve()
     check_resources_repo(resources_repo, args.resources_branch)
-    manifest = update_manifest(resources_repo, info, result, args.manifest_version)
-    upload_huggingface(info, result, workspace, args.hf_bucket, args.manifest_version,
-                       manifest, not args.no_onnx_upload, source)
+    manifest = resources_repo / f"model_names_{args.manifest_version}.json"
+    manifest = upload_huggingface(info, result, workspace, args.hf_bucket, args.manifest_version,
+                                  manifest, not args.no_onnx_upload, source)
     push_github(info, result, resources_repo, args.manifest_version, manifest, args.resources_branch, args.force)
     print("\nRelease complete.")
     print(f"  local artifact: {result['path']}")

@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.controls.starpilot_planner import StarPilotPlanner, get_force_stop_jerk_scale
-from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_lead_follow_jerk_scale
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
+  get_hyundai_canfd_scc_jerk_limits,
+  get_lead_follow_jerk_scale,
+)
 import openpilot.starpilot.controls.starpilot_planner as starpilot_planner_module
 
 
@@ -46,6 +49,14 @@ def test_lead_follow_jerk_scale_is_platform_specific():
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="ford", carFingerprint="FORD_F_150_LIGHTNING_MK1")) == 1.35
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="honda", carFingerprint="HONDA_CRV_5G")) == 1.35
   assert get_lead_follow_jerk_scale(SimpleNamespace(brand="other", carFingerprint="OTHER_CAR")) == 1.0
+
+
+def test_genesis_gv70_scc_jerk_limits_are_platform_specific():
+  gv70 = SimpleNamespace(brand="hyundai", carFingerprint="GENESIS_GV70_ELECTRIFIED_1ST_GEN")
+  other = SimpleNamespace(brand="hyundai", carFingerprint="HYUNDAI_IONIQ_6")
+
+  assert get_hyundai_canfd_scc_jerk_limits(gv70) == (1.5, 2.0)
+  assert get_hyundai_canfd_scc_jerk_limits(other) is None
 
 
 def make_sm(planner, *, frame: int, v_ego: float, left_blinker: bool, right_blinker: bool = False, standstill: bool = False):

@@ -130,9 +130,6 @@ class VehicleSettingsManagerView(PanelManagerView):
                    float(self._controller._params.get_int("LockDoorsTimer")),
                    f"{self._controller._params.get_int('LockDoorsTimer')}s"),
                  on_click=lambda: self._controller._on_select("LockDoorsTimer")))
-      rows.append(SettingRow("ClusterOffset", "value", tr_noop("Dashboard Speed Offset"),
-                 get_value=lambda: f"{self._controller._params.get_float('ClusterOffset'):.3f}x",
-                 on_click=lambda: self._controller._on_select("ClusterOffset")))
     return rows
 
   def _combo_value(self, keys: tuple[str, ...]) -> str:
@@ -720,8 +717,6 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       self._on_select_model()
     elif key == "LockDoorsTimer":
       self._show_lock_timer_selector()
-    elif key == "ClusterOffset":
-      self._show_offset_selector()
     else:
       self._show_action_picker(key)
 
@@ -814,7 +809,7 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       allowed_ids = set(range(9)) | {11, 12, 13, 14}
       if key == "LKASButtonControl":
         allowed_ids.add(9)
-      developer_access = self._params.get_bool("DeveloperUI") or self._params.get_bool("GalaxyDeveloperMode")
+      developer_access = gui_app.big_ui() or self._params.get_bool("DeveloperUI") or self._params.get_bool("GalaxyDeveloperMode")
       options = [o for o in ACTION_OPTIONS
                  if o["id"] in allowed_ids and
                  (cs.hasOpenpilotLongitudinal or not o.get("requires_longitudinal", False)) and
@@ -842,15 +837,6 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
     gui_app.push_widget(AetherSliderDialog(tr("Lock Doors Timer"), 0, 300, 5,
                                             self._params.get_int("LockDoorsTimer"), on_close,
                                             labels=_lock_doors_timer_labels(), color=PANEL_STYLE.accent))
-
-  def _show_offset_selector(self):
-    def on_close(res, val):
-      if res == DialogResult.CONFIRM:
-        self._params.put_float("ClusterOffset", float(val))
-
-    gui_app.push_widget(AetherSliderDialog(tr("Dashboard Speed Offset"), 1.000, 1.050, 0.001,
-                                            self._params.get_float("ClusterOffset"), on_close,
-                                            unit="x", color=PANEL_STYLE.accent))
 
   def _get_display_make(self) -> str:
     make = self._params.get("CarMake") or ""

@@ -1,11 +1,16 @@
 from openpilot.common.params import Params
-from openpilot.selfdrive.ui.lib.starpilot_visuals import lead_indicator_enabled
+from openpilot.selfdrive.ui.lib.starpilot_visuals import LeadInfoMode, lead_indicator_enabled, lead_info_mode
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl, BigToggle
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigMultiOptionDialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
 
 CAMERA_VIEW_LABELS = ["Auto", "Driver", "Standard", "Wide", "None"]
+LEAD_INFO_LABELS = {
+  LeadInfoMode.OFF: "Off",
+  LeadInfoMode.DISTANCE: "Distance",
+  LeadInfoMode.SPEED: "Speed",
+}
 
 
 class CameraViewBigButton(BigButton):
@@ -53,6 +58,37 @@ class LeadIndicatorBigButton(BigToggle):
     self.set_checked(lead_indicator_enabled(self.params, hide_by_default=True))
 
 
+class LeadInfoBigButton(BigButton):
+  def __init__(self):
+    super().__init__("lead info", "", gui_app.texture("icons_mici/onroad/eye_fill.png", 64, 64))
+    self.params = Params()
+    self.set_click_callback(self._show_selector)
+    self.refresh()
+
+  def refresh(self):
+    self.set_value(LEAD_INFO_LABELS[lead_info_mode(self.params)].lower())
+
+  def _show_selector(self):
+    current_mode = lead_info_mode(self.params)
+    options = list(LEAD_INFO_LABELS.values())
+    dialog_holder: dict[str, BigMultiOptionDialog] = {}
+
+    def on_confirm():
+      selected = dialog_holder["dialog"].get_selected_option()
+      try:
+        selected_mode = next(mode for mode, label in LEAD_INFO_LABELS.items() if label == selected)
+      except StopIteration:
+        gui_app.push_widget(BigDialog("", "Invalid lead info mode"))
+        return
+      self.params.put_int("LeadInfoMode", int(selected_mode))
+      self.params.put_bool("LeadInfo", selected_mode != LeadInfoMode.OFF)
+      self.refresh()
+
+    dialog = BigMultiOptionDialog(options=options, default=LEAD_INFO_LABELS[current_mode], right_btn_callback=on_confirm)
+    dialog_holder["dialog"] = dialog
+    gui_app.push_widget(dialog)
+
+
 class VisualsLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
@@ -63,7 +99,7 @@ class VisualsLayoutMici(NavScroller):
     self._torque_bar_btn = BigParamControl("torque bar", "EnableTorqueBarWidget")
     self._rainbow_path_btn = BigParamControl("rainbow road", "RainbowPath")
     self._lead_indicator_btn = LeadIndicatorBigButton()
-    self._lead_info_btn = BigParamControl("show lead speed", "LeadInfo")
+    self._lead_info_btn = LeadInfoBigButton()
     self._speed_limit_signs_btn = BigParamControl("show speed limits", "ShowSpeedLimits")
     self._slc_confirmation_btn = BigParamControl("confirm new speed limits", "SLCConfirmation")
     self._slc_confirmation_lower_btn = BigParamControl("confirm lower limits", "SLCConfirmationLower")
@@ -95,6 +131,7 @@ class VisualsLayoutMici(NavScroller):
   def _refresh(self):
     self._camera_view_btn.refresh()
     self._lead_indicator_btn.refresh()
+    self._lead_info_btn.refresh()
     self._lead_info_btn.set_enabled(lead_indicator_enabled(self._lead_info_btn.params, hide_by_default=True))
     confirmation_enabled = self._slc_confirmation_btn.params.get_bool("SLCConfirmation")
     self._slc_confirmation_lower_btn.set_visible(confirmation_enabled)

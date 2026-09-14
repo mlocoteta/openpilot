@@ -210,8 +210,7 @@ class AMDev:
     if not self.is_vf: # skip in vf mode, these are pf funcs.
       if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
         self.smu.set_power_limit(max_power)
-        self.smu.set_clocks(level=None)
-      else: self.smu.set_clocks(level=-1) # last level, max perf.
+      self.smu.set_clocks(level=None)
       for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
       self.reg("regSCRATCH_REG7").write(AMDev.Version)
       self.reg("regSCRATCH_REG6").write(1) # set initialized state.
