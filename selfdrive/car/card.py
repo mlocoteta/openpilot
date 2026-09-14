@@ -481,8 +481,18 @@ class Car:
 
   def _update_openpilot_lead_state(self, CC: car.CarControl) -> None:
     lead_visible = bool(CC.hudControl.leadVisible)
+    longitudinal_adjustment_active = lead_visible
     lead_distance = 0.0
     lead_rel_speed = 0.0
+
+    if self.sm.seen['starpilotPlan'] and self.sm.valid['starpilotPlan']:
+      longitudinal_adjustment_active = bool(self.sm['starpilotPlan'].trackingLead)
+
+    if self.sm.seen['longitudinalPlan'] and self.sm.valid['longitudinalPlan']:
+      longitudinal_plan = self.sm['longitudinalPlan']
+      longitudinal_adjustment_active |= bool(
+        longitudinal_plan.shouldStop or str(longitudinal_plan.longitudinalPlanSource) != "cruise"
+      )
 
     if self.sm.seen['radarState'] and self.sm.valid['radarState']:
       lead = self.sm['radarState'].leadOne
@@ -498,6 +508,7 @@ class Car:
     self.CI.CS.openpilot_lead_visible = lead_visible
     self.CI.CS.openpilot_lead_distance = lead_distance
     self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
+    self.CI.CS.openpilot_longitudinal_adjustment_active = longitudinal_adjustment_active
 
   def _update_redneck_cruise(self, CS: car.CarState, CC: car.CarControl) -> None:
     if self.redneck_cruise is None:

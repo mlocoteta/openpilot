@@ -1135,7 +1135,7 @@ class TestGMCarController:
     assert msgs == []
     assert controller.apply_speed == 100
 
-  def test_volt_cc_redneck_holds_medium_decel_request_at_max_without_lead(self):
+  def test_volt_cc_redneck_holds_strong_decel_request_at_max_during_free_cruise(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
     controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
     cs = SimpleNamespace(
@@ -1154,13 +1154,13 @@ class TestGMCarController:
     )
 
     msgs = gmcan.create_gm_cc_spam_command(
-      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), lead_visible=False,
+      packer, controller, cs, SimpleNamespace(accel=-1.2), SimpleNamespace(is_metric=True),
     )
 
     assert msgs == []
     assert controller.apply_speed == 100
 
-  def test_volt_cc_redneck_brakes_for_lead_inside_free_road_deadband(self):
+  def test_volt_cc_redneck_brakes_for_active_lead_inside_free_road_deadband(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
     controller = SimpleNamespace(frame=int(3.0 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
     cs = SimpleNamespace(
@@ -1179,7 +1179,7 @@ class TestGMCarController:
     )
 
     msgs = gmcan.create_gm_cc_spam_command(
-      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), lead_visible=True,
+      packer, controller, cs, SimpleNamespace(accel=-0.5), SimpleNamespace(is_metric=True), longitudinal_adjustment_active=True,
     )
 
     assert len(msgs) == 1
@@ -1236,7 +1236,7 @@ class TestGMCarController:
     )
 
     msgs = gmcan.create_gm_cc_spam_command(
-      packer, controller, cs, SimpleNamespace(accel=-1.36), SimpleNamespace(is_metric=True),
+      packer, controller, cs, SimpleNamespace(accel=-1.36), SimpleNamespace(is_metric=True), longitudinal_adjustment_active=True,
     )
 
     assert len(msgs) == 1
