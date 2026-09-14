@@ -2,11 +2,12 @@ import { api, showSnackbar } from "../api.js"
 import {
   getMapboxSearchContext,
   addRouteToMap,
+  highlightRoute,
   removeRouteFromMap,
   formatSecondsToHuman,
   formatMetersToHuman,
   formatMetersToMiles,
-} from "../../../components/navigation/navigation_utilities.js?v=nav-search-context-2"
+} from "../../../components/navigation/navigation_utilities.js?v=nav-route-selection-1"
 
 const MAPBOX_STYLE = "mapbox://styles/frogsgomoo/cmcfv151j000o01rcdxebhl76"
 
@@ -91,6 +92,8 @@ export const NavigationDestinationPanel = {
       favorites: [],
       destination: null,
       routeSummary: null,
+      routes: [],
+      selectedRouteId: "main",
       navigationStarted: false,
       isMetric: false,
       mapboxPublic: "",
@@ -209,6 +212,8 @@ export const NavigationDestinationPanel = {
     onInput(event) {
       this.destination = null
       this.routeSummary = null
+      this.routes = []
+      this.selectedRouteId = "main"
       this.navigationStarted = false
       if (this.map) removeRouteFromMap(this.map)
       this.searchRequest += 1
@@ -299,6 +304,8 @@ export const NavigationDestinationPanel = {
         this.navigationStarted = false
         this.destination = null
         this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
         this.query = ""
         this.suggestions = []
         if (this.map) removeRouteFromMap(this.map)
@@ -340,6 +347,17 @@ export const NavigationDestinationPanel = {
       const eta = new Date(Date.now() + Number(value || 0) * 1000)
       return eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     },
+    routeId(index) { return index === 0 ? "main" : `alt-${index}` },
+    selectRoute(route, routeId = "main") {
+      if (!route) return
+      this.selectedRouteId = routeId
+      this.routeSummary = {
+        distance: Number(route.distance) || 0,
+        duration: Number(route.duration) || 0,
+        routeId,
+      }
+      if (this.map && this.routes.length) highlightRoute(this.map, this.routes, routeId)
+    },
     async previewDestination(place) {
       if (!this.mapReady || !this.map || !place) return
       const mapboxgl = window.mapboxgl
@@ -347,6 +365,8 @@ export const NavigationDestinationPanel = {
       this.destinationMarker = new mapboxgl.Marker({ color: "#9d72ff" }).setLngLat([place.longitude, place.latitude]).addTo(this.map)
       if (!this.lastPosition) {
         this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
         this.map.flyTo({ center: [place.longitude, place.latitude], zoom: 14 })
         return
       }
@@ -354,20 +374,28 @@ export const NavigationDestinationPanel = {
         const payload = await api.mapboxDirections(this.lastPosition, place, this.mapboxPublic)
         const routes = Array.isArray(payload?.routes) ? payload.routes : []
         if (routes.length) {
-          const route = routes[0]
-          this.routeSummary = {
-            distance: Number(route.distance) || 0,
-            duration: Number(route.duration) || 0,
-            routeId: "main",
-          }
+          this.routes = routes
+          this.selectRoute(routes[0], "main")
           removeRouteFromMap(this.map)
-          addRouteToMap(this.map, routes, [this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude], () => {}, true, () => "main")
+          addRouteToMap(
+            this.map,
+            routes,
+            [this.lastPosition.longitude, this.lastPosition.latitude],
+            [place.longitude, place.latitude],
+            (route, routeId) => this.selectRoute(route, routeId),
+            this.isMetric,
+            () => this.selectedRouteId,
+          )
         } else {
           this.routeSummary = null
+          this.routes = []
+          this.selectedRouteId = "main"
           this.map.fitBounds([[this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude]], { padding: 80, duration: 500 })
         }
       } catch (e) {
         this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
         this.map.fitBounds([[this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude]], { padding: 80, duration: 500 })
       }
     },
@@ -403,6 +431,16 @@ export const NavigationDestinationPanel = {
             <div><span class="gx-navigation-summary__icon">🛣️</span><span>Distance:</span><strong>{{ formatDistance(routeSummary.distance) }}</strong></div>
             <div><span class="gx-navigation-summary__icon">⌛</span><span>Duration:</span><strong>{{ formatDuration(routeSummary.duration) }}</strong></div>
             <div><span class="gx-navigation-summary__icon">🕗</span><span>ETA:</span><strong>{{ formatEta(routeSummary.duration) }}</strong></div>
+          </div>
+          <div v-if="routes.length > 1" class="gx-navigation-route-picker" aria-label="Choose a route">
+            <div class="gx-navigation-route-picker__title">Routes</div>
+            <button v-for="(route, index) in routes" :key="routeId(index)" type="button"
+              class="gx-navigation-route-option" :class="{ selected: selectedRouteId === routeId(index) }"
+              :aria-pressed="selectedRouteId === routeId(index)" :aria-label="'Select route ' + (index + 1)"
+              @click="selectRoute(route, routeId(index))">
+              <span><strong>Route {{ index + 1 }}</strong><small>{{ selectedRouteId === routeId(index) ? 'Selected' : (index === 0 ? 'Recommended' : 'Alternative') }}</small></span>
+              <strong>{{ formatDistance(route.distance) }} · {{ formatDuration(route.duration) }}</strong>
+            </button>
           </div>
           <div class="gx-navigation-summary__actions">
             <button v-if="navigationStarted" type="button" class="gx-btn gx-btn--danger" @click="cancelNavigation"><i class="bi bi-x-lg"></i> Cancel Navigation</button>

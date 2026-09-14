@@ -1548,6 +1548,62 @@ button.gx-chip:hover {
   text-align: center;
 }
 
+.gx-navigation-route-picker {
+  border-top: 1px solid var(--outline);
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2) 0;
+}
+
+.gx-navigation-route-picker__title {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+}
+
+.gx-navigation-route-option {
+  align-items: center;
+  background: var(--surface-container);
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  cursor: pointer;
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: space-between;
+  min-height: 52px;
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  width: 100%;
+}
+
+.gx-navigation-route-option > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gx-navigation-route-option small {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.gx-navigation-route-option > strong:last-child {
+  white-space: nowrap;
+}
+
+.gx-navigation-route-option:hover,
+.gx-navigation-route-option:focus-visible,
+.gx-navigation-route-option.selected {
+  background: var(--primary-container);
+  border-color: var(--primary);
+}
+
+.gx-navigation-route-option.selected > strong:first-child {
+  color: var(--primary);
+}
+
 .gx-navigation-summary__actions {
   display: flex;
   flex-wrap: wrap;
