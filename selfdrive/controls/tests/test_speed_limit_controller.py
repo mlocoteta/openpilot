@@ -96,17 +96,17 @@ def mph(value):
   return value * CV.MPH_TO_MS
 
 
-def update_dashboard_limit(controller, now, current_limit, desired_limit, *, decel_pressed=False):
+def update_dashboard_limit(controller, now, current_limit, desired_limit, *, accel_pressed=False, decel_pressed=False):
   controller.update_limits(
     mph(desired_limit), now, False, mph(current_limit), mph(current_limit),
-    make_sm(gas_pressed=False, decel_pressed=decel_pressed),
+    make_sm(gas_pressed=False, accel_pressed=accel_pressed, decel_pressed=decel_pressed),
   )
 
 
-def make_pending_lower_limit(current_limit, desired_limit):
+def make_pending_limit(current_limit, desired_limit, confirmation_toggle):
   controller = make_controller(
     speed_limit_priority1="Dashboard",
-    speed_limit_confirmation_lower=True,
+    **{confirmation_toggle: True},
   )
   controller.source = "Dashboard"
   controller.target = mph(current_limit)
@@ -118,6 +118,10 @@ def make_pending_lower_limit(current_limit, desired_limit):
   update_dashboard_limit(controller, now, current_limit, desired_limit)
   assert controller.unconfirmed_speed_limit == pytest.approx(mph(desired_limit))
   return controller, now
+
+
+def make_pending_lower_limit(current_limit, desired_limit):
+  return make_pending_limit(current_limit, desired_limit, "speed_limit_confirmation_lower")
 
 
 @pytest.mark.parametrize("limit_mph", [15, 25])
@@ -463,33 +467,51 @@ def test_unconfirmed_lower_limit_keeps_existing_override():
     controller.shutdown()
 
 
-def test_rejected_lower_limit_does_not_auto_apply_on_next_update():
-  controller, now = make_pending_lower_limit(65, 45)
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "confirmation_toggle"),
+  [
+    (65, 45, "speed_limit_confirmation_lower"),
+    (35, 45, "speed_limit_confirmation_higher"),
+  ],
+)
+def test_rejected_confirmation_does_not_auto_apply_on_next_update(
+  current_limit, desired_limit, confirmation_toggle,
+):
+  controller, now = make_pending_limit(current_limit, desired_limit, confirmation_toggle)
   try:
-    update_dashboard_limit(controller, now, 65, 45, decel_pressed=True)
-    assert controller.denied_target == pytest.approx(mph(45))
+    update_dashboard_limit(controller, now, current_limit, desired_limit, decel_pressed=True)
+    assert controller.denied_target == pytest.approx(mph(desired_limit))
 
-    update_dashboard_limit(controller, now, 65, 45)
+    update_dashboard_limit(controller, now, current_limit, desired_limit)
 
     assert controller.source == "None"
-    assert controller.target == pytest.approx(mph(65))
+    assert controller.target == pytest.approx(mph(current_limit))
     assert controller.unconfirmed_speed_limit == 0
   finally:
     controller.shutdown()
 
 
-def test_timed_out_lower_limit_does_not_auto_apply():
-  controller, now = make_pending_lower_limit(55, 45)
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "confirmation_toggle"),
+  [
+    (55, 45, "speed_limit_confirmation_lower"),
+    (35, 45, "speed_limit_confirmation_higher"),
+  ],
+)
+def test_timed_out_confirmation_does_not_auto_apply(
+  current_limit, desired_limit, confirmation_toggle,
+):
+  controller, now = make_pending_limit(current_limit, desired_limit, confirmation_toggle)
   try:
     for _ in range(int(30 / DT_MDL)):
-      update_dashboard_limit(controller, now, 55, 45)
+      update_dashboard_limit(controller, now, current_limit, desired_limit)
 
-    assert controller.denied_target == pytest.approx(mph(45))
+    assert controller.denied_target == pytest.approx(mph(desired_limit))
 
-    update_dashboard_limit(controller, now, 55, 45)
+    update_dashboard_limit(controller, now, current_limit, desired_limit)
 
     assert controller.source == "None"
-    assert controller.target == pytest.approx(mph(55))
+    assert controller.target == pytest.approx(mph(current_limit))
     assert controller.unconfirmed_speed_limit == 0
   finally:
     controller.shutdown()
@@ -700,6 +722,160 @@ def test_confirmation_accel_press_does_not_arm_set_speed_override():
     controller.update_override(mph(60), 0.0, mph(45), 0.0, second_press_sm)
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(60))
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "accel_pressed", "decel_pressed"),
+  [
+    (65, 45, False, True),
+    (35, 45, True, False),
+  ],
+)
+def test_disabled_confirmation_does_not_consume_wheel_input(
+  current_limit, desired_limit, accel_pressed, decel_pressed,
+):
+  controller = make_controller()
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(current_limit)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(current_limit)
+    controller.last_valid_limit = mph(current_limit)
+    controller._slc_adopt_counter = 1
+    controller.starpilot_planner.params_memory.values["SpeedLimitAccepted"] = True
+
+    controller.handle_limit_change(
+      "Dashboard", mph(desired_limit), "", mph(current_limit),
+      make_sm(
+        gas_pressed=False,
+        accel_pressed=accel_pressed,
+        decel_pressed=decel_pressed,
+        v_cruise_kph=current_limit * CV.MPH_TO_KPH,
+      ),
+    )
+
+    assert controller.target == pytest.approx(mph(desired_limit))
+    assert controller.denied_target == 0
+    assert controller.unconfirmed_speed_limit == 0
+    assert not controller._set_speed_override_input_consumed
+    assert "SpeedLimitAccepted" not in controller.starpilot_planner.params_memory.values
+    assert "SLCForceCruiseSpeed" not in controller.starpilot_planner.params_memory.values
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "confirmation_toggle", "confirmation_enabled"),
+  [
+    (65, 45, "speed_limit_confirmation_lower", True),
+    (35, 45, "speed_limit_confirmation_higher", True),
+    (65, 45, "speed_limit_confirmation_lower", False),
+    (35, 45, "speed_limit_confirmation_higher", False),
+  ],
+)
+def test_directional_limit_changes_follow_confirmation_mode(
+  current_limit, desired_limit, confirmation_toggle, confirmation_enabled,
+):
+  controller = make_controller(
+    speed_limit_priority1="Dashboard",
+    **{confirmation_toggle: confirmation_enabled},
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(current_limit)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(current_limit)
+    controller.last_valid_limit = mph(current_limit)
+
+    update_dashboard_limit(controller, datetime.now(timezone.utc), current_limit, desired_limit)
+
+    if confirmation_enabled:
+      assert controller.source == "None"
+      assert controller.target == pytest.approx(mph(current_limit))
+      assert controller.unconfirmed_speed_limit == pytest.approx(mph(desired_limit))
+    else:
+      assert controller.source == "Dashboard"
+      assert controller.target == pytest.approx(mph(desired_limit))
+      assert controller.unconfirmed_speed_limit == 0
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "confirmation_toggle", "accel_pressed", "decel_pressed", "accepted"),
+  [
+    (65, 45, "speed_limit_confirmation_lower", True, False, True),
+    (65, 45, "speed_limit_confirmation_lower", False, True, False),
+    (35, 45, "speed_limit_confirmation_higher", True, False, True),
+    (35, 45, "speed_limit_confirmation_higher", False, True, False),
+  ],
+)
+def test_confirmation_wheel_actions_accept_or_decline_pending_limit(
+  current_limit, desired_limit, confirmation_toggle, accel_pressed, decel_pressed, accepted,
+):
+  controller, now = make_pending_limit(current_limit, desired_limit, confirmation_toggle)
+  try:
+    update_dashboard_limit(
+      controller, now, current_limit, desired_limit,
+      accel_pressed=accel_pressed,
+      decel_pressed=decel_pressed,
+    )
+
+    if accepted:
+      assert controller.source == "Dashboard"
+      assert controller.target == pytest.approx(mph(desired_limit))
+      assert controller._set_speed_override_input_consumed
+    else:
+      assert controller.source == "None"
+      assert controller.target == pytest.approx(mph(current_limit))
+      assert controller.denied_target == pytest.approx(mph(desired_limit))
+
+    # The following planner update clears the one-frame confirmation handoff state.
+    update_dashboard_limit(controller, now, current_limit, desired_limit)
+    assert controller.unconfirmed_speed_limit == 0
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+  ("current_limit", "desired_limit", "confirmation_toggle", "accel_pressed", "decel_pressed"),
+  [
+    (65, 45, "speed_limit_confirmation_lower", False, True),
+    (35, 45, "speed_limit_confirmation_higher", True, False),
+  ],
+)
+def test_disabling_confirmation_clears_pending_confirmation_immediately(
+  current_limit, desired_limit, confirmation_toggle, accel_pressed, decel_pressed,
+):
+  controller = make_controller(
+    speed_limit_priority1="Dashboard",
+    **{confirmation_toggle: True},
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(current_limit)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(current_limit)
+    controller.last_valid_limit = mph(current_limit)
+    now = datetime.now(timezone.utc)
+
+    update_dashboard_limit(controller, now, current_limit, desired_limit)
+    assert controller.unconfirmed_speed_limit == pytest.approx(mph(desired_limit))
+
+    setattr(controller.starpilot_toggles, confirmation_toggle, False)
+
+    update_dashboard_limit(
+      controller, now, current_limit, desired_limit,
+      accel_pressed=accel_pressed,
+      decel_pressed=decel_pressed,
+    )
+
+    assert controller.target == pytest.approx(mph(desired_limit))
+    assert controller.unconfirmed_speed_limit == 0
+    assert controller.denied_target == 0
+    assert not controller._set_speed_override_input_consumed
   finally:
     controller.shutdown()
 

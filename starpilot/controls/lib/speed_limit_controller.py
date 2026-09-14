@@ -124,6 +124,12 @@ class SpeedLimitController:
       0 < limit <= max(getattr(self.starpilot_toggles, "vision_speed_limit_low_limit_threshold", 0), 0)
     )
 
+  def _confirmation_required(self, desired_source, desired_target):
+    return desired_source != "None" and (
+      (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
+      (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
+    )
+
   def clear_override(self):
     self.override_slc = False
     self.overridden_speed = 0
@@ -281,15 +287,17 @@ class SpeedLimitController:
 
     long_active = sm["carControl"].longActive
     accepted_by_accel_button = sm["starpilotCarState"].accelPressed and long_active
-    confirmation_required = desired_source != "None" and (
-      (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
-      (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
-    )
+    confirmation_required = self._confirmation_required(desired_source, desired_target)
     higher_confirmation = confirmation_required and desired_target > self.target
-    speed_limit_accepted = accepted_by_accel_button
-    if not speed_limit_accepted and self._slc_adopt_counter % 4 == 0:
+    speed_limit_accepted = confirmation_required and accepted_by_accel_button
+    if confirmation_required and not speed_limit_accepted and self._slc_adopt_counter % 4 == 0:
       speed_limit_accepted = self.starpilot_planner.params_memory.get_bool("SpeedLimitAccepted")
-    speed_limit_denied = sm["starpilotCarState"].decelPressed or (self.speed_limit_changed_timer >= 30 and long_active)
+    if not confirmation_required:
+      self.starpilot_planner.params_memory.remove("SpeedLimitAccepted")
+      self.unconfirmed_speed_limit = 0
+    speed_limit_denied = confirmation_required and (
+      sm["starpilotCarState"].decelPressed or (self.speed_limit_changed_timer >= 30 and long_active)
+    )
 
     if not long_active and not sm["selfdriveState"].enabled:
       speed_limit_accepted = True
@@ -320,12 +328,7 @@ class SpeedLimitController:
       self.previous_target = desired_target
       self.previous_road_name = current_road_name
 
-    elif desired_target < self.target and (desired_source == "None" or not self.starpilot_toggles.speed_limit_confirmation_lower):
-      self.source = desired_source
-      self.target = desired_target
-      self.clear_persistent_override_for_limit_change(previous_limit, desired_target)
-
-    elif desired_target > self.target and (desired_source == "None" or not self.starpilot_toggles.speed_limit_confirmation_higher):
+    elif desired_target != self.target and not confirmation_required:
       self.source = desired_source
       self.target = desired_target
       self.clear_persistent_override_for_limit_change(previous_limit, desired_target)
@@ -447,10 +450,7 @@ class SpeedLimitController:
     # Do not trigger alerts when shifting to fallback or when re-obtaining the same speed limit
     is_fallback = desired_source == "None" or desired_target == 0
     same_speed = desired_target > 0 and current_speed > 0 and abs(desired_target - current_speed) < 1
-    confirmation_required = desired_source != "None" and (
-      (desired_target < self.target and self.starpilot_toggles.speed_limit_confirmation_lower) or
-      (desired_target > self.target and self.starpilot_toggles.speed_limit_confirmation_higher)
-    )
+    confirmation_required = self._confirmation_required(desired_source, desired_target)
     denied_same_limit = (
       confirmation_required and self.denied_target > 0 and
       abs(desired_target - self.denied_target) < 1
