@@ -45,19 +45,19 @@ export const LanguageSelector = {
     },
   },
   template: `
-    <div class="gx-card" style="margin-bottom:16px;">
+    <div class="gx-card gx-language-card">
       <div class="gx-section__header">
         <i class="bi bi-translate"></i>
         <span class="gx-section__title">{{ tr("Language") }}</span>
       </div>
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <label style="display:flex; align-items:center; gap:10px; flex:1; min-width:220px;">
+      <div class="gx-language-card__row">
+        <label class="gx-language-card__label">
           <span>{{ tr("Select language") }}</span>
-          <select class="gx-field" style="max-width:220px;" :value="selected" :disabled="saving" @change="change">
+          <select class="gx-field gx-language-card__select" :value="selected" :disabled="saving" @change="change">
             <option v-for="option in languages" :key="option.value" :value="option.value">{{ tr(option.label, option.label) }}</option>
           </select>
         </label>
-        <small class="gx-row__desc">{{ tr("Galaxy uses English when no language is selected.") }}</small>
+        <small class="gx-row__desc gx-language-card__hint">{{ tr("Galaxy uses English when no language is selected.") }}</small>
       </div>
       <p v-if="error" class="gx-row__desc" style="color:var(--danger); margin:8px 0 0;">{{ error }}</p>
     </div>

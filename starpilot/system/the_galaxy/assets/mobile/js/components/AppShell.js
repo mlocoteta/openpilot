@@ -1,4 +1,4 @@
-import { store, navigate, goBack, toolHref, toggleTheme } from "../store.js"
+import { store, navigate, goBack, toolHref, toggleTheme, toggleNavPinned } from "../store.js"
 import { api } from "../api.js"
 import { usePolling } from "../composables.js"
 import { languageState, setLanguage, t } from "../i18n.js"
@@ -40,6 +40,7 @@ export const AppShell = {
     online() { return store.online },
     statusLabel() { return store.online ? t(store.deviceStatus, store.deviceStatus) : t("Offline") },
     isLight() { return store.theme === "light" },
+    navPinned() { return store.navPinned },
     drawerOpen: {
       get() { return store.drawerOpen },
       set(v) { store.drawerOpen = v },
@@ -59,7 +60,7 @@ export const AppShell = {
   },
   methods: {
     tr(key, fallback = key) { return t(key, fallback) },
-    closeDrawer() { store.drawerOpen = false },
+    closeDrawer() { if (!store.navPinned) store.drawerOpen = false },
     back() { goBack() },
     async refreshStatus() {
       try {
@@ -84,6 +85,7 @@ export const AppShell = {
       this.$nextTick(() => { const el = this.$refs.searchInput; if (el) el.focus() })
     },
     themeToggle() { toggleTheme() },
+    toggleNavPin() { toggleNavPinned() },
     navTo(link) {
       this.closeDrawer()
       navigate(toolHref(link))
@@ -107,7 +109,7 @@ export const AppShell = {
     this.statusPoll?.destroy()
   },
   template: `
-    <div class="gx-app">
+    <div class="gx-app" :class="{ 'gx-nav-pinned': navPinned }">
       <header class="gx-appbar">
         <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" :aria-label="tr('Back')" @click="back">
           <i class="bi bi-arrow-left"></i>
@@ -138,15 +140,25 @@ export const AppShell = {
           :title="isLight ? tr('Dark mode') : tr('Light mode')" @click="themeToggle">
           <i class="bi" :class="isLight ? 'bi-moon-stars-fill' : 'bi-sun-fill'"></i>
         </button>
+        <button type="button" class="gx-icon-btn gx-appbar__pin" :aria-pressed="navPinned"
+          :aria-label="navPinned ? tr('Unpin navigation') : tr('Pin navigation')"
+          :title="navPinned ? tr('Unpin navigation') : tr('Pin navigation')" @click="toggleNavPin">
+          <i class="bi" :class="navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i>
+        </button>
       </header>
 
       <transition name="gx-fade">
-        <div v-if="store.drawerOpen" class="gx-underlay" @click="closeDrawer"></div>
+        <div v-if="store.drawerOpen && !navPinned" class="gx-underlay" @click="closeDrawer"></div>
       </transition>
-      <aside class="gx-drawer" :class="{ open: store.drawerOpen }">
+      <aside class="gx-drawer" :class="{ open: store.drawerOpen || navPinned }">
         <div class="gx-drawer__header">
           <img class="gx-logo" src="/assets/images/main_logo.png" alt="Galaxy logo" />
           <span class="gx-drawer-title">{{ tr("Galaxy") }}</span>
+          <button type="button" class="gx-icon-btn gx-drawer__pin" :aria-pressed="navPinned"
+            :aria-label="navPinned ? tr('Unpin navigation') : tr('Pin navigation')"
+            :title="navPinned ? tr('Unpin navigation') : tr('Pin navigation')" @click.stop="toggleNavPin">
+            <i class="bi" :class="navPinned ? 'bi-pin-angle-fill' : 'bi-pin-angle'"></i>
+          </button>
         </div>
         <div class="gx-nav-section">
           <div class="gx-nav-section__title">{{ tr("Main") }}</div>

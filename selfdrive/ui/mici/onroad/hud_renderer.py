@@ -195,10 +195,12 @@ class HudRenderer(Widget):
     controls_state = sm['controlsState']
     car_state = sm['carState']
     rivian_lateral_mode.update()
+    starpilot_car_state = sm['starpilotCarState'] if sm.valid.get('starpilotCarState', False) else None
     self._wheel_tint = get_wheel_tint(
       getattr(car_state, "brakePressed", False),
       rivian_lateral_mode.wheel_tint,
       ui_state.ui_params.get_bool("ShowBrakeStatus"),
+      getattr(starpilot_car_state, "brakeLights", False),
     )
 
     v_cruise_cluster = car_state.vCruiseCluster

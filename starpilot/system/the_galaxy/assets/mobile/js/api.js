@@ -185,6 +185,7 @@ export const api = {
 
   getNavigation() { return request("/api/navigation") },
   setNavigation(body) { return request("/api/navigation", { method: "POST", data: body }) },
+  clearNavigation() { return request("/api/navigation", { method: "DELETE" }) },
   getNavigationFavorites() { return request("/api/navigation/favorite", { cache: "no-store" }) },
   mapboxSuggest(query, accessToken, sessionToken, context = {}) {
     const params = new URLSearchParams({ access_token: accessToken, session_token: sessionToken, q: query, limit: "4", ...context })
@@ -207,6 +208,7 @@ export const api = {
   getNavigationKeys() { return request("/api/navigation_key") },
   setNavigationKey(body) { return request("/api/navigation_key", { method: "POST", data: body }) },
   navigationFavorite(body) { return request("/api/navigation/favorite", { method: "POST", data: body }) },
+  deleteNavigationFavorite(body) { return request("/api/navigation/favorite", { method: "DELETE", data: body }) },
   deleteNavigationKey(type) { return request(`/api/navigation_key?type=${encodeURIComponent(type)}`, { method: "DELETE" }) },
 
   async systemMonitor(signal) {

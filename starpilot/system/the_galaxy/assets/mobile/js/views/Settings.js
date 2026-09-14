@@ -142,8 +142,6 @@ export const Settings = {
     <div>
       <h2 style="margin-top:0;">{{ tr("Toggles") }}</h2>
 
-      <LanguageSelector :device-value="String(values.LanguageSetting || '')" />
-
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 
       <div v-if="loading" class="gx-loading">{{ tr("Loading configuration...") }}</div>
@@ -191,6 +189,8 @@ export const Settings = {
       </template>
 
       <div v-else class="gx-empty">{{ tr("No settings available.") }}</div>
+
+      <LanguageSelector v-if="route === '/settings' && !loading" :device-value="String(values.LanguageSetting || '')" />
     </div>
   `,
 }

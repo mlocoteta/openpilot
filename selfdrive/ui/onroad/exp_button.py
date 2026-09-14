@@ -16,8 +16,9 @@ from openpilot.starpilot.common.experimental_state import (
 BRAKE_WHEEL_COLOR = rl.Color(255, 0, 0, 255)
 
 
-def get_wheel_tint(brake_pressed: bool, mode_tint: rl.Color | None, brake_status_enabled: bool) -> rl.Color | None:
-  return BRAKE_WHEEL_COLOR if brake_status_enabled and brake_pressed else mode_tint
+def get_wheel_tint(brake_pressed: bool, mode_tint: rl.Color | None, brake_status_enabled: bool,
+                   brake_lights: bool = False) -> rl.Color | None:
+  return BRAKE_WHEEL_COLOR if brake_status_enabled and (brake_pressed or brake_lights) else mode_tint
 
 
 class ExpButton(Widget):
@@ -111,10 +112,12 @@ class ExpButton(Widget):
     texture = self._txt_exp if exp_mode else self._txt_wheel
     color = self._white_color
     tint = None
+    starpilot_car_state = ui_state.sm["starpilotCarState"] if getattr(ui_state.sm, "valid", {}).get("starpilotCarState", False) else None
     wheel_tint = get_wheel_tint(
       getattr(ui_state.sm["carState"], "brakePressed", False),
       self.wheel_tint,
       self._params.get_bool("ShowBrakeStatus"),
+      getattr(starpilot_car_state, "brakeLights", False),
     )
     if wheel_tint is not None:
       tint = rl.Color(wheel_tint.r, wheel_tint.g, wheel_tint.b, self._white_color.a)

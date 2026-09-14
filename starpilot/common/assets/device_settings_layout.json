@@ -2842,8 +2842,8 @@
       {
         "key": "ShowBrakeStatus",
         "label": "Show Brake Status",
-        "description": "Tint the on-screen steering-wheel icon red while the car reports that the brake pedal is pressed.",
-        "picker_description": "Tints the on-screen steering-wheel icon red while braking.",
+        "description": "Tint the on-screen steering-wheel icon red while the car reports that its brake lights are on.",
+        "picker_description": "Tints the on-screen steering-wheel icon red while the brake lights are on.",
         "data_type": "bool",
         "ui_type": "toggle",
         "galaxy_only": true,

@@ -39,6 +39,7 @@ export const SystemTools = {
       branchLoading: true,
       branchListFallback: false,
       branchListError: "",
+      advancedVersionPickerOpen: false,
       otherBranchesOpen: false,
       branchBusy: false,
 
@@ -57,7 +58,7 @@ export const SystemTools = {
   created() {
     this.poll = usePolling(() => this.loadFastStatus(), {
       interval: 1000,
-      enabled: () => !this.fastStatus || !!this.fastStatus.running,
+      enabled: () => this.statusPollingNeeded,
     })
     this.poll.start()
   },
@@ -76,14 +77,17 @@ export const SystemTools = {
       return branches
     },
     branchSwitchBlocked() {
-      return this.branchLoading || this.isOnroad || !!this.fastStatus?.isOnroad || !!this.fastStatus?.running || !!this.busy
+      return this.branchLoading || this.isOnroad || !!this.fastStatus?.isOnroad || this.updateInProgress || !!this.busy
     },
+    statusRebooting() { return String(this.fastStatus?.stage || "").trim().toLowerCase() === "rebooting" },
+    updateInProgress() { return !!this.fastStatus?.running || this.statusRebooting },
+    statusPollingNeeded() { return !this.fastStatus || this.updateInProgress },
     versionChoices() { return this.targetBranch === "StarPilot" ? releaseVersions(this.versionCommits) : this.versionCommits },
     installVersionBlocked() {
       return this.branchSwitchBlocked || this.branchBusy || !this.branches.includes(this.targetBranch) ||
         (this.versionMode === "earlier" && (this.versionLoading || !/^[a-f0-9]{40}$/.test(this.selectedCommit) || !this.versionChoices.some(commit => commit.sha === this.selectedCommit)))
     },
-    updateAvailable() { return this.checkedForUpdates && !!this.fastStatus?.updateAvailable && !this.fastStatus?.running },
+    updateAvailable() { return this.checkedForUpdates && !!this.fastStatus?.updateAvailable && !this.updateInProgress },
     factoryResetStatus() {
       const s = this.fastStatus
       if (!s || String(s?.lastMode || "").trim() !== "factory-reset") return null
@@ -352,13 +356,13 @@ export const SystemTools = {
       }
     },
     async checkUpdates() {
-      if (this.busy) return
+      if (this.busy || this.updateInProgress) return
       this.busy = "check"
       try {
         await this.loadFastStatus({ throwOnError: true })
         this.checkedForUpdates = true
         const st = this.fastStatus
-        if (st?.running) showSnackbar("An update is already running.")
+        if (this.updateInProgress) showSnackbar("An update is already running.")
         else if (st?.updateAvailable) showSnackbar(st?.message || "Update available.")
         else showSnackbar(st?.message || "No update available — you're up to date.")
       } catch (e) {
@@ -368,7 +372,7 @@ export const SystemTools = {
       }
     },
     async setAutomaticUpdates(enabled) {
-      if (this.autoUpdateBusy || this.isOnroad || this.fastStatus?.running || !this.fastStatus) return
+      if (this.autoUpdateBusy || this.isOnroad || this.updateInProgress || !this.fastStatus) return
       const previous = !!this.fastStatus.automaticUpdates
       this.autoUpdateBusy = true
       this.fastStatus = { ...this.fastStatus, automaticUpdates: !!enabled }
@@ -384,7 +388,7 @@ export const SystemTools = {
     },
     async applyFastUpdate() {
       if (this.busy || this.isOnroad) return
-      if (this.fastStatus?.running) { showSnackbar("Fast update is already running."); return }
+      if (this.updateInProgress) { showSnackbar("Fast update is already running."); return }
       if (!this.checkedForUpdates || !this.updateAvailable) {
         showSnackbar("No update available. Run \"Check for Updates\" first.", "error")
         return
@@ -400,7 +404,7 @@ export const SystemTools = {
       await this.runUpdate("fast")
     },
     async runUpdate(action) {
-      if (this.busy) return
+      if (this.busy || this.updateInProgress) return
       this.busy = action
       try {
         if (action === "rollback") {
@@ -503,17 +507,17 @@ export const SystemTools = {
               <div class="gx-section__header">
                 <i class="bi bi-arrow-repeat"></i>
                 <span class="gx-section__title">Update Status</span>
-                <span v-if="fastStatus.running" class="gx-chip" style="background:var(--primary);color:var(--on-primary);">{{ fastStatus.progressPercent }}%</span>
+                <span v-if="updateInProgress" class="gx-chip" style="background:var(--primary);color:var(--on-primary);">{{ statusRebooting ? 'Reconnecting…' : fastStatus.progressPercent + '%' }}</span>
                 <span v-else-if="updateAvailable" class="gx-chip" style="background:var(--warning);color:var(--black);">Update available</span>
                 <span v-else-if="checkedForUpdates" class="gx-chip">Up to date</span>
                 <span v-else class="gx-chip">Not checked</span>
               </div>
               <div style="padding: var(--sp-3); display:grid; gap:6px;">
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Installed branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
-                <div v-if="fastStatus.running" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
+                <div v-if="updateInProgress" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Local</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.localCommit) }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.remoteCommit) }}</span></div>
-                <div v-if="fastStatus.running" class="gx-update-progress" role="progressbar" aria-label="Update progress"
+                <div v-if="updateInProgress" class="gx-update-progress" role="progressbar" aria-label="Update progress"
                   :aria-valuenow="Math.round(fastStatus.progressPercent || 0)" aria-valuemin="0" aria-valuemax="100">
                   <div class="gx-update-progress__track">
                     <div class="gx-update-progress__fill" :class="{ 'gx-update-progress__fill--error': fastStatus.stage === 'error' }"
@@ -526,7 +530,7 @@ export const SystemTools = {
                   <small v-if="fastStatus.progressDetail">{{ fastStatus.progressDetail }}</small>
                 </div>
                 <div v-if="fastStatus.message" class="gx-note">{{ fastStatus.message }}</div>
-                <div v-if="fastStatus.warning && (fastStatus.running || fastStatus.updateAvailable)" class="gx-note gx-note--danger">{{ fastStatus.warning }}</div>
+                <div v-if="fastStatus.warning && (updateInProgress || fastStatus.updateAvailable)" class="gx-note gx-note--danger">{{ fastStatus.warning }}</div>
                 <div v-if="fastStatus.agnosUpdate?.available && fastStatus.agnosUpdate?.warnings?.length" style="margin-top:4px;">
                   <div v-for="w in fastStatus.agnosUpdate.warnings" :key="w" class="gx-note gx-note--danger"><i class="bi bi-exclamation-triangle-fill"></i> {{ w }}</div>
                 </div>
@@ -541,7 +545,7 @@ export const SystemTools = {
                 </div>
                 <label class="gx-switch">
                   <input type="checkbox" :checked="!!fastStatus?.automaticUpdates"
-                    :disabled="!fastStatus || isOnroad || autoUpdateBusy || !!fastStatus?.running"
+                    :disabled="!fastStatus || isOnroad || autoUpdateBusy || updateInProgress"
                     @change="setAutomaticUpdates($event.target.checked)" />
                   <span class="gx-switch__track"></span>
                   <span class="gx-switch__thumb"></span>
@@ -549,9 +553,15 @@ export const SystemTools = {
               </div>
             </div>
 
-            <div class="gx-card" style="margin-bottom:12px;">
-              <div class="gx-section__header"><i class="bi bi-git-branch"></i><span class="gx-section__title">Install a Version</span></div>
-              <div style="padding: var(--sp-3);">
+            <details class="gx-card" style="margin-bottom:12px;" @toggle="advancedVersionPickerOpen = $event.target.open">
+              <summary class="gx-section__header" style="list-style:none;">
+                <i class="bi bi-sliders"></i><span class="gx-section__title">Advanced update options</span>
+                <i class="bi" :class="advancedVersionPickerOpen ? 'bi-chevron-up' : 'bi-chevron-down'" aria-hidden="true"></i>
+              </summary>
+              <div v-if="advancedVersionPickerOpen">
+                <div class="gx-section__header" style="cursor:default;"><i class="bi bi-git-branch"></i><span class="gx-section__title">Install a Version</span></div>
+                <div style="padding: var(--sp-3);">
+                  <p class="gx-note" style="margin-top:0; overflow-wrap:anywhere;">Most people should stay on the latest version. Use this only to install a specific branch or historical version while troubleshooting.</p>
                 <p class="gx-note" style="margin-top:0; overflow-wrap:anywhere;">Installed branch: <strong>{{ currentBranch || 'Unknown' }}</strong></p>
                 <GalaxySelect id="gx-primary-branch" class="gx-field gx-field--full" aria-label="Target branch"
                   :value="primaryBranchValue" :disabled="branchSwitchBlocked || branchBusy" @change="onPrimaryBranchSelect">
@@ -592,23 +602,24 @@ export const SystemTools = {
                   <p>Pinned version: <strong>{{ fastStatus.versionPin.branch }} · {{ shortCommit(fastStatus.versionPin.commit) }}</strong><br>Automatic updates were paused at installation.</p>
                   <button type="button" class="gx-btn gx-btn--tonal" :disabled="branchSwitchBlocked || branchBusy || !branches.includes(fastStatus.versionPin.branch)" @click="returnToLatest">Return to Latest</button>
                 </div>
+                </div>
               </div>
-            </div>
+            </details>
 
             <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad || !!fastStatus?.running" @click="checkUpdates">
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad || updateInProgress" @click="checkUpdates">
                 <i v-if="busy === 'check'" class="bi bi-arrow-repeat gx-spin"></i>
                 <i v-else class="bi bi-search"></i> {{ busy === 'check' ? 'Checking...' : 'Check for Updates' }}
               </button>
               <button v-if="updateAvailable" type="button" class="gx-btn" :disabled="!!busy || isOnroad" @click="applyFastUpdate">
                 <i class="bi bi-arrow-up-circle"></i> {{ busy === 'fast' ? 'Updating...' : 'Update Now' }}
               </button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad" @click="runUpdate('recover')">Recover</button>
-              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad" @click="runUpdate('rollback')">Rollback</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad || updateInProgress" @click="runUpdate('recover')">Recover</button>
+              <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad || updateInProgress" @click="runUpdate('rollback')">Rollback</button>
             </div>
             <p class="gx-note">Check for Updates scans for a newer commit. Use <strong>Update Now</strong> to install it.</p>
             <p class="gx-note"><strong>Recover</strong> continues an update that was interrupted (for example, by power loss mid-install). <strong>Rollback</strong> returns the device to the previously installed version if the current one has a problem.</p>
-            <p v-if="checkedForUpdates && !updateAvailable && !fastStatus?.running" class="gx-note">
+            <p v-if="checkedForUpdates && !updateAvailable && !updateInProgress" class="gx-note">
               The device is up to date. Update becomes available only after a check finds a newer commit.
             </p>
           </template>

@@ -52,6 +52,12 @@ MACH_E_DIRECTION_CHANGE_MIN_PREVIEW_CURVATURE = 0.0005
 MACH_E_DIRECTION_CHANGE_FULL_PREVIEW_CURVATURE = 0.002
 MACH_E_DIRECTION_CHANGE_MIN_LAG_CURVATURE = 0.0008
 MACH_E_DIRECTION_CHANGE_FULL_LAG_CURVATURE = 0.0015
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_START_SPEED = 1.8
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_FULL_SPEED = 2.0
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_HOLD_SPEED = 2.8
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_FADE_SPEED = 3.5
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_MIN_CURVATURE = 0.0004
+MACH_E_LOW_SPEED_DIRECTION_CHANGE_FULL_CURVATURE = 0.0006
 FORD_CURVATURE_LOOKAHEAD = {
   CAR.FORD_EXPLORER_MK6: 0.20,
 }
@@ -261,6 +267,21 @@ class FordLateralController:
     ))
     return preview_weight * lag_weight
 
+  @staticmethod
+  def _low_speed_direction_change_weight(v_ego: float, desired: float) -> float:
+    speed_weight = float(np.interp(
+      v_ego,
+      [MACH_E_LOW_SPEED_DIRECTION_CHANGE_START_SPEED, MACH_E_LOW_SPEED_DIRECTION_CHANGE_FULL_SPEED,
+       MACH_E_LOW_SPEED_DIRECTION_CHANGE_HOLD_SPEED, MACH_E_LOW_SPEED_DIRECTION_CHANGE_FADE_SPEED],
+      [0.0, 1.0, 1.0, 0.0],
+    ))
+    curvature_weight = float(np.interp(
+      abs(desired),
+      [MACH_E_LOW_SPEED_DIRECTION_CHANGE_MIN_CURVATURE, MACH_E_LOW_SPEED_DIRECTION_CHANGE_FULL_CURVATURE],
+      [0.0, 1.0],
+    ))
+    return speed_weight * curvature_weight
+
   def _manual_turn(self, CC, CS) -> bool:
     if not CC.latActive:
       self.human_turn.reset()
@@ -329,11 +350,15 @@ class FordLateralController:
       turn_in_predicted = self._predicted_curvature(v_ego, lookahead + MACH_E_TURN_IN_LOOKAHEAD_EXTRA)
       direction_change_predicted = turn_in_predicted
       direction_change_weight = 0.0
-      if v_ego > MACH_E_DIRECTION_CHANGE_MIN_SPEED and not CS.out.steeringPressed and not self._lane_change()[0]:
+      direction_change_speed_weight = float(v_ego > MACH_E_DIRECTION_CHANGE_MIN_SPEED)
+      if direction_change_speed_weight == 0.0:
+        direction_change_speed_weight = self._low_speed_direction_change_weight(v_ego, desired)
+      if direction_change_speed_weight > 0.0 and not CS.out.steeringPressed and not self._lane_change()[0]:
         direction_change_lookahead_extra = self._direction_change_lookahead_extra(v_ego)
         if direction_change_lookahead_extra > MACH_E_TURN_IN_LOOKAHEAD_EXTRA:
           direction_change_predicted = self._predicted_curvature(v_ego, lookahead + direction_change_lookahead_extra)
         direction_change_weight = self._direction_change_preview_weight(desired, direction_change_predicted, current)
+        direction_change_weight *= direction_change_speed_weight
       if direction_change_weight > 0.0:
         predicted = float(np.interp(direction_change_weight, [0.0, 1.0], [predicted, direction_change_predicted]))
         allow_opposite_preview = True

@@ -6,7 +6,7 @@ import { Tools } from "./views/Tools.js"
 import { Recordings } from "./views/Recordings.js"
 import { Logs } from "./views/Logs.js"
 import { Tuning } from "./views/Tuning.js"
-import { Navigation } from "./views/Navigation.js?v=nav-destination-2"
+import { Navigation } from "./views/Navigation.js?v=nav-destination-3"
 import { Vehicle } from "./views/Vehicle.js"
 import { Bluetooth } from "./views/Bluetooth.js"
 import { SystemTools } from "./views/SystemTools.js"
@@ -22,6 +22,7 @@ import { ModelLaboratory } from "./views/ModelLaboratory.js"
 import { Cameras } from "./views/Cameras.js"
 import { store, initRouter, navigate } from "./store.js"
 import { showSnackbar } from "./api.js"
+import { installDomTranslator } from "./i18n.js"
 
 window.__galaxyVue = { createApp, h }
 
@@ -87,6 +88,7 @@ const app = createApp({
 })
 
 app.mount("#galaxy-app")
+installDomTranslator(document.getElementById("galaxy-app"))
 
 initRouter()
 

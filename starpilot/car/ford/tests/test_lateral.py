@@ -199,6 +199,21 @@ def test_mach_e_direction_change_lookahead_extra_fades_by_speed(controller, spee
   assert controller._direction_change_lookahead_extra(speed) == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("speed,desired,expected", (
+  (1.8, 0.0010, 0.0),
+  (1.9, 0.0010, 0.5),
+  (2.0, 0.0010, 1.0),
+  (2.8, 0.0010, 1.0),
+  (3.15, 0.0010, 0.5),
+  (3.5, 0.0010, 0.0),
+  (2.5, 0.0004, 0.0),
+  (2.5, 0.0005, 0.5),
+  (2.5, 0.0006, 1.0),
+))
+def test_mach_e_low_speed_direction_change_weight(controller, speed, desired, expected):
+  assert controller._low_speed_direction_change_weight(speed, desired) == pytest.approx(expected)
+
+
 @pytest.mark.parametrize("sign", (1.0, -1.0))
 def test_mach_e_direction_change_preview_leads_a_lagging_unwind(controller, sign):
   controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
@@ -257,6 +272,30 @@ def test_mach_e_direction_change_preview_uses_far_path_when_unwind_lags(controll
                            pytest.approx(0.003), True)]
 
 
+def test_mach_e_direction_change_preview_leads_low_speed_handoff(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.002
+  blend_inputs = []
+  monkeypatch.setattr(
+    controller, "_predicted_curvature",
+    lambda _v_ego, lookahead: 0.002 if lookahead < 1.0 else -0.002,
+  )
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=2.5, curvature=0.003),
+    SimpleNamespace(curvature=0.0015),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.0015), pytest.approx(-0.002), pytest.approx(2.5),
+                           pytest.approx(0.003), True)]
+
+
 def test_mach_e_direction_change_preview_uses_extended_horizon_at_medium_speed(controller, monkeypatch):
   controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
   controller.sm["liveDelay"].lateralDelay = 0.4
@@ -310,8 +349,12 @@ def test_mach_e_extended_direction_horizon_does_not_replace_turn_in_preview(cont
 
 
 @pytest.mark.parametrize("speed,steering_pressed,lane_change", (
+  (1.8, False, False),
+  (3.5, False, False),
   (8.0, False, False),
   (9.0, False, False),
+  (2.5, True, False),
+  (2.5, False, True),
   (15.0, True, False),
   (15.0, False, True),
 ))
@@ -338,6 +381,26 @@ def test_non_mach_e_direction_change_preview_is_unchanged(controller):
 
   assert controller._direction_change_preview_weight(
     desired=0.0015, preview=-0.002, current=0.003) == 0.0
+
+
+def test_non_mach_e_bypasses_low_speed_direction_change_preview(controller, monkeypatch):
+  controller.desired_curvature_last = 0.002
+  lookaheads = []
+  monkeypatch.setattr(
+    controller, "_predicted_curvature",
+    lambda _v_ego, lookahead: lookaheads.append(lookahead) or -0.002,
+  )
+  monkeypatch.setattr(
+    controller, "_low_speed_direction_change_weight",
+    lambda *_args: pytest.fail("low-speed direction-change preview must remain Mach-E-only"),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=2.5, curvature=0.003),
+    SimpleNamespace(curvature=0.0015),
+  )
+
+  assert lookaheads == [pytest.approx(0.2)]
 
 
 def test_mach_e_turn_in_preview_uses_extra_model_horizon(controller, monkeypatch):

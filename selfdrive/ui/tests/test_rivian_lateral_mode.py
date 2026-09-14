@@ -311,6 +311,26 @@ def test_non_mici_wheel_icon_turns_red_when_brakes_are_pressed(monkeypatch):
   assert (texture_color.r, texture_color.g, texture_color.b, texture_color.a) == (255, 0, 0, 255)
 
 
+def test_non_mici_wheel_icon_uses_reported_brake_lights(monkeypatch):
+  module, draws = load_exp_button(monkeypatch)
+  button = module.ExpButton(192, 144)
+  button.wheel_tint = FakeColor(0x4D, 0x9D, 0xFF, 255)
+  class FakeUiSubMaster(dict):
+    pass
+
+  module.ui_state.sm = FakeUiSubMaster(module.ui_state.sm)
+  module.ui_state.sm.valid = {"starpilotCarState": True}
+  module.ui_state.sm["starpilotCarState"] = SimpleNamespace(brakeLights=True)
+  module.ui_state.ui_params.get_bool = lambda key, *args, **kwargs: key == "ShowBrakeStatus"
+  button._update_state()
+
+  button._render(FakeRectangle(0, 0, 192, 192))
+
+  assert len(draws["textures"]) == 1
+  texture_color = draws["textures"][0][-1]
+  assert (texture_color.r, texture_color.g, texture_color.b, texture_color.a) == (255, 0, 0, 255)
+
+
 def test_non_mici_wheel_icon_brake_tint_is_disabled_by_default(monkeypatch):
   module, draws = load_exp_button(monkeypatch)
   button = module.ExpButton(192, 144)
