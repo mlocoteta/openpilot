@@ -225,7 +225,12 @@ export const api = {
   restoreToggles(data) { return request("/api/toggles/restore", { method: "POST", data }) },
   resetTogglesDefault() { return request("/api/toggles/reset_default", { method: "POST" }) },
 
-  getUpdateBranches() { return request("/api/update/branches") },
+  getUpdateBranches() {
+    return request("/api/update/branches", { cache: "no-store" }).then((data) => {
+      if (!Array.isArray(data?.branches)) throw new Error(data?.error || "Update branch list unavailable.")
+      return data
+    })
+  },
   getUpdateBranch() { return request("/api/update/branch") },
   setUpdateBranch(branch) { return request("/api/update/branch", { method: "POST", data: { branch } }) },
   getUpdateVersions(branch, { page = 1, head = "", signal } = {}) {
@@ -235,7 +240,12 @@ export const api = {
   },
   installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
-  getUpdateFastStatus() { return request("/api/update/fast/status") },
+  getUpdateFastStatus() {
+    return request("/api/update/fast/status", { cache: "no-store" }).then((data) => {
+      if (!data || typeof data !== "object" || typeof data.running !== "boolean") throw new Error(data?.error || "Update status unavailable.")
+      return data
+    })
+  },
   updateRecover() { return request("/api/update/recover", { method: "POST" }) },
   updateRollback() { return request("/api/update/rollback", { method: "POST" }) },
   factoryReset() { return request("/api/update/factory_reset", { method: "POST" }) },

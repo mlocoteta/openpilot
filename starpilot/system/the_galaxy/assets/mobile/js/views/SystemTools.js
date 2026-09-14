@@ -16,6 +16,8 @@ function toPercent(value) {
   return Math.max(0, Math.min(100, n))
 }
 
+const CORE_UPDATE_BRANCHES = ["StarPilot", "Dom"]
+
 export const SystemTools = {
   name: "SystemTools",
   components: { GalaxySection, GxNotice, GalaxySelect, VersionHistoryPicker },
@@ -35,6 +37,8 @@ export const SystemTools = {
       versionNotice: "",
       versionGeneration: 0,
       branchLoading: true,
+      branchListFallback: false,
+      branchListError: "",
       otherBranchesOpen: false,
       branchBusy: false,
 
@@ -102,15 +106,33 @@ export const SystemTools = {
     async loadBranches() {
       try {
         const data = await api.getUpdateBranches()
-        this.branches = Array.isArray(data?.branches) ? data.branches : []
-        this.currentBranch = data?.currentBranch || ""
+        const branches = [...new Set(data.branches.map(branch => String(branch || "").trim()).filter(Boolean))]
+        if (!branches.length) throw new Error("No update branches were returned.")
+        this.branches = branches
+        this.currentBranch = String(data?.currentBranch || "").trim()
+        this.branchListFallback = false
+        this.branchListError = ""
         if (!this.targetBranch) {
           this.targetBranch = this.currentBranch
           this.otherBranchesOpen = !!this.targetBranch && !["StarPilot", "Dom"].includes(this.targetBranch)
         }
         this.isOnroad = !!data?.isOnroad
       } catch (e) {
-        showSnackbar("Failed to load update info.", "error")
+        this.branchListError = e?.message || "Update branch list unavailable."
+        try {
+          if (!this.fastStatus) await this.loadFastStatus({ throwOnError: true })
+        } catch (statusError) {
+          this.fastStatus = null
+        }
+        const current = String(this.fastStatus?.branch || this.currentBranch || "").trim()
+        this.currentBranch = current
+        this.branches = [...new Set([current, ...CORE_UPDATE_BRANCHES].filter(Boolean))]
+        this.branchListFallback = true
+        if (!this.targetBranch) {
+          this.targetBranch = current || "Dom"
+          this.otherBranchesOpen = !!this.targetBranch && !CORE_UPDATE_BRANCHES.includes(this.targetBranch)
+        }
+        showSnackbar("Could not refresh the full branch list. Standard branches are still available.", "error")
       } finally {
         this.branchLoading = false
       }
@@ -534,8 +556,8 @@ export const SystemTools = {
                 <GalaxySelect id="gx-primary-branch" class="gx-field gx-field--full" aria-label="Target branch"
                   :value="primaryBranchValue" :disabled="branchSwitchBlocked || branchBusy" @change="onPrimaryBranchSelect">
                   <option value="" disabled>Select a branch</option>
-                  <option value="StarPilot" data-collapsed-label="StarPilot" data-description="Stable releases. Recommended for most users." :disabled="!branches.includes('StarPilot')">StarPilot — Release</option>
-                  <option value="Dom" data-collapsed-label="Dom" data-description="Latest features and fixes under development. Updates regularly and may introduce bugs." :disabled="!branches.includes('Dom')">Dom — Development</option>
+                  <option value="StarPilot" data-collapsed-label="StarPilot" data-description="Stable releases. Recommended for most users.">StarPilot — Release</option>
+                  <option value="Dom" data-collapsed-label="Dom" data-description="Latest features and fixes under development. Updates regularly and may introduce bugs.">Dom — Development</option>
                   <option value="other:">Other branches…</option>
                 </GalaxySelect>
                 <div v-if="otherBranchesOpen" style="margin-top:var(--sp-3); padding-left:var(--sp-3); border-left:2px solid var(--outline-variant);">
@@ -547,7 +569,7 @@ export const SystemTools = {
                     <option v-for="b in otherBranches" :key="b" :value="b">{{ b === currentBranch ? b + ' (current)' : b }}</option>
                   </GalaxySelect>
                 </div>
-                <p v-if="!branchLoading && !branches.length" class="gx-note">No branch list available. Reload when connected to check available branches.</p>
+                <p v-if="branchListFallback" class="gx-note">The full branch list is temporarily unavailable. Standard branches are shown; selecting a version still verifies it with the device.</p>
                 <div v-if="targetBranch" style="margin-top:var(--sp-3); display:grid; gap:8px; min-width:0;">
                   <label for="gx-version-mode" class="gx-row__label">Version</label>
                   <GalaxySelect id="gx-version-mode" class="gx-field gx-field--full" aria-label="Version" :value="versionMode"
