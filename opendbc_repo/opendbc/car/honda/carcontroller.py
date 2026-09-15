@@ -346,7 +346,11 @@ class CarController(CarControllerBase):
     # non-zero torque while controls are not allowed, and sending torque when
     # lateral is inactive is wrong regardless.
     ti_apply_steer = 0
-    if self.has_ti and CC.latActive and CS.ti_lkas_allowed:
+    # The Accord TI firmware may stay in OFF/DISCOVER feedback state until it
+    # observes a command. Do not deadlock command delivery on that feedback
+    # state; the normal lateral-active, driver-torque, command-limit, and slew
+    # protections below remain in force.
+    if self.has_ti and CC.latActive:
       # The TI drives the EPS motor directly and uses its own sign convention, not the
       # Honda CAN one -- so no negation here, matching the gen1 TI reference in
       # opendbc/car/mazda/carcontroller.py. Verified on car: negating steers the wrong way.
