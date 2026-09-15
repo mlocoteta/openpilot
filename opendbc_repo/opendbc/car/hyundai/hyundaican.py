@@ -129,13 +129,13 @@ def create_lkas11_can_canfd_blended(packer, frame, CP, apply_steer, steer_req,
                                     torque_fault, lkas11, sys_warning, sys_state, enabled,
                                     left_lane, right_lane,
                                     left_lane_depart, right_lane_depart, msg_364,
-                                    include_alerts=True, counter_mod=0x10):
+                                    include_alerts=True, counter_mod=0x10, fcw_opt_usm=None):
   bus = CanBus(CP).ECAN
   values = {
     "CF_Lkas_LdwsActivemode": int(left_lane) + (int(right_lane) << 1),
     "CF_Lkas_LdwsLHWarning": left_lane_depart,
     "CF_Lkas_LdwsRHWarning": right_lane_depart,
-    "CF_Lkas_FcwOpt_USM": 2 if enabled else 1,
+    "CF_Lkas_FcwOpt_USM": (2 if enabled else 1) if fcw_opt_usm is None else fcw_opt_usm,
     "CR_Lkas_StrToqReq": apply_steer,
     "CF_Lkas_ActToi": steer_req,
     "CF_Lkas_ToiFlt": torque_fault,

@@ -727,6 +727,45 @@ class TestHyundaiFingerprint:
     } <= msg_addrs_buses
     assert (0x364, 1) not in msg_addrs_buses
 
+  def test_palisade_telluride_hda2_aol_keeps_lkas_status_after_long_cancel(self):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, True, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 1
+
+    hud_control = SimpleNamespace(
+      visualAlert=CarControl.HUDControl.VisualAlert.none,
+      leftLaneVisible=True,
+      rightLaneVisible=True,
+      leftLaneDepart=False,
+      rightLaneDepart=False,
+      leadDistanceBars=3,
+      leadVisible=False,
+    )
+    lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 24) if i != 7}
+    lfa_block_msg["COUNTER"] = 0
+    CS = SimpleNamespace(lfa_block_msg=lfa_block_msg, redneck_send_button=Buttons.NONE, lkas11={}, msg_364={},
+                         out=SimpleNamespace(vEgoRaw=5.0))
+    CC = SimpleNamespace(enabled=False, latActive=True, longActive=False,
+                         cruiseControl=SimpleNamespace(cancel=False, resume=False, override=False))
+    actuators = SimpleNamespace(longControlState=LongCtrlState.off)
+    adas_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS", 0)], 0)
+    ecan_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS11", 0)], 1)
+
+    for steering_requested, icon, expected_status in ((True, 2, 2), (False, 1, 1)):
+      msgs = controller.create_can_msgs(steering_requested, 16 if steering_requested else 0, False,
+                                        0.0, 0.0, False, hud_control, actuators, CS, CC, icon, icon)
+      adas_parser.update([(1, [msg for msg in msgs if msg[0] == 0x50])])
+      ecan_parser.update([(1, [msg for msg in msgs if msg[0] == 0x340])])
+
+      assert adas_parser.vl["LKAS"]["LKA_ICON"] == icon
+      assert adas_parser.vl["LKAS"]["STEER_REQ"] == int(steering_requested)
+      assert ecan_parser.vl["LKAS11"]["CF_Lkas_FcwOpt_USM"] == expected_status
+      assert ecan_parser.vl["LKAS11"]["CF_Lkas_ActToi"] == int(steering_requested)
+      assert not any(msg[0] == 0x364 for msg in msgs)
+
   def test_g70_aol_uses_active_lkas_icon(self):
     CP = CarInterface.get_params(CAR.GENESIS_G70_2020, gen_empty_fingerprint(), [], False, False, False, None)
     controller = CarController(DBC[CP.carFingerprint], CP)

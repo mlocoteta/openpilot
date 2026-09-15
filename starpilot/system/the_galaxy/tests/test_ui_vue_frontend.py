@@ -489,6 +489,10 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert '"/sentry": Cameras' in app
   sentry = _read("js/views/Sentry.js")
   assert "GalaxyEmbed" not in sentry and "fetch(" not in sentry
+  assert "selectedImage" in sentry and "openImage" in sentry and "closeImage" in sentry
+  assert 'class="gx-scrim gx-scrim--image-viewer"' in sentry
+  assert 'aria-label="Close image"' in sentry
+  assert 'target="_blank"' not in sentry
 
   # Navigation maps + App Keys and Tuning lateral are native tabs now.
   nav = _read("js/views/Navigation.js")

@@ -1833,6 +1833,69 @@ button.gx-chip:hover {
   margin-top: var(--sp-5);
 }
 
+.gx-sentry-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.gx-sentry-image-button {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+  flex: 1 1 45%;
+  min-width: 120px;
+  padding: 0;
+}
+
+.gx-sentry-image-button img {
+  border-radius: var(--radius-sm);
+  display: block;
+  width: 100%;
+}
+
+.gx-sentry-image-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.gx-scrim--image-viewer {
+  padding: var(--sp-3);
+}
+
+.gx-image-viewer {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - var(--sp-6));
+  max-width: min(960px, 100%);
+  padding: var(--sp-3);
+}
+
+.gx-image-viewer__header {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.gx-image-viewer__header .gx-sheet__title {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gx-image-viewer__image {
+  border-radius: var(--radius-sm);
+  display: block;
+  height: auto;
+  margin: auto;
+  max-height: calc(100dvh - 120px);
+  max-width: 100%;
+  object-fit: contain;
+}
+
 /* Native-style bottom sheet used for fullscreen player overlays. Kept as a
    sibling of gx-sheet so confirm dialogs keep their centered look. */
 .gx-scrim--bottomsheet {

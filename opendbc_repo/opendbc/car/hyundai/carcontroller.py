@@ -782,6 +782,7 @@ class CarController(CarControllerBase):
     if blended_hda2:
       can_sends.extend(hyundaicanfd.create_steering_messages(
         self.packer, self.CP, self.CAN, CC.enabled, apply_steer_req, apply_torque, 0.0,
+        lka_icon=lka_icon,
         longitudinal_active=longitudinal_active,
       ))
       if self.long_active_ecu:
@@ -792,6 +793,7 @@ class CarController(CarControllerBase):
           left_lane_warning, right_lane_warning, CS.msg_364,
           include_alerts=False,
           counter_mod=0xF,
+          fcw_opt_usm=2 if apply_steer_req or lka_icon == 3 else 1,
         ))
       if self.frame % 5 == 0:
         can_sends.append(hyundaicanfd.create_suppress_lfa(
