@@ -1,9 +1,9 @@
-from opendbc.car import get_safety_config, structs
+from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.carstate import CarState
 from opendbc.car.tesla.radar_interface import RadarInterface
-from opendbc.car.tesla.values import TeslaSafetyFlags, CAR
+from opendbc.car.tesla.values import TeslaSafetyFlags, CAR, DBC, LEGACY_CARS
 from opendbc.car.tesla.preap.interface import get_preap_accel_limits, get_preap_params
 
 
@@ -31,6 +31,20 @@ class CarInterface(CarInterfaceBase):
 
     if candidate == CAR.TESLA_MODEL_S_PREAP:
       return get_preap_params(ret)
+
+    if candidate in LEGACY_CARS:
+      ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.tesla, TeslaSafetyFlags.FLAG_HW1.value)]
+      ret.steerLimitTimer = 0.4
+      ret.steerActuatorDelay = 0.1
+      ret.steerAtStandstill = True
+      ret.steerControlType = structs.CarParams.SteerControlType.angle
+      ret.radarUnavailable = Bus.radar not in DBC[candidate]
+      ret.alphaLongitudinalAvailable = True
+
+      if alpha_long:
+        ret.openpilotLongitudinalControl = True
+        ret.safetyConfigs[0].safetyParam |= TeslaSafetyFlags.LONG_CONTROL.value
+      return ret
 
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.tesla)]
 

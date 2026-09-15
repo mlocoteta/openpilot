@@ -70,6 +70,16 @@ class CAR(Platforms):
       Bus.radar: 'tesla_radar_bosch_generated',
     },
   )
+  TESLA_MODEL_S_HW1 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (with HW1) 2014-16", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
+  )
 
 
 FW_QUERY_CONFIG = FwQueryConfig(
@@ -125,10 +135,14 @@ class CarControllerParams:
   ACCEL_MAX = 2.0    # m/s^2
   ACCEL_MIN = -3.48  # m/s^2
   JERK_LIMIT_MAX = 4.9  # m/s^3, ACC faults at 5.0
+  JERK_LIMIT_MIN = -4.9  # m/s^3, ACC faults at 5.0
+  JERK_RAMP_RATE = JERK_LIMIT_MAX * 0.002
 
 
 class TeslaSafetyFlags(IntFlag):
   LONG_CONTROL = 1
+  FLAG_EXTERNAL_PANDA = 4
+  FLAG_HW1 = 8
   COOP_STEERING = 256
 
 
@@ -156,6 +170,8 @@ class CruiseButtons:
 
 
 DBC = CAR.create_dbc_map()
+
+LEGACY_CARS = (CAR.TESLA_MODEL_S_HW1,)
 
 STEER_THRESHOLD = 1
 STEER_DISENGAGE_THRESHOLD = 5.0

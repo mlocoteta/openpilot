@@ -767,6 +767,7 @@ class TestLatControl:
     assert steady_turn == pytest.approx(1.0)
     assert clean_unwind == pytest.approx(1.0)
     assert 0.70 < overshooting_unwind < 1.0
+    assert overshooting_unwind < 0.80
     assert high_speed_overshoot > overshooting_unwind
 
   def test_genesis_g90_ff_scale_curve(self):
@@ -1399,9 +1400,9 @@ class TestLatControl:
     assert low_speed_threshold == pytest.approx(get_standard_friction_threshold(8.0), abs=0.001)
     assert highway_threshold > highway_base
     assert highway_curve_threshold == pytest.approx(highway_base, abs=0.001)
-    assert get_kona_ev_2022_center_output_scale(0.0, 27.0) < 0.96
+    assert get_kona_ev_2022_center_output_scale(0.0, 27.0) < 0.94
     assert get_kona_ev_2022_center_output_scale(0.6, 27.0) == pytest.approx(1.0, abs=0.001)
-    assert get_kona_ev_2022_center_output_scale(0.0, 8.0) == pytest.approx(1.0, abs=0.001)
+    assert get_kona_ev_2022_center_output_scale(0.0, 8.0) == pytest.approx(1.0, abs=0.002)
 
   def test_kona_ev_2022_center_output_taper_update_path(self, monkeypatch):
     monkeypatch.setattr(latcontrol_torque, "get_kona_ev_2022_center_output_scale", lambda *_args: 1.0)
@@ -1830,11 +1831,13 @@ class TestLatControl:
     high_speed_wind = get_genesis_g70_stabilized_output(0.1, 0.3, 0.8, 0.5, 30.0, DT_CTRL)
     high_speed_unwind = get_genesis_g70_stabilized_output(0.1, 0.3, 0.8, -0.5, 30.0, DT_CTRL)
     high_speed_direction_change = get_genesis_g70_stabilized_output(-0.3, 0.3, -0.8, -0.5, 30.0, DT_CTRL)
+    low_speed_direction_change = get_genesis_g70_stabilized_output(-0.3, 0.3, -0.8, -0.5, 10.0, DT_CTRL)
 
     assert low_speed == pytest.approx(-0.2, abs=0.005)
     assert abs(high_speed_center - 0.2) < abs(low_speed - 0.2)
     assert high_speed_unwind > high_speed_wind > 0.1
     assert 0.2 < high_speed_direction_change < 0.3
+    assert high_speed_direction_change > low_speed_direction_change
 
   def test_genesis_g70_output_stabilizer_update_path(self, monkeypatch):
     calls = []

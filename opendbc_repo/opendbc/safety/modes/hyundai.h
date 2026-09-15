@@ -67,12 +67,20 @@ const LongitudinalLimits HYUNDAI_LONG_LIMITS = {
 #define HYUNDAI_NON_SCC_EV_ADDR_CHECK \
   {.msg = {{0x592U, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
 
+#define HYUNDAI_RAY_PEDAL_ADDR_CHECK \
+  {.msg = {{0x201U, 0, 6, 50U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+
 static const CanMsg HYUNDAI_TX_MSGS[] = {
   HYUNDAI_COMMON_TX_MSGS(0, false)
 };
 
 static const CanMsg HYUNDAI_REFRESH_TX_MSGS[] = {
   HYUNDAI_COMMON_TX_MSGS(0, true)
+};
+
+static const CanMsg HYUNDAI_RAY_PEDAL_TX_MSGS[] = {
+  HYUNDAI_COMMON_TX_MSGS(0, true)
+  {0x200, 0, 6, .check_relay = false},  // comma pedal only, not Hyundai EMS20
 };
 
 static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
@@ -90,6 +98,7 @@ static const CanMsg HYUNDAI_LONG_REFRESH_TX_MSGS[] = {
 };
 
 static bool hyundai_legacy = false;
+static bool hyundai_ray_pedal = false;
 static bool hyundai_can_canfd_blended_hda2 = false;
 static bool hyundai_acc_main_on_rx_prev = false;
 
@@ -120,6 +129,8 @@ static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
     cnt = byte_421 & 0xFU;
   } else if (msg->addr == 0x4F1U) {
     cnt = (msg->data[3] >> 4) & 0xFU;
+  } else if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+    cnt = msg->data[4] & 0xFU;
   } else {
   }
   return cnt;
@@ -136,9 +147,22 @@ static uint32_t hyundai_get_checksum(const CANPacket_t *msg) {
     chksum = msg->data[6] & 0xFU;
   } else if (msg->addr == 0x421U) {
     chksum = hyundai_can_canfd_blended ? msg->data[0] : msg->data[7] >> 4;
+  } else if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+    chksum = msg->data[5];
   } else {
   }
   return chksum;
+}
+
+static uint8_t hyundai_ray_pedal_checksum(const CANPacket_t *msg) {
+  uint8_t crc = 0xFFU;
+  for (int i = 4; i >= 0; i--) {
+    crc ^= msg->data[i];
+    for (int j = 0; j < 8; j++) {
+      crc = (crc & 0x80U) ? (uint8_t)((crc << 1U) ^ 0xD5U) : (uint8_t)(crc << 1U);
+    }
+  }
+  return crc;
 }
 
 static void hyundai_rx_all_hook(const CANPacket_t *msg) {
@@ -148,6 +172,10 @@ static void hyundai_rx_all_hook(const CANPacket_t *msg) {
 }
 
 static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
+  if (hyundai_ray_pedal && (msg->addr == 0x201U)) {
+    return hyundai_ray_pedal_checksum(msg);
+  }
+
   uint8_t chksum = 0;
   if (msg->addr == 0x386U) {
     // count the bits
@@ -290,6 +318,22 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED = HYUNDAI_LIMITS(404, 2, 3);
 
   bool tx = true;
+
+  if (hyundai_ray_pedal && (msg->addr == 0x200U)) {
+    const uint16_t track1 = ((uint16_t)msg->data[0] << 8U) | msg->data[1];
+    const uint16_t track2 = ((uint16_t)msg->data[2] << 8U) | msg->data[3];
+    const bool enabled = (msg->data[4] & 0x80U) != 0U;
+    const int expected_track2 = 497 + (2 * ((int)track1 - 264));
+    if ((msg->data[4] & 0x70U) != 0U ||
+        (msg->data[5] != hyundai_ray_pedal_checksum(msg)) ||
+        (enabled && (track1 < 264U || track1 > 397U || track2 < 497U || track2 > 766U ||
+                     SAFETY_ABS((int)track2 - expected_track2) > 40)) ||
+        (!enabled && ((track1 != 0U) || (track2 != 0U))) ||
+        longitudinal_interceptor_checks(msg) ||
+        (enabled && (!get_longitudinal_allowed() || brake_pressed_prev))) {
+      tx = false;
+    }
+  }
 
   if ((msg->addr == 0x53EU) && !hyundai_has_lkas12) {
     tx = false;
@@ -457,6 +501,10 @@ static safety_config hyundai_init(uint16_t param) {
   };
 
   hyundai_common_init(param);
+  hyundai_ray_pedal = (param & (uint16_t)~(32U | 128U | 2048U)) == 0x9405U;
+  if (hyundai_ray_pedal) {
+    hyundai_longitudinal = true;  // button engagement; no Hyundai SCC TX
+  }
   hyundai_legacy = false;
   hyundai_can_canfd_blended_hda2 = hyundai_can_canfd_blended && hyundai_canfd_lka_steering;
   hyundai_aol_main_lkas_sync = GET_FLAG(param, 32U);
@@ -467,6 +515,17 @@ static safety_config hyundai_init(uint16_t param) {
   }
 
   safety_config ret;
+  if (hyundai_ray_pedal) {
+    static RxCheck hyundai_ray_pedal_rx_checks[] = {
+      HYUNDAI_COMMON_RX_CHECKS(false)
+      HYUNDAI_NON_SCC_EV_ADDR_CHECK
+      HYUNDAI_LDA_BUTTON_ADDR_CHECK
+      HYUNDAI_RAY_PEDAL_ADDR_CHECK
+    };
+    SET_RX_CHECKS(hyundai_ray_pedal_rx_checks, ret);
+    SET_TX_MSGS(HYUNDAI_RAY_PEDAL_TX_MSGS, ret);
+    return ret;
+  }
   if (hyundai_longitudinal) {
     // Use CLU11 (buttons) to manage controls allowed instead of SCC cruise state
     static RxCheck hyundai_long_rx_checks[] = {
@@ -696,6 +755,7 @@ static safety_config hyundai_legacy_init(uint16_t param) {
 
   hyundai_common_init(param);
   hyundai_legacy = true;
+  hyundai_ray_pedal = false;
   hyundai_can_canfd_blended_hda2 = false;
   hyundai_camera_scc = false;
   hyundai_can_refresh_msgs = false;

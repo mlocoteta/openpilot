@@ -384,3 +384,4 @@ extern const safety_hooks rivian_hooks;
 extern const safety_hooks psa_hooks;
 extern const safety_hooks volvo_hooks;
 extern const safety_hooks tesla_preap_hooks;
+extern const safety_hooks tesla_legacy_hooks;

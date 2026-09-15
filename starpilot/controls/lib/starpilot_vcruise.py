@@ -35,7 +35,10 @@ SLC_LEAD_DROP_RELAXATION_MAX_POST_DROP_CLOSING_SPEED = 0.35
 SLC_LEAD_DROP_RELAXATION_MAX_LEAD_BRAKE = 0.25
 SLC_LEAD_DROP_RELAXATION_OVERSPEED_BP = [0.0, 5.0 * CV.MPH_TO_MS, 10.0 * CV.MPH_TO_MS, 15.0 * CV.MPH_TO_MS]
 SLC_LEAD_DROP_RELAXATION_DECEL_V = [0.7, 0.9, 1.15, 1.35]
-NAV_TURN_COMFORT_DECEL = 1.25
+# This is an approach envelope, not a request for harder braking. A gentler
+# deceleration value lowers the target farther from the turn and gives the MPC
+# more time to settle before the intersection.
+NAV_TURN_COMFORT_DECEL = 0.85
 NAV_TURN_DISTANCE_BUFFER = 8.0
 NAV_TURN_MIN_TARGET_DELTA = 0.25
 NAV_TURN_TARGET_SPEEDS = {

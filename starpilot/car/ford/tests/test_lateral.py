@@ -188,10 +188,10 @@ def test_mach_e_turn_in_lookahead_extra_fades_by_speed(controller, speed, expect
 @pytest.mark.parametrize("speed,expected", (
   (8.0, 0.80),
   (9.0, 0.80),
-  (9.5, 1.20),
-  (10.0, 1.60),
-  (12.0, 1.60),
-  (13.5, 1.20),
+  (9.5, 1.60),
+  (10.0, 2.40),
+  (12.0, 2.40),
+  (13.5, 1.60),
   (15.0, 0.80),
   (16.0, 0.80),
 ))
@@ -223,6 +223,52 @@ def test_mach_e_direction_change_preview_leads_a_lagging_unwind(controller, sign
     desired=sign * 0.0015, preview=-sign * 0.002, current=sign * 0.003)
 
   assert weight == pytest.approx(1.0)
+
+
+def test_mach_e_low_speed_direction_change_preview_can_lead_a_rising_near_path(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.0006
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0008, preview=-0.002, current=0.003, allow_rising_desired=True) == pytest.approx(1.0)
+  assert controller._direction_change_preview_weight(
+    desired=0.0008, preview=-0.002, current=0.003) == 0.0
+
+
+def test_mach_e_low_speed_direction_change_preview_rejects_large_rising_near_path(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.0014
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0016, preview=-0.002, current=0.003, allow_rising_desired=True) == 0.0
+
+
+def test_mach_e_extended_direction_preview_begins_before_measured_curvature_catches_desired(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.0148
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0147, preview=-0.002, current=0.0140, early_handoff_weight=1.0) == pytest.approx(1.0 / 6.0)
+  assert controller._direction_change_preview_weight(
+    desired=0.0147, preview=-0.002, current=0.0140) == 0.0
+
+
+def test_mach_e_extended_direction_preview_tolerates_small_desired_jitter(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.0146
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0147, preview=-0.002, current=0.0141, early_handoff_weight=1.0) == pytest.approx(2.0 / 9.0)
+  assert controller._direction_change_preview_weight(
+    desired=0.0147, preview=-0.002, current=0.0141) == 0.0
+
+
+def test_mach_e_extended_direction_preview_preserves_turn_in_when_vehicle_lags(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.0146
+
+  assert controller._direction_change_preview_weight(
+    desired=0.0147, preview=-0.002, current=0.0130, early_handoff_weight=1.0) == 0.0
 
 
 @pytest.mark.parametrize("desired,preview,current,last", (
@@ -296,6 +342,51 @@ def test_mach_e_direction_change_preview_leads_low_speed_handoff(controller, mon
                            pytest.approx(0.003), True)]
 
 
+def test_mach_e_direction_change_preview_leads_rising_low_speed_handoff(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.0006
+  blend_inputs = []
+  monkeypatch.setattr(
+    controller, "_predicted_curvature",
+    lambda _v_ego, lookahead: 0.0008 if lookahead < 1.0 else -0.002,
+  )
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=2.5, curvature=0.003),
+    SimpleNamespace(curvature=0.0008),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.0008), pytest.approx(-0.002), pytest.approx(2.5),
+                           pytest.approx(0.003), True)]
+
+
+def test_mach_e_direction_change_preview_does_not_lead_rising_high_speed_path(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.0006
+  blend_inputs = []
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda _v_ego, _lookahead: -0.002)
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=15.0, curvature=0.003),
+    SimpleNamespace(curvature=0.0008),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.0008), pytest.approx(-0.002), pytest.approx(15.0),
+                           pytest.approx(0.003), False)]
+
+
 def test_mach_e_direction_change_preview_uses_extended_horizon_at_medium_speed(controller, monkeypatch):
   controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
   controller.sm["liveDelay"].lateralDelay = 0.4
@@ -305,7 +396,7 @@ def test_mach_e_direction_change_preview_uses_extended_horizon_at_medium_speed(c
 
   def predicted_curvature(_v_ego, lookahead):
     lookaheads.append(lookahead)
-    return {0.4: 0.002, 1.2: 0.001, 2.0: -0.002}[round(lookahead, 1)]
+    return {0.4: 0.002, 1.2: 0.001, 2.8: -0.002}[round(lookahead, 1)]
 
   monkeypatch.setattr(controller, "_predicted_curvature", predicted_curvature)
   monkeypatch.setattr(
@@ -319,9 +410,61 @@ def test_mach_e_direction_change_preview_uses_extended_horizon_at_medium_speed(c
     SimpleNamespace(curvature=0.0015),
   )
 
-  assert lookaheads == [pytest.approx(0.4), pytest.approx(1.2), pytest.approx(2.0)]
+  assert lookaheads == [pytest.approx(0.4), pytest.approx(1.2), pytest.approx(2.8)]
   assert blend_inputs == [(pytest.approx(0.0015), pytest.approx(-0.002), pytest.approx(10.5),
                            pytest.approx(0.003), True)]
+
+
+def test_mach_e_extended_direction_preview_advances_large_curve_exit(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.0146
+  blend_inputs = []
+
+  def predicted_curvature(_v_ego, lookahead):
+    return {0.4: 0.0144, 1.2: 0.011, 2.8: -0.002}[round(lookahead, 1)]
+
+  monkeypatch.setattr(controller, "_predicted_curvature", predicted_curvature)
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=12.0, curvature=0.0141),
+    SimpleNamespace(curvature=0.0147),
+  )
+
+  assert len(blend_inputs) == 1
+  assert blend_inputs[0][0] == pytest.approx(0.0147)
+  assert blend_inputs[0][1] < 0.0144
+  assert blend_inputs[0][4]
+
+
+def test_mach_e_extended_direction_preview_preserves_small_medium_speed_path(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = 0.0007
+  blend_inputs = []
+
+  def predicted_curvature(_v_ego, lookahead):
+    return 0.0008 if lookahead < 2.0 else -0.002
+
+  monkeypatch.setattr(controller, "_predicted_curvature", predicted_curvature)
+  monkeypatch.setattr(
+    controller, "_blend_and_scale",
+    lambda desired, predicted, v_ego, current, allow_opposite_preview=False:
+      blend_inputs.append((desired, predicted, v_ego, current, allow_opposite_preview)) or (0.0, 1),
+  )
+
+  controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=12.0, curvature=0.0014),
+    SimpleNamespace(curvature=0.0008),
+  )
+
+  assert blend_inputs == [(pytest.approx(0.0008), pytest.approx(0.0008), pytest.approx(12.0),
+                           pytest.approx(0.0014), False)]
 
 
 def test_mach_e_extended_direction_horizon_does_not_replace_turn_in_preview(controller, monkeypatch):
@@ -331,7 +474,7 @@ def test_mach_e_extended_direction_horizon_does_not_replace_turn_in_preview(cont
   blend_inputs = []
 
   def predicted_curvature(_v_ego, lookahead):
-    return {0.4: 0.006, 1.2: 0.010, 1.6: 0.004, 2.0: -0.002}[round(lookahead, 1)]
+    return {0.4: 0.006, 1.2: 0.010, 1.6: 0.004, 2.8: -0.002}[round(lookahead, 1)]
 
   monkeypatch.setattr(controller, "_predicted_curvature", predicted_curvature)
   monkeypatch.setattr(

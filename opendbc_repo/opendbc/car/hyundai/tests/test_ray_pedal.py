@@ -1,0 +1,133 @@
+from types import SimpleNamespace
+
+import pytest
+
+from opendbc.can import CANPacker, CANParser
+from opendbc.car import Bus, gen_empty_fingerprint
+from opendbc.car.hyundai.carcontroller import CarController
+from opendbc.car.hyundai.carstate import CarState
+from opendbc.car.hyundai.interface import CarInterface
+from opendbc.car.hyundai.values import CAR, DBC, HyundaiSafetyFlags
+from opendbc.car.structs import CarControl
+
+
+def ray_fingerprint(sensor_length=6, lfa_length=8):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0][0x201] = sensor_length
+  fingerprint[0][0x391] = 8
+  fingerprint[2][0x485] = lfa_length
+  return fingerprint
+
+
+@pytest.mark.parametrize(("candidate", "fingerprint", "has_pedal"), [
+  (CAR.KIA_RAY_EV, ray_fingerprint(), True),
+  (CAR.KIA_RAY_EV, ray_fingerprint(sensor_length=8), False),
+  (CAR.KIA_RAY_EV, ray_fingerprint(lfa_length=4), False),
+  (CAR.HYUNDAI_KONA_EV_NON_SCC, ray_fingerprint(), False),
+])
+def test_ray_pedal_fingerprint_isolation(candidate, fingerprint, has_pedal):
+  CP = CarInterface.get_params(candidate, fingerprint, [], False, False, False, None)
+  assert CP.enableGasInterceptorDEPRECATED is has_pedal
+  assert CP.openpilotLongitudinalControl is has_pedal
+  if has_pedal:
+    assert not CP.pcmCruise
+    assert CP.safetyConfigs[-1].safetyParam == 0x9405
+    assert CP.minEnableSpeed == 5.0
+    assert not CP.autoResumeSng
+    FPCP = CarInterface.get_starpilot_params(candidate, fingerprint, [], CP, SimpleNamespace())
+    assert FPCP.canUsePedal
+    assert not FPCP.pcmCruiseSpeed
+    assert not FPCP.redneckCruiseAvailable
+  else:
+    assert CP.pcmCruise
+    assert not (CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
+
+
+def test_ray_pedal_safety_signature_is_unique_across_hyundai_platforms():
+  for candidate in CAR:
+    for alpha_long in (False, True):
+      CP = CarInterface.get_params(candidate, ray_fingerprint(), [],
+                                   alpha_long, False, False, None)
+      has_ray_signature = (CP.safetyConfigs[-1].safetyParam & ~(32 | 128 | 2048)) == 0x9405
+      assert has_ray_signature is (candidate == CAR.KIA_RAY_EV)
+      assert CP.enableGasInterceptorDEPRECATED is (candidate == CAR.KIA_RAY_EV)
+
+
+def test_ray_pedal_parser_validates_actual_route_frames():
+  CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
+  parser = CarState(CP, None).get_can_parsers(CP)[Bus.party]
+  assert parser.dbc_name == "hyundai_kia_ray_pedal"
+  # Consecutive bus-0 GAS_SENSOR frames from Sept. 15 Ray rlog segment 4.
+  samples = [bytes.fromhex(s) for s in (
+    "01f403d55de8", "01f603d55ef1", "01f403d55f51", "01f603d3503f",
+    "01f903d551ab", "01f903d552a4", "01f703d55370",
+  )]
+  for idx, dat in enumerate(samples):
+    parser.update([(1_000_000_000 + idx * 20_000_000, [(0x201, dat, 0)])])
+    assert parser.can_valid
+    assert parser.vl["GAS_SENSOR"]["STATE"] == 5  # FAULT_TIMEOUT: no 0x200 was sent
+
+  prior = parser.vl_raw["GAS_SENSOR"]
+  bad = bytearray(samples[-1])
+  bad[-1] ^= 1
+  parser.update([(1_160_000_000, [(0x201, bytes(bad), 0)])])
+  assert parser.vl_raw["GAS_SENSOR"] == prior
+
+
+def test_ray_pedal_fault_clears_only_with_healthy_sensor_state():
+  CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
+  state = CarState(CP, None)
+  parsers = state.get_can_parsers(CP)
+  packer = CANPacker("hyundai_kia_ray_pedal")
+  sensor = packer.make_can_msg("GAS_SENSOR", 0, {
+    "INTERCEPTOR_GAS": 0, "INTERCEPTOR_GAS2": 0,
+    "STATE": 0, "COUNTER_PEDAL": 1,
+  })
+  for parser in parsers.values():
+    parser.update([(1_000_000_000, [sensor])])
+  ret, _ = state.update(parsers, SimpleNamespace())
+  assert state.ray_pedal_valid
+  assert state.ray_pedal_state == 0
+  assert not ret.accFaulted
+
+
+def test_ray_controller_heartbeats_and_only_actuates_when_ready():
+  CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
+  controller = CarController(DBC[CP.carFingerprint], CP)
+  parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS11", 0), ("CLU11", 0)], 0)
+  CS = SimpleNamespace(
+    lkas11=parser.vl["LKAS11"], clu11=parser.vl["CLU11"],
+    out=SimpleNamespace(vEgo=12.0, gasPressed=False, brakePressed=False,
+                        cruiseState=SimpleNamespace(enabled=False)),
+    ray_pedal_valid=True, ray_pedal_state=5, is_metric=True,
+  )
+  CC = SimpleNamespace(
+    enabled=True, longActive=True, latActive=True,
+    cruiseControl=SimpleNamespace(cancel=False, resume=False, override=False),
+  )
+  hud = SimpleNamespace(
+    visualAlert=CarControl.HUDControl.VisualAlert.none,
+    leftLaneVisible=True, rightLaneVisible=True,
+    leftLaneDepart=False, rightLaneDepart=False,
+  )
+  actuators = SimpleNamespace(longControlState=CarControl.Actuators.LongControlState.pid)
+
+  def pedal_msg(accel, frame):
+    controller.frame = frame
+    messages = controller.create_can_msgs(True, 0, False, 0.0, accel, False,
+                                          hud, actuators, CS, CC, 2, 0)
+    return next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)
+
+  assert pedal_msg(2.0, 0)[:4] == bytes(4)  # fault timeout: heartbeat only
+  CS.ray_pedal_state = 0
+  assert pedal_msg(2.0, 4)[:4] != bytes(4)
+  CS.out.gasPressed = True
+  assert pedal_msg(2.0, 8)[:4] == bytes(4)
+  CS.out.gasPressed = False
+  assert pedal_msg(-1.0, 12)[:4] == bytes(4)  # decel = EV lift/regen, not gas
+  CS.out.cruiseState.enabled = True
+  controller.frame = 16
+  messages = controller.create_can_msgs(True, 0, False, 0.0, 2.0, False,
+                                        hud, actuators, CS, CC, 2, 0)
+  assert next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)[:4] == bytes(4)
+  assert any(addr == 0x4F1 and bus == 0 for addr, _, bus in messages)  # cancel stock CC

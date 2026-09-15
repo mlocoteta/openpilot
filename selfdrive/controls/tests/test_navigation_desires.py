@@ -116,6 +116,76 @@ def test_nav_desires_turn_right_waits_until_turn_is_close():
   assert helper.desire == log.Desire.none
 
 
+def test_matching_routed_turn_does_not_start_lane_change_above_threshold():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {
+    "valid": True,
+    "maneuverType": "turn",
+    "maneuverModifier": "right",
+    "maneuverDistance": 111.0,
+  }
+
+  helper.update(
+    make_car_state(vEgo=16.0, rightBlinker=True),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(minimum_lane_change_speed=11.1),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.off
+  assert helper.lane_change_direction == LaneChangeDirection.none
+  assert helper.desire == log.Desire.none
+
+
+def test_distant_routed_turn_does_not_block_lane_change():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {
+    "valid": True,
+    "maneuverType": "turn",
+    "maneuverModifier": "right",
+    "maneuverDistance": 794.0,
+  }
+
+  helper.update(
+    make_car_state(vEgo=16.0, rightBlinker=True),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(minimum_lane_change_speed=11.1),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  assert helper.lane_change_direction == LaneChangeDirection.right
+
+
+def test_matching_routed_turn_cancels_pending_lane_change_before_it_starts():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {
+    "valid": True,
+    "maneuverType": "turn",
+    "maneuverModifier": "left",
+    "maneuverDistance": 125.0,
+  }
+  helper.lane_change_state = LaneChangeState.preLaneChange
+  helper.lane_change_direction = LaneChangeDirection.left
+  helper.prev_one_blinker = True
+
+  helper.update(
+    make_car_state(vEgo=11.0, leftBlinker=True),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(minimum_lane_change_speed=10.0),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.off
+  assert helper.lane_change_direction == LaneChangeDirection.none
+
+
 def test_nav_desires_off_ramp_lane_guidance_becomes_keep_right():
   helper = DesireHelper()
   helper.nav_desires_allowed = True

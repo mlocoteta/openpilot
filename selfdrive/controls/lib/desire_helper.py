@@ -14,6 +14,13 @@ LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 NAV_TURN_DISTANCE_SPEED_BREAKPOINTS = [0.0, 5.0, 10.0]
 NAV_TURN_DISTANCE_BREAKPOINTS = [20.0, 25.0, 30.0]
+# A driver normally signals an intersection before slowing below the lane-change
+# speed threshold. Use the route to classify that early signal so it does not
+# start a lane change while approaching the matching turn.
+NAV_TURN_SIGNAL_LEAD_TIME = 12.0
+NAV_TURN_SIGNAL_BASE_DISTANCE = 15.0
+NAV_TURN_SIGNAL_MIN_DISTANCE = 30.0
+NAV_TURN_SIGNAL_MAX_DISTANCE = 250.0
 NAV_KEEP_DISTANCE_SPEED_BREAKPOINTS = [0.0, 15.0, 30.0]
 NAV_KEEP_DISTANCE_BREAKPOINTS = [25.0, 90.0, 160.0]
 NAV_KEEP_AMBIGUOUS_SPLIT_DISTANCE_SCALE = 0.6
@@ -116,6 +123,34 @@ class DesireHelper:
       return False
 
     return distance <= float(np.interp(carstate.vEgo, NAV_TURN_DISTANCE_SPEED_BREAKPOINTS, NAV_TURN_DISTANCE_BREAKPOINTS))
+
+  @staticmethod
+  def _nav_turn_signal_matches(carstate, nav_instruction_state):
+    if not bool(nav_instruction_state.get("valid", False)):
+      return False
+    if str(nav_instruction_state.get("maneuverType", "")).strip().lower() != "turn":
+      return False
+
+    modifier = str(nav_instruction_state.get("maneuverModifier", "")).strip()
+    matching_signal = (
+      modifier in ("left", "sharpLeft") and carstate.leftBlinker and not carstate.rightBlinker
+    ) or (
+      modifier in ("right", "sharpRight") and carstate.rightBlinker and not carstate.leftBlinker
+    )
+    if not matching_signal:
+      return False
+
+    try:
+      maneuver_distance = float(nav_instruction_state.get("maneuverDistance", 0.0))
+    except (TypeError, ValueError):
+      return False
+
+    signal_distance = float(np.clip(
+      NAV_TURN_SIGNAL_BASE_DISTANCE + max(float(carstate.vEgo), 0.0) * NAV_TURN_SIGNAL_LEAD_TIME,
+      NAV_TURN_SIGNAL_MIN_DISTANCE,
+      NAV_TURN_SIGNAL_MAX_DISTANCE,
+    ))
+    return 0.0 <= maneuver_distance <= signal_distance
 
   @staticmethod
   def _nudgeless_enabled(starpilot_toggles, controls_enabled):
@@ -245,6 +280,10 @@ class DesireHelper:
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < starpilot_toggles.minimum_lane_change_speed
 
+    self._update_nav_params()
+    self.nav_desires_allowed = bool(getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed))
+    nav_turn_signal = self.nav_desires_allowed and self._nav_turn_signal_matches(carstate, self._nav_instruction_state)
+
     stop_imminent = (bool(getattr(starpilotPlan, "redLight", False))
                      or bool(getattr(starpilotPlan, "forcingStop", False))
                      or bool(getattr(starpilotPlan, "stopSignConfirmed", False)))
@@ -264,8 +303,13 @@ class DesireHelper:
       self.lane_change_state = LaneChangeState.off
       self.lane_change_direction = LaneChangeDirection.none
     else:
+      if nav_turn_signal and self.lane_change_state == LaneChangeState.preLaneChange:
+        self.lane_change_state = LaneChangeState.off
+        self.lane_change_direction = LaneChangeDirection.none
+
       # LaneChangeState.off
-      if self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker and not below_lane_change_speed:
+      if (self.lane_change_state == LaneChangeState.off and one_blinker and not self.prev_one_blinker
+          and not below_lane_change_speed and not nav_turn_signal):
         self.lane_change_state = LaneChangeState.preLaneChange
         self.lane_change_ll_prob = 1.0
         # Initialize lane change direction to prevent UI alert flicker

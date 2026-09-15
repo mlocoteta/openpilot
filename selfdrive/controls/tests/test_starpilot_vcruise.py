@@ -1284,6 +1284,33 @@ def test_nav_turn_speed_control_slows_for_imminent_turn():
   assert result > 0.0
 
 
+def test_nav_turn_speed_control_begins_before_reported_intersection_approach():
+  _, vcruise = make_vcruise(nav_state={
+    "valid": True,
+    "maneuverType": "turn",
+    "maneuverModifier": "right",
+    "maneuverDistance": 111.0,
+    "nextManeuverType": "",
+    "nextManeuverModifier": "",
+    "nextManeuverDistance": 0.0,
+  })
+
+  toggles = make_toggles()
+  toggles.nav_longitudinal_allowed = True
+  result = vcruise.update(
+    controls_enabled=True,
+    now=0.0,
+    time_validated=True,
+    v_cruise=16.1,
+    v_ego=16.0,
+    sm=make_sm(standstill=False),
+    starpilot_toggles=toggles,
+  )
+
+  assert result < 16.1
+  assert result == pytest.approx(vcruise.nav_turn_target)
+
+
 def test_nav_turn_speed_control_ignores_distant_turn():
   _, vcruise = make_vcruise(nav_state={
     "valid": True,

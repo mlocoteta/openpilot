@@ -16,7 +16,7 @@ class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
 
-    self.radar_off_can = CP.radarUnavailable or CP.carFingerprint != CAR.TESLA_MODEL_S_PREAP
+    self.radar_off_can = CP.radarUnavailable or Bus.radar not in DBC[CP.carFingerprint]
     self.updated_messages: set[int] = set()
     self.track_id = 0
     self.radar_offset = float(nap_conf.radar_offset) if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP else 0.0

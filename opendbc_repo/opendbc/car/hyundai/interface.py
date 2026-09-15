@@ -43,6 +43,7 @@ ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.can
 ECU_DISABLE_TIMESTAMP = 0.0
 KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
 KIA_EV9_ACCEL_MAX = 2.2
+RAY_PEDAL_SENSOR_ADDR = 0x201
 
 
 def apply_platform_longitudinal_params(ret: structs.CarParams) -> None:
@@ -301,6 +302,18 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.EV_GAS.value
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
+
+    if (candidate == CAR.KIA_RAY_EV and fingerprint[0].get(RAY_PEDAL_SENSOR_ADDR) == 6 and
+        ret.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_REFRESH_MSGS and
+        ret.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON):
+      ret.enableGasInterceptorDEPRECATED = True
+      ret.alphaLongitudinalAvailable = True
+      ret.openpilotLongitudinalControl = True
+      ret.pcmCruise = False
+      ret.radarUnavailable = True
+      ret.autoResumeSng = False
+      ret.minEnableSpeed = 5.0  # pedal-only: no commanded friction brake/standstill hold
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.LONG.value
 
     # Car specific configuration overrides
 

@@ -138,6 +138,9 @@ class CarState(CarStateBase):
     self.buttons_counter = 0
     self.main_cruise_on = False
     self.main_cruise_tracking = bool(getattr(FPCP, "flags", 0) & HyundaiStarPilotFlags.MAIN_CRUISE_STATE_TRACKING)
+    if CP.carFingerprint == CAR.KIA_RAY_EV:
+      self.ray_pedal_state = 5
+      self.ray_pedal_valid = False
 
     self.cruise_info = {}
     self.msg_161 = {}
@@ -300,6 +303,7 @@ class CarState(CarStateBase):
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
     cp_alt = can_parsers.get(Bus.alt)
+    cp_pedal = can_parsers.get(Bus.party)
 
     if self.CP.flags & HyundaiFlags.CANFD:
       return self.update_canfd(can_parsers)
@@ -393,6 +397,11 @@ class CarState(CarStateBase):
     ret.espDisabled = cp.vl["TCS11"]["TCS_PAS"] == 1
     ret.espActive = cp.vl["TCS11"]["ABS_ACT"] == 1
     ret.accFaulted = False if no_scc else cp.vl["TCS13"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
+    if self.CP.carFingerprint == CAR.KIA_RAY_EV and self.CP.enableGasInterceptorDEPRECATED:
+      self.ray_pedal_valid = bool(cp_pedal is not None and cp_pedal.can_valid and
+                                  cp_pedal.ts_nanos["GAS_SENSOR"]["STATE"] > 0)
+      self.ray_pedal_state = int(cp_pedal.vl["GAS_SENSOR"]["STATE"]) if cp_pedal is not None else 5
+      ret.accFaulted = not self.ray_pedal_valid or self.ray_pedal_state != 0
 
     if self.CP.flags & (HyundaiFlags.HYBRID | HyundaiFlags.EV | HyundaiFlags.FCEV):
       if self.CP.flags & HyundaiFlags.FCEV:
@@ -748,4 +757,6 @@ class CarState(CarStateBase):
     }
     if CP.carFingerprint in ALT_BUS_LDA_BUTTON_CARS:
       parsers[Bus.alt] = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CLU13", 0)], 1)
+    if CP.carFingerprint == CAR.KIA_RAY_EV and CP.enableGasInterceptorDEPRECATED:
+      parsers[Bus.party] = CANParser("hyundai_kia_ray_pedal", [("GAS_SENSOR", 50)], 0)
     return parsers

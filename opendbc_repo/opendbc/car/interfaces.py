@@ -233,6 +233,9 @@ class CarInterfaceBase(ABC):
           fp_ret.flags |= int(HondaStarPilotFlags.HAS_CAMERA_MESSAGES)
 
       elif platform in HYUNDAI:
+        if candidate == HYUNDAI.KIA_RAY_EV and CP.enableGasInterceptorDEPRECATED:
+          fp_ret.canUsePedal = True
+          fp_ret.pcmCruiseSpeed = False
         if candidate in CANFD_CAR:
           hda2 = Ecu.adas in [fw.ecu for fw in car_fw]
           CAN = CanBus(None, fingerprint, bool(CP.flags & HyundaiFlags.CANFD_LKA_STEERING))
@@ -244,7 +247,9 @@ class CarInterfaceBase(ABC):
         if candidate != HYUNDAI.KIA_RAY_EV and not (CP.flags & HyundaiFlags.CANFD) and 0x53E in fingerprint[2]:
           fp_ret.flags |= HyundaiStarPilotFlags.HAS_LKAS12.value
 
-        fp_ret.redneckCruiseAvailable = bool(CP.flags & HyundaiFlags.NON_SCC) and not bool(CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS)
+        fp_ret.redneckCruiseAvailable = (bool(CP.flags & HyundaiFlags.NON_SCC) and
+                                         not bool(CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS) and
+                                         not (candidate == HYUNDAI.KIA_RAY_EV and CP.enableGasInterceptorDEPRECATED))
         if fp_ret.redneckCruiseAvailable and params.get_bool("RedneckCruise"):
           fp_ret.pcmCruiseSpeed = False
           CP.openpilotLongitudinalControl = True
