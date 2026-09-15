@@ -1,4 +1,5 @@
 import { api, showSnackbar } from "../api.js"
+import { GxNotice } from "./GxNotice.js"
 import {
   getMapboxSearchContext,
   addRouteToMap,
@@ -80,6 +81,7 @@ function secondaryLabel(place) {
 
 export const NavigationDestinationPanel = {
   name: "NavigationDestinationPanel",
+  components: { GxNotice },
   data() {
     return {
       loading: true,
@@ -426,9 +428,9 @@ export const NavigationDestinationPanel = {
       <div v-else ref="map" class="gx-navigation-map"></div>
 
       <div v-if="hasMapbox && !loading" class="gx-navigation-overlay">
-        <section v-if="!hasRoutingKey" class="gx-navigation-error gx-card">
+        <GxNotice v-if="!hasRoutingKey" tone="warn" icon="bi-key-fill" style="margin:0;">
           The map and destination search only use your public Mapbox key. Add a <a href="#/navigation/keys">secret Mapbox key in App Keys</a> before starting navigation so the comma can calculate the on-device route and provide turn desires.
-        </section>
+        </GxNotice>
         <section class="gx-navigation-search gx-card">
           <div class="gx-navigation-search__row">
             <i class="bi bi-search" aria-hidden="true"></i>
@@ -475,7 +477,7 @@ export const NavigationDestinationPanel = {
             <i class="bi" :class="isPlaceFavorite(place) ? 'bi-heart-fill' : 'bi-clock-history'"></i>
           </button>
         </section>
-        <p v-if="error" class="gx-navigation-error gx-card">{{ error }}</p>
+        <GxNotice v-if="error" tone="danger" :text="error" style="margin:0;" />
       </div>
     </div>
   `,

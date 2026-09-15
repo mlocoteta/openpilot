@@ -309,6 +309,7 @@ export const MapsPanel = {
   },
   template: `
     <div style="display:grid; gap:12px;">
+      <GxNotice v-if="error" tone="danger" :text="error" style="margin:0;" />
       <section class="gx-card">
         <div class="gx-section__header">
           <i class="bi bi-map"></i>
@@ -451,8 +452,6 @@ export const MapsPanel = {
           </div>
         </div>
       </section>
-
-      <GxNotice v-if="error" tone="danger" :text="error" />
     </div>
   `,
 }

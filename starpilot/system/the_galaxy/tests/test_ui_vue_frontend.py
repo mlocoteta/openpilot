@@ -300,9 +300,11 @@ def test_ui_eliminates_slider_toggle_flicker():
   assert "interacting" in card
   assert "onSliderCommit" in card
   assert "flushSlider" in card
-  # No mid-drag auto-commit timer: holding still must NOT release/lock.
+  # No mid-drag auto-commit timer: holding still must NOT release/lock or
+  # commit. A hold may only switch the slider into fine scrubbing.
   assert "commitTimer" not in card
-  assert "setTimeout" not in card
+  hold = card[card.index("startHoldTimer"):card.index("activateFineScrub")]
+  assert "flushSlider" not in hold and "commit" not in hold
   # Release (change) and blur (keyboard) both flush the commit.
   assert "interacting = false" in card
   assert "onSliderBlur" in card
@@ -497,8 +499,8 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
   destination = _read("js/components/NavigationDestinationPanel.js")
-  assert '"./views/Navigation.js?v=nav-destination-2"' in _read("js/app.js")
-  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-2"' in _read("js/views/Navigation.js")
+  assert '"./views/Navigation.js?v=nav-destination-4"' in _read("js/app.js")
+  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-4"' in _read("js/views/Navigation.js")
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination

@@ -884,8 +884,7 @@ body.is-scrolling .gx-tile {
   width: 100%;
 }
 
-.gx-slider-row .gx-row__value { text-align: left; min-width: 0; }
-.gx-slider-row .gx-slider-reset { align-self: flex-end; }
+.gx-slider-row .gx-row__value { text-align: left; min-width: 0; transition: color var(--motion-fast), text-shadow var(--motion-fast); }
 
 .gx-slider-meta {
   color: var(--text-muted);
@@ -903,6 +902,7 @@ input[type="range"].gx-slider {
   flex: 1;
   height: 8px;
   outline: none;
+  touch-action: pan-y;
   width: 100%;
 }
 
@@ -1317,34 +1317,6 @@ button.gx-chip:hover {
   color: var(--primary);
 }
 
-.gx-language-card {
-  margin-bottom: var(--sp-4);
-}
-
-.gx-language-card__row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-3);
-}
-
-.gx-language-card__label {
-  align-items: center;
-  display: flex;
-  flex: 1 1 360px;
-  gap: var(--sp-4);
-  min-width: 220px;
-}
-
-.gx-language-card__select {
-  margin-left: var(--sp-2);
-  max-width: 220px;
-}
-
-.gx-language-card__hint {
-  margin-left: auto;
-}
-
 @media (min-width: 768px) {
   .gx-app.gx-nav-pinned .gx-content {
     margin-left: 320px;
@@ -1355,25 +1327,6 @@ button.gx-chip:hover {
     margin-left: 320px;
     width: calc(100% - 320px);
   }
-}
-
-@media (max-width: 767px) {
-  .gx-language-card__label {
-    flex-basis: 100%;
-  }
-
-  .gx-language-card__hint {
-    margin-left: 0;
-    width: 100%;
-  }
-}
-
-/* The destination view is a map-first screen. Search and route details float
-   over the map, matching the classic navigation experience. */
-.gx-navigation-view {
-  margin: calc(-1 * var(--sp-4));
-  min-height: calc(100dvh - var(--appbar-height));
-  position: relative;
 }
 
 .gx-navigation-stage {
@@ -1423,8 +1376,7 @@ button.gx-chip:hover {
 
 .gx-navigation-search,
 .gx-navigation-summary,
-.gx-navigation-recent,
-.gx-navigation-error {
+.gx-navigation-recent {
   max-width: min(500px, calc(100vw - 32px));
 }
 
@@ -1641,12 +1593,6 @@ button.gx-chip:hover {
   border-top: 1px solid var(--outline);
 }
 
-.gx-navigation-error {
-  color: var(--error);
-  margin: var(--sp-4) 0 0;
-  padding: var(--sp-3);
-}
-
 .gx-navigation-empty {
   align-items: center;
   display: flex;
@@ -1664,28 +1610,9 @@ button.gx-chip:hover {
   margin: 0;
 }
 
-.gx-navigation-tabs {
-  pointer-events: auto;
-  position: absolute;
-  right: var(--sp-4);
-  top: var(--sp-4);
-  z-index: 3;
-}
-
 @media (max-width: 767px) {
-  .gx-navigation-view {
-    margin: calc(-1 * var(--sp-3));
-  }
-
   .gx-navigation-overlay {
     padding: var(--sp-3);
-  }
-
-  .gx-navigation-tabs {
-    bottom: calc(var(--bottomnav-height) + var(--sp-3));
-    left: var(--sp-3);
-    right: auto;
-    top: auto;
   }
 
   .gx-navigation-summary__rows > div {
@@ -2446,3 +2373,21 @@ button.gx-chip:hover {
 .gx-select-menu { background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), #141020; }
 [data-theme="light"] .gx-select-menu { background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), #fff; }
 .gx-select-menu:not([open]) { display: none; }
+
+.gx-slider-row.is-fine-scrubbing input[type="range"].gx-slider {
+  touch-action: none;
+  background: rgba(157, 114, 255, 0.28);
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
+.gx-slider-row.is-fine-scrubbing input[type="range"].gx-slider::-webkit-slider-thumb {
+  transform: scale(1.35);
+  background: var(--secondary);
+  border-color: #ffffff;
+  box-shadow: 0 0 10px var(--secondary-glow);
+}
+
+.gx-slider-row.is-fine-scrubbing .gx-row__value {
+  color: var(--secondary);
+  text-shadow: 0 0 10px var(--secondary-glow);
+}
