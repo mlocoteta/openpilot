@@ -706,7 +706,11 @@ class StarPilotDrivingModelLayout(_SettingsPage):
     self._current_model_key = self._default_model_key()
     self._current_model_name = self._default_model_name()
 
-    self._model_manager = ModelManager(self._params, self._params_memory)
+    # ModelManager repairs legacy model/profile parameters on construction.
+    # Those parameter writes can block long enough to trip the UI startup
+    # watchdog, so create it from the existing manifest worker instead of
+    # during MainLayout construction.
+    self._model_manager: ModelManager | None = None
     self._download_thread: threading.Thread | None = None
     self._manifest_fetch_thread: threading.Thread | None = None
     self._manifest_fetched = False
@@ -732,6 +736,8 @@ class StarPilotDrivingModelLayout(_SettingsPage):
 
     def _task():
       try:
+        if self._model_manager is None:
+          self._model_manager = ModelManager(self._params, self._params_memory)
         self._model_manager.update_models()
       finally:
         self._manifest_fetched = True
@@ -1279,8 +1285,12 @@ class StarPilotDrivingModelLayout(_SettingsPage):
       def _download_task():
         try:
           if download_all:
+            if self._model_manager is None:
+              self._model_manager = ModelManager(self._params, self._params_memory)
             self._model_manager.download_all_models()
           else:
+            if self._model_manager is None:
+              self._model_manager = ModelManager(self._params, self._params_memory)
             self._model_manager.download_model(model_to_download)
         except Exception:
           pass
