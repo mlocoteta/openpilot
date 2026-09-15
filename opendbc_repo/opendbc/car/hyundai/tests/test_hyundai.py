@@ -788,6 +788,48 @@ class TestHyundaiFingerprint:
 
     assert parser.vl["LKAS11"]["CF_Lkas_FcwOpt_USM"] == 2
 
+  @pytest.mark.parametrize(("candidate", "expected_status"), (
+    (CAR.KIA_NIRO_PHEV_2022, 2),
+    (CAR.KIA_NIRO_HEV_2021, 2),
+  ))
+  def test_classic_niro_aol_keeps_active_lkas_status(self, candidate, expected_status):
+    CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], True, False, False, get_test_toggles())
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 1
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS11", 0)], 0)
+
+    hud_control = SimpleNamespace(
+      visualAlert=CarControl.HUDControl.VisualAlert.none,
+      leftLaneVisible=True,
+      rightLaneVisible=True,
+      leftLaneDepart=False,
+      rightLaneDepart=False,
+      leadVisible=False,
+    )
+    CS = SimpleNamespace(lkas11=parser.vl["LKAS11"])
+    CC = SimpleNamespace(
+      enabled=False,
+      latActive=True,
+      longActive=False,
+      cruiseControl=SimpleNamespace(cancel=False, resume=False, override=False),
+    )
+    actuators = SimpleNamespace(longControlState=LongCtrlState.off)
+
+    msgs = controller.create_can_msgs(True, 156, False, 0.0, 0.0, False, hud_control, actuators, CS, CC, 2, 0)
+    lkas11 = next(msg for msg in msgs if msg[0] == 0x340)
+    parser.update([(1, [lkas11])])
+
+    assert parser.vl["LKAS11"]["CF_Lkas_ActToi"] == 1
+    assert parser.vl["LKAS11"]["CF_Lkas_FcwOpt_USM"] == expected_status
+
+    CC.latActive = False
+    msgs = controller.create_can_msgs(False, 0, False, 0.0, 0.0, False, hud_control, actuators, CS, CC, 1, 0)
+    lkas11 = next(msg for msg in msgs if msg[0] == 0x340)
+    parser.update([(2, [lkas11])])
+
+    assert parser.vl["LKAS11"]["CF_Lkas_ActToi"] == 0
+    assert parser.vl["LKAS11"]["CF_Lkas_FcwOpt_USM"] == 1
+
   def test_kona_non_scc_uses_no_individual_lane_lkas_status(self):
     CP = CarInterface.get_params(CAR.HYUNDAI_KONA_NON_SCC, gen_empty_fingerprint(), [], False, False, False, None)
     packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
