@@ -46,7 +46,7 @@ TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES = 100
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
 MAX_STEER_RATE = 100  # deg/s
-MAX_STEER_RATE_FRAMES = 18  # tx control frames needed before torque can be cut
+MAX_STEER_RATE_FRAMES = 17  # tx control frames needed before torque can be cut
 
 # EPS allows user torque above threshold for 50 frames before permanently faulting
 MAX_USER_TORQUE = 500
@@ -77,13 +77,12 @@ def should_bypass_toyota_long_pid(CP, starpilot_toggles=None) -> bool:
   ) or highlander_sdsu)
 
 
-def apply_toyota_corolla_steer_rate_guard(car_fingerprint, steering_rate_deg: float, lat_active: bool,
-                                           apply_torque: int, apply_steer_req: bool) -> tuple[int, bool]:
-  if (car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 and lat_active and
-      abs(steering_rate_deg) >= MAX_STEER_RATE):
-    return 0, True
+def get_toyota_lat_active(car_fingerprint, requested_active: bool, steering_torque: float,
+                          steering_pressed: bool) -> bool:
+  if not requested_active or abs(steering_torque) >= MAX_USER_TORQUE:
+    return False
 
-  return apply_torque, apply_steer_req
+  return not (car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 and steering_pressed)
 
 
 def supports_toyota_auto_hold(CP, auto_hold_enabled: bool) -> bool:
@@ -344,7 +343,8 @@ class CarController(CarControllerBase):
     stopping = actuators.longControlState == LongCtrlState.stopping
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
-    lat_active = CC.latActive and abs(CS.out.steeringTorque) < MAX_USER_TORQUE
+    lat_active = get_toyota_lat_active(self.CP.carFingerprint, CC.latActive,
+                                       CS.out.steeringTorque, CS.out.steeringPressed)
 
     if len(CC.orientationNED) == 3:
       self.pitch.update(CC.orientationNED[1])
@@ -373,10 +373,6 @@ class CarController(CarControllerBase):
     self.steer_rate_counter, apply_steer_req = common_fault_avoidance(
       abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, lat_active,
       self.steer_rate_counter, MAX_STEER_RATE_FRAMES,
-    )
-
-    apply_torque, apply_steer_req = apply_toyota_corolla_steer_rate_guard(
-      self.CP.carFingerprint, CS.out.steeringRateDeg, lat_active, apply_torque, apply_steer_req,
     )
 
     if not lat_active:

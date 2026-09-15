@@ -68,7 +68,7 @@ def test_nav_desires_turn_right_below_lane_change_speed():
   helper = DesireHelper()
   helper.nav_desires_allowed = True
   helper._update_nav_params = lambda: None
-  helper._nav_instruction_state = {"valid": True, "maneuverModifier": "right", "maneuverDistance": 10.0}
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 10.0}
 
   helper.update(
     make_car_state(vEgo=5.0, rightBlinker=True),
@@ -81,12 +81,69 @@ def test_nav_desires_turn_right_below_lane_change_speed():
   assert helper.desire == log.Desire.turnRight
 
 
+def test_nav_desires_turn_preview_starts_before_last_second():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 50.0}
+
+  helper.update(
+    make_car_state(vEgo=10.5, rightBlinker=True),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(minimum_lane_change_speed=11.1),
+  )
+
+  assert helper.desire == log.Desire.turnRight
+  assert helper.lane_change_state == LaneChangeState.off
+
+
+def test_nav_desires_turn_preview_is_bounded_and_requires_matching_signal():
+  for distance, blinker, speed, maneuver_type in (
+    (65.0, True, 10.5, "turn"),
+    (-1.0, True, 10.5, "turn"),
+    (50.0, False, 10.5, "turn"),
+    (50.0, True, 11.2, "turn"),
+    (50.0, True, 10.5, "arrive"),
+  ):
+    helper = DesireHelper()
+    helper._update_nav_params = lambda: None
+    helper._nav_instruction_state = {"valid": True, "maneuverType": maneuver_type, "maneuverModifier": "right", "maneuverDistance": distance}
+
+    helper.update(
+      make_car_state(vEgo=speed, rightBlinker=blinker),
+      True,
+      0.0,
+      make_plan(),
+      make_toggles(minimum_lane_change_speed=11.1),
+    )
+
+    assert helper.desire == log.Desire.none
+
+
+def test_nav_desires_turn_preview_respects_stop_hold():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 20.0}
+
+  helper.update(
+    make_car_state(vEgo=5.0, rightBlinker=True),
+    True,
+    0.0,
+    make_plan(redLight=True),
+    make_toggles(minimum_lane_change_speed=11.1),
+  )
+
+  assert helper.turn_stop_hold
+  assert helper.desire == log.Desire.none
+
+
 def test_nav_desires_turn_requires_matching_blinker():
   for modifier, opposite_blinker in (("left", "rightBlinker"), ("right", "leftBlinker")):
     helper = DesireHelper()
     helper.nav_desires_allowed = True
     helper._update_nav_params = lambda: None
-    helper._nav_instruction_state = {"valid": True, "maneuverModifier": modifier, "maneuverDistance": 10.0}
+    helper._nav_instruction_state = {"valid": True, "maneuverType": "turn", "maneuverModifier": modifier, "maneuverDistance": 10.0}
 
     helper.update(
       make_car_state(vEgo=5.0, **{opposite_blinker: True}),
@@ -103,7 +160,7 @@ def test_nav_desires_turn_right_waits_until_turn_is_close():
   helper = DesireHelper()
   helper.nav_desires_allowed = True
   helper._update_nav_params = lambda: None
-  helper._nav_instruction_state = {"valid": True, "maneuverModifier": "right", "maneuverDistance": 300.0}
+  helper._nav_instruction_state = {"valid": True, "maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 300.0}
 
   helper.update(
     make_car_state(vEgo=5.0),

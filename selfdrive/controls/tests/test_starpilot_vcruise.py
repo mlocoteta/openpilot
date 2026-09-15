@@ -1311,6 +1311,25 @@ def test_nav_turn_speed_control_begins_before_reported_intersection_approach():
   assert result == pytest.approx(vcruise.nav_turn_target)
 
 
+def test_nav_turn_speed_control_starts_earlier_at_reported_route_cruise():
+  _, vcruise = make_vcruise(nav_state={
+    "valid": True,
+    "maneuverType": "turn",
+    "maneuverModifier": "right",
+    "maneuverDistance": 100.0,
+    "nextManeuverType": "",
+    "nextManeuverModifier": "",
+    "nextManeuverDistance": 0.0,
+  })
+
+  toggles = make_toggles()
+  toggles.nav_longitudinal_allowed = True
+  result = update_vcruise(vcruise, make_sm(standstill=False), toggles, now=0.0, v_ego=11.94, v_cruise=11.94)
+
+  assert result < 11.94
+  assert result == pytest.approx(vcruise.nav_turn_target)
+
+
 def test_nav_turn_speed_control_ignores_distant_turn():
   _, vcruise = make_vcruise(nav_state={
     "valid": True,

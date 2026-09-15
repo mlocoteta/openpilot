@@ -13,7 +13,7 @@ LaneChangeDirection = log.LaneChangeDirection
 LANE_CHANGE_SPEED_MIN = 20 * CV.MPH_TO_MS
 LANE_CHANGE_TIME_MAX = 10.
 NAV_TURN_DISTANCE_SPEED_BREAKPOINTS = [0.0, 5.0, 10.0]
-NAV_TURN_DISTANCE_BREAKPOINTS = [20.0, 25.0, 30.0]
+NAV_TURN_DISTANCE_BREAKPOINTS = [20.0, 35.0, 55.0]
 # A driver normally signals an intersection before slowing below the lane-change
 # speed threshold. Use the route to classify that early signal so it does not
 # start a lane change while approaching the matching turn.
@@ -122,7 +122,7 @@ class DesireHelper:
     except (TypeError, ValueError):
       return False
 
-    return distance <= float(np.interp(carstate.vEgo, NAV_TURN_DISTANCE_SPEED_BREAKPOINTS, NAV_TURN_DISTANCE_BREAKPOINTS))
+    return 0.0 <= distance <= float(np.interp(carstate.vEgo, NAV_TURN_DISTANCE_SPEED_BREAKPOINTS, NAV_TURN_DISTANCE_BREAKPOINTS))
 
   @staticmethod
   def _nav_turn_signal_matches(carstate, nav_instruction_state):
@@ -242,6 +242,9 @@ class DesireHelper:
     if modifier == "":
       return log.Desire.none
 
+    if modifier in ("left", "sharpLeft", "right", "sharpRight") and str(self._nav_instruction_state.get("maneuverType", "")).strip().lower() != "turn":
+      return log.Desire.none
+
     if modifier == "slightLeft":
       if not self.nav_lane_positioning_allowed:
         return log.Desire.none
@@ -259,11 +262,15 @@ class DesireHelper:
         if desired_lane_width >= starpilot_toggles.lane_detection_width and self._nav_torque_applied(carstate, lane_change_direction):
           return log.Desire.keepRight
     elif modifier in ("left", "sharpLeft"):
+      if self.turn_stop_hold:
+        return log.Desire.none
       turn_allowed = carstate.leftBlinker and not carstate.rightBlinker and not carstate.leftBlindspot
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnLeft
     elif modifier in ("right", "sharpRight"):
+      if self.turn_stop_hold:
+        return log.Desire.none
       turn_allowed = carstate.rightBlinker and not carstate.leftBlinker and not carstate.rightBlindspot
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
