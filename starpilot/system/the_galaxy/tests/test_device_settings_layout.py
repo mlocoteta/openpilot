@@ -293,6 +293,15 @@ def test_requested_simple_and_advanced_settings_tiers():
         if not param["key"].startswith("PIPPreview")
         and param["key"] != "DisableWideRoad"
       ]
+    if section_name == "Device & Data":
+      params = [
+        param for param in params
+        if param["key"] not in {
+          "ScreenBrightness", "ScreenBrightnessOnroad", "StandbyWakeEngage",
+          "StandbyWakeDisengage", "StandbyWakeInfoAlert", "StandbyWakeWarningAlert",
+          "StandbyWakeCriticalAlert", "StandbyWakeTurnSignal", "StandbyWakeButton",
+        }
+      ]
     assert {param["settings_tier"] for param in params} == {"simple"}
 
   for key in ("AlwaysOnLateral", "LaneChanges", "QOLLateral"):
@@ -337,6 +346,16 @@ def test_requested_simple_and_advanced_settings_tiers():
   assert developer["DeveloperUI"]["settings_tier"] == "advanced"
   assert developer["RedneckCruise"]["settings_tier"] == "advanced"
   assert sections["Visual (Display & UI)"]["DisableWideRoad"]["settings_tier"] == "advanced"
+
+  device = sections["Device & Data"]
+  assert device["ScreenBrightness"]["settings_tier"] == "advanced"
+  assert device["ScreenBrightnessOnroad"]["settings_tier"] == "advanced"
+  for key in (
+    "StandbyWakeEngage", "StandbyWakeDisengage", "StandbyWakeInfoAlert",
+    "StandbyWakeWarningAlert", "StandbyWakeCriticalAlert", "StandbyWakeTurnSignal",
+    "StandbyWakeButton",
+  ):
+    assert device[key]["settings_tier"] == "advanced"
 
 
 def test_turn_steering_limit_mute_speed_is_galaxy_developer_only():

@@ -1,6 +1,7 @@
 import importlib
 from pathlib import Path
-from tempfile import TemporaryDirectory
+import shutil
+from tempfile import mkdtemp
 from types import SimpleNamespace
 
 import pytest
@@ -14,10 +15,15 @@ class Params:
   def __init__(self, values=None):
     self.values = dict(values or {})
     self.fail_key = None
-    self.directory = TemporaryDirectory(prefix='screen-settings-test-')
+    self.directory = Path(mkdtemp(prefix='screen-settings-test-'))
 
   def get_param_path(self):
-    return str(Path(self.directory.name) / 'd')
+    return str(self.directory / 'd')
+
+  def __del__(self):
+    directory = getattr(self, 'directory', None)
+    if directory is not None:
+      shutil.rmtree(directory, ignore_errors=True)
 
   def get(self, key):
     return self.values.get(key)

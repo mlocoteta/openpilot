@@ -1,4 +1,4 @@
-"""Shared screen preferences and wake policy for native UI and Galaxy.
+"""Shared screen preferences and wake policy for Galaxy and services.
 
 The existing brightness value 101 continues to encode Auto for older clients.
 Manual values and offsets are independent for the driving and parked screens.
@@ -43,7 +43,7 @@ def _raw(params, key):
   try:
     return params.get(key)
   except (UnknownKeyName, KeyError, TypeError, ValueError):
-    # Older native registries may not yet know new settings during an update.
+    # Older registries may not know new settings during an update.
     return None
 
 
@@ -84,8 +84,7 @@ def enabled_wake_keys(params):
 
 @contextmanager
 def _screen_write_transaction(params):
-  # Keep the lock outside the key directory, where Params clearing cannot remove
-  # it. Include the prefix so isolated Params stores do not block each other.
+  # Keep the lock outside the key directory, where Params clearing cannot remove it.
   directory = Path(params.get_param_path())
   lock_path = directory.parent / f'.screen_settings.{directory.name}.lock'
   with _WRITE_LOCK:

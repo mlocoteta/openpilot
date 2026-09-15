@@ -21,7 +21,7 @@ import {api} from '/assets/mobile/js/api.js';
 const layout = ${JSON.stringify(layout)};
 const values = reactive({ScreenManagement:true, ScreenBrightness:101, ScreenBrightnessManual:67, ScreenBrightnessOffset:0,
   ScreenBrightnessOnroad:101, ScreenBrightnessOnroadOffset:0, ScreenTimeout:30, ScreenTimeoutOnroad:15, StandbyMode:false,
-  ...${JSON.stringify(wakeDefaults)}});
+  GalaxyDeveloperMode:false, ...${JSON.stringify(wakeDefaults)}});
 window.values=values; window.writes=[]; window.holdWrite=false; window.failWrite=false;
 window.fetch=async (input,init={}) => {
   const url=new URL(input,location.href);
@@ -64,6 +64,10 @@ createApp({components:{SettingTree},setup:()=>({values}),
     const onMode=page.locator('#gx-ScreenBrightnessOnroad-mode')
     const offSlider=page.locator('#gx-ScreenBrightness-slider')
     const onSlider=page.locator('#gx-ScreenBrightnessOnroad-slider')
+    assert.equal(section.params.find(p => p.key === 'ScreenBrightness').settings_tier, 'advanced')
+    assert.equal(section.params.find(p => p.key === 'StandbyWakeButton').settings_tier, 'advanced')
+    assert.equal(await offMode.count(), 0, 'screen controls stay hidden until Galaxy Developer Mode is enabled')
+    await page.evaluate(()=>{window.values.GalaxyDeveloperMode=true})
     await offMode.waitFor()
     assert.equal(await offMode.inputValue(),'auto')
     assert.equal(await onMode.inputValue(),'auto')

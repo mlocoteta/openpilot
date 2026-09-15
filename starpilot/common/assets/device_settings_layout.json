@@ -4689,7 +4689,7 @@
         "galaxy_ui_type": "brightness",
         "step": 1,
         "parent_key": "ScreenManagement",
-        "settings_tier": "simple",
+        "settings_tier": "advanced",
         "default": 101,
         "min": 0,
         "max": 101
@@ -4703,7 +4703,7 @@
         "galaxy_ui_type": "brightness",
         "step": 1,
         "parent_key": "ScreenManagement",
-        "settings_tier": "simple",
+        "settings_tier": "advanced",
         "default": 101,
         "min": 0,
         "max": 101
@@ -4771,7 +4771,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeDisengage",
@@ -4785,7 +4785,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeInfoAlert",
@@ -4799,7 +4799,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeWarningAlert",
@@ -4813,7 +4813,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeCriticalAlert",
@@ -4827,7 +4827,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeTurnSignal",
@@ -4841,7 +4841,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       },
       {
         "key": "StandbyWakeButton",
@@ -4855,7 +4855,7 @@
           "ScreenManagement",
           "StandbyMode"
         ],
-        "settings_tier": "simple"
+        "settings_tier": "advanced"
       }
     ]
   },
