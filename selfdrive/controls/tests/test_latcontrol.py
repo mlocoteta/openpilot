@@ -2073,6 +2073,17 @@ class TestLatControl:
     assert strong_turn_envelope < envelope
     assert strong_turn > damped
 
+  def test_honda_accord_low_speed_damping_requires_reversal_activation(self):
+    untouched, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=0.0)
+    active, active_scale, active_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=1.0)
+
+    assert untouched == pytest.approx(1.0)
+    assert scale == pytest.approx(1.0)
+    assert envelope == pytest.approx(0.0)
+    assert active < untouched
+    assert active_scale < 1.0
+    assert active_envelope > 0.0
+
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0
     assert get_subaru_impreza_pid_output_scale(0.75) == 1.0

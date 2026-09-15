@@ -100,6 +100,10 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
     self.honda_accord_low_speed_damping_enabled = False
     self.honda_accord_low_speed_damping_max = 0.12
+    self.honda_accord_damping_prev_raw_output = 0.0
+    self.honda_accord_damping_prev_error = 0.0
+    self.honda_accord_damping_prev_setpoint = 0.0
+    self.honda_accord_damping_hold_frames = 0
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -200,6 +204,11 @@ class LatControlTorque(LatControl):
   def update_honda_accord_low_speed_damping(self, enabled, max_reduction):
     self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
     self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
+    if not self.honda_accord_low_speed_damping_enabled:
+      self.honda_accord_damping_prev_raw_output = 0.0
+      self.honda_accord_damping_prev_error = 0.0
+      self.honda_accord_damping_prev_setpoint = 0.0
+      self.honda_accord_damping_hold_frames = 0
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     if self.is_palisade:
@@ -713,9 +722,25 @@ class LatControlTorque(LatControl):
       ti_low_speed_damping_scale = 1.0
       ti_low_speed_damping_envelope = 0.0
       if self.honda_accord_low_speed_damping_enabled:
+        # The previous implementation reduced *every* command in the envelope.
+        # Only intervene when the output or tracking error reverses while the
+        # requested turn direction remains stable; that is the observed Accord
+        # TI ping-pong signature. A short hold damps the following limiter steps
+        # without adding steady-turn lag.
+        raw_output_torque = float(output_torque)
+        stable_turn = abs(setpoint) > 0.15 and setpoint * self.honda_accord_damping_prev_setpoint > 0.0
+        output_reversal = raw_output_torque * self.honda_accord_damping_prev_raw_output < -0.0025
+        error_reversal = error * self.honda_accord_damping_prev_error < -0.0025
+        if stable_turn and (output_reversal or error_reversal):
+          self.honda_accord_damping_hold_frames = max(self.honda_accord_damping_hold_frames, int(0.30 / self.dt))
+        activation = min(1.0, self.honda_accord_damping_hold_frames * self.dt / 0.30)
         output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_low_speed_damped_output(
-          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_low_speed_damping_max,
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_low_speed_damping_max, activation,
         )
+        self.honda_accord_damping_hold_frames = max(0, self.honda_accord_damping_hold_frames - 1)
+        self.honda_accord_damping_prev_raw_output = raw_output_torque
+        self.honda_accord_damping_prev_error = float(error)
+        self.honda_accord_damping_prev_setpoint = float(setpoint)
 
       pid_log.active = True
       pid_log.p = float(self.pid.p)

@@ -2220,8 +2220,8 @@ def get_honda_accord_ff_scale(desired_lateral_accel: float) -> float:
 
 def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_torque: float,
                                               desired_lateral_accel: float, v_ego: float,
-                                              max_reduction: float) -> tuple[float, float, float]:
-  """Smooth TI output only in the observed low-speed reversal band.
+                                              max_reduction: float, activation: float = 1.0) -> tuple[float, float, float]:
+  """Smooth TI output only during a detected low-speed reversal episode.
 
   The static sigmoid mapping stays untouched. This envelope fades out below crawl,
   above 5.5 m/s, and for stronger turns. The returned scale/envelope are telemetry
@@ -2233,7 +2233,9 @@ def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_t
                            HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH))
   lat_weight = _sigmoid((HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
                         HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH)
-  envelope = speed_weight * lat_weight
+  # ``activation`` is the controller's short reversal hold. Keeping the static
+  # envelope separate lets a normal gentle turn pass through untouched.
+  envelope = speed_weight * lat_weight * float(np.clip(activation, 0.0, 1.0))
   reduction = min(max(float(max_reduction), 0.0), 0.25) * envelope
   scale = 1.0 - reduction
   # Limit abrupt command-to-command reversals without adding a second hard limiter.
