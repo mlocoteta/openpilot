@@ -101,6 +101,7 @@ class LatControlTorque(LatControl):
     self.honda_accord_low_speed_damping_enabled = False
     self.honda_accord_low_speed_damping_max = 0.12
     self.honda_accord_continuous_center_damping_enabled = False
+    self.honda_accord_continuous_center_damping_max_reduction = 0.62
     self.honda_accord_damping_prev_raw_output = 0.0
     self.honda_accord_damping_prev_error = 0.0
     self.honda_accord_damping_prev_setpoint = 0.0
@@ -202,10 +203,12 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state.tiLowSpeedDampingActive = False
     self.starpilot_lateral_state.tiLowSpeedDampingScale = 1.0
 
-  def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False):
+  def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False,
+                                            continuous_center_max_reduction=0.62):
     self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
     self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
     self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and self.is_honda_accord
+    self.honda_accord_continuous_center_damping_max_reduction = float(np.clip(continuous_center_max_reduction, 0.0, 0.75))
     # The two experimental policies are A/B alternatives. The continuous policy
     # intentionally takes priority when selected, so they can never stack.
     if self.honda_accord_continuous_center_damping_enabled:
@@ -729,7 +732,7 @@ class LatControlTorque(LatControl):
       ti_low_speed_damping_envelope = 0.0
       if self.honda_accord_continuous_center_damping_enabled:
         output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_continuous_center_damped_output(
-          output_torque, self.prev_output_torque, setpoint, CS.vEgo,
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_continuous_center_damping_max_reduction,
         )
       elif self.honda_accord_low_speed_damping_enabled:
         # The previous implementation reduced *every* command in the envelope.

@@ -2090,6 +2090,7 @@ class TestLatControl:
     damped, scale, envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0)
     outside, outside_scale, outside_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.8, 4.0)
     highway, highway_scale, highway_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 12.0)
+    lighter_cap, _, _ = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0, max_reduction=0.20)
 
     assert 0.62 <= scale < 1.0
     assert 0.0 < envelope <= 1.0
@@ -2100,6 +2101,7 @@ class TestLatControl:
     assert highway == pytest.approx(1.0)
     assert highway_scale == pytest.approx(1.0)
     assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    assert lighter_cap > damped
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0

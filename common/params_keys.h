@@ -758,6 +758,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Optional MoreTore-style continuous center damper. It is mutually exclusive
     // with the reversal-gated experiment and remains opt-in.
     {"TILowSpeedCenterDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TILowSpeedCenterDampingMaxReduction", {PERSISTENT, FLOAT, "0.62", "0.62", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},

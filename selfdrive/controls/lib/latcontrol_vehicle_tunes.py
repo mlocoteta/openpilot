@@ -2259,7 +2259,8 @@ def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_t
 
 
 def get_honda_accord_continuous_center_damped_output(output_torque: float, prev_output_torque: float,
-                                                      desired_lateral_accel: float, v_ego: float) -> tuple[float, float, float]:
+                                                      desired_lateral_accel: float, v_ego: float,
+                                                      max_reduction: float = 0.62) -> tuple[float, float, float]:
   """MoreTore-style continuous small-signal center damping for an Accord TI.
 
   This deliberately mirrors the reference output cap/scale/alpha strategy,
@@ -2273,7 +2274,11 @@ def get_honda_accord_continuous_center_damped_output(output_torque: float, prev_
   center_weight = _sigmoid((HONDA_ACCORD_CENTER_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
                            HONDA_ACCORD_CENTER_DAMPING_LAT_WIDTH)
   envelope = speed_weight * center_weight
-  output_limit = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_LIMIT) * envelope)
+  # At the MoreTore-reference default (0.62), this produces its 0.38
+  # normalized-output floor. The slider only adjusts this cap; the reference
+  # smoothing scale/alpha remain fixed for an interpretable A/B test.
+  capped_reduction = float(np.clip(max_reduction, 0.0, 0.75))
+  output_limit = 1.0 - (capped_reduction * envelope)
   limited_output = float(np.clip(output_torque, -output_limit, output_limit))
   output_scale = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_SCALE_MIN) * envelope)
   output_alpha = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_ALPHA_MIN) * envelope)

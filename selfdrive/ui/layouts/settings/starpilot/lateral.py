@@ -393,6 +393,13 @@ class StarPilotLateralLayout(_SettingsPage):
                              p.put_bool("TILowSpeedDampingEnabled", False)) if s else p.put_bool("TILowSpeedCenterDampingEnabled", False),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
       ),
+      SettingRow(
+        "TILowSpeedCenterDampingMaxReduction", "value", tr_noop("TI Continuous Center Maximum Reduction"),
+        subtitle=tr_noop("Hard-cap reduction at the center. 0.62 matches the MoreTore reference (0.38 output floor); smoothing remains fixed."),
+        get_value=lambda: f"{(p.get_float('TILowSpeedCenterDampingMaxReduction') or 0.62):.2f}",
+        on_click=lambda: self._show_slider("TILowSpeedCenterDampingMaxReduction", 0.10, 0.75, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TILowSpeedCenterDampingEnabled"),
+      ),
     ]
 
     self._manager_view = SteeringManagerView(
