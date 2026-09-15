@@ -31,7 +31,11 @@ class MainLayout(Widget):
     self._current_mode = MainState.HOME
     self._prev_onroad = False
 
-    self._layouts = {MainState.HOME: HomeLayout(), MainState.SETTINGS: SettingsLayout(), MainState.ONROAD: StarPilotOnroadView()}
+    # StarPilot's onroad view eagerly creates GPU textures.  Do not pay that
+    # cost while the offroad UI is booting: on slower storage it can exceed
+    # the startup watchdog before the first frame is drawn.
+    self._layouts = {MainState.HOME: HomeLayout(), MainState.SETTINGS: SettingsLayout()}
+    self._onroad_layout: StarPilotOnroadView | None = None
 
     self._sidebar_rect = rl.Rectangle(0, 0, 0, 0)
     self._dev_sidebar_rect = rl.Rectangle(0, 0, 0, 0)
@@ -74,8 +78,15 @@ class MainLayout(Widget):
                                 open_settings=lambda: self.open_settings(PanelType.TOGGLES))
     self._layouts[MainState.HOME].set_settings_callback(lambda: self.open_settings(PanelType.TOGGLES))
     self._layouts[MainState.SETTINGS].set_callbacks(on_close=self._set_mode_for_state)
-    self._layouts[MainState.ONROAD].set_click_callback(self._on_onroad_clicked)
     device.add_interactive_timeout_callback(self._set_mode_for_state)
+
+  def _layout_for(self, state: MainState) -> Widget:
+    if state != MainState.ONROAD:
+      return self._layouts[state]
+    if self._onroad_layout is None:
+      self._onroad_layout = StarPilotOnroadView()
+      self._onroad_layout.set_click_callback(self._on_onroad_clicked)
+    return self._onroad_layout
 
   def _update_layout_rects(self):
     left_w = SIDEBAR_WIDTH if self._sidebar.is_visible else 0
@@ -108,9 +119,9 @@ class MainLayout(Widget):
 
   def _set_current_layout(self, layout: MainState):
     if layout != self._current_mode:
-      self._layouts[self._current_mode].hide_event()
+      self._layout_for(self._current_mode).hide_event()
       self._current_mode = layout
-      self._layouts[self._current_mode].show_event()
+      self._layout_for(self._current_mode).show_event()
       gui_app.request_high_fps()
 
   def open_settings(self, panel_type: PanelType):
@@ -146,7 +157,7 @@ class MainLayout(Widget):
 
     has_dev = self._current_mode == MainState.ONROAD and self._dev_sidebar.visible
     content_rect = self._content_rect if (self._sidebar.is_visible or has_dev) else self._rect
-    self._layouts[self._current_mode].render(content_rect)
+    self._layout_for(self._current_mode).render(content_rect)
 
     if has_dev:
       self._dev_sidebar.render(self._dev_sidebar_rect)
