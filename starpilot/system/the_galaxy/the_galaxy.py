@@ -13,6 +13,7 @@ import sysconfig
 import tarfile
 
 import io
+import tokenize
 from io import BytesIO
 from pathlib import Path
 
@@ -3283,7 +3284,13 @@ def _extract_fingerprint_models_for_make(make_key):
   except Exception:
     return []
 
-  content = re.sub(r'#[^\n]*', "", content)
+  lines = content.splitlines(keepends=True)
+  for token in tokenize.generate_tokens(io.StringIO(content).readline):
+    if token.type == tokenize.COMMENT:
+      line_index, start = token.start[0] - 1, token.start[1]
+      end = token.end[1]
+      lines[line_index] = lines[line_index][:start] + " " * (end - start) + lines[line_index][end:]
+  content = "".join(lines)
   content = re.sub(r'footnotes=\[[^\]]*\],\s*', "", content)
 
   models = []
@@ -3327,6 +3334,7 @@ def _get_fingerprint_catalog():
   all_models = []
   seen_all = set()
   model_to_label = {}
+  labels_by_model = {}
   model_to_make = {}
   label_to_model = {}
 
@@ -3340,6 +3348,7 @@ def _get_fingerprint_catalog():
       model_label = entry["label"]
 
       model_to_label.setdefault(model_value, model_label)
+      labels_by_model.setdefault(model_value, set()).add(model_label)
       model_to_make.setdefault(model_value, make_label)
       label_to_model.setdefault(model_label, model_value)
 
@@ -3355,6 +3364,10 @@ def _get_fingerprint_catalog():
       })
 
   all_models.sort(key=lambda entry: entry["label"].lower())
+
+  for model_value, labels in labels_by_model.items():
+    if len(labels) > 1:
+      model_to_label[model_value] = None
 
   _fingerprint_catalog_cache = {
     "makes": make_options,
@@ -4286,6 +4299,12 @@ def _get_fingerprint_snapshot_text():
   model_value = str(params.get("CarModel", encoding="utf-8") or "").strip()
 
   if model_name and model_value:
+    catalog = _get_fingerprint_catalog()
+    if model_value in catalog["model_to_make"] and not any(
+      entry["value"] == model_value and entry["label"] == model_name
+      for entry in catalog["all_models"]
+    ):
+      return f"Mismatch: {model_name} vs {model_value}; reselect your vehicle"
     return f"{model_name} ({model_value})"
   if model_name:
     return model_name
@@ -6588,6 +6607,13 @@ def setup(app):
           return jsonify({"error": "Car model cannot be empty."}), 400
 
         catalog = _get_fingerprint_catalog()
+        if selected_label_input:
+          labelled_models = {
+            entry["value"] for entry in catalog["all_models"]
+            if entry["label"] == selected_label_input
+          }
+          if labelled_models and selected_model not in labelled_models:
+            return jsonify({"error": "Vehicle label and model do not match; refresh and reselect your vehicle."}), 400
         if selected_label_input and any(
           entry["value"] == selected_model and entry["label"] == selected_label_input
           for entry in catalog["all_models"]

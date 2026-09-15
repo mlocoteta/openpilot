@@ -335,12 +335,31 @@ function scheduleSyncInputs() {
 
 function applySelectOptions(el, options) {
   el.innerHTML = ""
+  const labelsByValue = new Map()
   for (const opt of options || []) {
     if (opt?.developer_only && !state.values[GALAXY_DEVELOPER_MODE_KEY]) continue
     const o = document.createElement("option")
     o.value = String(opt.value)
     o.textContent = opt.label
     el.appendChild(o)
+    if (el.id === "ds-CarModel") {
+      if (!labelsByValue.has(o.value)) labelsByValue.set(o.value, [])
+      labelsByValue.get(o.value).push(o.textContent)
+    }
+  }
+
+  if (el.id === "ds-CarModel") {
+    for (const [modelValue, labels] of labelsByValue) {
+      if (labels.length < 2) continue
+      const baseNames = labels.map(label => label.split(" (")[0].replace(/\s+\d{4}.*$/, "").trim())
+      const baseName = baseNames.every(name => name === baseNames[0]) ? baseNames[0] : modelValue
+      const placeholder = document.createElement("option")
+      placeholder.value = modelValue
+      placeholder.textContent = `${baseName} (variant not identified)`
+      placeholder.dataset.fingerprintVariantPlaceholder = "1"
+      const firstVariant = Array.from(el.options).find(option => option.value === modelValue)
+      el.insertBefore(placeholder, firstVariant)
+    }
   }
 }
 
@@ -354,12 +373,14 @@ function syncSelectValue(el, key) {
   if (key === "CarModel") {
     const targetLabel = toSelectValue(state.values.CarModelName)
     const options = Array.from(el.options)
-    const matchingIndex = options.findIndex(opt => {
-      if (opt.value !== targetValue) return false
-      return !targetLabel || opt.textContent === targetLabel
-    })
+    const matchingIndex = targetLabel ? options.findIndex(opt => opt.value === targetValue && opt.textContent === targetLabel) : -1
     if (matchingIndex !== -1) {
       el.selectedIndex = matchingIndex
+      return
+    }
+    const unspecifiedIndex = options.findIndex(opt => opt.value === targetValue && opt.dataset.fingerprintVariantPlaceholder === "1")
+    if (unspecifiedIndex !== -1) {
+      el.selectedIndex = unspecifiedIndex
       return
     }
   }
