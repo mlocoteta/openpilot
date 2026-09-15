@@ -80,7 +80,9 @@ HONDA_ACCORD_TURN_FF_REDUCTION_MAX = 0.10
 HONDA_ACCORD_TURN_FF_ONSET = 0.45
 HONDA_ACCORD_TURN_FF_WIDTH = 0.12
 HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED = 2.5
-HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED = 5.5
+# Cover the observed low-speed/city transition; the smooth envelope fades away
+# before normal highway control.
+HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED = 8.2
 HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH = 0.30
 HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL = 1.20
 HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH = 0.25
@@ -2224,7 +2226,7 @@ def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_t
   """Smooth TI output only during a detected low-speed reversal episode.
 
   The static sigmoid mapping stays untouched. This envelope fades out below crawl,
-  above 5.5 m/s, and for stronger turns. The returned scale/envelope are telemetry
+  above 8.2 m/s, and for stronger turns. The returned scale/envelope are telemetry
   values for rlog review; callers must keep this feature explicitly opt-in.
   """
   speed_weight = (_sigmoid((v_ego - HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED) /
