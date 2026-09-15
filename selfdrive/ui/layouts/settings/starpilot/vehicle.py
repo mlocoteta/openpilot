@@ -627,8 +627,34 @@ class ButtonActionComboDialog(Widget):
 class StarPilotVehicleSettingsLayout(_SettingsPage):
   def __init__(self):
     super().__init__()
-    self._make_options, self._models_by_make, self._models_by_value, self._make_by_model = get_fingerprint_catalog()
+    # Building the manual-fingerprint catalog reads every supported make's
+    # values.py.  On a comma that can exceed the UI stall watchdog's startup
+    # budget, so never do it while MainLayout is being constructed.
+    self._make_options: tuple[str, ...] = ()
+    self._models_by_make: dict[str, tuple[FingerprintModelOption, ...]] = {}
+    self._models_by_value: dict[str, FingerprintModelOption] = {}
+    self._make_by_model: dict[str, str] = {}
+    self._fingerprint_catalog_ready = False
+    self._fingerprint_catalog_error = False
+    threading.Thread(target=self._load_fingerprint_catalog, name="fingerprint_catalog", daemon=True).start()
     self._manager_view = VehicleSettingsManagerView(self)
+
+  def _load_fingerprint_catalog(self):
+    try:
+      catalog = get_fingerprint_catalog()
+    except Exception:
+      self._fingerprint_catalog_error = True
+      return
+
+    self._make_options, self._models_by_make, self._models_by_value, self._make_by_model = catalog
+    self._fingerprint_catalog_ready = True
+
+  def _ensure_fingerprint_catalog_ready(self) -> bool:
+    if self._fingerprint_catalog_ready:
+      return True
+    message = tr("Unable to load the fingerprint list.") if self._fingerprint_catalog_error else tr("Loading fingerprint list. Please try again in a moment.")
+    gui_app.push_widget(ConfirmDialog(message, tr("OK")))
+    return False
 
   def _action_title(self, key: str) -> str:
     titles = {
@@ -752,6 +778,8 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
     ))
 
   def _on_select_make(self):
+    if not self._ensure_fingerprint_catalog_ready():
+      return
     makes = list(self._make_options)
     if not makes:
       gui_app.push_widget(ConfirmDialog(tr("No fingerprint list available."), tr("OK")))
@@ -773,6 +801,8 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
     gui_app.push_widget(dialog)
 
   def _on_select_model(self):
+    if not self._ensure_fingerprint_catalog_ready():
+      return
     make = self._params.get("CarMake") or ""
     if not make:
       gui_app.push_widget(ConfirmDialog(tr("Please select a Car Make first!"), tr("OK")))
