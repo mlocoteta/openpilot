@@ -78,7 +78,7 @@ def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
   assert shell.index('<DevicePicker />') > shell.index('v-for="(links, section) in NAV"')
   assert '"GalaxyDeviceName", {PERSISTENT | DONT_LOG, STRING' in param_keys
   assert "localStorage" not in picker
-  assert ".gx-drawer.open ~ .liquid-glass-nav" in css
+  assert ".gx-drawer.open ~ .blur-nav" in css
   assert "Local Galaxy instances do not have the gateway directory endpoint." in picker
 
 
@@ -331,11 +331,9 @@ def test_ui_developer_mode_banner_offers_unlock():
 
 def test_ui_has_bottom_navigation_and_drawer():
   shell = _read("js/components/AppShell.js")
-  # Exactly one navigation affordance: liquid-glass bottom nav (mobile) OR the
-  # drawer hamburger (desktop). Mobile shows a back button instead.
-  assert "liquid-glass-nav" in shell
+  assert "blur-nav" in shell
   assert "nav-item" in shell
-  assert "gx-menu-btn" in shell
+  assert "gx-appbar__menu" in shell
   assert "gx-back-btn" in shell
   assert "goBack" in shell or "back()" in shell
   assert "gx-drawer" in shell
@@ -351,23 +349,23 @@ def test_ui_search_visible_on_mobile_and_content_full_width():
   # Search must NOT be hidden on mobile (regression: it was display:none <600px).
   assert ".gx-appbar__search" in css
   # A single breakpoint picks mobile (bottom nav + back) vs desktop (drawer).
-  assert ".liquid-glass-nav { display: flex; }" in css
-  assert ".gx-menu-btn { display: none; }" in css
+  assert ".blur-nav { display: flex; }" in css
+  assert ".gx-appbar__menu { display: inline-flex; }" in css
   assert ".gx-back-btn { display: inline-flex; }" in css
   # Content + embedded tools fill the available width (no 760px cap).
   assert "max-width: none" in css
-  # Liquid Glass styling is present.
+  # Blur nav styling is present.
   assert "--glass-bg" in css
   assert "backdrop-filter" in css
 
 
-def test_ui_glass_nav_single_breakpoint_no_dual_nav():
+def test_ui_blur_nav_single_breakpoint_no_dual_nav():
   css = _read("css/material.css")
-  assert ".liquid-glass-nav" in css
+  assert ".blur-nav" in css
   assert "@media (min-width: 768px)" in css
-  assert ".liquid-glass-nav { display: none; }" in css
+  assert ".blur-nav { display: none; }" in css
   assert ".gx-back-btn { display: none; }" in css
-  assert ".gx-menu-btn { display: inline-flex; }" in css
+  assert ".gx-appbar__menu { display: inline-flex; }" in css
 
 
 def test_ui_settings_deep_links_and_dev_mode_updates():

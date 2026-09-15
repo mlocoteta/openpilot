@@ -282,6 +282,8 @@ test('Latest explains normal OS handling and local-edit behavior; historical con
   assert.match(confirmations[0].message, /required OS update/)
   assert.match(confirmations[0].message, /Local code changes may be overwritten/)
   assert.doesNotMatch(confirmations[0].message, /code changes are backed up/)
+  instance.rebootPending = false
+  instance.rebootStartedAt = 0
   await instance.onVersionModeSelect({target:{value:'earlier'}})
   instance.selectedCommit=SHA
   await instance.installSelectedVersion()

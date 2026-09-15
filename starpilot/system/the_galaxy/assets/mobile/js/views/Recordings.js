@@ -63,7 +63,6 @@ export const Recordings = {
       playerError: "",
       segments: [],
       current: 0,
-      segmentMenuOpen: false,
       cameras: [],
       selectedCamera: "",
       logsRoute: null,
@@ -213,7 +212,6 @@ export const Recordings = {
         if (!cameras.length) throw new Error("No camera video for this route.")
         this.segments = segments
         this.current = 0
-        this.segmentMenuOpen = false
         this.cameras = cameras
         this.selectedCamera = cameras.includes("forward") ? "forward" : cameras[0]
         this.$nextTick(() => this.playSegment())
@@ -246,14 +244,7 @@ export const Recordings = {
       video.load()
       video.play().catch(() => {})
     },
-    toggleSegmentMenu() {
-      this.segmentMenuOpen = !this.segmentMenuOpen
-      if (this.segmentMenuOpen) {
-        this.$nextTick(() => this.$el.querySelector(".gx-segment-picker__item.active")?.scrollIntoView({ block: "nearest" }))
-      }
-    },
     selectSegment(i) {
-      this.segmentMenuOpen = false
       if (i === this.current) return
       this.current = i
       this.playSegment()
@@ -272,7 +263,6 @@ export const Recordings = {
       this.playerLoading = false
       this.playerError = ""
       this.segments = []
-      this.segmentMenuOpen = false
       this.cameras = []
     },
     async openLogs(route) {
@@ -368,12 +358,12 @@ export const Recordings = {
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
           <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes, dates, or IDs..." v-model="searchQuery" />
-          <select class="gx-field" v-model="sortOrder">
+          <GalaxySelect class="gx-field" v-model="sortOrder">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="longest">Longest duration</option>
             <option value="shortest">Shortest duration</option>
-          </select>
+          </GalaxySelect>
         </div>
         <div style="padding: 0 var(--sp-3) var(--sp-3);">
           <GalaxyTabs :items="{ all: 'All', preserved: 'Preserved' }" :active="showPreservedOnly ? 'preserved' : 'all'" @select="setPreservedFilter" />
@@ -469,7 +459,7 @@ export const Recordings = {
       <Teleport to="body">
         <transition name="gx-fade">
           <div v-if="sub === 'routes' && playerRoute" class="gx-scrim gx-scrim--bottomsheet" @click.self="closePlayer">
-            <div class="gx-sheet" role="dialog" aria-label="Route video player" @click="segmentMenuOpen = false">
+            <div class="gx-sheet" role="dialog" aria-label="Route video player">
               <div class="gx-section__header gx-video-player-header" style="cursor:default;">
                 <i class="bi bi-camera-video"></i>
                 <span class="gx-section__title">{{ playerRoute.displayName }}</span>
@@ -483,15 +473,9 @@ export const Recordings = {
                   <div style="display:flex; flex-direction:column; gap:8px; padding: var(--sp-3) 0 0;">
                     <div class="gx-video-segment-controls">
                       <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Previous segment" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-chevron-left"></i></button>
-                      <div class="gx-segment-picker gx-video-segment-select">
-                        <button type="button" class="gx-segment-picker__trigger" :aria-expanded="segmentMenuOpen ? 'true' : 'false'" @click.stop="toggleSegmentMenu">
-                          <span>Segment {{ current + 1 }} of {{ segments.length }}</span>
-                          <i class="bi" :class="segmentMenuOpen ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
-                        </button>
-                        <div v-if="segmentMenuOpen" class="gx-segment-picker__menu" role="listbox" @click.stop>
-                          <button v-for="(s,i) in segments" :key="i" type="button" class="gx-segment-picker__item" :class="{ active: i === current }" role="option" :aria-selected="i === current ? 'true' : 'false'" @click="selectSegment(i)">Segment {{ i + 1 }}</button>
-                        </div>
-                      </div>
+                      <GalaxySelect class="gx-field gx-video-segment-select" aria-label="Video segment" :value="String(current)" :disabled="!segments.length" @change="selectSegment(Number($event.target.value))">
+                        <option v-for="(s, i) in segments" :key="i" :value="String(i)">Segment {{ i + 1 }} of {{ segments.length }}</option>
+                      </GalaxySelect>
                       <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Next segment" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-chevron-right"></i></button>
                     </div>
                     <div class="gx-video-actions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">

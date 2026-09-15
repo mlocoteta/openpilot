@@ -182,7 +182,7 @@ export const AppShell = {
         <slot />
       </main>
 
-      <nav class="liquid-glass-nav">
+      <nav class="blur-nav">
         <button v-for="item in BOTTOM_NAV" :key="item.link" type="button"
           class="nav-item" :class="{ active: isActive(item.link) }"
           @click="bottomNavTo(item)">

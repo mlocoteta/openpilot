@@ -54,13 +54,15 @@ for (const surface of ['classic','mobile']) for (const scenario of ['stale-poll'
   new MutationObserver(records=>{for(const r of records) if(r.target.id==='snackbar_wrapper') for(const n of r.addedNodes) window.notices.push(n.textContent);}).observe(document,{childList:true,subtree:true});
  });
  const select=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('select'):page.locator('#mm-active-big-model-select');
+ const trigger=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('.gx-select__button'):null;
+ const choose=async value=>{if(mobile){await trigger.click();await page.locator(`.gx-select-menu[open] [role="option"][data-value="${value}"]`).click();}else{await select.selectOption(value);}};
  const until=async(fn,msg)=>{for(let i=0;i<80;i++){if(await fn())return;await tick();}throw new Error(msg);};
  let failure=null;
  try {
   await page.goto('http://galaxy.invalid/manage_models');
   await until(async()=>await select.count() && await select.inputValue()==='gpu-a','initial selection');
   if(scenario==='stale-poll') {holdNext=true;await page.evaluate(()=>{window.poll()});await until(()=>heldGet,'held prewrite poll');}
-  await select.selectOption('');
+  await choose('');
   await until(()=>writes.length===1,'selection PUT');
   assert.deepEqual(writes,[{method:'PUT',path:'/api/models/active',body:{profile:'big',model:''}}]);
   if(scenario==='stale-poll') {

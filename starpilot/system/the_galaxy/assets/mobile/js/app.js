@@ -23,6 +23,7 @@ import { Cameras } from "./views/Cameras.js"
 import { store, initRouter, navigate } from "./store.js"
 import { showSnackbar } from "./api.js"
 import { installDomTranslator } from "./i18n.js"
+import { GalaxySelect } from "./components/GalaxySelect.js"
 
 window.__galaxyVue = { createApp, h }
 
@@ -86,6 +87,8 @@ const app = createApp({
     })
   },
 })
+
+app.component("GalaxySelect", GalaxySelect)
 
 app.mount("#galaxy-app")
 installDomTranslator(document.getElementById("galaxy-app"))

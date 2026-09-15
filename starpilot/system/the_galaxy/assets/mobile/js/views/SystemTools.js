@@ -2,7 +2,6 @@ import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxySection } from "../components/GalaxySection.js"
-import { GalaxySelect } from "../components/GalaxySelect.js"
 import { VersionHistoryPicker, versionTitle, releaseVersions } from "../components/VersionHistoryPicker.js"
 import { GxNotice } from "../components/GxNotice.js"
 
@@ -59,7 +58,7 @@ async function resolveDeviceScope() {
 
 export const SystemTools = {
   name: "SystemTools",
-  components: { GalaxySection, GxNotice, GalaxySelect, VersionHistoryPicker },
+  components: { GalaxySection, GxNotice, VersionHistoryPicker },
   data() {
     return {
       branches: [],

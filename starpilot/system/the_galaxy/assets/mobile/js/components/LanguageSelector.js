@@ -57,9 +57,9 @@ export const LanguageSelector = {
           <span class="gx-row__label">{{ tr("Select language") }}</span>
           <span class="gx-row__desc">{{ tr("Galaxy uses English when no language is selected.") }}</span>
         </div>
-        <select class="gx-field" :value="selected" :disabled="saving" @change="change">
+        <GalaxySelect class="gx-field" :value="selected" :disabled="saving" @change="change">
           <option v-for="option in languages" :key="option.value" :value="option.value">{{ tr(option.label, option.label) }}</option>
-        </select>
+        </GalaxySelect>
       </div>
       <GxNotice v-if="error" tone="danger" :text="error" style="margin: 0 var(--sp-4) var(--sp-4);" />
     </div>

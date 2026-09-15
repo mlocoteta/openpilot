@@ -544,7 +544,7 @@ ul { list-style: none; margin: 0; padding: 0; }
   width: 100%;
 }
 
-.liquid-glass-nav {
+.blur-nav {
   position: fixed;
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
@@ -571,11 +571,11 @@ ul { list-style: none; margin: 0; padding: 0; }
   max-width: calc(100vw - 32px);
 }
 
-[data-theme="light"] .liquid-glass-nav {
+[data-theme="light"] .blur-nav {
   border: 1.5px solid var(--primary);
 }
 
-.liquid-glass-nav .nav-item {
+.blur-nav .nav-item {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -592,28 +592,28 @@ ul { list-style: none; margin: 0; padding: 0; }
   cursor: pointer;
 }
 
-.liquid-glass-nav .nav-item i {
+.blur-nav .nav-item i {
   font-size: 1.3rem;
   margin-bottom: 2px;
   transition: transform var(--motion-fast);
 }
 
-.liquid-glass-nav .nav-item:hover {
+.blur-nav .nav-item:hover {
   color: var(--on-surface);
   background: rgba(255, 255, 255, 0.08);
 }
 
-.liquid-glass-nav .nav-item:active i {
+.blur-nav .nav-item:active i {
   transform: scale(0.88);
 }
 
-.liquid-glass-nav .nav-item.active {
+.blur-nav .nav-item.active {
   background: var(--glass-active-bg);
   color: var(--primary);
   font-weight: var(--fw-bold);
 }
 
-.liquid-glass-nav .nav-item.active i {
+.blur-nav .nav-item.active i {
   transform: translateY(-2px);
 }
 
@@ -791,7 +791,7 @@ body.is-scrolling .gx-tile {
 .gx-row__desc {
   color: var(--text-muted);
   font-size: var(--fs-sm);
-  margin-top: 2px;
+  margin-top: 4px;
   line-height: 1.4;
 }
 
@@ -807,14 +807,6 @@ body.is-scrolling .gx-tile {
 .gx-row--favorites { align-items: stretch; flex-direction: column; }
 .gx-row--favorites .gx-row__info { flex: none; }
 .gx-row--stack { align-items: stretch; flex-direction: column; }
-/* Keep the native keyboard/touch picker, but wrap its verified label instead
-   of clipping Conditional Experimental at enlarged phone UI scales. */
-.gx-mode-select { position: relative; width: 100%; }
-.gx-mode-select__label { display: flex; align-items: center; justify-content: space-between; gap: 12px; white-space: normal; }
-.gx-mode-select__label span { min-width: 0; overflow-wrap: anywhere; }
-.gx-mode-select__label i { flex-shrink: 0; }
-.gx-mode-select select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.gx-mode-select:focus-within { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 16px; }
 .gx-row--stack .gx-row__info { flex: none; }
 .gx-row--stack .gx-field,
 .gx-row--stack .gx-slider-row { width: 100%; }
@@ -981,7 +973,6 @@ input[type="range"].gx-slider:active::-webkit-slider-thumb {
   background: rgba(255, 255, 255, 0.9);
 }
 
-select.gx-field { background: var(--surface-container-high); }
 textarea.gx-field { padding: var(--sp-3); border-radius: var(--radius-md); }
 
 input[type="color"].gx-color {
@@ -1285,7 +1276,7 @@ button.gx-chip:hover {
 
 .gx-drawer.open { transform: translateX(0); }
 
-.gx-drawer.open ~ .liquid-glass-nav {
+.gx-drawer.open ~ .blur-nav {
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(12px) translateZ(0);
@@ -1935,75 +1926,6 @@ button.gx-chip:hover {
   flex: 0 1 240px;
 }
 
-/* Custom dropdown standing in for a native <select>: Android renders a native
-   select as a full-screen wall of options with no way to restyle it, so segment
-   picking gets its own small themed menu instead, consistent on every platform. */
-.gx-segment-picker {
-  position: relative;
-}
-
-.gx-segment-picker__trigger {
-  align-items: center;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  box-sizing: border-box;
-  color: var(--on-surface);
-  cursor: pointer;
-  display: flex;
-  font-family: var(--font-body);
-  font-size: var(--fs-base);
-  justify-content: space-between;
-  min-height: 46px;
-  padding: 0 var(--sp-3);
-  width: 100%;
-}
-
-.gx-segment-picker__trigger:hover { background: rgba(255, 255, 255, 0.1); }
-
-.gx-segment-picker__menu {
-  background: var(--surface-container-high);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  bottom: calc(100% + 4px);
-  box-shadow: var(--elev-3);
-  left: 0;
-  max-height: 220px;
-  overflow-y: auto;
-  padding: var(--sp-1);
-  position: absolute;
-  width: 100%;
-  z-index: 2;
-}
-
-[data-theme="light"] .gx-segment-picker__menu {
-  border: 1.5px solid var(--primary);
-}
-
-.gx-segment-picker__item {
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--on-surface);
-  cursor: pointer;
-  display: block;
-  font-family: var(--font-body);
-  font-size: var(--fs-sm);
-  padding: var(--sp-2) var(--sp-3);
-  text-align: left;
-  width: 100%;
-}
-
-.gx-segment-picker__item:hover { background: var(--glass-bg-hover); }
-
-.gx-segment-picker__item.active {
-  background: var(--primary-container);
-  color: var(--on-primary-container);
-  font-weight: var(--fw-bold);
-}
-
 .gx-route-logs-section {
   scroll-margin-top: calc(var(--appbar-height) + var(--sp-3));
 }
@@ -2317,7 +2239,7 @@ button.gx-chip:hover {
 .gx-install__manual { display: grid; gap: var(--sp-2); }
 
 @media (max-width: 767px) {
-  .liquid-glass-nav { display: flex; }
+  .blur-nav { display: flex; }
   .gx-drawer { padding-bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px)); }
   .gx-back-btn { display: inline-flex; }
   .gx-appbar__search { flex: 1; min-width: 0; }
@@ -2326,7 +2248,7 @@ button.gx-chip:hover {
 }
 
 @media (min-width: 768px) {
-  .liquid-glass-nav { display: none; }
+  .blur-nav { display: none; }
   .gx-back-btn { display: none; }
   .gx-content { padding-bottom: var(--sp-6); }
 }
@@ -2353,7 +2275,7 @@ button.gx-chip:hover {
 .gx-monitor tbody tr:hover { background:var(--surface); }
 @media(max-width:600px) { .gx-monitor__summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } .gx-monitor__metric { padding:12px; } .gx-monitor__metric strong { font-size:22px; } }
 
-/* Version and branch selector menus. */
+/* GalaxySelect: the themed dropdown used for every select in the app. */
 .gx-select { display: inline-flex; position: relative; vertical-align: middle; min-width: 0; max-width: 100%; }
 .gx-select.gx-field { padding: 0; background: var(--surface-container-high); }
 .gx-select.gx-field--full { display: flex; width: 100%; }

@@ -36,9 +36,9 @@ vm=await reset();const pending=deferred();write=()=>pending.promise;const action
 vm=await reset();const confirmation=deferred();prompt=()=>confirmation.promise;const downloading=vm.runAction('download',vm.models[0]);await vm.runAction('downloadAll');assert.deepEqual(requests,[]);component.beforeUnmount.call(vm);confirmation.resolve(true);await downloading;assert.deepEqual(requests,[]);
 // Two concurrent polls resolve newest-first.
 vm=await reset();const a=deferred(),b=deferred();status=()=>a.promise;const first=vm.refresh();status=()=>b.promise;const second=vm.refresh();b.resolve(payload({activeBigModel:'new'}));await second;a.resolve(payload({activeBigModel:'old'}));await first;assert.equal(vm.activeBigModel,'new');
-assert.ok(!source.includes('GalaxySelect'));assert.ok(!source.includes('model_metrics'));assert.ok(!source.includes('model_stats'));assert.ok(source.includes('selectionUncertain || status.isOnroad'));
+assert.ok(source.includes('<GalaxySelect'));assert.ok(!source.includes('model_metrics'));assert.ok(!source.includes('model_stats'));assert.ok(source.includes('selectionUncertain || status.isOnroad'));
 console.log('PASS: 15 hardware/download/selection/lifecycle scenarios against shipped methods');
 
 const {compile} = await import('../assets/vendor/vue/vue.esm-browser.js');
 assert.equal(typeof compile(component.template, {onError(error) {throw error;}}), 'function');
-console.log('PASS: shipped Vue compiler accepts the native-select Model Manager template');
+console.log('PASS: shipped Vue compiler accepts the GalaxySelect Model Manager template');

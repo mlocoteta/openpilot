@@ -45,13 +45,15 @@ try {
   const rows=page.locator(rowSelector);
   await rows.first().waitFor();
   const select=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('select'):page.locator('#mm-active-big-model-select');
+  const trigger=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('.gx-select__button'):null;
+  const choose=async value=>{if(mobile){await trigger.click();await page.locator(`.gx-select-menu[open] [role="option"][data-value="${value}"]`).click();}else{await select.selectOption(value);}};
   assert.equal(await select.inputValue(),'fixture-0');
-  await select.selectOption('');
+  await choose('');
   await new Promise(r=>setTimeout(r,350));
   assert.deepEqual(writes,[{path:'/api/models/active',body:{profile:'big',model:''}}],`${surface}: None must disable Active Big through API`);
   assert.equal(await select.inputValue(),process.env.MODEL_FAULT === 'reject' ? 'fixture-0' : '', 'Selection must match authoritative status after uncertain response');
   if (process.env.MODEL_FAULT) assert.ok(polls >= 2, 'Uncertain write requires immediate authoritative readback');
-  await select.selectOption('fixture-2');
+  await choose('fixture-2');
   await new Promise(r=>setTimeout(r,350));
   assert.equal(writes.length,2);
   assert.deepEqual(writes[1],{path:'/api/models/active',body:{profile:'big',model:'fixture-2'}});
