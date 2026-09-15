@@ -87,6 +87,18 @@ HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH = 0.30
 HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL = 1.20
 HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH = 0.25
 HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION = 0.35
+# MoreTore-style continuous center damper. These intentionally match the
+# Bolt 2022–23 reference envelope, but are kept disabled and separate from
+# the Accord-specific reversal-gated experiment.
+HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED = 2.5
+HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED_WIDTH = 0.7
+HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED = 8.2
+HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED_WIDTH = 0.6
+HONDA_ACCORD_CENTER_DAMPING_LAT_ACCEL = 0.17
+HONDA_ACCORD_CENTER_DAMPING_LAT_WIDTH = 0.04
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_LIMIT = 0.38
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_SCALE_MIN = 0.62
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_ALPHA_MIN = 0.28
 VOLT_STANDARD_CARS = (
   GM_CAR.CHEVROLET_VOLT,
   GM_CAR.CHEVROLET_VOLT_2019,
@@ -2244,6 +2256,29 @@ def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_t
   alpha = 1.0 - HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION * envelope
   damped = prev_output_torque + alpha * ((output_torque * scale) - prev_output_torque)
   return float(damped), float(scale), float(envelope)
+
+
+def get_honda_accord_continuous_center_damped_output(output_torque: float, prev_output_torque: float,
+                                                      desired_lateral_accel: float, v_ego: float) -> tuple[float, float, float]:
+  """MoreTore-style continuous small-signal center damping for an Accord TI.
+
+  This deliberately mirrors the reference output cap/scale/alpha strategy,
+  rather than the Accord's reversal-triggered experiment. It must be selected
+  explicitly and is intended for an A/B rlog comparison, not to stack with it.
+  """
+  speed_weight = (_sigmoid((v_ego - HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED) /
+                           HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED_WIDTH) *
+                  _sigmoid((HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED - v_ego) /
+                           HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED_WIDTH))
+  center_weight = _sigmoid((HONDA_ACCORD_CENTER_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
+                           HONDA_ACCORD_CENTER_DAMPING_LAT_WIDTH)
+  envelope = speed_weight * center_weight
+  output_limit = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_LIMIT) * envelope)
+  limited_output = float(np.clip(output_torque, -output_limit, output_limit))
+  output_scale = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_SCALE_MIN) * envelope)
+  output_alpha = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_ALPHA_MIN) * envelope)
+  damped = prev_output_torque + output_alpha * ((limited_output * output_scale) - prev_output_torque)
+  return float(damped), float(output_scale), float(envelope)
 
 
 def get_bolt_2017_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:

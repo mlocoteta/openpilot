@@ -100,6 +100,7 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
     self.honda_accord_low_speed_damping_enabled = False
     self.honda_accord_low_speed_damping_max = 0.12
+    self.honda_accord_continuous_center_damping_enabled = False
     self.honda_accord_damping_prev_raw_output = 0.0
     self.honda_accord_damping_prev_error = 0.0
     self.honda_accord_damping_prev_setpoint = 0.0
@@ -201,9 +202,14 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state.tiLowSpeedDampingActive = False
     self.starpilot_lateral_state.tiLowSpeedDampingScale = 1.0
 
-  def update_honda_accord_low_speed_damping(self, enabled, max_reduction):
+  def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False):
     self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
     self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
+    self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and self.is_honda_accord
+    # The two experimental policies are A/B alternatives. The continuous policy
+    # intentionally takes priority when selected, so they can never stack.
+    if self.honda_accord_continuous_center_damping_enabled:
+      self.honda_accord_low_speed_damping_enabled = False
     if not self.honda_accord_low_speed_damping_enabled:
       self.honda_accord_damping_prev_raw_output = 0.0
       self.honda_accord_damping_prev_error = 0.0
@@ -721,7 +727,11 @@ class LatControlTorque(LatControl):
         output_torque *= civic_bosch_modified_a_center_taper
       ti_low_speed_damping_scale = 1.0
       ti_low_speed_damping_envelope = 0.0
-      if self.honda_accord_low_speed_damping_enabled:
+      if self.honda_accord_continuous_center_damping_enabled:
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_continuous_center_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo,
+        )
+      elif self.honda_accord_low_speed_damping_enabled:
         # The previous implementation reduced *every* command in the envelope.
         # Only intervene when the output or tracking error reverses while the
         # requested turn direction remains stable; that is the observed Accord

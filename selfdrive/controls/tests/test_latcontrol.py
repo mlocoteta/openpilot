@@ -106,6 +106,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_genesis_gv70_reversal_output_scale,
   get_genesis_gv70_unwind_ff_scale,
   get_honda_accord_ff_scale,
+  get_honda_accord_continuous_center_damped_output,
   get_honda_accord_low_speed_damped_output,
   get_elantra_non_scc_ff_scale,
   get_honda_accord_steer_ratio_scale,
@@ -2083,6 +2084,22 @@ class TestLatControl:
     assert active < untouched
     assert active_scale < 1.0
     assert active_envelope > 0.0
+
+  def test_honda_accord_continuous_center_damping_matches_reference_envelope(self):
+    # MoreTore-style path acts continuously in the small-signal center band.
+    damped, scale, envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0)
+    outside, outside_scale, outside_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.8, 4.0)
+    highway, highway_scale, highway_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 12.0)
+
+    assert 0.62 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    assert outside > damped
+    assert outside_scale > scale
+    assert outside_envelope < envelope
+    assert highway == pytest.approx(1.0)
+    assert highway_scale == pytest.approx(1.0)
+    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0

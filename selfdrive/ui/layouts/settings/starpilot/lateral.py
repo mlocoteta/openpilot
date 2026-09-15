@@ -372,9 +372,10 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "TILowSpeedDampingEnabled", "toggle", tr_noop("TI Low-speed Damping (Experimental)"),
-        subtitle=tr_noop("Smooths rapid TI torque reversals around 7–12 mph. Off by default; does not change A/B/C."),
+        subtitle=tr_noop("Reversal-gated damping through 5.6–18.3 mph. Off by default; does not change A/B/C."),
         get_state=lambda: p.get_bool("TILowSpeedDampingEnabled"),
-        set_state=lambda s: p.put_bool("TILowSpeedDampingEnabled", s),
+        set_state=lambda s: (p.put_bool("TILowSpeedDampingEnabled", s),
+                             p.put_bool("TILowSpeedCenterDampingEnabled", False)) if s else p.put_bool("TILowSpeedDampingEnabled", False),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
       ),
       SettingRow(
@@ -383,6 +384,14 @@ class StarPilotLateralLayout(_SettingsPage):
         get_value=lambda: f"{(p.get_float('TILowSpeedDampingMax') or 0.12):.2f}",
         on_click=lambda: self._show_slider("TILowSpeedDampingMax", 0.02, 0.25, step=0.01, value_type="float"),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TILowSpeedDampingEnabled"),
+      ),
+      SettingRow(
+        "TILowSpeedCenterDampingEnabled", "toggle", tr_noop("TI Continuous Center Damping (MoreTore-style)"),
+        subtitle=tr_noop("Continuously limits and smooths small center commands from 5.6–18.3 mph. Alternative to reversal-gated damping."),
+        get_state=lambda: p.get_bool("TILowSpeedCenterDampingEnabled"),
+        set_state=lambda s: (p.put_bool("TILowSpeedCenterDampingEnabled", s),
+                             p.put_bool("TILowSpeedDampingEnabled", False)) if s else p.put_bool("TILowSpeedCenterDampingEnabled", False),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
       ),
     ]
 

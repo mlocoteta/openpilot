@@ -755,6 +755,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // it is deliberately independent of the static sigmoid A/B/C mapping.
     {"TILowSpeedDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
     {"TILowSpeedDampingMax", {PERSISTENT, FLOAT, "0.12", "0.12", 3}},
+    // Optional MoreTore-style continuous center damper. It is mutually exclusive
+    // with the reversal-gated experiment and remains opt-in.
+    {"TILowSpeedCenterDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},

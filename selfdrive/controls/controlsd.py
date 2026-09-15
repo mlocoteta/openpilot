@@ -477,6 +477,7 @@ class Controls:
             self.LaC.update_honda_accord_low_speed_damping(
               self.params.get_bool("TILowSpeedDampingEnabled"),
               self.params.get_float("TILowSpeedDampingMax") or 0.12,
+              self.params.get_bool("TILowSpeedCenterDampingEnabled"),
             )
         except Exception:
           pass
