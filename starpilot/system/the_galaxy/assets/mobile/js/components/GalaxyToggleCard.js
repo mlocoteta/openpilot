@@ -4,6 +4,7 @@ import {
   normalizeHexColor, numericBounds, numericEpsilon, snapNumericToBoundsAndStep,
   resolveVehicleUnitParam, stepPrecision,
 } from "../params.js"
+import { ScreenBrightnessControl } from "./ScreenBrightnessControl.js"
 import { FavoritesEditor } from "./FavoritesEditor.js"
 import { t } from "../i18n.js"
 
@@ -15,7 +16,7 @@ const FINE_SCRUB_JITTER_PX = 4
 
 export const GalaxyToggleCard = {
   name: "GalaxyToggleCard",
-  components: { FavoritesEditor },
+  components: { FavoritesEditor, ScreenBrightnessControl },
   props: {
     param: { type: Object, required: true },
     value: { default: undefined },
@@ -269,7 +270,9 @@ export const GalaxyToggleCard = {
     this.clearHoldTimer()
   },
   template: `
-    <div>
+    <ScreenBrightnessControl v-if="param.ui_type === 'brightness'" :param="param" :value="value" :values="values"
+      :locked="locked" :lock-message="lockMessage" @change="$emit('change', $event)" />
+    <div v-else>
       <div class="gx-row" :class="{ disabled: locked, 'gx-row--favorites': isFavorites, 'gx-row--stack': isSlider || isSelect }">
         <div class="gx-row__info">
           <span class="gx-row__label">{{ tr(displayParam.label, displayParam.label) }}
