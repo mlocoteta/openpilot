@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -68,10 +68,10 @@ def make_toggles(**overrides):
   return SimpleNamespace(**defaults)
 
 
-def make_sm(*, gas_pressed, enabled=True, accel_pressed=False, decel_pressed=False, long_active=True, v_cruise_kph=255.0):
+def make_sm(*, gas_pressed, enabled=True, accel_pressed=False, decel_pressed=False, long_active=True, standstill=False, v_cruise_kph=255.0):
   return {
     "carControl": SimpleNamespace(longActive=long_active),
-    "carState": SimpleNamespace(gasPressed=gas_pressed, steeringAngleDeg=0.0, vCruise=v_cruise_kph),
+    "carState": SimpleNamespace(gasPressed=gas_pressed, steeringAngleDeg=0.0, standstill=standstill, vCruise=v_cruise_kph),
     "liveParameters": SimpleNamespace(angleOffsetDeg=0.0),
     "mapdOut": SimpleNamespace(nextSpeedLimitDistance=0.0, nextSpeedLimit=0.0, speedLimit=0.0, waySelectionType=0, roadName=""),
     "selfdriveState": SimpleNamespace(enabled=enabled),
@@ -314,6 +314,25 @@ def test_unset_cruise_applies_vehicle_speed_large_delta_guard():
     controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(90), mph(75), sm)
     assert controller.target == pytest.approx(mph(15))
     assert controller.source == "Vision"
+  finally:
+    controller.shutdown()
+
+
+def test_standstill_ignores_vehicle_speed_jitter_for_vision_limit_guard():
+  controller = make_controller(
+    speed_limit_priority1="Vision",
+    vision_speed_limit_detection=True,
+  )
+  try:
+    controller.starpilot_planner.params_memory.put_float("VisionSpeedLimit", mph(35))
+    controller.starpilot_planner.params_memory.put_float("VisionSpeedLimitSupportSpeed", mph(35))
+    controller.starpilot_planner.params_memory.put_int("VisionSpeedLimitSupportCount", 2)
+    sm = make_sm(gas_pressed=False, standstill=True)
+
+    for v_ego in (-0.0067, 0.0005):
+      controller.update_limits(0.0, datetime.now(UTC), False, mph(35), v_ego, sm)
+      assert controller.target == pytest.approx(mph(35))
+      assert controller.source == "Vision"
   finally:
     controller.shutdown()
 

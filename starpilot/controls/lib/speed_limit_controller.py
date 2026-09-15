@@ -361,8 +361,9 @@ class SpeedLimitController:
     raw_set_speed_kph = float(sm["carState"].vCruise)
     selected_set_speed = raw_set_speed_kph * CV.KPH_TO_MS if 0 < raw_set_speed_kph < V_CRUISE_UNSET else 0
     reference_speed = selected_set_speed if selected_set_speed > 0 else max(float(v_ego), 0)
+    # vEgo jitters around zero at standstill; do not let that switch the active source.
     if (
-      usable_vision_limit > 0 and reference_speed > 0 and
+      usable_vision_limit > 0 and reference_speed > 0 and not sm["carState"].standstill and
       abs(usable_vision_limit - reference_speed) >= VISION_LARGE_REFERENCE_SPEED_DELTA
     ):
       support_count = self.starpilot_planner.params_memory.get_int("VisionSpeedLimitSupportCount")
