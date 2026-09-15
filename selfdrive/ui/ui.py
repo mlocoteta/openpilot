@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
+import threading
 
 from openpilot.system.hardware import TICI
 from openpilot.common.realtime import Priority, config_realtime_process, set_core_affinity
@@ -49,6 +50,20 @@ def main():
   stall_monitor = UIStallMonitor("raylib_ui")
   stall_monitor.progress("ui.before_init_window")
   stall_monitor.start()
+  startup_complete = threading.Event()
+
+  # Keep the manager watchdog informed during the bounded cold-start path.
+  # BIG UI may spend several seconds creating the window and static layouts
+  # before the regular render loop can issue its first watchdog kick.
+  def _startup_watchdog_heartbeat():
+    deadline = time.monotonic() + 25.0
+    while not startup_complete.wait(2.0):
+      if time.monotonic() >= deadline:
+        return
+      kick_watchdog()
+
+  startup_heartbeat = threading.Thread(target=_startup_watchdog_heartbeat, name="ui_startup_watchdog", daemon=True)
+  startup_heartbeat.start()
 
   try:
     gui_app.init_window("UI")
@@ -65,6 +80,7 @@ def main():
     stall_monitor.progress("ui.after_layout_init")
     stall_monitor.set_context(_stall_context())
     kick_watchdog()
+    startup_complete.set()
     stall_monitor.progress("ui.loop_ready")
     context_update_time = 0.0
 
@@ -87,6 +103,7 @@ def main():
             pass
       stall_monitor.progress("ui.loop_idle")
   finally:
+    startup_complete.set()
     gui_app.set_progress_hook(None)
     stall_monitor.stop()
 
