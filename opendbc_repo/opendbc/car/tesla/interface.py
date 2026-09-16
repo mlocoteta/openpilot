@@ -39,6 +39,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerAtStandstill = True
       ret.steerControlType = structs.CarParams.SteerControlType.angle
       ret.radarUnavailable = Bus.radar not in DBC[candidate]
+      ret.radarTimeStepDEPRECATED = 0.125
       ret.alphaLongitudinalAvailable = True
 
       if alpha_long:

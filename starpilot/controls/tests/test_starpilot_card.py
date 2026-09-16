@@ -626,7 +626,46 @@ def test_hyundai_canfd_lkas_button_wrapped_enum_can_toggle_aol(monkeypatch, tmp_
   assert ret.alwaysOnLateralEnabled is False
 
 
-def test_kia_forte_non_scc_main_cruise_button_toggles_aol_immediately(monkeypatch, tmp_path):
+@pytest.mark.parametrize("fingerprint", (
+  spc.HYUNDAI_CAR.KIA_FORTE_2019_NON_SCC,
+  spc.HYUNDAI_CAR.KIA_FORTE_2021_NON_SCC,
+))
+def test_kia_forte_non_scc_main_cruise_aol_follows_cruise_state(monkeypatch, tmp_path, fingerprint):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(
+      brand="hyundai",
+      carFingerprint=fingerprint,
+      flags=spc.HyundaiFlags.NON_SCC,
+    ),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  assert card.kia_forte_non_scc
+
+  car_state = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.mainCruise, pressed=True)])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, main_cruise_aol_toggle=True)
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.alwaysOnLateralEnabled is False
+
+  car_state.buttonEvents = []
+  car_state.cruiseState.available = True
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+
+  car_state.cruiseState.available = False
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert ret.alwaysOnLateralAllowed is False
+  assert ret.alwaysOnLateralEnabled is False
+
+
+def test_kia_forte_non_scc_main_cruise_aol_restores_state_after_boot(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
@@ -638,19 +677,14 @@ def test_kia_forte_non_scc_main_cruise_button_toggles_aol_immediately(monkeypatc
     ),
     SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
   )
+  assert card.kia_forte_non_scc
 
-  car_state = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.mainCruise, pressed=True)])
-  starpilot_car_state = SimpleNamespace(distancePressed=False)
-  sm = make_sm()
-  toggles = make_toggles(always_on_lateral=True, main_cruise_aol_toggle=True)
-
-  ret = card.update(car_state, starpilot_car_state, sm, toggles)
-  assert ret.alwaysOnLateralAllowed is True
-  assert ret.alwaysOnLateralEnabled is True
-
-  car_state.buttonEvents = []
-  car_state.cruiseState.available = False
-  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  ret = card.update(
+    make_car_state(available=True),
+    SimpleNamespace(distancePressed=False),
+    make_sm(),
+    make_toggles(always_on_lateral=True, main_cruise_aol_toggle=True),
+  )
   assert ret.alwaysOnLateralAllowed is True
   assert ret.alwaysOnLateralEnabled is True
 

@@ -20,6 +20,8 @@ def test_hw1_is_distinct_from_preap_and_does_not_change_can_buses():
   assert preap.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.teslaPreAP
   assert hw1.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.tesla
   assert hw1.safetyConfigs[0].safetyParam == TeslaSafetyFlags.FLAG_HW1.value
+  assert hw1.radarTimeStepDEPRECATED == pytest.approx(0.125)
+  assert preap.radarTimeStepDEPRECATED == pytest.approx(0.05)
   assert CANBUS.party == 0 and CANBUS.autopilot_party == 2
   assert CarState.get_can_parsers(hw1)[Bus.ap_pt].bus == 2
   assert CarState.get_can_parsers(hw1)[Bus.chassis].message_states[0x211].ignore_alive

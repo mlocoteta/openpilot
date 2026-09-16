@@ -434,9 +434,11 @@ def test_hyundai_lkas12_tx_requires_stock_camera_message():
 
   lkas12 = libsafety_py.make_CANPacket(0x53E, 0, bytes(6))
   assert not safety.safety_tx_hook(lkas12)
+  assert safety.safety_fwd_hook(2, 0x53E) == 0
 
   safety.safety_rx_hook(libsafety_py.make_CANPacket(0x53E, 2, bytes(6)))
   assert safety.safety_tx_hook(lkas12)
+  assert safety.safety_fwd_hook(2, 0x53E) == -1
 
 
 class TestHyundaiLongitudinalSafety(HyundaiLongitudinalBase, TestHyundaiSafety):

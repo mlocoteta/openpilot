@@ -58,7 +58,6 @@ from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import (
   get_subaru_impreza_pid_output_scale,
   get_genesis_gv70_low_speed_center_overshoot_scale,
   get_genesis_gv70_stabilized_output,
-  get_genesis_g70_high_speed_transition_scale,
   get_genesis_g70_stabilized_output,
   normalize_flm_overrides,
   set_flm_runtime_overrides,
@@ -91,7 +90,6 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_genesis_g90_friction_scale,
   get_genesis_g90_friction_threshold,
   get_genesis_g70_center_output_scale,
-  get_genesis_g70_curve_unwind_output_scale,
   get_genesis_g70_angle_output_scale,
   get_genesis_g70_friction_jerk_deadzone,
   get_genesis_g70_friction_threshold,
@@ -993,14 +991,6 @@ class TestLatControl:
     assert get_genesis_g70_low_speed_output_limit(0.0, 2.0) < 0.30
     assert get_genesis_g70_low_speed_angle_damping(0.0, -20.0, 0.0, 2.0) < 0.0
     assert get_genesis_g70_low_speed_angle_damping(0.0, 20.0, 0.0, 2.0) > 0.0
-    assert get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704) < \
-      get_genesis_g70_high_speed_transition_scale(0.0, 0.1, 65.0 * 0.44704)
-    assert get_genesis_g70_high_speed_transition_scale(1.0, 0.8, 65.0 * 0.44704) > \
-      get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
-    assert get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 20.0 * 0.44704) > \
-      get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
-    assert 0.88 < get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) < 1.0
-    assert get_genesis_g70_curve_unwind_output_scale(0.7, 0.5, 25.0) == 1.0
     assert get_genesis_g70_angle_output_scale(55.0, 1.0) > get_genesis_g70_angle_output_scale(85.0, 1.0)
     assert get_genesis_g70_angle_output_scale(85.0, -1.0) == pytest.approx(1.0)
     assert get_genesis_g70_friction_jerk_deadzone(25.0, 0.0) > 0.25
@@ -1017,6 +1007,37 @@ class TestLatControl:
     assert get_genesis_g70_high_speed_error_scale(0.2, 0.9, 0.8, 10.0) > get_genesis_g70_high_speed_error_scale(0.2, 0.9, 0.8, 20.0)
     assert get_genesis_g70_high_speed_error_scale(0.7, 0.95, 0.8, 30.0) < \
       get_genesis_g70_high_speed_error_scale(0.7, 0.45, 0.8, 30.0)
+
+  def test_genesis_g70_output_stabilizer_releases_faster_than_it_builds(self):
+    high_speed = 65.0 * 0.44704
+    build = get_genesis_g70_stabilized_output(0.30, 0.10, 0.15, 0.10, 0.30, high_speed, DT_CTRL)
+    release = get_genesis_g70_stabilized_output(0.10, 0.30, 0.15, 0.30, -0.30, high_speed, DT_CTRL)
+    reversal = get_genesis_g70_stabilized_output(-0.20, 0.20, -0.15, 0.20, -0.30, high_speed, DT_CTRL)
+    low_speed = get_genesis_g70_stabilized_output(0.30, 0.10, 0.15, 0.10, 0.30, 5.0, DT_CTRL)
+
+    assert abs(release - 0.10) < abs(build - 0.30)
+    assert reversal < 0.20
+    assert low_speed == pytest.approx(0.30, abs=0.01)
+
+  def test_genesis_g70_output_stabilizer_update_path(self, monkeypatch):
+    calls = []
+
+    def stabilized_output(output_torque, prev_output_torque, desired_lateral_accel,
+                          measured_lateral_accel, desired_lateral_jerk, v_ego, dt):
+      calls.append((output_torque, prev_output_torque, desired_lateral_accel,
+                    measured_lateral_accel, desired_lateral_jerk, v_ego, dt))
+      return 0.123
+
+    monkeypatch.setattr(latcontrol_torque, "get_genesis_g70_stabilized_output", stabilized_output)
+    controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.GENESIS_G70_2020)
+    CS.vEgo = 25.0
+    output, _, lac_log = controller.update(
+      True, CS, VM, params, False, 0.0002, False, 0.2, None, None, starpilot_toggles,
+    )
+
+    assert calls
+    assert lac_log.active
+    assert output == pytest.approx(-0.123)
 
   def test_sonata_hybrid_center_output_taper_is_mid_speed_and_center_gated(self):
     low_speed = get_sonata_hybrid_center_output_scale(0.0, 8.0)
@@ -1824,40 +1845,6 @@ class TestLatControl:
     assert controller.is_genesis_g70
     assert lac_log.active
     assert 0.0 < abs(output) <= get_genesis_g70_low_speed_output_limit(0.0, CS.vEgo)
-
-  def test_genesis_g70_output_stabilizer_is_speed_and_phase_aware(self):
-    low_speed = get_genesis_g70_stabilized_output(-0.2, 0.2, 0.1, -0.4, 5.0, DT_CTRL)
-    high_speed_center = get_genesis_g70_stabilized_output(-0.2, 0.2, 0.1, -0.4, 30.0, DT_CTRL)
-    high_speed_wind = get_genesis_g70_stabilized_output(0.1, 0.3, 0.8, 0.5, 30.0, DT_CTRL)
-    high_speed_unwind = get_genesis_g70_stabilized_output(0.1, 0.3, 0.8, -0.5, 30.0, DT_CTRL)
-    high_speed_direction_change = get_genesis_g70_stabilized_output(-0.3, 0.3, -0.8, -0.5, 30.0, DT_CTRL)
-    low_speed_direction_change = get_genesis_g70_stabilized_output(-0.3, 0.3, -0.8, -0.5, 10.0, DT_CTRL)
-
-    assert low_speed == pytest.approx(-0.2, abs=0.005)
-    assert abs(high_speed_center - 0.2) < abs(low_speed - 0.2)
-    assert high_speed_unwind > high_speed_wind > 0.1
-    assert 0.2 < high_speed_direction_change < 0.3
-    assert high_speed_direction_change > low_speed_direction_change
-
-  def test_genesis_g70_output_stabilizer_update_path(self, monkeypatch):
-    calls = []
-
-    def stabilized_output(output_torque, prev_output_torque, desired_lateral_accel,
-                          desired_lateral_jerk, v_ego, dt):
-      calls.append((output_torque, prev_output_torque, desired_lateral_accel,
-                    desired_lateral_jerk, v_ego, dt))
-      return 0.123
-
-    monkeypatch.setattr(latcontrol_torque, "get_genesis_g70_stabilized_output", stabilized_output)
-    controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.GENESIS_G70_2020)
-    CS.vEgo = 25.0
-    output, _, lac_log = controller.update(
-      True, CS, VM, params, False, 0.0002, False, 0.2, None, None, starpilot_toggles,
-    )
-
-    assert calls
-    assert lac_log.active
-    assert output == pytest.approx(-0.123)
 
   def test_ioniq_5_default_update_path(self):
     controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.HYUNDAI_IONIQ_5)

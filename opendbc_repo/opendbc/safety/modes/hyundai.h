@@ -438,6 +438,10 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   return tx;
 }
 
+static bool hyundai_fwd_hook(int bus_num, int addr) {
+  return (bus_num == 2) && (addr == 0x53E) && hyundai_has_lkas12;
+}
+
 static safety_config hyundai_init(uint16_t param) {
   static const CanMsg HYUNDAI_CAMERA_SCC_TX_MSGS[] = {
     HYUNDAI_COMMON_TX_MSGS(2, false)
@@ -775,6 +779,7 @@ const safety_hooks hyundai_hooks = {
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,
+  .fwd = hyundai_fwd_hook,
 };
 
 const safety_hooks hyundai_legacy_hooks = {
@@ -785,4 +790,5 @@ const safety_hooks hyundai_legacy_hooks = {
   .get_counter = hyundai_get_counter,
   .get_checksum = hyundai_get_checksum,
   .compute_checksum = hyundai_compute_checksum,
+  .fwd = hyundai_fwd_hook,
 };

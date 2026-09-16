@@ -25,6 +25,9 @@ HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE = 1.25
 GENESIS_GV70_ELECTRIFIED_LEAD_FOLLOW_JERK_SCALE = 1.75
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_UPPER = 1.5
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_LOWER = 2.0
+GENESIS_GV70_ELECTRIFIED_SCC_URGENT_JERK_LOWER = 5.0
+GENESIS_GV70_ELECTRIFIED_SCC_URGENT_ACCEL = -1.0
+HYUNDAI_CANFD_SCC_FREQUENCY = 50.0
 FORD_LIGHTNING_LEAD_FOLLOW_JERK_SCALE = 1.35
 HONDA_CRV_5G_LEAD_FOLLOW_JERK_SCALE = 1.35
 GM_SILVERADO_EARLY_FOLLOW_MIN_EGO_SPEED = 18.0
@@ -529,10 +532,29 @@ def get_lead_follow_jerk_scale(CP):
   return 1.0
 
 
-def get_hyundai_canfd_scc_jerk_limits(CP):
+def get_hyundai_canfd_scc_jerk_limits(CP, stopping=False, accel=0.0):
   if str(getattr(CP, "carFingerprint", "")) == "GENESIS_GV70_ELECTRIFIED_1ST_GEN":
-    return GENESIS_GV70_ELECTRIFIED_SCC_JERK_UPPER, GENESIS_GV70_ELECTRIFIED_SCC_JERK_LOWER
+    jerk_lower = GENESIS_GV70_ELECTRIFIED_SCC_URGENT_JERK_LOWER \
+      if stopping or accel <= GENESIS_GV70_ELECTRIFIED_SCC_URGENT_ACCEL \
+      else GENESIS_GV70_ELECTRIFIED_SCC_JERK_LOWER
+    return GENESIS_GV70_ELECTRIFIED_SCC_JERK_UPPER, jerk_lower
   return None
+
+
+def shape_hyundai_canfd_scc_accel(CP, enabled, gas_override, stopping, accel, accel_last):
+  jerk_limits = get_hyundai_canfd_scc_jerk_limits(CP, stopping, accel)
+  if jerk_limits is None:
+    return float(accel)
+  if not enabled or gas_override:
+    return 0.0
+
+  jerk_upper, jerk_lower = jerk_limits
+
+  return float(np.clip(
+    accel,
+    accel_last - jerk_lower / HYUNDAI_CANFD_SCC_FREQUENCY,
+    accel_last + jerk_upper / HYUNDAI_CANFD_SCC_FREQUENCY,
+  ))
 
 
 def get_honda_accord_lead_departure_tune(CP):

@@ -17,7 +17,7 @@ from opendbc.car.hyundai.values import HyundaiFlags, HyundaiSafetyFlags, Hyundai
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.common.params import Params
-from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_hyundai_canfd_scc_jerk_limits
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_hyundai_canfd_scc_jerk_limits, shape_hyundai_canfd_scc_accel
 from openpilot.starpilot.common.testing_grounds import testing_ground
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -1064,8 +1064,14 @@ class CarController(CarControllerBase):
       if self.frame % 2 == 0:
         lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
         if self.CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN:
-          scc_jerk_limits = get_hyundai_canfd_scc_jerk_limits(self.CP)
+          scc_jerk_limits = get_hyundai_canfd_scc_jerk_limits(self.CP, stopping, accel)
+          raw_accel = accel
+          accel = shape_hyundai_canfd_scc_accel(
+            self.CP, CC.enabled, CC.cruiseControl.override, stopping, accel, self.accel_last,
+          )
           acc_kwargs = {
+            "direct_accel": True,
+            "raw_accel": raw_accel,
             "jerk_upper": scc_jerk_limits[0],
             "jerk_lower": scc_jerk_limits[1],
             "lead_distance": lead_distance,
