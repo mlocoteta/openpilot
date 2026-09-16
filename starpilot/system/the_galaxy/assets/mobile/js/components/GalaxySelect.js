@@ -41,7 +41,12 @@ export const GalaxySelect = {
       this.open = true
       await this.$nextTick()
       const menu = this.$refs.menu
-      menu.showModal()
+      try {
+        menu.showModal()
+      } catch (error) {
+        this.open = false
+        return
+      }
       this.position()
       const options = [...menu.querySelectorAll('[role="option"]:not(:disabled)')]
       const selected = options.find(option => option.dataset.value === this.selected)
@@ -126,7 +131,7 @@ export const GalaxySelect = {
         :aria-label="name" :aria-describedby="$attrs['aria-describedby']" :disabled="disabled" @click="show" @keydown="buttonKey">
         <span>{{ label }}</span><i class="bi bi-chevron-down" aria-hidden="true"></i>
       </button>
-      <dialog ref="menu" class="gx-select-menu" @cancel.prevent="close" @click="event => { if (event.target === $refs.menu) close() }" @keydown="menuKey">
+      <dialog ref="menu" class="gx-select-menu" @cancel.prevent="close" @click.self="close" @keydown="menuKey">
         <div :id="uid + '-list'" role="listbox" :aria-label="name">
           <template v-for="(item, index) in items" :key="item.index">
             <div v-if="item.group && item.group !== items[index - 1]?.group" class="gx-select-menu__group">{{ item.group }}</div>

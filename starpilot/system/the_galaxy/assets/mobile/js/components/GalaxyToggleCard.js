@@ -216,9 +216,10 @@ export const GalaxyToggleCard = {
     onSliderPointerEnd(e) {
       this.clearHoldTimer()
       const wasFine = this.isFineScrubbing
+      const pid = e?.pointerId ?? this.fineScrub?.pointerId
       this.fineScrub = null
       this.isFineScrubbing = false
-      try { e.target.releasePointerCapture?.(e.pointerId) } catch (_) {}
+      try { (e?.target || this.$refs.slider)?.releasePointerCapture?.(pid) } catch (_) {}
       this.interacting = false
       if (wasFine || this.preview !== undefined) {
         this.flushSlider(this.currentValue)
@@ -303,7 +304,7 @@ export const GalaxyToggleCard = {
             <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">{{ tr("Default") }}</button>
           </div>
           <input ref="slider" type="range" class="gx-slider" :min="bounds.min" :max="bounds.max" :step="bounds.step"
-            :value="currentValue" :disabled="locked || updating"
+            :value="currentValue" :disabled="locked"
             @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
             @pointerdown="onSliderPointerDown" @pointermove="onSliderPointerMove"
             @pointerup="onSliderPointerEnd" @pointercancel="onSliderPointerEnd"

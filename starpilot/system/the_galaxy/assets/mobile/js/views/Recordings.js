@@ -1,5 +1,6 @@
 import { api, showSnackbar } from "../api.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
+import { GalaxySheet } from "../components/GalaxySheet.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
 import { GxNotice } from "../components/GxNotice.js"
 import { isFirestarOrigin } from "../components/PwaInstallSection.js"
@@ -47,7 +48,7 @@ function localDeviceUrl(ip, route = "/") {
 
 export const Recordings = {
   name: "Recordings",
-  components: { GalaxyTabs, GxNotice },
+  components: { GalaxyTabs, GxNotice, GalaxySheet },
   data() {
     return {
       sub: "routes",
@@ -456,61 +457,39 @@ export const Recordings = {
       </section>
       </template>
 
-      <Teleport to="body">
-        <transition name="gx-fade">
-          <div v-if="sub === 'routes' && playerRoute" class="gx-scrim gx-scrim--bottomsheet" @click.self="closePlayer">
-            <div class="gx-sheet" role="dialog" aria-label="Route video player">
-              <div class="gx-section__header gx-video-player-header" style="cursor:default;">
-                <i class="bi bi-camera-video"></i>
-                <span class="gx-section__title">{{ playerRoute.displayName }}</span>
-                <button type="button" class="gx-icon-btn" aria-label="Close player" @click="closePlayer"><i class="bi bi-x-lg"></i></button>
+      <GalaxySheet :open="sub === 'routes' && !!playerRoute" :title="playerRoute?.displayName || ''" icon="bi-camera-video" bottomsheet @close="closePlayer">
+        <div style="padding: var(--sp-3);">
+          <div v-if="playerError" class="gx-empty" style="color: var(--error);">{{ playerError }}</div>
+          <div v-else-if="playerLoading" class="gx-loading"><i class="bi bi-hourglass-split"></i> Loading video...</div>
+          <template v-else-if="segments.length">
+            <video ref="player" class="gx-video" controls muted playsinline preload="metadata"></video>
+            <div style="display:flex; flex-direction:column; gap:8px; padding: var(--sp-3) 0 0;">
+              <div class="gx-video-segment-controls">
+                <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Previous segment" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-chevron-left"></i></button>
+                <GalaxySelect class="gx-field gx-video-segment-select" aria-label="Video segment" :value="String(current)" :disabled="!segments.length" @change="selectSegment(Number($event.target.value))">
+                  <option v-for="(s, i) in segments" :key="i" :value="String(i)">Segment {{ i + 1 }} of {{ segments.length }}</option>
+                </GalaxySelect>
+                <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Next segment" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-chevron-right"></i></button>
               </div>
-              <div style="padding: var(--sp-3);">
-                <div v-if="playerError" class="gx-empty" style="color: var(--error);">{{ playerError }}</div>
-                <div v-else-if="playerLoading" class="gx-loading"><i class="bi bi-hourglass-split"></i> Loading video...</div>
-                <template v-else-if="segments.length">
-                  <video ref="player" class="gx-video" controls muted playsinline preload="metadata"></video>
-                  <div style="display:flex; flex-direction:column; gap:8px; padding: var(--sp-3) 0 0;">
-                    <div class="gx-video-segment-controls">
-                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Previous segment" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-chevron-left"></i></button>
-                      <GalaxySelect class="gx-field gx-video-segment-select" aria-label="Video segment" :value="String(current)" :disabled="!segments.length" @change="selectSegment(Number($event.target.value))">
-                        <option v-for="(s, i) in segments" :key="i" :value="String(i)">Segment {{ i + 1 }} of {{ segments.length }}</option>
-                      </GalaxySelect>
-                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Next segment" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-chevron-right"></i></button>
-                    </div>
-                    <div class="gx-video-actions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                      <button v-for="c in cameras" :key="c" type="button" class="gx-chip" :style="selectedCamera===c?'background:var(--primary);color:var(--on-primary);':''" @click="selectedCamera=c; playSegment()">{{ c }}</button>
-                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon gx-video-download" title="Download" style="margin-left:auto;" @click="downloadRoute"><i class="bi bi-download"></i></button>
-                    </div>
-                  </div>
-                </template>
+              <div class="gx-video-actions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <button v-for="c in cameras" :key="c" type="button" class="gx-chip" :style="selectedCamera===c?'background:var(--primary);color:var(--on-primary);':''" @click="selectedCamera=c; playSegment()">{{ c }}</button>
+                <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon gx-video-download" title="Download" style="margin-left:auto;" @click="downloadRoute"><i class="bi bi-download"></i></button>
               </div>
             </div>
-          </div>
-        </transition>
-      </Teleport>
+          </template>
+        </div>
+      </GalaxySheet>
 
-      <Teleport to="body">
-        <transition name="gx-fade">
-          <div v-if="recPlay" class="gx-scrim gx-scrim--bottomsheet" @click.self="closeRecPlayer">
-            <div class="gx-sheet" role="dialog" aria-label="Screen recording player">
-              <div class="gx-section__header gx-video-player-header" style="cursor:default;">
-                <i class="bi bi-record-circle"></i>
-                <span class="gx-section__title">{{ screenDisplayName(recPlay) }}</span>
-                <button type="button" class="gx-icon-btn" aria-label="Close player" @click="closeRecPlayer"><i class="bi bi-x-lg"></i></button>
-              </div>
-              <div style="padding: var(--sp-3);">
-                <video class="gx-video" controls autoplay playsinline :src="screenUrl(recPlay.filename)"></video>
-                <div style="display:flex; gap:8px; padding: var(--sp-3) 0 0; flex-wrap:wrap;">
-                  <button type="button" class="gx-btn" @click="downloadRec(recPlay)"><i class="bi bi-download"></i> Download</button>
-                  <button type="button" class="gx-btn gx-btn--tonal" @click="renameRec(recPlay)"><i class="bi bi-pencil"></i> Rename</button>
-                  <button type="button" class="gx-btn gx-btn--danger" @click="deleteRec(recPlay)"><i class="bi bi-trash"></i> Delete</button>
-                </div>
-              </div>
-            </div>
+      <GalaxySheet :open="!!recPlay" :title="screenDisplayName(recPlay)" icon="bi-record-circle" bottomsheet @close="closeRecPlayer">
+        <div style="padding: var(--sp-3);">
+          <video class="gx-video" controls autoplay playsinline :src="screenUrl(recPlay?.filename)"></video>
+          <div style="display:flex; gap:8px; padding: var(--sp-3) 0 0; flex-wrap:wrap;">
+            <button type="button" class="gx-btn" @click="downloadRec(recPlay)"><i class="bi bi-download"></i> Download</button>
+            <button type="button" class="gx-btn gx-btn--tonal" @click="renameRec(recPlay)"><i class="bi bi-pencil"></i> Rename</button>
+            <button type="button" class="gx-btn gx-btn--danger" @click="deleteRec(recPlay)"><i class="bi bi-trash"></i> Delete</button>
           </div>
-        </transition>
-      </Teleport>
+        </div>
+      </GalaxySheet>
       </template>
 
       <GxNotice v-else tone="info" icon="bi-satellite" title="Recordings unavailable via Galaxy">

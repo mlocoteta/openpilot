@@ -16,6 +16,7 @@ const wakes = Object.keys(wakeDefaults)
 const fixture = `
 import {createApp, reactive} from 'vue';
 import {SettingTree} from '/assets/mobile/js/components/SettingTree.js';
+import {GalaxySelect} from '/assets/mobile/js/components/GalaxySelect.js';
 import {applyParamChange, isSettingVisible} from '/assets/mobile/js/params.js';
 import {api} from '/assets/mobile/js/api.js';
 const layout = ${JSON.stringify(layout)};
@@ -35,7 +36,7 @@ window.fetch=async (input,init={}) => {
   return new Response(JSON.stringify({updated}),{status:200});
 };
 const section=(await api.getLayout()).find(s=>s.params.some(p=>p.key==='ScreenManagement'));
-createApp({components:{SettingTree},setup:()=>({values}),
+createApp({components:{SettingTree, GalaxySelect},setup:()=>({values}),
   data:()=>({expanded:{ScreenManagement:true}}),
   computed:{params(){return section.params.filter(p=>isSettingVisible(section,p,this.values))}},
   methods:{change(patch){Object.assign(values,applyParamChange(values,patch))}},
@@ -62,6 +63,10 @@ createApp({components:{SettingTree},setup:()=>({values}),
     await page.goto('http://offline.invalid/')
     const offMode=page.locator('#gx-ScreenBrightness-mode')
     const onMode=page.locator('#gx-ScreenBrightnessOnroad-mode')
+    const offModeSelect=page.locator('.gx-select:has(#gx-ScreenBrightness-mode) select')
+    const onModeSelect=page.locator('.gx-select:has(#gx-ScreenBrightnessOnroad-mode) select')
+    const modeValue=(select)=>select.evaluate(el=>el.value)
+    const setMode=(select,value)=>select.evaluate((el,v)=>{el.value=v;el.dispatchEvent(new Event('change',{bubbles:true}))},value)
     const offSlider=page.locator('#gx-ScreenBrightness-slider')
     const onSlider=page.locator('#gx-ScreenBrightnessOnroad-slider')
     assert.equal(section.params.find(p => p.key === 'ScreenBrightness').settings_tier, 'advanced')
@@ -69,9 +74,9 @@ createApp({components:{SettingTree},setup:()=>({values}),
     assert.equal(await offMode.count(), 0, 'screen controls stay hidden until Galaxy Developer Mode is enabled')
     await page.evaluate(()=>{window.values.GalaxyDeveloperMode=true})
     await offMode.waitFor()
-    assert.equal(await offMode.inputValue(),'auto')
-    assert.equal(await onMode.inputValue(),'auto')
-    assert.deepEqual(await offMode.locator('option').allTextContents(),['Auto','Manual'])
+    assert.equal(await modeValue(offModeSelect),'auto')
+    assert.equal(await modeValue(onModeSelect),'auto')
+    assert.deepEqual(await offModeSelect.locator('option').allTextContents(),['Auto','Manual'])
     assert.equal(await offSlider.getAttribute('min'),'-30')
     assert.equal(await offSlider.getAttribute('max'),'30')
     assert.equal(await offSlider.inputValue(),'0')
@@ -87,12 +92,12 @@ createApp({components:{SettingTree},setup:()=>({values}),
     assert.equal(await page.evaluate(()=>window.writes.length),0,'initial render cannot write settings')
     assert.equal(await page.getByText('101',{exact:true}).count(),0,'internal Auto sentinel cannot appear')
 
-    await offMode.selectOption('manual')
+    await setMode(offModeSelect,'manual')
     await page.waitForFunction(()=>window.values.ScreenBrightness===67)
     assert.equal(await offSlider.getAttribute('min'),'0')
     assert.equal(await offSlider.getAttribute('max'),'100')
     assert.equal(await offSlider.inputValue(),'67','mode change restores saved manual brightness')
-    await onMode.selectOption('manual')
+    await setMode(onModeSelect,'manual')
     await page.waitForFunction(()=>window.values.ScreenBrightnessOnroad===100)
     assert.equal(await onSlider.inputValue(),'100','missing manual memory defaults to 100')
     await onSlider.fill('45'); await onSlider.dispatchEvent('change')
@@ -102,7 +107,7 @@ createApp({components:{SettingTree},setup:()=>({values}),
     assert.equal(await onSlider.inputValue(),'100','manual Default restores 100%')
     await offSlider.fill('0'); await offSlider.dispatchEvent('change')
     await page.waitForFunction(()=>window.values.ScreenBrightnessManual===0)
-    await offMode.selectOption('auto')
+    await setMode(offModeSelect,'auto')
     await page.waitForFunction(()=>window.values.ScreenBrightness===101)
     await offSlider.fill('-30'); await offSlider.dispatchEvent('change')
     await page.waitForFunction(()=>window.values.ScreenBrightnessOffset===-30)
@@ -110,7 +115,7 @@ createApp({components:{SettingTree},setup:()=>({values}),
     await offSlider.fill('30'); await offSlider.dispatchEvent('change')
     await page.waitForFunction(()=>window.values.ScreenBrightnessOffset===30)
     assert.equal(await offSlider.getAttribute('aria-valuetext'),'+30%')
-    await offMode.selectOption('manual')
+    await setMode(offModeSelect,'manual')
     await page.waitForFunction(()=>window.values.ScreenBrightness===0)
     assert.equal(await offSlider.inputValue(),'0','manual zero survives Auto roundtrip')
     assert.equal(await onSlider.inputValue(),'100','onroad and offroad remain independent')
@@ -122,19 +127,19 @@ createApp({components:{SettingTree},setup:()=>({values}),
     await offSlider.dispatchEvent('change')
     await page.waitForFunction(()=>window.values.ScreenBrightnessManual===83)
     await page.evaluate(()=>{window.holdWrite=true})
-    await offMode.selectOption('auto')
+    await setMode(offModeSelect,'auto')
     await page.waitForFunction(()=>!!window.releaseWrite)
     assert.equal(await offMode.isDisabled(),true)
     await page.evaluate(()=>{window.values.ScreenBrightness=83})
-    assert.equal(await offMode.inputValue(),'auto','stale props cannot reverse pending mode change')
+    assert.equal(await modeValue(offModeSelect),'auto','stale props cannot reverse pending mode change')
     await page.evaluate(()=>{window.holdWrite=false;window.releaseWrite()})
     await page.waitForFunction(()=>!document.querySelector('#gx-ScreenBrightness-mode').disabled)
-    assert.equal(await offMode.inputValue(),'auto')
+    assert.equal(await modeValue(offModeSelect),'auto')
 
     await page.evaluate(()=>{window.failWrite=true})
-    await offMode.selectOption('manual')
+    await setMode(offModeSelect,'manual')
     await page.waitForFunction(()=>!document.querySelector('#gx-ScreenBrightness-mode').disabled)
-    assert.equal(await offMode.inputValue(),'auto','failed mode saves roll back')
+    assert.equal(await modeValue(offModeSelect),'auto','failed mode saves roll back')
     await offSlider.fill('24'); await offSlider.dispatchEvent('change')
     await page.waitForFunction(()=>!document.querySelector('#gx-ScreenBrightness-mode').disabled)
     assert.equal(await offSlider.inputValue(),'-10','failed offset saves roll back')

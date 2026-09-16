@@ -28,6 +28,7 @@ def test_ui_app_shell_files_exist():
     "js/components/AppShell.js",
     "js/components/DevicePicker.js",
     "js/components/GalaxyModal.js",
+    "js/components/GalaxySheet.js",
     "js/components/GalaxySection.js",
     "js/components/GalaxyEmbed.js",
     "js/components/GalaxyToggleCard.js",
@@ -490,8 +491,8 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   sentry = _read("js/views/Sentry.js")
   assert "GalaxyEmbed" not in sentry and "fetch(" not in sentry
   assert "selectedImage" in sentry and "openImage" in sentry and "closeImage" in sentry
-  assert 'class="gx-scrim gx-scrim--image-viewer"' in sentry
-  assert 'aria-label="Close image"' in sentry
+  assert "GalaxySheet" in sentry
+  assert 'scrim-class="gx-scrim--image-viewer"' in sentry
   assert 'target="_blank"' not in sentry
 
   # Navigation maps + App Keys and Tuning lateral are native tabs now.

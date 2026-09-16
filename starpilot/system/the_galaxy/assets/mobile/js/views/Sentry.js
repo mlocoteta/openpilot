@@ -2,6 +2,7 @@ import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxySection } from "../components/GalaxySection.js"
+import { GalaxySheet } from "../components/GalaxySheet.js"
 
 function b64ToBytes(value) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4)
@@ -12,7 +13,7 @@ function b64ToBytes(value) {
 
 export const Sentry = {
   name: "Sentry",
-  components: { GalaxySection },
+  components: { GalaxySection, GalaxySheet },
   data() {
     return {
       loading: true,
@@ -402,17 +403,10 @@ export const Sentry = {
         </div>
       </GalaxySection>
 
-      <div v-if="selectedImage" class="gx-scrim gx-scrim--image-viewer" @click.self="closeImage">
-        <div class="gx-sheet gx-image-viewer" role="dialog" aria-modal="true" :aria-label="selectedImage.alt">
-          <div class="gx-image-viewer__header">
-            <span class="gx-sheet__title">{{ selectedImage.alt }}</span>
-            <button type="button" class="gx-icon-btn" aria-label="Close image" title="Close image" @click="closeImage">
-              <i class="bi bi-x-lg" aria-hidden="true"></i>
-            </button>
-          </div>
-          <img class="gx-image-viewer__image" :src="selectedImage.src" :alt="selectedImage.alt" />
-        </div>
-      </div>
+      <GalaxySheet :open="!!selectedImage" :title="selectedImage?.alt || ''" icon="bi-camera"
+        scrim-class="gx-scrim--image-viewer" sheet-class="gx-image-viewer" @close="closeImage">
+        <img class="gx-image-viewer__image" :src="selectedImage?.src" :alt="selectedImage?.alt || ''" />
+      </GalaxySheet>
     </div>
   `,
 }

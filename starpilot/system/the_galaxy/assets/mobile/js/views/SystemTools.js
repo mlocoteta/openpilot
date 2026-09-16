@@ -14,6 +14,28 @@ function toPercent(value) {
   if (!Number.isFinite(n)) return 0
   return Math.max(0, Math.min(100, n))
 }
+function githubRemoteUrl(remote, commitsUrl = "") {
+  let value = String(remote || "").trim()
+  if (!value) {
+    const commits = String(commitsUrl || "").trim()
+    const markerIndex = commits.indexOf("/commits/")
+    if (commits.startsWith("https://github.com/") && markerIndex > 0) value = commits.slice(0, markerIndex)
+    else return ""
+  }
+  if (value.startsWith("git@github.com:")) value = `https://github.com/${value.split(":", 2)[1] || ""}`
+  else if (value.startsWith("ssh://git@github.com/")) value = `https://github.com/${value.split("ssh://git@github.com/", 2)[1] || ""}`
+  else if (value.startsWith("http://github.com/")) value = `https://github.com/${value.split("http://github.com/", 2)[1] || ""}`
+  if (!value.startsWith("https://github.com/")) return ""
+  value = value.replace(/\/+$/, "")
+  return value.endsWith(".git") ? value.slice(0, -4) : value
+}
+
+function githubCommitUrl(remote, commitsUrl, commit) {
+  const sha = String(commit || "").trim()
+  if (!/^[a-f0-9]{7,40}$/i.test(sha)) return ""
+  const base = githubRemoteUrl(remote, commitsUrl)
+  return base ? `${base}/commit/${sha}` : ""
+}
 
 const CORE_UPDATE_BRANCHES = ["StarPilot", "Dom"]
 const REBOOT_PENDING_STORAGE_KEY = "galaxy-update-reboot-pending"
@@ -153,6 +175,7 @@ export const SystemTools = {
         (this.versionMode === "earlier" && (this.versionLoading || !/^[a-f0-9]{40}$/.test(this.selectedCommit) || !this.versionChoices.some(commit => commit.sha === this.selectedCommit)))
     },
     updateAvailable() { return this.checkedForUpdates && !!this.fastStatus?.updateAvailable && !this.updateInProgress },
+    remoteCommitUrl() { return githubCommitUrl(this.fastStatus?.originRemote, this.fastStatus?.commitsUrl, this.fastStatus?.remoteCommit) },
     factoryResetStatus() {
       const s = this.fastStatus
       if (!s || String(s?.lastMode || "").trim() !== "factory-reset") return null
@@ -618,7 +641,7 @@ export const SystemTools = {
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Installed branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
                 <div v-if="updateInProgress && !rebootPending" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Local</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.localCommit) }}</span></div>
-                <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.remoteCommit) }}</span></div>
+                <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;"><a v-if="remoteCommitUrl" class="gx-link" :href="remoteCommitUrl" target="_blank" rel="noopener noreferrer" :title="fastStatus.remoteCommit">{{ shortCommit(fastStatus.remoteCommit) }}</a><template v-else>{{ shortCommit(fastStatus.remoteCommit) }}</template></span></div>
                 <div v-if="updateInProgress && !rebootPending" class="gx-update-progress" role="progressbar" aria-label="Update progress"
                   :aria-valuenow="Math.round(fastStatus.progressPercent || 0)" aria-valuemin="0" aria-valuemax="100">
                   <div class="gx-update-progress__track">

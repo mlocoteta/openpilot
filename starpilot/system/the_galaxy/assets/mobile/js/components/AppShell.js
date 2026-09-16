@@ -36,7 +36,7 @@ export const AppShell = {
   name: "AppShell",
   components: { DevicePicker },
   data() {
-    return { store, BOTTOM_NAV, NAV }
+    return { store, BOTTOM_NAV, NAV, searchNarrow: false }
   },
   computed: {
     online() { return store.online },
@@ -51,6 +51,9 @@ export const AppShell = {
     search: {
       get() { return store.search },
       set(v) { store.search = v },
+    },
+    searchPlaceholder() {
+      return this.searchNarrow ? t("Search") : t("Search toggles...")
     },
   },
   watch: {
@@ -86,6 +89,19 @@ export const AppShell = {
       store.search = ""
       this.$nextTick(() => { const el = this.$refs.searchInput; if (el) el.focus() })
     },
+    measureSearch() {
+      const el = this.$refs.searchInput
+      if (!el) return
+      const styles = window.getComputedStyle(el)
+      const padding = parseFloat(styles.paddingLeft || "0") + parseFloat(styles.paddingRight || "0")
+      const available = el.clientWidth - padding
+      if (available <= 0) return
+      if (!this._searchCanvas) this._searchCanvas = document.createElement("canvas")
+      const ctx = this._searchCanvas.getContext("2d")
+      if (!ctx) return
+      ctx.font = `${styles.fontStyle} ${styles.fontWeight} ${styles.fontSize} ${styles.fontFamily}`
+      this.searchNarrow = ctx.measureText(t("Search toggles...")).width > available
+    },
     themeToggle() { toggleTheme() },
     toggleNavPin() { toggleNavPinned() },
     navTo(link) {
@@ -107,8 +123,19 @@ export const AppShell = {
     this.statusPoll = usePolling(() => this.refreshStatus(), { interval: 5000 })
     this.statusPoll.start()
   },
+  mounted() {
+    this.measureSearch()
+    if (typeof ResizeObserver !== "undefined" && this.$refs.searchInput) {
+      this.searchObserver = new ResizeObserver(() => this.measureSearch())
+      this.searchObserver.observe(this.$refs.searchInput)
+    } else {
+      window.addEventListener("resize", this.measureSearch)
+    }
+  },
   beforeUnmount() {
     this.statusPoll?.destroy()
+    this.searchObserver?.disconnect()
+    window.removeEventListener("resize", this.measureSearch)
   },
   template: `
     <div class="gx-app" :class="{ 'gx-nav-pinned': navPinned }">
@@ -122,7 +149,7 @@ export const AppShell = {
             <span class="gx-appbar__title">Galaxy</span>
           </span>
           <div class="gx-searchwrap">
-            <input ref="searchInput" class="gx-search gx-appbar__search" type="search" :placeholder="tr('Search toggles...')"
+            <input ref="searchInput" class="gx-search gx-appbar__search" type="search" :placeholder="searchPlaceholder"
               v-model="search" :aria-label="tr('Search toggles')" />
             <button v-if="search" type="button" class="gx-search-clear" :aria-label="tr('Clear search')" @click="clearSearch">
               <i class="bi bi-x"></i>

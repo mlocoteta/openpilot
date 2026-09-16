@@ -117,10 +117,10 @@ export const ScreenBrightnessControl = {
         <span class="gx-row__desc">{{ tr(param.description) }}</span>
         <span v-if="locked" class="gx-row__desc">{{ tr(lockMessage) }}</span>
       </div>
-      <select class="gx-field" :id="controlId + '-mode'" :value="mode" :disabled="locked || updating" @change="onModeChange">
+      <GalaxySelect class="gx-field" :id="controlId + '-mode'" :value="mode" :disabled="locked || updating" aria-label="Brightness mode" @change="onModeChange">
         <option value="auto">{{ tr("Auto") }}</option>
         <option value="manual">{{ tr("Manual") }}</option>
-      </select>
+      </GalaxySelect>
       <div class="gx-slider-row">
         <div class="gx-brightness__readout">
           <label :for="controlId + '-slider'">{{ mode === 'auto' ? tr("Auto brightness offset") : tr("Brightness") }}</label>
