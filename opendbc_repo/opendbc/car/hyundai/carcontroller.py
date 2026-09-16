@@ -1033,7 +1033,8 @@ class CarController(CarControllerBase):
             left_sound_active=left_warning.sound_active, right_sound_active=right_warning.sound_active,
           )
         else:
-          adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame)
+          adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame,
+                                                             car_fingerprint=self.CP.carFingerprint)
         can_sends.extend(adrv_messages)
         # The front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
         # and stops publishing object tracks when it disappears.
