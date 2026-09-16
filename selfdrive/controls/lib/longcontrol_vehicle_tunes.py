@@ -212,6 +212,7 @@ class LongControlVehicleTuning:
     if (
       self.is_hyundai_elantra_2021 and
       should_stop and
+      not has_lead and
       v_ego < HYUNDAI_ELANTRA_FINAL_STOP_MAX_SPEED and
       a_target <= 0.1
     ):
