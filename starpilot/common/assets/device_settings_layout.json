@@ -2768,9 +2768,9 @@
       },
       {
         "key": "PedalsOnUI",
-        "label": "Gas / Brake Pedal Indicators",
-        "description": "On-screen gas and brake indicators.\n\nDynamic: Opacity changes according to how much openpilot is accelerating or braking\nStatic: Full when active, dim when not",
-        "picker_description": "Shows gas and brake indicators on the driving screen.",
+        "label": "Pedal-Responsive Wheel",
+        "description": "Tint the on-screen steering-wheel icon green while accelerating and red while braking. Also show gas and brake indicators.\n\nDynamic: Opacity changes according to how much openpilot is accelerating or braking\nStatic: Full when active, dim when not",
+        "picker_description": "Colors the driving-screen wheel by acceleration and braking, with optional pedal indicators.",
         "data_type": "bool",
         "ui_type": "toggle",
         "is_parent_toggle": true,
@@ -2805,16 +2805,6 @@
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "CustomUI",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "ShowBrakeStatus",
-        "label": "Show Brake Status",
-        "description": "Tint the on-screen steering-wheel icon red while the car reports that its brake lights are on.",
-        "picker_description": "Tints the on-screen steering-wheel icon red while the brake lights are on.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "galaxy_only": true,
         "settings_tier": "simple"
       },
       {

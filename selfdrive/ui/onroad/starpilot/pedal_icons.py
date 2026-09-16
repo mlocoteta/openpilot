@@ -15,7 +15,11 @@ def render_pedal_icons(start_x: float, start_y: float, font):
     return
 
   standstill = getattr(car_state, "standstill", False)
-  brake_lights = getattr(car_state, "brakeLights", False)
+  starpilot_car_state = ui_state.sm["starpilotCarState"] if ui_state.sm.valid.get("starpilotCarState", False) else None
+  brake_lights = (getattr(car_state, "brakeLights", False) or
+                  getattr(car_state, "brakeLightsDEPRECATED", False) or
+                  getattr(car_state, "regenBraking", False) or
+                  getattr(starpilot_car_state, "brakeLights", False))
   acceleration_ego = getattr(car_state, "aEgo", 0.0)
 
   dynamic_pedals = params.get_bool("DynamicPedalsOnUI")

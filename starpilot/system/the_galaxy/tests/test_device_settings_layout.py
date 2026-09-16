@@ -111,13 +111,14 @@ def test_driving_personality_controls_are_not_parked_only():
   assert all(params[key].get("requires_offroad") is not True for key in personality_keys)
 
 
-def test_brake_status_toggle_is_galaxy_only():
-  setting = _params_by_section(_layout())["Visual (Display & UI)"]["ShowBrakeStatus"]
+def test_pedal_feedback_wheel_uses_existing_pedal_toggle():
+  setting = _params_by_section(_layout())["Visual (Display & UI)"]["PedalsOnUI"]
 
-  assert _declared_default("ShowBrakeStatus") == "0"
-  assert setting["galaxy_only"] is True
+  assert _declared_default("PedalsOnUI") == "0"
+  assert setting["label"] == "Pedal-Responsive Wheel"
   assert setting["settings_tier"] == "simple"
   assert setting["ui_type"] == "toggle"
+  assert "ShowBrakeStatus" not in _params_by_section(_layout())["Visual (Display & UI)"]
 
 
 def test_ford_lateral_controls_are_ford_only_and_galaxy_only():

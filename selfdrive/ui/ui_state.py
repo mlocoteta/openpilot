@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.lib.prime_state import PrimeState
 from openpilot.selfdrive.ui.lib.ui_param_cache import shared_ui_params
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.starpilot.common.lateral_only_experimental import lateral_only_experimental_available
+from openpilot.starpilot.common.car_params_capability import capability_car_params_bytes
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.starpilot.common.screen_settings import (
   alert_wake_key, brightness_preferences, calculate_screen_brightness, enabled_wake_keys, standby_button_press_time,
@@ -284,7 +285,7 @@ class UIState:
   def update_params(self) -> None:
     # For slower operations
     # Update longitudinal control state
-    CP_bytes = self.params.get("CarParamsPersistent")
+    CP_bytes = capability_car_params_bytes(self.params)
     if CP_bytes is not None:
       self.CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
       if self.CP.alphaLongitudinalAvailable:
@@ -296,6 +297,8 @@ class UIState:
         lateral_only_experimental_available(self.CP)
       )
     else:
+      self.CP = None
+      self.has_longitudinal_control = False
       self.experimental_mode_available = False
     self._param_update_time = time.monotonic()
 

@@ -195,12 +195,20 @@ class HudRenderer(Widget):
     controls_state = sm['controlsState']
     car_state = sm['carState']
     rivian_lateral_mode.update()
+    car_control = sm['carControl'] if sm.valid.get('carControl', False) else None
+    actuators = getattr(car_control, "actuators", None)
+    long_active = bool(getattr(car_control, "longActive", False))
     starpilot_car_state = sm['starpilotCarState'] if sm.valid.get('starpilotCarState', False) else None
+    pedal_feedback_enabled = ui_state.ui_params.get_bool("PedalsOnUI") or ui_state.ui_params.get_bool("ShowBrakeStatus")
     self._wheel_tint = get_wheel_tint(
-      getattr(car_state, "brakePressed", False),
+      getattr(car_state, "brakePressed", False) or getattr(car_state, "regenBraking", False),
       rivian_lateral_mode.wheel_tint,
-      ui_state.ui_params.get_bool("ShowBrakeStatus"),
+      pedal_feedback_enabled,
       getattr(starpilot_car_state, "brakeLights", False),
+      getattr(car_state, "aEgo", 0.0),
+      getattr(car_state, "gasPressed", False),
+      getattr(actuators, "accel", 0.0) if long_active else 0.0,
+      getattr(actuators, "gas", 0.0) if long_active else 0.0,
     )
 
     v_cruise_cluster = car_state.vCruiseCluster

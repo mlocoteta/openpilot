@@ -78,6 +78,7 @@ from openpilot.starpilot.common.model_lab import (
 )
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
 from openpilot.starpilot.common import param_profiles
+from openpilot.starpilot.common.car_params_capability import capability_car_params_bytes
 from openpilot.starpilot.system.the_galaxy import version_history, version_install
 from openpilot.starpilot.common.accel_profile import (
   A_CRUISE_MAX_BP_CUSTOM,
@@ -4463,7 +4464,7 @@ def _get_is_tici_or_tizi():
   return HARDWARE.get_device_type() in ("tici", "tizi")
 
 def _get_alpha_longitudinal_available():
-  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
+  cp_bytes = capability_car_params_bytes(params)
   if not cp_bytes:
     return False
 

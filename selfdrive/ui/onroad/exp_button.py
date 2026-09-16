@@ -14,11 +14,27 @@ from openpilot.starpilot.common.experimental_state import (
 
 
 BRAKE_WHEEL_COLOR = rl.Color(255, 0, 0, 255)
+ACCEL_WHEEL_COLOR = rl.Color(22, 127, 64, 255)
+BRAKE_ACCEL_THRESHOLD = 0.25
+COMMAND_ACCEL_THRESHOLD = 0.05
 
 
-def get_wheel_tint(brake_pressed: bool, mode_tint: rl.Color | None, brake_status_enabled: bool,
-                   brake_lights: bool = False) -> rl.Color | None:
-  return BRAKE_WHEEL_COLOR if brake_status_enabled and (brake_pressed or brake_lights) else mode_tint
+def get_wheel_tint(brake_pressed: bool, mode_tint: rl.Color | None, pedal_feedback_enabled: bool,
+                   brake_lights: bool = False, acceleration: float = 0.0,
+                   gas_pressed: bool = False, commanded_accel: float = 0.0,
+                   commanded_gas: float = 0.0) -> rl.Color | None:
+  if not pedal_feedback_enabled:
+    return mode_tint
+
+  braking = brake_pressed or brake_lights or acceleration < -BRAKE_ACCEL_THRESHOLD or \
+    commanded_accel < -COMMAND_ACCEL_THRESHOLD
+  accelerating = gas_pressed or acceleration > BRAKE_ACCEL_THRESHOLD or \
+    commanded_accel > COMMAND_ACCEL_THRESHOLD or commanded_gas > COMMAND_ACCEL_THRESHOLD
+  if braking:
+    return BRAKE_WHEEL_COLOR
+  if accelerating:
+    return ACCEL_WHEEL_COLOR
+  return mode_tint
 
 
 class ExpButton(Widget):
@@ -112,12 +128,21 @@ class ExpButton(Widget):
     texture = self._txt_exp if exp_mode else self._txt_wheel
     color = self._white_color
     tint = None
+    car_state = ui_state.sm["carState"]
+    car_control = ui_state.sm["carControl"] if getattr(ui_state.sm, "valid", {}).get("carControl", False) else None
+    actuators = getattr(car_control, "actuators", None)
+    long_active = bool(getattr(car_control, "longActive", False))
     starpilot_car_state = ui_state.sm["starpilotCarState"] if getattr(ui_state.sm, "valid", {}).get("starpilotCarState", False) else None
+    pedal_feedback_enabled = self._params.get_bool("PedalsOnUI") or self._params.get_bool("ShowBrakeStatus")
     wheel_tint = get_wheel_tint(
-      getattr(ui_state.sm["carState"], "brakePressed", False),
+      getattr(car_state, "brakePressed", False) or getattr(car_state, "regenBraking", False),
       self.wheel_tint,
-      self._params.get_bool("ShowBrakeStatus"),
+      pedal_feedback_enabled,
       getattr(starpilot_car_state, "brakeLights", False),
+      getattr(car_state, "aEgo", 0.0),
+      getattr(car_state, "gasPressed", False),
+      getattr(actuators, "accel", 0.0) if long_active else 0.0,
+      getattr(actuators, "gas", 0.0) if long_active else 0.0,
     )
     if wheel_tint is not None:
       tint = rl.Color(wheel_tint.r, wheel_tint.g, wheel_tint.b, self._white_color.a)

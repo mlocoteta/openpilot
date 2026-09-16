@@ -91,6 +91,43 @@ def test_ray_pedal_fault_clears_only_with_healthy_sensor_state():
   assert not ret.accFaulted
 
 
+def test_ray_driver_override_uses_physical_interceptor_tracks():
+  CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
+  state = CarState(CP, None)
+  parsers = state.get_can_parsers(CP)
+  native_gas = (0x371, bytes.fromhex("004e008000ae0700"), 0)
+  physical_rest = (0x201, bytes.fromhex("010801f30cef"), 0)
+  for parser in parsers.values():
+    parser.update([(1_000_000_000, [native_gas, physical_rest])])
+  ret, _ = state.update(parsers, SimpleNamespace())
+  assert state.ray_pedal_valid
+  assert not ret.gasPressed
+
+  packer = CANPacker("hyundai_kia_ray_pedal")
+  physical_press = packer.make_can_msg("GAS_SENSOR", 0, {
+    "INTERCEPTOR_GAS": (310 - 264) * 0.672,
+    "INTERCEPTOR_GAS2": (593 - 497) * 0.332,
+    "STATE": 0, "COUNTER_PEDAL": 13,
+  })
+  for parser in parsers.values():
+    parser.update([(1_020_000_000, [physical_press])])
+  ret, _ = state.update(parsers, SimpleNamespace())
+  assert ret.gasPressed
+
+
+def test_ray_without_pedal_keeps_native_gas_detection():
+  CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(sensor_length=8), [], False, False, False, None)
+  assert not CP.enableGasInterceptorDEPRECATED
+  state = CarState(CP, None)
+  parsers = state.get_can_parsers(CP)
+  assert Bus.party not in parsers
+  native_gas = (0x371, bytes.fromhex("004e008000ae0700"), 0)
+  for parser in parsers.values():
+    parser.update([(1_000_000_000, [native_gas])])
+  ret, _ = state.update(parsers, SimpleNamespace())
+  assert ret.gasPressed
+
+
 def test_ray_controller_heartbeats_and_only_actuates_when_ready():
   CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
   controller = CarController(DBC[CP.carFingerprint], CP)

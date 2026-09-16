@@ -413,6 +413,12 @@ class CarState(CarStateBase):
     else:
       ret.gasPressed = bool(cp.vl["EMS16"]["CF_Ems_AclAct"])
 
+    if self.CP.carFingerprint == CAR.KIA_RAY_EV and self.CP.enableGasInterceptorDEPRECATED and self.ray_pedal_valid:
+      driver_pedal = cp_pedal.vl_raw["GAS_SENSOR"]
+      track1 = int.from_bytes(driver_pedal[:2], "big")
+      track2 = int.from_bytes(driver_pedal[2:4], "big")
+      ret.gasPressed = track1 > 272 or track2 > 513
+
     # Gear Selection via Cluster - For those Kia/Hyundai which are not fully discovered, we can use the Cluster Indicator for Gear Selection,
     # as this seems to be standard over all cars, but is not the preferred method.
     if self.CP.flags & (HyundaiFlags.HYBRID | HyundaiFlags.EV):
