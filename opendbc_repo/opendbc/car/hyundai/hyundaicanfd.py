@@ -21,7 +21,7 @@ def cache_adrv_0x51_template(car_fingerprint: CAR, dat: bytes | None) -> None:
     _adrv_0x51_templates[car_fingerprint] = bytes(dat)
 
 
-def create_adrv_0x51(packer, CAN, frame: int, car_fingerprint: CAR | None = None):
+def create_adrv_0x51(packer, CAN, frame: int, car_fingerprint: CAR | None = None, drive_gear: bool = False):
   template = _adrv_0x51_templates.get(car_fingerprint)
   if template is None:
     return packer.make_can_msg("ADRV_0x51", CAN.ACAN, {})
@@ -29,6 +29,7 @@ def create_adrv_0x51(packer, CAN, frame: int, car_fingerprint: CAR | None = None
   # EV6 MRR30 tracks stop when the ADAS takeover replaces this platform payload with zeros.
   dat = bytearray(template)
   dat[2] = (template[2] + frame + 1) & 0xFF
+  dat[3] = (dat[3] & ~0x1) | int(drive_gear)
   crc = hkg_can_fd_checksum(0x51, None, dat)
   dat[0] = crc & 0xFF
   dat[1] = (crc >> 8) & 0xFF
@@ -815,13 +816,13 @@ def create_fca_warning_light(packer, CAN, frame):
   return ret
 
 
-def create_adrv_messages(packer, CAN, frame, blended_hda2=False, car_fingerprint=None):
+def create_adrv_messages(packer, CAN, frame, blended_hda2=False, car_fingerprint=None, drive_gear=False):
   # messages needed to car happy after disabling
   # the ADAS Driving ECU to do longitudinal control
 
   ret = []
 
-  ret.append(create_adrv_0x51(packer, CAN, frame, car_fingerprint))
+  ret.append(create_adrv_0x51(packer, CAN, frame, car_fingerprint, drive_gear))
 
   if blended_hda2:
     return ret

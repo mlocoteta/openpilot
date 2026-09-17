@@ -159,7 +159,8 @@ class TestHyundaiFingerprint:
 
     hyundaicanfd.cache_adrv_0x51_template(CAR.KIA_EV6, factory)
     try:
-      address, dat, bus = hyundaicanfd.create_adrv_0x51(packer, can_bus, 7, CAR.KIA_EV6)
+      address, dat, bus = hyundaicanfd.create_adrv_0x51(packer, can_bus, 7, CAR.KIA_EV6, drive_gear=True)
+      _, parked_dat, _ = hyundaicanfd.create_adrv_0x51(packer, can_bus, 8, CAR.KIA_EV6, drive_gear=False)
       _, other_dat, _ = hyundaicanfd.create_adrv_0x51(packer, can_bus, 7, CAR.HYUNDAI_IONIQ_6)
     finally:
       hyundaicanfd.cache_adrv_0x51_template(CAR.KIA_EV6, None)
@@ -169,6 +170,9 @@ class TestHyundaiFingerprint:
     assert dat[2] == (factory[2] + 8) & 0xFF
     assert dat[3:] == factory[3:]
     assert int.from_bytes(dat[:2], "little") == hkg_can_fd_checksum(address, None, bytearray(dat))
+    assert parked_dat[3] == factory[3] & ~0x1
+    assert parked_dat[4:] == factory[4:]
+    assert int.from_bytes(parked_dat[:2], "little") == hkg_can_fd_checksum(address, None, bytearray(parked_dat))
     assert other_dat[3:] == bytes(29)
 
   def test_ev6_init_captures_factory_adrv_0x51(self, monkeypatch):
@@ -193,7 +197,7 @@ class TestHyundaiFingerprint:
 
     packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
     try:
-      _, dat, _ = hyundaicanfd.create_adrv_0x51(packer, CanBus(CP), 0, CAR.KIA_EV6)
+      _, dat, _ = hyundaicanfd.create_adrv_0x51(packer, CanBus(CP), 0, CAR.KIA_EV6, drive_gear=True)
     finally:
       hyundaicanfd.cache_adrv_0x51_template(CAR.KIA_EV6, None)
 
