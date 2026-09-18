@@ -436,6 +436,12 @@ class Controls:
     if self.CP.lateralTuning.which() == "torque" and (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite):
       self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
 
+    # Honda 9G Accord Torque Interceptor: live sigmoid reload + Kp override.
+    # Only when the TI toggle is on — otherwise the 9G runs stock PID LKAS untouched.
+    self.has_ti_sigmoid = (self.CP.carFingerprint == "HONDA_ACCORD_9G") and self.params.get_bool("TorqueInterceptorEnabled")
+    self._ti_frame = 0
+    self._ti_sigmoid_hash = getattr(self.CI.__class__, "_sigmoid_params", None)
+
   def update(self):
     self.sm.update(15)
     if self.sm.updated["liveCalibration"]:
@@ -446,6 +452,36 @@ class Controls:
 
     if hasattr(self.LaC, "pid") and self.CP.lateralTuning.which() != "pid":
       self.LaC.pid._k_p = self.starpilot_toggles.steerKp
+
+    # Honda 9G TI: live sigmoid params + Kp (~1s cadence). Gated to the 9G so no
+    # other torque car is affected.
+    if self.has_ti_sigmoid:
+      self._ti_frame += 1
+      if self._ti_frame % 100 == 0:
+        try:
+          if not self.params.get_bool("TISigmoidEnabled"):
+            if self._ti_sigmoid_hash is not None and hasattr(self.LaC, "reset_to_linear"):
+              self.LaC.reset_to_linear()
+              self._ti_sigmoid_hash = None
+          elif self.params.get_bool("TISigmoidLive") and hasattr(self.LaC, "update_sigmoid_lookup"):
+            a = self.params.get_float("TISigmoidA")
+            b = self.params.get_float("TISigmoidB")
+            c = self.params.get_float("TISigmoidC")
+            if a > 0 and b > 0 and c > 0 and (a, b, c) != self._ti_sigmoid_hash:
+              self.LaC.update_sigmoid_lookup(a, b, c)
+              self._ti_sigmoid_hash = (a, b, c)
+          ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
+          if ti_kp > 0 and hasattr(self.LaC, "pid"):
+            self.LaC.pid._k_p = [[0], [ti_kp]]
+          if hasattr(self.LaC, "update_honda_accord_low_speed_damping"):
+            self.LaC.update_honda_accord_low_speed_damping(
+              self.params.get_bool("TILowSpeedDampingEnabled"),
+              self.params.get_float("TILowSpeedDampingMax") or 0.12,
+              self.params.get_bool("TILowSpeedCenterDampingEnabled"),
+              self.params.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62,
+            )
+        except Exception:
+          pass
 
     if self.sm.updated['liveDelay'] and hasattr(self.LaC, "update_live_delay"):
       self.LaC.update_live_delay(self.sm['liveDelay'].lateralDelay)

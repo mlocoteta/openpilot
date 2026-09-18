@@ -12,7 +12,11 @@ from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
-UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "10"))
+# The BIG StarPilot UI can legitimately take longer than ten seconds to create
+# its first frame on a comma after an update or cold asset-cache start.  Keep
+# the watchdog, but allow that bounded startup window instead of endlessly
+# respawning the UI before it can kick its first heartbeat.
+UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "30"))
 CAMERAD_WATCHDOG_MAX_DT = int(os.getenv("CAMERAD_WATCHDOG_MAX_DT", "5"))
 
 def driverview(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
@@ -119,7 +123,9 @@ def run_navigationd(started: bool, params: Params, CP: car.CarParams, starpilot_
 
 def run_mapd(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   if started:
-    return True
+    # mapd only feeds the map speed-limit and curve-speed controllers. It costs ~150MB RSS
+    # and this device has no swap, so don't run it when neither consumer is enabled.
+    return params.get_bool("SpeedLimitController") or params.get_bool("CurveSpeedController")
 
   memory_params = Params(memory=True)
   return memory_params.get_bool("DownloadMaps") or memory_params.get_bool("CancelDownloadMaps")

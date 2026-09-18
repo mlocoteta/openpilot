@@ -52,6 +52,7 @@ from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.loggerd.deleter import PRESERVE_ATTR_NAME, PRESERVE_ATTR_VALUE, PRESERVE_COUNT
 from openpilot.system.version import get_build_metadata
+from openpilot.selfdrive.ui.lib.starpilot_version import DEFAULT_HOME_SCREEN_NAME, HOME_SCREEN_NAME_MAX_LENGTH
 from openpilot.tools.longitudinal_maneuvers.capabilities import get_longitudinal_maneuver_support
 from panda import Panda
 
@@ -6282,6 +6283,16 @@ def setup(app):
       val = data["value"]
       selected_label_input = str(data.get("label") or "").strip()
 
+      if key == "HomeScreenName":
+        if not params.get_bool("GalaxyDeveloperMode"):
+          return jsonify({"error": "Custom Home Screen Name is available only with Galaxy Developer Mode enabled."}), 403
+
+        val = str(val or "").strip()
+        if len(val) > HOME_SCREEN_NAME_MAX_LENGTH:
+          return jsonify({"error": f"Custom Home Screen Name must be {HOME_SCREEN_NAME_MAX_LENGTH} characters or fewer."}), 400
+        data["value"] = val or DEFAULT_HOME_SCREEN_NAME
+        val = data["value"]
+
       # Python json parses true/false as boolean
       if isinstance(val, bool):
         str_val = "1" if val else "0"
@@ -6724,6 +6735,8 @@ def setup(app):
       if key == "RivianAngleControl":
         response["message"] = "Rivian steering mode updated. The safe channel handoff is in progress."
       updated = {}
+      if key == "HomeScreenName":
+        updated[key] = str_val
       if key in PANDA_FIRMWARE_TOGGLE_KEYS:
         threading.Thread(target=_flash_panda_then_reboot, daemon=True).start()
         response["message"] = f"Parameter '{key}' updated successfully. Panda flashing started; device will reboot when finished."
@@ -9388,15 +9401,121 @@ def setup(app):
 
     return jsonify({"installed": False})
 
+  @app.route("/api/tailscale/status", methods=["GET"])
+  def tailscale_status():
+    base = "/data/tailscale"
+    socket = f"{base}/tailscaled.sock"
+    tailscale_binary = f"{base}/tailscale"
+
+    def command_result(command):
+      try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+        return {
+          "returncode": result.returncode,
+          "stdout": result.stdout.strip(),
+          "stderr": result.stderr.strip(),
+        }
+      except subprocess.TimeoutExpired:
+        return {"returncode": None, "stdout": "", "stderr": "command timed out"}
+
+    service = command_result(["sudo", "systemctl", "is-active", "tailscaled"])
+    journal = command_result(["sudo", "journalctl", "-u", "tailscaled", "-n", "80", "--no-pager"])
+    cli = {"returncode": None, "stdout": "", "stderr": "Tailscale binary is not installed"}
+    if os.path.exists(tailscale_binary):
+      cli = command_result(["sudo", tailscale_binary, "--socket", socket, "status", "--json"])
+
+    status = {}
+    if cli["returncode"] == 0:
+      try:
+        raw_status = json.loads(cli["stdout"])
+        status = {
+          "backendState": raw_status.get("BackendState", ""),
+          "authUrl": raw_status.get("AuthURL", ""),
+          "selfOnline": raw_status.get("Self", {}).get("Online", False),
+        }
+      except json.JSONDecodeError:
+        cli["stderr"] = (cli["stderr"] + "\nInvalid JSON from tailscale status").strip()
+
+    return jsonify({
+      "installed": os.path.exists(tailscale_binary),
+      "service": service,
+      "journal": journal,
+      "cli": cli,
+      "status": status,
+    }), 200
+
   @app.route("/api/tailscale/setup", methods=["POST"])
   def tailscale_setup():
     arch = "arm64"
     base = "/data/tailscale"
+    socket = f"{base}/tailscaled.sock"
+    tailscale_binary = f"{base}/tailscale"
 
-    result = subprocess.run(
-      "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
-      shell=True, capture_output=True, text=True
-    )
+    def start_tailscale_auth():
+      proc = subprocess.Popen(
+        ["sudo", tailscale_binary, "--socket", socket, "up", "--force-reauth", "--json", "--timeout=30s"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        preexec_fn=os.setsid
+      )
+
+      auth_url = None
+      output = ""
+      selector = selectors.DefaultSelector()
+      selector.register(proc.stdout, selectors.EVENT_READ)
+      deadline = time.monotonic() + 20
+      while time.monotonic() < deadline:
+        events = selector.select(timeout=max(0, deadline - time.monotonic()))
+        if not events:
+          break
+        chunk = os.read(proc.stdout.fileno(), 4096)
+        if not chunk:
+          break
+        output += chunk.decode(errors="replace")
+        match = re.search(r"https://login\.tailscale\.com/\S+", output)
+        if match:
+          auth_url = match.group(0)
+          # The client must remain alive while browser authorization completes.
+          break
+      selector.close()
+
+      return jsonify({
+        "message": "Tailscale setup started. Please authenticate in your browser." if auth_url else "Tailscale did not provide an authorization link yet.",
+        "auth_url": auth_url,
+        "detail": output.strip()[-2000:]
+      }), 200
+
+    # A cancelled browser login leaves the daemon holding the original URL.
+    # Return that URL directly instead of starting another client that will
+    # intentionally suppress the duplicate notification.
+    if os.path.exists(tailscale_binary):
+      try:
+        status = subprocess.run(
+          ["sudo", tailscale_binary, "--socket", socket, "status", "--json"],
+          capture_output=True, text=True, timeout=10
+        )
+        pending_auth_url = json.loads(status.stdout).get("AuthURL") if status.returncode == 0 else None
+        if pending_auth_url:
+          return jsonify({
+            "message": "Tailscale is awaiting browser authentication.",
+            "auth_url": pending_auth_url,
+            "detail": ""
+          }), 200
+      except (json.JSONDecodeError, subprocess.TimeoutExpired):
+        pass
+
+    # The daemon and its binaries persist under /data. Never overwrite an
+    # active tailscaled binary merely to retry browser authorization.
+    if os.path.exists(tailscale_binary) and os.path.exists(f"{base}/tailscaled"):
+      return start_tailscale_auth()
+
+    try:
+      result = subprocess.run(
+        "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
+        shell=True, capture_output=True, text=True, timeout=30
+      )
+    except subprocess.TimeoutExpired:
+      return jsonify({"error": "Timed out while checking for a Tailscale release."}), 504
 
     version = result.stdout.strip() or "1.84.0"
 
@@ -9444,27 +9563,7 @@ def setup(app):
     run_cmd(["sudo", "systemctl", "enable", "/etc/systemd/system/tailscaled.service"], "Enabled tailscaled service.", "Failed to enable tailscaled service.")
     run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
 
-    proc = subprocess.Popen(
-      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.STDOUT,
-      text=True,
-      preexec_fn=os.setsid
-    )
-
-    auth_url = None
-    for line in proc.stdout:
-      match = re.search(r"https://login\.tailscale\.com/\S+", line)
-      if match and not auth_url:
-        auth_url = match.group(0)
-        run_cmd(["sudo", "kill", "-TERM", f"-{proc.pid}"], "Sent SIGTERM to Tailscale setup process.", "Failed to send SIGTERM to Tailscale setup process.")
-        proc.wait(timeout=5)
-        break
-
-    return jsonify({
-      "message": "Tailscale setup started. Please authenticate in your browser.",
-      "auth_url": auth_url
-    }), 200
+    return start_tailscale_auth()
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
   def tailscale_uninstall():

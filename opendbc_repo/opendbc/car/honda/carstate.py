@@ -8,8 +8,10 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
-                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags
+                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
+                                                 TI_LIMITS, TI_STATE
 from opendbc.car.interfaces import CarStateBase
+from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -49,6 +51,17 @@ class CarState(CarStateBase):
     self.brake_error_msg = "HYBRID_BRAKE_ERROR" if CP.flags & HondaFlags.HYBRID else "STANDSTILL"
 
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
+
+    # Honda 9G Accord Torque Interceptor (TI): steering torque comes from a separate
+    # CAN device (TI_FEEDBACK) instead of the stock EPS. Gated to the 9G platform and
+    # the TorqueInterceptorEnabled toggle so no other Honda is affected.
+    self.ti_enabled = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and Params().get_bool("TorqueInterceptorEnabled")
+    self.ti_ramp_down = False
+    self.ti_version = 1
+    self.ti_state = TI_STATE.RUN
+    self.ti_violation = 0
+    self.ti_error = 0
+    self.ti_lkas_allowed = False
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -205,7 +218,29 @@ class CarState(CarStateBase):
       ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
-    ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+    if self.ti_enabled:
+      # Only consume TI_FEEDBACK when the board actually sent it. It is registered
+      # optional (freq 0), so an absent message decodes as all-zero -- which would
+      # drive ti_state to DISCOVER(0), leave ti_lkas_allowed False forever and
+      # silently disable the interceptor, and would also zero steeringTorque and
+      # so kill driver-override detection. Older TI firmware does not emit
+      # feedback at all, so treat "never seen" as the RUN default it starts in.
+      if cp.vl_all.get("TI_FEEDBACK", {}).get("STATE", []):
+        ti = cp.vl["TI_FEEDBACK"]
+        ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
+        self.ti_version = ti["VERSION_NUMBER"]
+        self.ti_state = ti["STATE"]
+        self.ti_violation = ti["VIOL"]
+        self.ti_error = ti["ERROR"]
+        if self.ti_version > 1:
+          self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
+        ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
+      else:
+        # no feedback: keep the stock EPS torque so steeringPressed still works
+        ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+      self.ti_lkas_allowed = (not self.ti_ramp_down) and (self.ti_state == TI_STATE.RUN)
+    else:
+      ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
@@ -353,11 +388,21 @@ class CarState(CarStateBase):
     return ret, fp_ret
 
   def get_can_parsers(self, CP):
-    pt_messages = [("GAS_SENSOR", 0)] if CP.enableGasInterceptorDEPRECATED else []
+    # POWERTRAIN_DATA is read via cp.vl_all (BRAKE_SWITCH debounce), which needs the
+    # message registered. With a gas interceptor the first plain cp.vl read of it is
+    # skipped, so register it explicitly for the 9G to avoid a KeyError in vl_all.
+    pt_messages = [("POWERTRAIN_DATA", 0)] if CP.carFingerprint == CAR.HONDA_ACCORD_9G else []
+    # The TI board only sends TI_FEEDBACK once openpilot commands it (TI_STEERING_CONTROL),
+    # so it is absent while idle. Register it as optional (freq 0 -> ignore_alive) so a
+    # plain cp.vl["TI_FEEDBACK"] read doesn't lazily add it as a *required* message and
+    # trip canError ("Unknown Vehicle Variant") before we ever get to engage.
+    if CP.carFingerprint == CAR.HONDA_ACCORD_9G and Params().get_bool("TorqueInterceptorEnabled"):
+      pt_messages.append(("TI_FEEDBACK", 0))
+    if CP.enableGasInterceptorDEPRECATED:
+      pt_messages.append(("GAS_SENSOR", 0))
     if CP.carFingerprint == CAR.HONDA_ACCORD_11G:
       # Both deliberately go silent during the handover, so skip alive/timeout checks.
       pt_messages += [("ACC_CONTROL", float("nan")), ("STEERING_CONTROL", float("nan"))]
-
     pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt)
     if CP.enableGasInterceptorDEPRECATED:
       pt_parser.message_states[0x201].ignore_checksum = True

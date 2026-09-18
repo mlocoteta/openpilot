@@ -73,6 +73,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"HondaLateralPidKiScale", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
     {"HondaLateralPidKpScale", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
     {"HondaWindFactorParams", {PERSISTENT, FLOAT}},
+    {"HomeScreenName", {PERSISTENT, STRING, "StarPilot", "StarPilot", 3}},
     {"InstallDate", {PERSISTENT, TIME}},
     {"IsDriverViewEnabled", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsEngaged", {PERSISTENT, BOOL}},
@@ -749,6 +750,27 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ThemesDownloaded", {PERSISTENT, JSON, "{}", "{}"}},
     {"Timezone", {PERSISTENT, STRING, "", ""}},
     {"TinygradUpdateAvailable", {PERSISTENT, BOOL, "0", "0", 1}},
+    // Honda 9G Accord Torque Interceptor (TI) — opt-in via the StarPilot toggle.
+    // OFF by default so a stock 9G Accord runs normal LKAS. When ON, the sigmoid
+    // tune applies (a=15, b=0.72, c=0.16, Kp=1; sigmoid + live-update default ON).
+    // Show the external GPU (Chestnut) hotspot temperature in the sidebar TEMP
+    // box instead of the SoC temperature. Falls back to SoC when no eGPU.
+    {"SidebarEgpuTemp", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TISigmoidEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
+    {"TISigmoidLive", {PERSISTENT, BOOL, "1", "1", 3}},
+    {"TISigmoidA", {PERSISTENT, FLOAT, "15.0", "15.0", 3}},
+    {"TISigmoidB", {PERSISTENT, FLOAT, "0.72", "0.72", 3}},
+    {"TISigmoidC", {PERSISTENT, FLOAT, "0.16", "0.16", 3}},
+    {"TISteerKp", {PERSISTENT, FLOAT, "0.3", "0.3", 3}},
+    // Experimental Accord TI low-speed reversal damping. Disabled by default;
+    // it is deliberately independent of the static sigmoid A/B/C mapping.
+    {"TILowSpeedDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TILowSpeedDampingMax", {PERSISTENT, FLOAT, "0.12", "0.12", 3}},
+    // Optional MoreTore-style continuous center damper. It is mutually exclusive
+    // with the reversal-gated experiment and remains opt-in.
+    {"TILowSpeedCenterDampingEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"TILowSpeedCenterDampingMaxReduction", {PERSISTENT, FLOAT, "0.62", "0.62", 3}},
     {"ToyotaDoors", {PERSISTENT, BOOL, "1", "0", 0}},
     {"TrailerLoad", {PERSISTENT, INT, "0", "0", 2}},
     {"TrafficFollow", {PERSISTENT, FLOAT, "0.75", "0.75", 2}},

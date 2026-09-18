@@ -98,6 +98,14 @@ class LatControlTorque(LatControl):
     self.debug_counter = 0
     self.prev_desired_lateral_accel = 0.0
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
+    self.honda_accord_low_speed_damping_enabled = False
+    self.honda_accord_low_speed_damping_max = 0.12
+    self.honda_accord_continuous_center_damping_enabled = False
+    self.honda_accord_continuous_center_damping_max_reduction = 0.62
+    self.honda_accord_damping_prev_raw_output = 0.0
+    self.honda_accord_damping_prev_error = 0.0
+    self.honda_accord_damping_prev_setpoint = 0.0
+    self.honda_accord_damping_hold_frames = 0
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -192,6 +200,24 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state.frictionJerkDeadzone = 0.0
     self.starpilot_lateral_state.lowSpeedFactor = 0.0
     self.starpilot_lateral_state.unwindDetected = False
+    self.starpilot_lateral_state.tiLowSpeedDampingActive = False
+    self.starpilot_lateral_state.tiLowSpeedDampingScale = 1.0
+
+  def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False,
+                                            continuous_center_max_reduction=0.62):
+    self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
+    self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
+    self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and self.is_honda_accord
+    self.honda_accord_continuous_center_damping_max_reduction = float(np.clip(continuous_center_max_reduction, 0.0, 0.75))
+    # The two experimental policies are A/B alternatives. The continuous policy
+    # intentionally takes priority when selected, so they can never stack.
+    if self.honda_accord_continuous_center_damping_enabled:
+      self.honda_accord_low_speed_damping_enabled = False
+    if not self.honda_accord_low_speed_damping_enabled:
+      self.honda_accord_damping_prev_raw_output = 0.0
+      self.honda_accord_damping_prev_error = 0.0
+      self.honda_accord_damping_prev_setpoint = 0.0
+      self.honda_accord_damping_hold_frames = 0
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     if self.is_palisade:
@@ -222,6 +248,21 @@ class LatControlTorque(LatControl):
   def update_limits(self):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
+
+  def update_sigmoid_lookup(self, a, b, c):
+    """Live-swap the torque curve to sigmoid+linear (Honda 9G TI). Called from controlsd."""
+    from opendbc.car.honda.interface import CarInterface as HondaCI
+    HondaCI.rebuild_sigmoid_lookup(a, b, c)
+    lookup = HondaCI._sigmoid_lookup
+    self.torque_from_lateral_accel = lambda lat_accel, tp: float(np.interp(lat_accel, lookup[1], lookup[0]))
+    self.lateral_accel_from_torque = lambda torque, tp: float(np.interp(torque, lookup[0], lookup[1]))
+    self.update_limits()
+
+  def reset_to_linear(self):
+    """Live-swap back to the stock linear torque model."""
+    self.torque_from_lateral_accel = lambda lat_accel, tp: lat_accel / float(tp.latAccelFactor)
+    self.lateral_accel_from_torque = lambda torque, tp: torque * float(tp.latAccelFactor)
+    self.update_limits()
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay, calibrated_pose, model_data, starpilot_toggles):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
@@ -683,6 +724,33 @@ class LatControlTorque(LatControl):
         output_torque *= kia_stinger_2022_center_taper
       elif self.is_civic_bosch_modified and civic_bosch_modified_a_lateral_testing_ground_active():
         output_torque *= civic_bosch_modified_a_center_taper
+      ti_low_speed_damping_scale = 1.0
+      ti_low_speed_damping_envelope = 0.0
+      if self.honda_accord_continuous_center_damping_enabled:
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_continuous_center_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_continuous_center_damping_max_reduction,
+        )
+      elif self.honda_accord_low_speed_damping_enabled:
+        # The previous implementation reduced *every* command in the envelope.
+        # Only intervene when the output or tracking error reverses while the
+        # requested turn direction remains stable; that is the observed Accord
+        # TI ping-pong signature. A short hold damps the following limiter steps
+        # without adding steady-turn lag.
+        raw_output_torque = float(output_torque)
+        stable_turn = abs(setpoint) > 0.15 and setpoint * self.honda_accord_damping_prev_setpoint > 0.0
+        output_reversal = raw_output_torque * self.honda_accord_damping_prev_raw_output < -0.0025
+        error_reversal = error * self.honda_accord_damping_prev_error < -0.0025
+        if stable_turn and (output_reversal or error_reversal):
+          self.honda_accord_damping_hold_frames = max(self.honda_accord_damping_hold_frames, int(0.30 / self.dt))
+        activation = min(1.0, self.honda_accord_damping_hold_frames * self.dt / 0.30)
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_low_speed_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_low_speed_damping_max, activation,
+        )
+        self.honda_accord_damping_hold_frames = max(0, self.honda_accord_damping_hold_frames - 1)
+        self.honda_accord_damping_prev_raw_output = raw_output_torque
+        self.honda_accord_damping_prev_error = float(error)
+        self.honda_accord_damping_prev_setpoint = float(setpoint)
+
       pid_log.active = True
       pid_log.p = float(self.pid.p)
       pid_log.i = float(self.pid.i)
@@ -700,6 +768,8 @@ class LatControlTorque(LatControl):
       self.starpilot_lateral_state.frictionJerkDeadzone = float(friction_jerk_deadzone)
       self.starpilot_lateral_state.lowSpeedFactor = float(low_speed_factor)
       self.starpilot_lateral_state.unwindDetected = bool(unwind_detected)
+      self.starpilot_lateral_state.tiLowSpeedDampingActive = bool(ti_low_speed_damping_envelope > 0.05)
+      self.starpilot_lateral_state.tiLowSpeedDampingScale = float(ti_low_speed_damping_scale)
       pid_log.saturated = bool(self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited_by_safety, curvature_limited))
       self.prev_output_torque = float(output_torque)
 
