@@ -349,7 +349,7 @@ class BigMultiOptionDialog(NavWidget):
 
   def _handle_mouse_event(self, mouse_event: MouseEvent) -> None:
     super()._handle_mouse_event(mouse_event)
-    if not self._scroll_inner.scroll_panel.is_touch_valid():
+    if not self._scroll_inner.scroll_panel.is_event_touch_valid(mouse_event):
       self._can_click = False
 
   def _handle_mouse_release(self, mouse_pos: MousePos):

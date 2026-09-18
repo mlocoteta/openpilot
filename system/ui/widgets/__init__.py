@@ -39,6 +39,7 @@ class Widget(abc.ABC):
     # if current mouse/touch down started within the widget's rectangle
     self.__tracking_is_pressed = [False] * MAX_TOUCH_SLOTS
     self._touch_valid_callback: Callable[[], bool] | None = None
+    self._touch_event_valid_callback: Callable[[MouseEvent], bool] | None = None
     self._click_delay: float | None = None  # seconds to hold is_pressed after release
     self._click_release_time: float | None = None
     self._click_callback: Callable[[], None] | None = None
@@ -90,6 +91,10 @@ class Widget(abc.ABC):
   def _touch_valid(self) -> bool:
     """Check if the widget can be touched."""
     return self._touch_valid_callback() if self._touch_valid_callback else True
+
+  def set_touch_event_valid_callback(self, touch_callback: Callable[[MouseEvent], bool]) -> None:
+    """Validate individual events when a parent has already processed the touch batch."""
+    self._touch_event_valid_callback = touch_callback
 
   def set_position(self, x: float, y: float) -> None:
     changed = (self._rect.x != x or self._rect.y != y)
@@ -146,10 +151,11 @@ class Widget(abc.ABC):
       if not self._multi_touch and mouse_event.slot != 0:
         continue
 
+      event_touch_valid = touch_valid and (self._touch_event_valid_callback is None or self._touch_event_valid_callback(mouse_event))
       mouse_in_rect = rl.check_collision_point_rec(mouse_event.pos, hit_rect)
       # Ignores touches/presses that start outside our rect
       # Allows touch to leave the rect and come back in focus if mouse did not release
-      if mouse_event.left_pressed and touch_valid:
+      if mouse_event.left_pressed and event_touch_valid:
         if mouse_in_rect:
           self._handle_mouse_press(mouse_event.pos)
           self.__is_pressed[mouse_event.slot] = True
@@ -157,7 +163,7 @@ class Widget(abc.ABC):
           self._handle_mouse_event(mouse_event)
 
       # Callback such as scroll panel signifies user is scrolling
-      elif not touch_valid:
+      elif not event_touch_valid:
         self.__is_pressed[mouse_event.slot] = False
         self.__tracking_is_pressed[mouse_event.slot] = False
 
