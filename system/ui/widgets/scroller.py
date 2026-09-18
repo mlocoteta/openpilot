@@ -148,7 +148,7 @@ class _Scroller(Widget):
 
     # preserve original touch valid callback
     original_touch_valid_callback = item._touch_valid_callback
-    item.set_touch_valid_callback(lambda: self.scroll_panel.is_touch_valid() and self.enabled and self._scrolling_to[0] is None
+    item.set_touch_valid_callback(lambda: self.scroll_panel.is_touch_valid() and self.enabled and not self._scrolling_to[1]
                                           and not self.moving_items and (original_touch_valid_callback() if
                                                                          original_touch_valid_callback else True))
 
@@ -207,7 +207,7 @@ class _Scroller(Widget):
 
     if scroll_snap_idx is not None:
       snap_item = visible_items[scroll_snap_idx]
-      if self.is_pressed:
+      if self.scroll_panel.state in (ScrollState.PRESSED, ScrollState.MANUAL_SCROLL):
         # no snapping until released
         self._scroll_snap_filter.x = 0
       else:
