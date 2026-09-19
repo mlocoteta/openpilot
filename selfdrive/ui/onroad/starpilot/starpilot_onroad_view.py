@@ -21,7 +21,6 @@ from openpilot.selfdrive.ui.onroad.starpilot.weather_icon import render_weather_
 from openpilot.selfdrive.ui.lib.starpilot_status import (
   get_screen_edge_color,
 )
-from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_roundness
 from openpilot.starpilot.common.favorite_slots import (
   build_favorite_slot_options,
   filter_favorite_slot_options,
@@ -101,10 +100,6 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _render(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
-    border_roundness = get_border_roundness(rect, border_width)
-    border_color = get_pulse_glide_border_color(ui_state.sm, get_screen_edge_color(ui_state))
-    rl.draw_rectangle_rounded(rect, border_roundness, 10, border_color)
-    render_background_effects(rect, border_width)
 
     # The favorite menu has first claim on the lower-left gesture. Filtering
     # its events before the inherited HUD/widgets render prevents a corner tap
@@ -161,10 +156,12 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _draw_border(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
-    border_roundness = get_border_roundness(rect, border_width)
-    rl.draw_rectangle_rounded_lines_ex(rect, border_roundness, 10, border_width, rl.BLACK)
+    rl.draw_rectangle_lines_ex(rect, border_width, rl.BLACK)
     border_rect = rl.Rectangle(rect.x + border_width, rect.y + border_width,
                                 rect.width - 2 * border_width, rect.height - 2 * border_width)
+    border_color = get_pulse_glide_border_color(ui_state.sm, get_screen_edge_color(ui_state))
+    rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 10, border_width, border_color)
+    render_background_effects(rect, border_width)
     render_overlay(border_rect, border_width)
 
   def _render_slc(self):
