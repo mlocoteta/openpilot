@@ -156,6 +156,8 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _draw_border(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
+    if self._draw_hud_controls and not self._full_alert_showing():
+      self._favorite_radial_menu.render_corner_hint(self._content_rect)
     rl.draw_rectangle_lines_ex(rect, border_width, rl.BLACK)
     border_rect = rl.Rectangle(rect.x + border_width, rect.y + border_width,
                                 rect.width - 2 * border_width, rect.height - 2 * border_width)
