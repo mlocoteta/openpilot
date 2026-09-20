@@ -438,6 +438,7 @@ def launcher(proc: str, name: str, nice: int | None = None) -> None:
   except Exception:
     # can't install the crash handler because sys.excepthook doesn't play nice
     # with threads, so catch it here.
+    cloudlog.exception(f"child {proc} crashed")
     sentry.capture_exception()
     raise
 
