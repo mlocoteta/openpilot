@@ -454,7 +454,13 @@ class StarPilotVariables:
     self.starpilot_toggles = SimpleNamespace()
     toggle = self.starpilot_toggles
 
-    self.default_values = {key.decode(): self.params.get_default_value(key) for key in self.params.all_keys()}
+    # Params key bindings return strings on newer builds and bytes on older
+    # generated modules. Accept both so a rebuilt params extension cannot
+    # prevent StarPilot from reaching manager/UI startup.
+    self.default_values = {
+      key.decode() if isinstance(key, bytes) else key: self.params.get_default_value(key)
+      for key in self.params.all_keys()
+    }
     branch = get_build_metadata().channel
     self.release_branch = branch == "StarPilot"
     self.staging_branch = branch == "StarPilot-Staging"
