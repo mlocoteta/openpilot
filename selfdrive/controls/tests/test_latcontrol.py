@@ -2085,6 +2085,14 @@ class TestLatControl:
     assert active_scale < 1.0
     assert active_envelope > 0.0
 
+  def test_honda_accord_low_speed_damping_has_gentle_crawl_tail(self):
+    # One mph has only a small smooth-envelope contribution, and still needs
+    # reversal activation before any output is changed.
+    _, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 1.0 * 0.44704, 0.12, activation=1.0)
+
+    assert 0.0 < envelope < 0.10
+    assert 0.98 < scale < 1.0
+
   def test_honda_accord_continuous_center_damping_matches_reference_envelope(self):
     # MoreTore-style path acts continuously in the small-signal center band.
     damped, scale, envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0)
