@@ -502,8 +502,8 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
   destination = _read("js/components/NavigationDestinationPanel.js")
-  assert '"./views/Navigation.js?v=nav-destination-4"' in _read("js/app.js")
-  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-4"' in _read("js/views/Navigation.js")
+  assert '"./views/Navigation.js?v=nav-destination-6"' in _read("js/app.js")
+  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-6"' in _read("js/views/Navigation.js")
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
@@ -618,6 +618,7 @@ def test_ui_mobile_polish_regressions():
   assert 'localDeviceUrl(status?.lanIp, "/recordings")' in recordings
   assert 'localDeviceUrl(status?.lanIp, "/galaxy")' in galaxy
   assert "gx-btn gx-btn--tonal" in recordings and "Open Recordings Locally" in recordings
+  assert "screenDisplayName(rec) {\n      if (!rec) return" in recordings
   assert "gx-btn gx-btn--tonal" in galaxy and "Open Galaxy Locally" in galaxy
 
   home = _read("js/views/Home.js")
@@ -856,3 +857,33 @@ console.log("hierarchy logic OK")
 
   result = subprocess.run([node, str(script)], capture_output=True, text=True)
   assert result.returncode == 0, f"node failed:\n{result.stdout}\n{result.stderr}"
+
+
+def test_ui_navigation_map_first_layout_regressions():
+  nav = _read("js/views/Navigation.js")
+  css = _read("css/material.css")
+  destination = _read("js/components/NavigationDestinationPanel.js")
+
+  # Destination tab is a map-first screen: the map fills the content area and
+  # runs behind the top appbar and the tab switcher floats above the bottom nav.
+  assert 'class="gx-navigation-view"' in nav and "gx-navigation-tabs" in nav
+  assert ".gx-content:has(.gx-navigation-view)" in css
+  assert "--bottomnav-clearance:" in css
+  assert "margin-top: calc(-1 * (var(--appbar-height) + env(safe-area-inset-top, 0px) + var(--sp-1)))" in css
+  assert "height: 100dvh" in css
+  assert "padding-top: calc(var(--appbar-height) + env(safe-area-inset-top, 0px) + var(--sp-4))" in css
+  assert ".gx-navigation-tabs {" in css
+  assert "bottom: var(--bottomnav-clearance)" in css
+  assert "padding-bottom: calc(var(--bottomnav-clearance) + 56px)" in css
+
+  # Route metrics use Bootstrap Icons consistently, not emoji.
+  assert "bi-signpost-2" in destination and "bi-clock-history" in destination
+  for emoji in ("🛣️", "⌛", "🕗"):
+    assert emoji not in destination
+
+  # The route summary stays compact so the map remains visible: metrics are a
+  # horizontal strip and route options are compact chips, not full-width rows.
+  assert 'class="gx-navigation-metrics"' in destination
+  assert destination.count('class="gx-navigation-metric"') == 3
+  assert "gx-navigation-summary__rows" not in destination and "gx-navigation-summary__rows" not in css
+  assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in css

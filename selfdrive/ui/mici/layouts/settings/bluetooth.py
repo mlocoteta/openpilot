@@ -79,6 +79,10 @@ class BluetoothDeviceButton(BigButton):
     super().set_touch_valid_callback(lambda: touch_callback() and not self._forget_btn.is_pressed)
     self._forget_btn.set_touch_valid_callback(touch_callback)
 
+  def set_touch_event_valid_callback(self, touch_callback):
+    super().set_touch_event_valid_callback(touch_callback)
+    self._forget_btn.set_touch_event_valid_callback(touch_callback)
+
   def _draw_content(self, btn_y: float):
     self._label.set_color(LABEL_COLOR)
     label_rect = rl.Rectangle(self._rect.x + self.LABEL_PADDING, btn_y + self.LABEL_VERTICAL_PADDING,

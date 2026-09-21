@@ -72,9 +72,7 @@ class GuiScrollPanel2:
 
     bounds_size = bounds.width if self._horizontal else bounds.height
 
-    for mouse_event in gui_app.mouse_events:
-      self._handle_mouse_event(mouse_event, bounds, bounds_size, content_size)
-      self._previous_mouse_event = mouse_event
+    self._process_mouse_events(bounds, bounds_size, content_size)
 
     wheel_move = rl.get_mouse_wheel_move()
     if wheel_move != 0 and self.enabled and rl.check_collision_point_rec(rl.get_mouse_position(), bounds):
@@ -92,6 +90,11 @@ class GuiScrollPanel2:
       print('New state:', self._state)
       print()
     return self.get_offset()
+
+  def _process_mouse_events(self, bounds: rl.Rectangle, bounds_size: float, content_size: float) -> None:
+    for mouse_event in gui_app.mouse_events:
+      self._handle_mouse_event(mouse_event, bounds, bounds_size, content_size)
+      self._previous_mouse_event = mouse_event
 
   def _get_offset_bounds(self, bounds_size: float, content_size: float) -> tuple[float, float]:
     """Returns (max_offset, min_offset) for the given bounds and content size."""

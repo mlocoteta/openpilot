@@ -194,13 +194,15 @@ class FavoriteRadialMenu:
   def render(self, rect: rl.Rectangle) -> None:
     self._layout(rect)
     self._collapse_if_idle()
-    if self._state == self.STATE_COLLAPSED:
-      self._draw_corner_hint()
-    elif self._state == self.STATE_RADIAL:
-      self._draw_corner_hint()
+    if self._state == self.STATE_RADIAL:
       self._draw_radial_menu()
-    else:
+    elif self._state == self.STATE_PICKER:
       self._draw_picker()
+
+  def render_corner_hint(self, rect: rl.Rectangle) -> None:
+    self._rect = rect
+    if not self.is_picker_open:
+      self._draw_corner_hint()
 
   def blocks_pointer(self, mouse_pos: Any) -> bool:
     """Whether a parent click at ``mouse_pos`` belongs to this menu."""
@@ -755,8 +757,8 @@ class FavoriteRadialMenu:
           rl.draw_triangle(v_tb, v_ra, v_rb, col)
 
     # 3. Ultra-Polished Frosted-Glass Vector Arrow (Nestled deep in purple corner)
-    cx = x0 + 34.0 * scale
-    cy = y0 - 34.0 * scale
+    center = self.corner_center(self._rect)
+    cx, cy = center.x, center.y
 
     tip = rl.Vector2(cx + 15.0 * scale, cy - 15.0 * scale)
     tail = rl.Vector2(cx - 15.0 * scale, cy + 15.0 * scale)

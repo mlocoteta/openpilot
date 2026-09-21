@@ -1197,7 +1197,7 @@ class CarController(CarControllerBase):
           # cannot linger after a disengage or main-off event.
           if should_send_bolt_acc_pedal_friction:
             can_sends.append(gmcan.create_friction_brake_command(
-              self.packer_ch, friction_brake_bus, experiment_brake, idx, bolt_acc_pedal_friction_main_on,
+              self.packer_ch, friction_brake_bus, experiment_brake, idx, bolt_acc_pedal_friction_main_on and CC.longActive,
               near_stop, at_full_stop, self.CP))
         if self.CP.carFingerprint not in CC_ONLY_CAR:
           friction_brake_bus = get_friction_brake_bus(self.CP)

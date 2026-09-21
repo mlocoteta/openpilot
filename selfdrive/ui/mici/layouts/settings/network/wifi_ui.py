@@ -7,7 +7,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.mici.layouts.settings.network.action_state import should_show_forget_button
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigInputDialog, BigConfirmationDialog
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, LABEL_COLOR
-from openpilot.system.ui.lib.application import gui_app, MousePos, FontWeight
+from openpilot.system.ui.lib.application import gui_app, MousePos, MouseEvent, FontWeight
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.system.ui.lib.wifi_manager import WifiManager, Network, SecurityType, normalize_ssid
@@ -193,6 +193,10 @@ class WifiButton(BigButton):
   def set_touch_valid_callback(self, touch_callback: Callable[[], bool]) -> None:
     super().set_touch_valid_callback(lambda: touch_callback() and not self._forget_btn.is_pressed)
     self._forget_btn.set_touch_valid_callback(touch_callback)
+
+  def set_touch_event_valid_callback(self, touch_callback: Callable[[MouseEvent], bool]) -> None:
+    super().set_touch_event_valid_callback(touch_callback)
+    self._forget_btn.set_touch_event_valid_callback(touch_callback)
 
   @property
   def _is_saved(self):

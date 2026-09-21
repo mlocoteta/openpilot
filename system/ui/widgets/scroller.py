@@ -4,8 +4,8 @@ from collections.abc import Callable
 
 from openpilot.common.filter_simple import FirstOrderFilter, BounceFilter
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.ui.lib.application import gui_app
-from openpilot.system.ui.lib.scroll_panel2 import GuiScrollPanel2, ScrollState
+from openpilot.system.ui.lib.application import gui_app, MouseEvent
+from openpilot.system.ui.lib.scroll_panel2 import GuiScrollPanel2, ScrollState, MIN_DRAG_PIXELS
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 
@@ -23,6 +23,63 @@ EDGE_SHADOW_WIDTH = 20
 MIN_ZOOM_ANIMATION_TIME = 0.075  # seconds
 DO_ZOOM = False
 DO_JELLO = False
+
+
+class _MiciScrollPanel(GuiScrollPanel2):
+  """Mici gesture ownership, using the shared scrolling physics unchanged."""
+  def __init__(self, horizontal: bool = True, handle_out_of_bounds: bool = True):
+    super().__init__(horizontal, handle_out_of_bounds)
+    self._event_touch_valid: dict[MouseEvent, bool] = {}
+    self.reset()
+
+  def reset(self) -> None:
+    """Forget touch history without changing the scroll position."""
+    self._state = ScrollState.STEADY
+    self._velocity = 0.0
+    self._velocity_buffer.clear()
+    self._initial_click_event = None
+    self._previous_mouse_event = None
+    self._snap_target = None
+    self._touch_active = False
+    self.touch_started = False
+    self._event_touch_valid.clear()
+
+  def is_event_touch_valid(self, event: MouseEvent) -> bool:
+    return self._event_touch_valid.get(event, False)
+
+  def _process_mouse_events(self, bounds: rl.Rectangle, bounds_size: float, content_size: float) -> None:
+    self._event_touch_valid.clear()
+    self.touch_started = False
+    if not self.enabled:
+      self.reset()
+      # Disabling scrolling alone must not disable the controls inside it.
+      self._event_touch_valid.update((event, True) for event in gui_app.mouse_events if event.slot == 0)
+      return
+
+    for event in gui_app.mouse_events:
+      if event.slot != 0:
+        continue
+      if event.left_pressed:
+        if not rl.check_collision_point_rec(event.pos, bounds):
+          continue
+        self._touch_active = True
+        self.touch_started = True
+      if not self._touch_active:
+        continue
+
+      was_dragging = self._state == ScrollState.MANUAL_SCROLL
+      if self._state == ScrollState.PRESSED and self._initial_click_event is not None:
+        was_dragging |= abs(self._get_mouse_pos(event) - self._get_mouse_pos(self._initial_click_event)) > MIN_DRAG_PIXELS
+      super()._handle_mouse_event(event, bounds, bounds_size, content_size)
+      # Preserve drag cancellation through release, even if another tap follows
+      # in this batch. Children consume these events after the panel updates.
+      self._event_touch_valid[event] = not (was_dragging or self._state == ScrollState.MANUAL_SCROLL)
+      self._previous_mouse_event = event
+      if event.left_released:
+        self._touch_active = False
+        if self._state == ScrollState.MANUAL_SCROLL:
+          # A release can itself cross the drag threshold. Finish that drag now.
+          super()._handle_mouse_event(event, bounds, bounds_size, content_size)
 
 
 class ScrollIndicator(Widget):
@@ -95,7 +152,7 @@ class _Scroller(Widget):
     # when not pressed, snap to closest item to be center
     self._scroll_snap_filter = FirstOrderFilter(0.0, 0.05, 1 / gui_app.target_fps)
 
-    self.scroll_panel = GuiScrollPanel2(self._horizontal, handle_out_of_bounds=not self._snap_items)
+    self.scroll_panel = _MiciScrollPanel(self._horizontal, handle_out_of_bounds=not self._snap_items)
     self._scroll_enabled: bool | Callable[[], bool] = True
 
     self._show_scroll_indicator = scroll_indicator and self._horizontal
@@ -148,9 +205,12 @@ class _Scroller(Widget):
 
     # preserve original touch valid callback
     original_touch_valid_callback = item._touch_valid_callback
-    item.set_touch_valid_callback(lambda: self.scroll_panel.is_touch_valid() and self.enabled and not self._scrolling_to[1]
+    item.set_touch_valid_callback(lambda: self.enabled and not self._scrolling_to[1]
                                           and not self.moving_items and (original_touch_valid_callback() if
                                                                          original_touch_valid_callback else True))
+    original_event_callback = item._touch_event_valid_callback
+    item.set_touch_event_valid_callback(lambda event: self.scroll_panel.is_event_touch_valid(event) and
+                                       (original_event_callback(event) if original_event_callback else True))
 
   def add_widgets(self, items: list[Widget]) -> None:
     for item in items:
@@ -189,6 +249,8 @@ class _Scroller(Widget):
     scroll_enabled = self._scroll_enabled() if callable(self._scroll_enabled) else self._scroll_enabled
     self.scroll_panel.set_enabled(scroll_enabled and self.enabled and not self._scrolling_to[1])
     self.scroll_panel.update(self._rect, content_size)
+    if self.scroll_panel.touch_started and not self._scrolling_to[1]:
+      self._scrolling_to = None, False
     if not self._snap_items:
       return self.scroll_panel.get_offset()
 
@@ -398,6 +460,7 @@ class _Scroller(Widget):
 
   def show_event(self):
     super().show_event()
+    self.scroll_panel.reset()
     for item in self._items:
       item.show_event()
 
@@ -414,6 +477,7 @@ class _Scroller(Widget):
 
   def hide_event(self):
     super().hide_event()
+    self.scroll_panel.reset()
     for item in self._items:
       item.hide_event()
 
@@ -450,12 +514,17 @@ class NavRawScrollPanel(NavWidget):
 
   def __init__(self):
     super().__init__()
-    self._scroll_panel = GuiScrollPanel2(horizontal=False)
+    self._scroll_panel = _MiciScrollPanel(horizontal=False)
     self._scroll_panel.set_enabled(lambda: self.enabled and not self.is_dismissing)
 
   def show_event(self):
     super().show_event()
+    self._scroll_panel.reset()
     self._scroll_panel.set_offset(0)
+
+  def hide_event(self):
+    super().hide_event()
+    self._scroll_panel.reset()
 
   def _back_enabled(self) -> bool:
     return self._scroll_panel.get_offset() >= -20
