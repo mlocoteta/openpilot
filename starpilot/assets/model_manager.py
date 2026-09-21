@@ -882,9 +882,10 @@ class ModelManager:
   def _migrate_model_artifacts(self, selected_model: str):
     """Remove artifacts compiled for the previous tinygrad manifest.
 
-    Model IDs are stable across manifest generations, but tinygrad pickles are
-    not. Local models are intentionally retained because StarPilot does not own
-    or have a source from which to redownload them.
+    Preserve downloaded artifacts that the newly fetched manifest still accepts.
+    In particular, a StarPilot source update must not force a re-download merely
+    because the manifest revision changed. Artifacts whose declared format or
+    size no longer verifies are removed and can be downloaded again.
     """
     removed = 0
     for model_file in MODELS_PATH.iterdir():
@@ -892,6 +893,9 @@ class ModelManager:
         continue
       model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
       if model_key and is_local_model_key(model_key):
+        continue
+      artifact_format = self._model_artifact_format_map().get(model_key, "")
+      if model_key in self.available_models and self._is_model_downloaded(model_key, artifact_format):
         continue
       if model_file.is_file() or model_file.is_symlink():
         delete_file(model_file, print_error=False)
@@ -1199,6 +1203,9 @@ class ModelManager:
         continue
       model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
       if model_key and is_local_model_key(model_key):
+        continue
+      artifact_format = self._model_artifact_format_map().get(model_key, "")
+      if model_key in self.available_models and self._is_model_downloaded(model_key, artifact_format):
         continue
       if model_file.is_file():
         delete_file(model_file, print_error=False)
