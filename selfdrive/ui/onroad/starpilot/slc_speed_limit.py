@@ -17,6 +17,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.source_bubble_layout import (
   source_content_metrics, source_value_text, visible_source_rows,
 )
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
+from openpilot.selfdrive.ui.lib.speed_limit_pulse import SpeedLimitPulse
 
 _WHITE = rl.Color(255, 255, 255, 255)
 
@@ -53,41 +54,16 @@ FONT_EU_OFFSET = 40
 # is "Vision" and the resolved value just changed.
 VISION_SPEED_LIMIT_PULSE_SECONDS = 1.0
 VISION_SPEED_LIMIT_PULSE_COLOR = rl.Color(188, 132, 255, 255)
-VISION_SPEED_LIMIT_CHANGE_THRESHOLD = 0.1  # m/s
-
-
-# ── Vision speed-limit pulse state (one-shot highlight) ────────────────
-# Persists across frames so we can detect a just-changed vision limit and
-# animate the sign colors toward VISION_SPEED_LIMIT_PULSE_COLOR for
-# VISION_SPEED_LIMIT_PULSE_SECONDS. Held at module scope because this file
-# is a procedural API consumed once per frame by StarPilotOnroadView.
-
-_pulse = {
-  "last": 0.0,            # last resolved vision limit (m/s) seen while active
-  "start": -VISION_SPEED_LIMIT_PULSE_SECONDS,  # get_time() stamp of the last change
-}
+_pulse = SpeedLimitPulse()
 
 
 def _reset_pulse() -> None:
-  """Clear pulse state when SLC goes hidden or stale."""
-  _pulse["last"] = 0.0
-  _pulse["start"] = -VISION_SPEED_LIMIT_PULSE_SECONDS
+  _pulse.reset()
 
 
 def _tick_pulse(source: str, resolved_ms: float) -> None:
-  """Update pulse state once per frame from the resolved speed limit.
-
-  The pulse fires when the active source is "Vision" and its resolved value
-  changed by at least VISION_SPEED_LIMIT_CHANGE_THRESHOLD (m/s).
-  """
-  vision_active = source == "Vision" and resolved_ms > 0.0
-  if not vision_active:
-    _pulse["start"] = -VISION_SPEED_LIMIT_PULSE_SECONDS
-    return
-
-  if abs(resolved_ms - _pulse["last"]) >= VISION_SPEED_LIMIT_CHANGE_THRESHOLD:
-    _pulse["start"] = rl.get_time()
-  _pulse["last"] = resolved_ms
+  speed_conversion = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
+  _pulse.update(source, resolved_ms, speed_conversion, rl.get_time(), ui_state.started_frame)
 
 
 def _speed_limit_pulse_color(base: rl.Color, alpha: int) -> rl.Color:
@@ -98,7 +74,7 @@ def _speed_limit_pulse_color(base: rl.Color, alpha: int) -> rl.Color:
   where t is elapsed / VISION_SPEED_LIMIT_PULSE_SECONDS.
   """
   base_with_alpha = rl.Color(base.r, base.g, base.b, alpha)
-  elapsed = rl.get_time() - _pulse["start"]
+  elapsed = rl.get_time() - _pulse.start_time
   if elapsed < 0.0 or elapsed >= VISION_SPEED_LIMIT_PULSE_SECONDS:
     return base_with_alpha
 
@@ -118,7 +94,7 @@ def _get_slc_state():
   """Extract SLC state from SubMaster. Returns dict or None if stale/hidden."""
   sm = ui_state.sm
   if sm.recv_frame["starpilotPlan"] < ui_state.started_frame:
-    _reset_pulse()
+    _pulse.clear()
     return None
 
   plan = sm["starpilotPlan"]
@@ -129,7 +105,7 @@ def _get_slc_state():
   unconfirmed_valid = plan.unconfirmedSlcSpeedLimit > 1
 
   if not show_slc:
-    _reset_pulse()
+    _pulse.clear()
     return None
 
   speed_conversion = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH

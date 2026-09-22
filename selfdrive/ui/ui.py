@@ -45,7 +45,7 @@ def _stall_context() -> dict[str, object]:
 
 def main():
   cores = {5, }
-  config_realtime_process(0, Priority.CTRL_HIGH)
+  config_realtime_process(0, Priority.UI)
 
   stall_monitor = UIStallMonitor("raylib_ui")
   stall_monitor.progress("ui.before_init_window")
