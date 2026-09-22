@@ -169,8 +169,10 @@ class CarController(CarControllerBase):
         CS.engagement.pedal_speed_kph = 0.0
 
     if self.frame % 2 == 0:
+      requested_angle = float(np.clip(actuators.steeringAngleDeg,
+                                       CS.out.steeringAngleDeg - 20., CS.out.steeringAngleDeg + 20.))
       self.apply_angle_last = apply_steer_angle_limits_vm(
-        actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
+        requested_angle, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
         lat_active, CarControllerParams, self.VM,
       )
       cntr = (self.frame // 2) % 16
