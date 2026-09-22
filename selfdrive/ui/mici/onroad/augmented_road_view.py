@@ -565,6 +565,8 @@ class StandstillTimerOverlay:
 
 
 class AugmentedRoadView(CameraView):
+  _use_roi_upload = True
+
   def __init__(self, bookmark_callback=None, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_ROAD):
     super().__init__("camerad", stream_type)
     self._bookmark_callback = bookmark_callback
