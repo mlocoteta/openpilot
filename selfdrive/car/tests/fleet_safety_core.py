@@ -167,7 +167,8 @@ class TxAudit:
     for i, r in enumerate(records):
       if r.failure and len(failures) < failure_limit:
         failures.append({"index": i, "addr": r.addr, "bus": r.bus, "data_hex": r.data.hex(), "timestamp_ns": r.timestamp_ns,
-                         "scenario": r.scenario, "reason": r.failure})
+                         "scenario": r.scenario, "reason": r.failure,
+                         "permissions": r.permissions.label, "requested_mode": r.requested_mode})
     permissions = [r.permissions.label for r in records]
     requested = [r.requested_mode for r in records]
 

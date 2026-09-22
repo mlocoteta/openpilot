@@ -80,7 +80,7 @@ class TestEffectiveSafetyConfigs(unittest.TestCase):
                            (params(), params([config(1, -1)]), {}),
                            (params(alternative=65535), params(), {}),
                            (params(), params(), {"panda_count": -1})):
-      with self.subTest(cp=cp, fp=fp, kwargs=kwargs), self.assertRaises(ValueError):
+      with self.subTest(case=repr((cp, fp, kwargs))), self.assertRaises(ValueError):
         effective_safety_configs(cp, fp, **kwargs)
 
 
