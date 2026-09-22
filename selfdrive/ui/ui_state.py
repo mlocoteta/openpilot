@@ -112,6 +112,7 @@ class UIState:
     self.switchback_mode_enabled: bool = False
     self.traffic_mode_enabled: bool = False
     self.conditional_status: int = 0
+    self._last_starpilot_toggles: str = ""
     self.starpilot_toggles: dict = {
       "debug_mode": False,
       "driver_camera_in_reverse": False,
@@ -236,11 +237,12 @@ class UIState:
     if self.sm.updated["starpilotPlan"]:
       plan = self.sm["starpilotPlan"]
       toggles_str = plan.starpilotToggles
-      if toggles_str:
+      if toggles_str and toggles_str != self._last_starpilot_toggles:
         try:
           parsed = json.loads(toggles_str)
           if isinstance(parsed, dict):
             self.starpilot_toggles.update(parsed)
+            self._last_starpilot_toggles = toggles_str
         except Exception as e:
           cloudlog.warning(f"Error parsing starpilot_toggles: {e}")
 

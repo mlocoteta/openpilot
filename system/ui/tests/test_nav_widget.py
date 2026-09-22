@@ -2,8 +2,9 @@ import pyray as rl
 import pytest
 
 from openpilot.system.ui.lib.application import MouseEvent, MousePos, gui_app
+from openpilot.common.filter_simple import BounceFilter
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.nav_widget import NavWidget
+from openpilot.system.ui.widgets.nav_widget import NavBar, NavWidget, NAV_BAR_MARGIN, NAV_BAR_HEIGHT
 
 
 class NavScreen(NavWidget):
@@ -25,6 +26,8 @@ def viewport():
 def screen(monkeypatch, viewport):
   monkeypatch.setattr(rl, "draw_rectangle_rec", lambda *_: None)
   monkeypatch.setattr(rl, "get_time", lambda: 10.0)
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / 60)
+  monkeypatch.setattr(gui_app, "_target_fps", 60)
   monkeypatch.setattr(gui_app, "_show_touches", False)
   monkeypatch.setattr(gui_app, "_mouse_events", [])
   screen = NavScreen()
@@ -126,3 +129,93 @@ def test_programmatic_dismiss_uncovers_background_before_first_moving_frame(scre
   assert not screen.covers_background(viewport)
   screen.render(viewport)
   assert screen.rect.y > 0
+
+
+@pytest.mark.parametrize("fps", [20, 30, 60])
+def test_show_animation_duration_tracks_elapsed_time(monkeypatch, screen, viewport, fps):
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / fps)
+  shown = []
+  screen.set_shown_callback(lambda: shown.append(True))
+  screen.show_event()
+  for _frames in range(1, fps * 3):
+    screen.render(viewport)
+    if screen.covers_background(viewport):
+      break
+
+  assert screen.covers_background(viewport)
+  assert screen._y_pos_filter.x == screen._y_pos_filter.velocity.x == 0
+  assert _frames / fps == pytest.approx(35 / 60, abs=1 / fps)
+  assert shown == [True]
+
+
+@pytest.mark.parametrize("fps", [20, 30, 60])
+def test_dismiss_animation_duration_tracks_elapsed_time(monkeypatch, screen, viewport, fps):
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / fps)
+  popped, dismissed, backed = [], [], []
+  monkeypatch.setattr(gui_app, "pop_widget", lambda: popped.append(True))
+  screen.set_back_callback(lambda: backed.append(True))
+  screen.dismiss(lambda: dismissed.append(True))
+  for _frames in range(1, fps * 3):
+    screen.render(viewport)
+    if popped:
+      break
+
+  assert _frames / fps == pytest.approx(13 / 60, abs=1 / fps)
+  assert popped == dismissed == [True]
+  assert not backed
+
+
+def test_show_animation_retains_original_sixty_fps_motion(screen):
+  reference = BounceFilter(gui_app.height, 0.1, 1 / 60, bounce=1)
+  screen.show_event()
+  for _ in range(20):
+    reference.update(0.0)
+    screen._update_state()
+    assert screen._y_pos_filter.x == pytest.approx(reference.x)
+    assert screen._y_pos_filter.velocity.x == pytest.approx(reference.velocity.x)
+
+
+@pytest.mark.parametrize("fps", [20, 30, 60])
+def test_navigation_bar_fade_tracks_elapsed_time(monkeypatch, screen, fps):
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / fps)
+  monkeypatch.setattr(rl, "draw_rectangle_rounded", lambda *_: None)
+  monkeypatch.setattr(rl, "draw_rectangle_rounded_lines_ex", lambda *_: None)
+  bar = NavBar()
+  bar.set_alpha(0.0)
+  for _ in range(fps // 2):
+    bar._render(bar.rect)
+  assert bar._alpha_filter.x == pytest.approx((1 - bar._alpha_filter.alpha) ** 30)
+
+
+@pytest.mark.parametrize("fps", [20, 30, 60])
+def test_navigation_bar_slide_tracks_elapsed_time(monkeypatch, screen, viewport, fps):
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / fps)
+  screen._nav_bar_y_filter.x = -NAV_BAR_MARGIN - NAV_BAR_HEIGHT
+  for _ in range(fps // 2):
+    screen.render(viewport)
+  remaining = (1 - screen._nav_bar_y_filter.alpha) ** 30
+  assert screen._nav_bar_y_filter.x == pytest.approx(NAV_BAR_MARGIN - (2 * NAV_BAR_MARGIN + NAV_BAR_HEIGHT) * remaining)
+
+
+def test_long_frame_uses_bounded_spring_steps(monkeypatch, screen):
+  screen.show_event()
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 0.1)
+  screen._update_state()
+  expected = screen._y_pos_filter.x, screen._y_pos_filter.velocity.x
+
+  screen.show_event()
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 5.0)
+  screen._update_state()
+  assert (screen._y_pos_filter.x, screen._y_pos_filter.velocity.x) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("elapsed", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_frame_duration_uses_default_step(monkeypatch, screen, elapsed):
+  screen.show_event()
+  screen._update_state()
+  expected = screen._y_pos_filter.x, screen._y_pos_filter.velocity.x
+
+  screen.show_event()
+  monkeypatch.setattr(rl, "get_frame_time", lambda: elapsed)
+  screen._update_state()
+  assert (screen._y_pos_filter.x, screen._y_pos_filter.velocity.x) == pytest.approx(expected)
