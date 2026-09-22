@@ -830,7 +830,7 @@ class CarController(CarControllerBase):
       pedal_ready = CS.ray_pedal_valid and CS.ray_pedal_state == 0
       pedal_active = (CC.longActive and pedal_ready and not CC.cruiseControl.override and
                       not CS.out.gasPressed and not CS.out.brakePressed and
-                      not CS.out.cruiseState.enabled and CS.out.vEgo >= self.CP.minEnableSpeed)
+                      not CS.out.cruiseState.enabled)
       if pedal_active:
         target = float(np.clip(accel / CarControllerParams.ACCEL_MAX * RAY_PEDAL_COMMAND_CAP,
                                0.0, RAY_PEDAL_COMMAND_CAP))

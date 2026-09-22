@@ -32,7 +32,7 @@ def test_ray_pedal_fingerprint_isolation(candidate, fingerprint, has_pedal):
   if has_pedal:
     assert not CP.pcmCruise
     assert CP.safetyConfigs[-1].safetyParam == 0x9405
-    assert CP.minEnableSpeed == 5.0
+    assert CP.minEnableSpeed == -1.0
     assert not CP.autoResumeSng
     FPCP = CarInterface.get_starpilot_params(candidate, fingerprint, [], CP, SimpleNamespace())
     assert FPCP.canUsePedal
@@ -128,13 +128,14 @@ def test_ray_without_pedal_keeps_native_gas_detection():
   assert ret.gasPressed
 
 
-def test_ray_controller_heartbeats_and_only_actuates_when_ready():
+@pytest.mark.parametrize("speed", [0.0, 0.1, 1.0, 4.9, 5.0, 12.0])
+def test_ray_controller_heartbeats_and_only_actuates_when_ready(speed):
   CP = CarInterface.get_params(CAR.KIA_RAY_EV, ray_fingerprint(), [], False, False, False, None)
   controller = CarController(DBC[CP.carFingerprint], CP)
   parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS11", 0), ("CLU11", 0)], 0)
   CS = SimpleNamespace(
     lkas11=parser.vl["LKAS11"], clu11=parser.vl["CLU11"],
-    out=SimpleNamespace(vEgo=12.0, gasPressed=False, brakePressed=False,
+    out=SimpleNamespace(vEgo=speed, gasPressed=False, brakePressed=False,
                         cruiseState=SimpleNamespace(enabled=False)),
     ray_pedal_valid=True, ray_pedal_state=5, is_metric=True,
   )
@@ -168,6 +169,34 @@ def test_ray_controller_heartbeats_and_only_actuates_when_ready():
                                         hud, actuators, CS, CC, 2, 0)
   assert next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)[:4] == bytes(4)
   assert any(addr == 0x4F1 and bus == 0 for addr, _, bus in messages)  # cancel stock CC
+
+  CS.out.cruiseState.enabled = False
+  CS.out.brakePressed = True
+  assert pedal_msg(2.0, 20)[:4] == bytes(4)
+  CS.out.brakePressed = False
+  assert pedal_msg(2.0, 24)[4] & 0x80
+  assert controller._ray_pedal_gas_last == pytest.approx(0.012)
+  assert pedal_msg(2.0, 28)[4] & 0x80
+  assert controller._ray_pedal_gas_last == pytest.approx(0.024)
+  CS.out.brakePressed = True
+  assert pedal_msg(2.0, 32)[:4] == bytes(4)
+  assert controller._ray_pedal_gas_last == 0.0
+  CS.out.brakePressed = False
+  assert pedal_msg(2.0, 36)[4] & 0x80
+  assert controller._ray_pedal_gas_last == pytest.approx(0.012)
+
+  CC.longActive = False
+  assert pedal_msg(2.0, 40)[:4] == bytes(4)
+  CC.longActive = True
+  CC.cruiseControl.override = True
+  assert pedal_msg(2.0, 44)[:4] == bytes(4)
+  CC.cruiseControl.override = False
+  CS.ray_pedal_valid = False
+  assert pedal_msg(2.0, 48)[:4] == bytes(4)
+  CS.ray_pedal_valid = True
+  for fault in range(1, 6):
+    CS.ray_pedal_state = fault
+    assert pedal_msg(2.0, 48 + 4 * fault)[:4] == bytes(4)
 
 
 @pytest.mark.parametrize("candidate", [CAR.KIA_RAY_EV, CAR.HYUNDAI_KONA_EV_NON_SCC])

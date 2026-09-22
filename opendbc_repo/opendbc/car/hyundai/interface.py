@@ -313,7 +313,7 @@ class CarInterface(CarInterfaceBase):
       ret.pcmCruise = False
       ret.radarUnavailable = True
       ret.autoResumeSng = False
-      ret.minEnableSpeed = 5.0  # pedal-only: no commanded friction brake/standstill hold
+      ret.minEnableSpeed = -1.0
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.LONG.value
 
     # Car specific configuration overrides
