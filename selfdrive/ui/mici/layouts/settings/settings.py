@@ -1,16 +1,14 @@
+from functools import cached_property
+
 from openpilot.common.params import Params
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigMultiToggle
 from openpilot.selfdrive.ui.mici.layouts.settings.toggles import TogglesLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.network.network_layout import NetworkLayoutMici
-from openpilot.selfdrive.ui.mici.layouts.settings.bluetooth import BluetoothLayoutMici
-from openpilot.selfdrive.ui.mici.layouts.settings.vehicle import VehicleLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.device import DeviceLayoutMici, PairBigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.developer import DeveloperLayoutMici
-from openpilot.selfdrive.ui.mici.layouts.settings.software import SoftwareLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.driving_model import DrivingModelBigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyBigButton
-from openpilot.selfdrive.ui.mici.layouts.settings.visuals import VisualsLayoutMici
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.wifi_manager import WifiManager
 
@@ -61,37 +59,32 @@ class SettingsLayout(NavScroller):
     super().__init__()
     self._params = Params()
 
-    toggles_panel = TogglesLayoutMici()
+    self._toggles_panel = TogglesLayoutMici()
     toggles_btn = SettingsBigButton("toggles", "", gui_app.texture("icons_mici/settings.png", 64, 64))
-    toggles_btn.set_click_callback(lambda: gui_app.push_widget(toggles_panel))
+    toggles_btn.set_click_callback(lambda: gui_app.push_widget(self._toggles_panel))
 
-    network_panel = NetworkLayoutMici(wifi_manager)
+    self._network_panel = NetworkLayoutMici(wifi_manager)
     network_btn = SettingsBigButton("network", "", gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 76, 56))
-    network_btn.set_click_callback(lambda: gui_app.push_widget(network_panel))
+    network_btn.set_click_callback(lambda: gui_app.push_widget(self._network_panel))
 
-    bluetooth_panel = BluetoothLayoutMici()
     bluetooth_btn = SettingsBigButton("bluetooth", "", gui_app.texture("icons_mici/settings/bluetooth.png", 64, 64))
-    bluetooth_btn.set_click_callback(lambda: gui_app.push_widget(bluetooth_panel))
+    bluetooth_btn.set_click_callback(lambda: gui_app.push_widget(self._bluetooth_panel))
 
-    vehicle_panel = VehicleLayoutMici()
     vehicle_btn = SettingsBigButton("vehicle", "", gui_app.texture("icons_mici/settings/vehicle.png", 64, 57))
-    vehicle_btn.set_click_callback(lambda: gui_app.push_widget(vehicle_panel))
+    vehicle_btn.set_click_callback(lambda: gui_app.push_widget(self._vehicle_panel))
 
-    visuals_panel = VisualsLayoutMici()
     visuals_btn = SettingsBigButton("visuals", "", gui_app.texture("icons_mici/settings/device/cameras.png", 64, 64))
-    visuals_btn.set_click_callback(lambda: gui_app.push_widget(visuals_panel))
+    visuals_btn.set_click_callback(lambda: gui_app.push_widget(self._visuals_panel))
 
-    device_panel = DeviceLayoutMici()
     device_btn = SettingsBigButton("device", "", gui_app.texture("icons_mici/settings/device_icon.png", 72, 58))
-    device_btn.set_click_callback(lambda: gui_app.push_widget(device_panel))
+    device_btn.set_click_callback(lambda: gui_app.push_widget(self._device_panel))
 
-    software_panel = SoftwareLayoutMici()
     software_btn = SettingsBigButton("software", "", gui_app.texture("icons_mici/settings/device/update.png", 64, 75))
-    software_btn.set_click_callback(lambda: gui_app.push_widget(software_panel))
+    software_btn.set_click_callback(lambda: gui_app.push_widget(self._software_panel))
 
-    developer_panel = DeveloperLayoutMici()
+    self._developer_panel = DeveloperLayoutMici()
     developer_btn = SettingsBigButton("developer", "", gui_app.texture("icons_mici/settings/developer_icon.png", 64, 60))
-    developer_btn.set_click_callback(lambda: gui_app.push_widget(developer_panel))
+    developer_btn.set_click_callback(lambda: gui_app.push_widget(self._developer_panel))
 
     self._force_drive_state_btn = ForceDriveStateBigButton()
     self._driving_model_btn = DrivingModelBigButton()
@@ -114,6 +107,30 @@ class SettingsLayout(NavScroller):
     ])
 
     self._font_medium = gui_app.font(FontWeight.MEDIUM)
+
+  @cached_property
+  def _bluetooth_panel(self):
+    from openpilot.selfdrive.ui.mici.layouts.settings.bluetooth import BluetoothLayoutMici
+    return BluetoothLayoutMici()
+
+  @cached_property
+  def _vehicle_panel(self):
+    from openpilot.selfdrive.ui.mici.layouts.settings.vehicle import VehicleLayoutMici
+    return VehicleLayoutMici()
+
+  @cached_property
+  def _visuals_panel(self):
+    from openpilot.selfdrive.ui.mici.layouts.settings.visuals import VisualsLayoutMici
+    return VisualsLayoutMici()
+
+  @cached_property
+  def _device_panel(self):
+    return DeviceLayoutMici()
+
+  @cached_property
+  def _software_panel(self):
+    from openpilot.selfdrive.ui.mici.layouts.settings.software import SoftwareLayoutMici
+    return SoftwareLayoutMici()
 
   def show_event(self):
     super().show_event()

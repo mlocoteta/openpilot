@@ -91,26 +91,24 @@ def _get_openpilot_root() -> Path:
   return Path(__file__).resolve().parents[5]
 
 
-def _extract_fingerprint_models_for_make(make_key: str) -> list[tuple[str, str, str]]:
-  source_make = FINGERPRINT_MAKE_TO_VALUES_DIR.get(make_key, make_key)
-  root = _get_openpilot_root()
+def _extract_fingerprint_models_for_source(source_make: str, root: Path) -> dict[str, list[tuple[str, str, str]]]:
   values_candidates = (
     root / "opendbc" / "car" / source_make / "values.py",
     root / "selfdrive" / "car" / source_make / "values.py",
   )
   values_path = next((path for path in values_candidates if path.is_file()), None)
   if values_path is None:
-    return []
+    return {}
 
   try:
     content = values_path.read_text(encoding="utf-8", errors="replace")
   except Exception:
-    return []
+    return {}
 
   content = re.sub(r'#[^\n]*', "", content)
   content = re.sub(r'footnotes=\[[^\]]*\],\s*', "", content)
 
-  models: list[tuple[str, str, str]] = []
+  models: dict[str, list[tuple[str, str, str]]] = {}
   seen: set[tuple[str, str]] = set()
 
   for platform_match in _FINGERPRINT_PLATFORM_RE.finditer(content):
@@ -125,18 +123,21 @@ def _extract_fingerprint_models_for_make(make_key: str) -> list[tuple[str, str, 
         continue
 
       make_label = car_name.split(" ", 1)[0]
-      if make_label.lower() != make_key:
-        continue
-
       dedupe_key = (car_name, platform_name)
       if dedupe_key in seen:
         continue
 
       seen.add(dedupe_key)
-      models.append((platform_name, car_name, make_label))
+      models.setdefault(make_label.lower(), []).append((platform_name, car_name, make_label))
 
-  models.sort(key=lambda entry: entry[1].lower())
+  for entries in models.values():
+    entries.sort(key=lambda entry: entry[1].lower())
   return models
+
+
+def _extract_fingerprint_models_for_make(make_key: str) -> list[tuple[str, str, str]]:
+  source_make = FINGERPRINT_MAKE_TO_VALUES_DIR.get(make_key, make_key)
+  return _extract_fingerprint_models_for_source(source_make, _get_openpilot_root()).get(make_key, [])
 
 
 @lru_cache(maxsize=1)
@@ -151,8 +152,13 @@ def get_fingerprint_catalog() -> tuple[
   model_by_value: dict[str, FingerprintModelOption] = {}
   make_by_model: dict[str, str] = {}
 
+  root = _get_openpilot_root()
+  sources: dict[str, dict[str, list[tuple[str, str, str]]]] = {}
   for make_key in sorted(FINGERPRINT_MAKE_TO_VALUES_DIR):
-    entries = _extract_fingerprint_models_for_make(make_key)
+    source_make = FINGERPRINT_MAKE_TO_VALUES_DIR[make_key]
+    if source_make not in sources:
+      sources[source_make] = _extract_fingerprint_models_for_source(source_make, root)
+    entries = sources[source_make].get(make_key, [])
     if not entries:
       continue
 
