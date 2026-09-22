@@ -101,3 +101,37 @@ def test_changed_transform_invalidates_geometry_and_copies_input(renderer):
   np.testing.assert_array_equal(renderer._car_space_transform, transform)
   transform[0, 0] += 1
   assert renderer._car_space_transform[0, 0] != transform[0, 0]
+
+
+@pytest.mark.parametrize('lengths', [(33,) * 6, (0, 1, 7, 33, 15, 100), (0,) * 6, ()])
+@pytest.mark.parametrize('max_idx', [-1, 0, 15, 100])
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+def test_batched_projection_preserves_each_lane(renderer, lengths, max_idx, dtype):
+  rng = np.random.default_rng(67)
+  lines = [np.column_stack((np.linspace(-5, 110, length), rng.normal(0, 6, length), rng.normal(0, 1, length))).astype(dtype)
+           for length in lengths]
+  widths = [0.08 + i * 0.06 for i in range(len(lines))]
+
+  actual = renderer._map_lines_to_polygons(lines, widths, max_idx)
+
+  assert len(actual) == len(lines)
+  for line, width, polygon in zip(lines, widths, actual, strict=True):
+    assert polygon.dtype == np.float32
+    assert polygon.flags.c_contiguous
+    expected = reference_polygon(renderer, line, width, 0, max_idx, True)
+    np.testing.assert_allclose(polygon, expected, rtol=1e-5, atol=1e-3)
+
+
+def test_batched_projection_clips_lines_independently(renderer):
+  renderer._clip_region = SimpleNamespace(x=0, y=0, width=100, height=100)
+  renderer._car_space_transform = np.eye(3, dtype=np.float32)
+  lines = [np.array([[0, 0, 0], [20, 50, 1], [30, 99, 1]], dtype=np.float32),
+           np.empty((0, 3), dtype=np.float32),
+           np.array([[-1, 10, 1], [40, 80, 1], [50, 10, 1]], dtype=np.float32)]
+
+  with np.errstate(divide='raise', invalid='raise'):
+    polygons = renderer._map_lines_to_polygons(lines, [2, 1, 15], 100)
+
+  np.testing.assert_array_equal(polygons[0], [[20, 48], [20, 52]])
+  assert polygons[1].shape == (0, 2)
+  np.testing.assert_array_equal(polygons[2], [[40, 65], [40, 95]])

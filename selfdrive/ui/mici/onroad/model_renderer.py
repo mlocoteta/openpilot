@@ -247,20 +247,13 @@ class ModelRenderer(Widget):
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
-    # Update lane lines using raw points
-    line_width_factor = 0.12
-    for i, lane_line in enumerate(self._lane_lines):
-      if i in (1, 2):
-        line_width_factor = 0.16
-      line_width = lane_line_width if lane_line_width is not None else line_width_factor
-      lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, line_width * self._lane_line_probs[i], 0.0, max_idx
-      )
-
-    # Update road edges using raw points
-    edge_width = road_edge_width if road_edge_width is not None else line_width_factor
-    for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, edge_width, 0.0, max_idx)
+    line_widths = [0.12, 0.16, 0.16, 0.16] if lane_line_width is None else [lane_line_width] * 4
+    widths = [width * probability for width, probability in zip(line_widths, self._lane_line_probs, strict=True)]
+    widths.extend([0.16 if road_edge_width is None else road_edge_width] * len(self._road_edges))
+    lines = [*self._lane_lines, *self._road_edges]
+    polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, max_idx)
+    for line, polygon in zip(lines, polygons, strict=True):
+      line.projected_points = polygon
 
     # Update path using raw points
     if lead and lead.status:
@@ -586,7 +579,39 @@ class ModelRenderer(Widget):
       return np.empty((0, 2), dtype=np.float32)
 
     offsets = np.array([[0, -y_off, z_off], [0, y_off, z_off]], dtype=np.float32)
-    points_3d = points[None, :, :] + offsets[:, None, :]
+    proj, valid = self._project_points(points, offsets[:, None, :])
+
+    screen = proj[:2, :, valid]
+    if not allow_invert:
+      keep = screen[1, 0] == np.minimum.accumulate(screen[1, 0])
+      screen = screen[:, :, keep]
+
+    return np.concatenate((screen[:, 0].T, screen[:, 1, ::-1].T)).astype(np.float32, copy=False)
+
+  def _map_lines_to_polygons(self, lines: list[np.ndarray], y_offsets: list[float], max_idx: int) -> list[np.ndarray]:
+    points = [line[:max_idx + 1] for line in lines]
+    counts = [len(line) for line in points]
+    total = sum(counts)
+    if total == 0:
+      return [np.empty((0, 2), dtype=np.float32) for _ in lines]
+
+    offsets = np.zeros((2, total, 3), dtype=np.float32)
+    offsets[1, :, 1] = np.repeat(y_offsets, counts)
+    offsets[0, :, 1] = -offsets[1, :, 1]
+    proj, valid = self._project_points(np.concatenate(points), offsets)
+
+    polygons = []
+    start = 0
+    for count in counts:
+      end = start + count
+      screen = proj[:2, :, start:end][:, :, valid[start:end]]
+      polygons.append(np.concatenate((screen[:, 0].T, screen[:, 1, ::-1].T)).astype(np.float32, copy=False))
+      start = end
+    return polygons
+
+  def _project_points(self, points: np.ndarray, offsets: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    n = len(points)
+    points_3d = points[None, :, :] + offsets
     proj = (self._car_space_transform @ points_3d.reshape(2 * n, 3).T).reshape(3, 2, n)
 
     valid = (points[:, 0] >= 0) & (np.abs(proj[2, 0]) >= 1e-6) & (np.abs(proj[2, 1]) >= 1e-6)
@@ -598,13 +623,7 @@ class ModelRenderer(Widget):
     for side in (0, 1):
       valid &= ((proj[0, side] >= x_min) & (proj[0, side] <= x_max) &
                 (proj[1, side] >= y_min) & (proj[1, side] <= y_max))
-
-    screen = proj[:2, :, valid]
-    if not allow_invert:
-      keep = screen[1, 0] == np.minimum.accumulate(screen[1, 0])
-      screen = screen[:, :, keep]
-
-    return np.concatenate((screen[:, 0].T, screen[:, 1, ::-1].T)).astype(np.float32, copy=False)
+    return proj, valid
 
   @staticmethod
   def _hsla_to_color(h, s, l, a):
