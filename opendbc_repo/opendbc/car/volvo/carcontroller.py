@@ -170,8 +170,6 @@ class CarController(CarControllerBase):
           # convention = driver pushing right → yields right authority
           # (LOOSELY/+ arm), retains left (INV/- arm).
           # Yield arm scales with |drv| above OVERRIDE_THRESH — strong presses
-          # (potholes, hard corrections) cross past zero so EPS hands the wheel
-          # to the driver in their direction.
           excess = max(0.0, self.lca_auth_drv_mag_filt - float(P.LCA_AUTH_OVERRIDE_ENTER))
           yield_signed = float(P.LCA_AUTH_YIELD_BASE) - P.LCA_AUTH_YIELD_SLOPE * excess
           yield_signed = max(float(P.LCA_AUTH_YIELD_MIN), min(yield_signed, float(P.LCA_AUTH_YIELD_BASE)))

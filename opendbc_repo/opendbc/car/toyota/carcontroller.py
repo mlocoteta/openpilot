@@ -77,12 +77,8 @@ def should_bypass_toyota_long_pid(CP, starpilot_toggles=None) -> bool:
   ) or highlander_sdsu)
 
 
-def get_toyota_lat_active(car_fingerprint, requested_active: bool, steering_torque: float,
-                          steering_pressed: bool) -> bool:
-  if not requested_active or abs(steering_torque) >= MAX_USER_TORQUE:
-    return False
-
-  return not (car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 and steering_pressed)
+def get_toyota_lat_active(requested_active: bool, steering_torque: float) -> bool:
+  return requested_active and abs(steering_torque) < MAX_USER_TORQUE
 
 
 def supports_toyota_auto_hold(CP, auto_hold_enabled: bool) -> bool:
@@ -343,8 +339,7 @@ class CarController(CarControllerBase):
     stopping = actuators.longControlState == LongCtrlState.stopping
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
-    lat_active = get_toyota_lat_active(self.CP.carFingerprint, CC.latActive,
-                                       CS.out.steeringTorque, CS.out.steeringPressed)
+    lat_active = get_toyota_lat_active(CC.latActive, CS.out.steeringTorque)
 
     if len(CC.orientationNED) == 3:
       self.pitch.update(CC.orientationNED[1])

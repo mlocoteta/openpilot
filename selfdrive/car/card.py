@@ -363,7 +363,14 @@ class Car:
     elif any(be.type in (ButtonType.decelCruise, ButtonType.setCruise) for be in CS.buttonEvents):
       self.resume_prev_button = False
 
-    FPCS = self.starpilot_card.update(CS, FPCS, self.sm, self.starpilot_toggles)
+    preap_authorized = False
+    if self.CP.carFingerprint == "TESLA_MODEL_S_PREAP":
+      from opendbc.car.tesla.preap.lateral import preap_lateral_authorized
+      preap_authorized = preap_lateral_authorized(
+        self.CP, self.CI.CS, self.sm['pandaStates'], self.sm.all_checks(['pandaStates']),
+      )
+      self.CI.CS.preap_lateral_authorized = preap_authorized
+    FPCS = self.starpilot_card.update(CS, FPCS, self.sm, self.starpilot_toggles, preap_authorized=preap_authorized)
     return CS, RD, FPCS
 
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None, FPCS: custom.StarPilotCarState):

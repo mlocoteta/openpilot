@@ -8,7 +8,9 @@ CONTROLLER_ACTION_FORCE_COAST = "__starpilot_controller_action__:force_coast"
 CONTROLLER_ACTION_TOGGLE_AOL = "__starpilot_controller_action__:toggle_aol"
 CONTROLLER_ACTION_ENGAGE = "__starpilot_controller_action__:engage_openpilot"
 CONTROLLER_ACTION_DISENGAGE = "__starpilot_controller_action__:disengage_openpilot"
+CONTROLLER_ACTION_SCREEN_OFF = "__starpilot_controller_action__:toggle_screen_off"
 CONTROLLER_ACTION_COUNTERS = {
+  CONTROLLER_ACTION_SCREEN_OFF: "ScreenOffToggleCounter",
   CONTROLLER_ACTION_BOOKMARK: "WheelButtonBookmarkCounter",
   CONTROLLER_ACTION_PULSE_AND_GLIDE: "WheelControlPulseGlideCounter",
   CONTROLLER_ACTION_FORCE_COAST: "WheelControlForceCoastCounter",
@@ -17,6 +19,12 @@ CONTROLLER_ACTION_COUNTERS = {
   CONTROLLER_ACTION_DISENGAGE: "WheelControlDisengageCounter",
 }
 CONTROLLER_ACTION_OPTIONS = (
+  {
+    "key": CONTROLLER_ACTION_SCREEN_OFF,
+    "label": "Toggle Screen Off",
+    "description": "Turns only the display off while driving. Press again, touch the screen, or go offroad to wake it. Driving controls stay active.",
+    "section": "Controller Actions",
+  },
   {
     "key": CONTROLLER_ACTION_CYCLE_PERSONALITY,
     "label": "Cycle Driving Personality",

@@ -1591,6 +1591,7 @@ class StarPilotVariables:
     toggle.subaru_stop_start_off = self.get_value(
       "SubaruStopStartOff", condition=toggle.car_model in SUBARU_STOP_START_CARS,
     )
+    toggle.subaru_avh_on = self.get_value("SubaruAvhStartup", condition=toggle.car_model == "SUBARU_LEGACY_2025")
     toggle.jeep_brake_hold = self.get_value(
       "JeepBrakeHold",
       condition=toggle.car_make == "chrysler" and toggle.car_model in CHRYSLER_JEEPS,

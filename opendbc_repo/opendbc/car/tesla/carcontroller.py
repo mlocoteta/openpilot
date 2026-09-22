@@ -153,7 +153,7 @@ class CarController(CarControllerBase):
   def _update_preap(self, CC, CS):
     actuators = CC.actuators
     can_sends = []
-    lat_active = CC.latActive and CS.hands_on_level < 3
+    lat_active = CC.latActive and CS.hands_on_level < 3 and getattr(CS, "preap_lateral_authorized", False)
 
     if CC.cruiseControl.cancel and CS.cruiseEnabled:
       CS.cruiseEnabled = False

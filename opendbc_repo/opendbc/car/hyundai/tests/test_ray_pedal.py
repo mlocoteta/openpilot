@@ -168,3 +168,49 @@ def test_ray_controller_heartbeats_and_only_actuates_when_ready():
                                         hud, actuators, CS, CC, 2, 0)
   assert next(dat for addr, dat, bus in messages if addr == 0x200 and bus == 0)[:4] == bytes(4)
   assert any(addr == 0x4F1 and bus == 0 for addr, _, bus in messages)  # cancel stock CC
+
+
+@pytest.mark.parametrize("candidate", [CAR.KIA_RAY_EV, CAR.HYUNDAI_KONA_EV_NON_SCC])
+def test_ray_stock_cruise_cancellation_survives_accelerator_override(candidate):
+  CP = CarInterface.get_params(candidate, ray_fingerprint(), [], False, False, False, None)
+  controller = CarController(DBC[CP.carFingerprint], CP)
+  parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS11", 0), ("CLU11", 0)], 0)
+  CS = SimpleNamespace(
+    lkas11=parser.vl["LKAS11"], clu11=parser.vl["CLU11"],
+    out=SimpleNamespace(vEgo=12.0, gasPressed=True, brakePressed=False,
+                        cruiseState=SimpleNamespace(enabled=True)),
+    ray_pedal_valid=True, ray_pedal_state=0, is_metric=True,
+  )
+  CC = SimpleNamespace(
+    enabled=True, longActive=False, latActive=True,
+    cruiseControl=SimpleNamespace(cancel=False, resume=False, override=True),
+  )
+  hud = SimpleNamespace(
+    visualAlert=CarControl.HUDControl.VisualAlert.none,
+    leftLaneVisible=True, rightLaneVisible=True, leftLaneDepart=False, rightLaneDepart=False,
+  )
+  actuators = SimpleNamespace(longControlState=CarControl.Actuators.LongControlState.off)
+  controller._create_can_redneck_button_messages = lambda _: []
+
+  def messages(frame):
+    controller.frame = frame
+    return controller.create_can_msgs(True, 0, False, 0.0, 2.0, False,
+                                      hud, actuators, CS, CC, 2, 0)
+
+  def cancel_frames(msgs):
+    return [dat for addr, dat, bus in msgs if addr == 0x4F1 and bus == 0 and dat[0] & 7 == 4]
+
+  msgs = messages(20)
+  assert bool(cancel_frames(msgs)) is (candidate == CAR.KIA_RAY_EV)
+  if candidate == CAR.KIA_RAY_EV:
+    pedal = next(dat for addr, dat, bus in msgs if addr == 0x200 and bus == 0)
+    assert pedal[:4] == bytes(4)
+    assert not (pedal[4] & 0x80)
+    assert not cancel_frames(messages(24))  # retain the existing cancellation rate limit
+    assert cancel_frames(messages(32))
+
+  CS.out.cruiseState.enabled = False
+  assert not cancel_frames(messages(44))
+  CS.out.cruiseState.enabled = True
+  CC.enabled = False
+  assert not cancel_frames(messages(56))  # AOL alone must not cancel native cruise

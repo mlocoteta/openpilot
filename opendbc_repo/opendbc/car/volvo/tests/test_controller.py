@@ -1,11 +1,14 @@
 from collections import defaultdict
 from types import SimpleNamespace
 
+import pytest
+
 from opendbc.car.volvo.carcontroller import CarController
 from opendbc.car.volvo.helpers import checksum_lca_5_message
 from opendbc.car.volvo.interface import CarInterface
 from opendbc.car.volvo.values import CAR, DBC
 from opendbc.car.volvo.volvocan import create_c1_checksum
+from opendbc.safety.tests.libsafety import libsafety_py
 
 
 def _zero_message():
@@ -68,6 +71,35 @@ def test_controller_relays_stock_lca5_angle_when_inactive():
   if raw & (1 << 14):
     raw -= 1 << 15
   assert abs(raw * 0.05596 - 12.0) < 0.1
+
+
+@pytest.mark.parametrize("fingerprint", [CAR.POLESTAR_2, CAR.VOLVO_XC40_RECHARGE])
+@pytest.mark.parametrize("driver_torque", [20.0, -20.0, 128.0, -127.0])
+def test_override_lca_stream_passes_safety_and_recovers(fingerprint, driver_torque):
+  cp = CarInterface.get_non_essential_params(fingerprint)
+  controller = CarController(DBC[cp.carFingerprint], cp)
+  cs = _state()
+  cc = SimpleNamespace(latActive=True, actuators=_Actuators())
+  safety = libsafety_py.libsafety
+  config = cp.safetyConfigs[0]
+  assert safety.set_safety_hooks(config.safetyModel.raw, config.safetyParam) == 0
+  safety.init_tests()
+  safety.set_controls_allowed(True)
+
+  for active, torque in [(True, 0), (True, driver_torque), (True, -driver_torque),
+                        (True, 0), (False, 0), (True, 0)]:
+    cc.latActive = active
+    cs.out.steeringTorque = torque
+    for _ in range(350):
+      _, messages = controller.update(cc, cs, 0, None)
+      address, data, bus = next(msg for msg in messages if msg[0] == 0x58)
+      assert safety.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, data)), (
+        active, torque, controller.frame, controller.lca_auth_pos, controller.lca_auth_neg)
+    if active and torque == 0:
+      assert controller.lca_auth_pos == 614
+      assert controller.lca_auth_neg == -614
+    elif active:
+      assert min(abs(controller.lca_auth_pos), abs(controller.lca_auth_neg)) == 0
 
 
 def _c1_state():

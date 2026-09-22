@@ -486,7 +486,10 @@ class FordLateralController:
         curvature_rate = 0.0
 
     self.curvature_last = float(np.clip(applied, -0.02, 0.02))
-    curvature_rate = float(np.clip(curvature_rate, -0.001024, 0.001023))
+    min_curvature_rate = -0.001024
+    if self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and self.CP.flags & FordFlags.CANFD:
+      min_curvature_rate = -0.001023
+    curvature_rate = float(np.clip(curvature_rate, min_curvature_rate, 0.001023))
     return FordLateralResult(
       curvature=self.curvature_last,
       curvature_rate=curvature_rate,

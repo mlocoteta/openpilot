@@ -7,7 +7,7 @@ from opendbc.can import CANPacker
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import CAR, FordFlags
 from .. import fordcan
-from ..lateral import FordLateralController, HumanTurnDetector
+from ..lateral import FordLateralController, HumanTurnDetector, STEER_DT
 
 
 class FakeSubMaster(dict):
@@ -75,6 +75,51 @@ def test_extended_messages_are_curvature_only(canfd):
 
   assert raw_path_angle == 1000
   assert raw_path_offset == 512
+
+
+@pytest.mark.parametrize("requested_rate", (-0.002, -0.001024, -0.001023, -0.0005, 0.0, 0.0005, 0.001023, 0.002))
+def test_mach_e_canfd_curvature_rate_survives_wire_sign_conversion(controller, monkeypatch, requested_rate):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  speed = 8.0
+  predicted = -0.012
+  controller.curvature_last = predicted
+  controller.desired_curvature_last = predicted
+  controller.curvature_samples.append(predicted - requested_rate * STEER_DT * speed)
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_args: predicted)
+
+  result = controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=speed, curvature=predicted),
+    SimpleNamespace(curvature=predicted))
+  expected = max(-0.001023, min(0.001023, requested_rate))
+  assert result.curvature == pytest.approx(predicted)
+  assert result.curvature_rate == pytest.approx(expected)
+
+  packer = CANPacker("ford_lincoln_base_pt")
+  can_bus = CanBus(SimpleNamespace(flags=FordFlags.CANFD, safetyConfigs=[SimpleNamespace()]))
+  _, data, _ = fordcan.create_lat_ctl2_msg(
+    packer, can_bus, 1, result.ramp_type, result.precision_type,
+    -result.curvature, -result.curvature_rate, 0)
+  decoded_rate = ((data[6] << 3) | (data[7] >> 5)) * 1e-6 - 0.001024
+  assert -decoded_rate == pytest.approx(expected, abs=0.5e-6)
+
+
+@pytest.mark.parametrize("fingerprint,flags", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD),
+  (CAR.FORD_EDGE_MK2, 0),
+))
+def test_mach_e_canfd_rate_bound_preserves_other_paths(controller, monkeypatch, fingerprint, flags):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  controller.desired_curvature_last = -0.012
+  controller.curvature_samples.append(0.0)
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_args: -0.012)
+
+  result = controller.update(
+    SimpleNamespace(latActive=True), car_state(speed=8.0), SimpleNamespace(curvature=-0.012))
+
+  assert result.curvature_rate == pytest.approx(-0.001024)
 
 
 def test_curvature_strategy_uses_polynomial_signals(controller):

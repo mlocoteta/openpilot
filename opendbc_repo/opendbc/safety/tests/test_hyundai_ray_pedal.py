@@ -82,3 +82,19 @@ def test_non_ray_hyundai_ev_keeps_native_driver_gas_detection():
   native_gas = bytes.fromhex("004e008000ae0700")
   assert safety.safety_rx_hook(libsafety_py.make_CANPacket(0x371, 0, native_gas))
   assert safety.get_gas_pressed_prev()
+
+
+@pytest.mark.parametrize("controls_allowed", [False, True])
+def test_ray_native_cruise_cancel_allowed_during_pedal_override(controls_allowed):
+  safety = libsafety_py.libsafety
+  safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0x9405)
+  safety.init_tests()
+  safety.set_controls_allowed(controls_allowed)
+  safety.set_gas_pressed_prev(True)
+  packer = CANPacker("hyundai_can_refresh_generated")
+  addr, dat, bus = packer.make_can_msg("CLU11", 0, {"CF_Clu_CruiseSwState": 4})
+  assert safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, dat))
+
+  pedal_packer = CANPacker("hyundai_kia_ray_pedal")
+  addr, dat, bus = create_gas_interceptor_command(pedal_packer, 0.1, 3)
+  assert not safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, dat))

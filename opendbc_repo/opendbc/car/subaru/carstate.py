@@ -4,8 +4,9 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.subaru.values import DBC, CanBus, SUBARU_REDNECK_CRUISE_CARS, SUBARU_STOP_START_CARS, SubaruFlags
+from opendbc.car.subaru.values import CAR, DBC, CanBus, SUBARU_REDNECK_CRUISE_CARS, SUBARU_STOP_START_CARS, SubaruFlags
 from opendbc.car import CanSignalRateCalculator
+from opendbc.car.subaru.avh import INPUTS as AVH_INPUTS
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -26,6 +27,7 @@ class CarState(CarStateBase):
     self.dashlights_msg = {}
     self.dashlights_dat = b""
     self.stop_start_state = 0
+    self.avh_frames = {}
     self.cruise_buttons_msg = {}
     self.cruise_buttons = {button: 0 for button in SUBARU_CRUISE_BUTTONS}
 
@@ -36,6 +38,9 @@ class CarState(CarStateBase):
     cp_main = can_parsers[Bus.main] if self.CP.flags & SubaruFlags.D_PLATFORM else cp
     cp_angle = cp_main if self.CP.flags & SubaruFlags.D_PLATFORM else cp
     ret = structs.CarState()
+
+    if self.CP.carFingerprint == CAR.SUBARU_LEGACY_2025:
+      self.avh_frames = {a: (cp_alt.ts_nanos[a]["CHECKSUM"] / 1e9, cp_alt.vl_raw[a]) for a in AVH_INPUTS}
 
     if self.CP.carFingerprint in SUBARU_STOP_START_CARS:
       stop_start_cp = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp
@@ -177,11 +182,15 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    avh_messages = [(a, 0) for a in (0x6BB, 0x32B, 0x40, 0x48)] if CP.carFingerprint == CAR.SUBARU_LEGACY_2025 else []
     parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.main_for_cp(CP)),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.camera),
-      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.alt_for_cp(CP))
+      Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], avh_messages, CanBus.alt_for_cp(CP))
     }
     if CP.flags & SubaruFlags.D_PLATFORM:
       parsers[Bus.main] = CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.main)
+    if CP.carFingerprint == CAR.SUBARU_LEGACY_2025:
+      for address in AVH_INPUTS:
+        parsers[Bus.alt].vl[address]
     return parsers

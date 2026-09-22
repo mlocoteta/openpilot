@@ -30,6 +30,11 @@ def test_volvo_aol_is_held_off_until_pscm_sequence_is_validated():
   assert spv.always_on_lateral_available(SimpleNamespace(brand="honda")) is True
 
 
+def test_tesla_aol_capability_includes_preap():
+  for fingerprint in ("TESLA_MODEL_S_PREAP", "TESLA_MODEL_S_HW1", "TESLA_MODEL_X_HW1", "TESLA_MODEL_3", "TESLA_MODEL_Y"):
+    assert spv.always_on_lateral_available(SimpleNamespace(brand="tesla", carFingerprint=fingerprint))
+
+
 def test_explicit_main_cruise_aol_mapping_is_not_disabled_by_longitudinal_gate():
   aol_button = spv.BUTTON_FUNCTIONS["AOL_TOGGLE"]
 
