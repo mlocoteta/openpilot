@@ -1667,6 +1667,20 @@ class TestHyundaiFingerprint:
     assert exact
     assert matches == {candidate}
 
+  def test_staria_2023_australian_route_fw_exact_matches(self):
+    route_fw = {
+      (Ecu.fwdCamera, 0x7c4): b'\xf1\x00US4 MFC  AT AUS RHD 1.00 1.04 99211-CG000 210819',
+      (Ecu.fwdRadar, 0x7d0): b'\xf1\x00US4_ RDR -----      1.00 1.00 99110-CG000         ',
+    }
+    car_fw = [
+      CarParams.CarFw(ecu=ecu, fwVersion=version, address=address, subAddress=0, brand="hyundai")
+      for (ecu, address), version in route_fw.items()
+    ]
+
+    exact, matches = match_fw_to_car(car_fw, "KMFYFX71MPU095311", allow_fuzzy=False, log=False)
+    assert exact
+    assert matches == {CAR.HYUNDAI_STARIA_4TH_GEN}
+
   def test_kona_ev_non_scc_has_no_dedicated_fw_coverage(self):
     assert CAR.HYUNDAI_KONA_EV_NON_SCC not in FW_VERSIONS
 
