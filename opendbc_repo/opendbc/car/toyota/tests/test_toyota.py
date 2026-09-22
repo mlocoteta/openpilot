@@ -12,7 +12,7 @@ from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
                                              get_rav4_interceptor_pedal_scale, \
-                                             get_toyota_lat_active, \
+                                             get_toyota_lat_active, get_toyota_steer_rate_limit, \
                                              MAX_STEER_RATE, MAX_STEER_RATE_FRAMES, MAX_USER_TORQUE, \
                                              limit_interceptor_pcm_accel, \
                                              limit_interceptor_stopping_accel, limit_no_lead_cruise_sign_flip, \
@@ -757,6 +757,23 @@ class TestToyotaCarController:
       )
       requests.append(request)
     assert requests == ([True] * 17 + [False]) * 2
+
+  @pytest.mark.parametrize("candidate", list(CAR))
+  def test_steer_rate_margin_is_corolla_only(self, candidate):
+    expected = 80 if candidate == CAR.TOYOTA_COROLLA_TSS2 else MAX_STEER_RATE
+    assert get_toyota_steer_rate_limit(candidate) == expected
+
+  @pytest.mark.parametrize("direction", [-1, 1])
+  def test_corolla_rate_margin_preserves_request_spacing(self, direction):
+    counter = 0
+    requests = []
+    for rate in [0] * 30 + [90 * direction] * 36 + [0] * 30:
+      counter, request = common_fault_avoidance(
+        abs(rate) >= get_toyota_steer_rate_limit(CAR.TOYOTA_COROLLA_TSS2),
+        get_toyota_lat_active(True, 117 * direction), counter, MAX_STEER_RATE_FRAMES,
+      )
+      requests.append(request)
+    assert requests == [True] * 30 + ([True] * 17 + [False]) * 2 + [True] * 30
 
   @staticmethod
   def _make_controller(*, standstill_req=False, last_standstill=False):
