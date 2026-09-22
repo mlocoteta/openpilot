@@ -186,7 +186,7 @@ def _configure_shader_color(state: ShaderState, color: Optional[rl.Color],
     rl.set_shader_value(state.shader, state.locations['fillColor'], state.fill_color_ptr, UNIFORM_VEC4)
 
 
-def triangulate(pts: np.ndarray) -> list[tuple[float, float]]:
+def triangulate(pts: np.ndarray) -> np.ndarray:
   """Only supports simple polygons with two chains (ribbon)."""
 
   # interleave points to produce a triangle strip
@@ -194,10 +194,10 @@ def triangulate(pts: np.ndarray) -> list[tuple[float, float]]:
     pts = pts[:-1]
 
   half = len(pts) // 2
-  tri_strip = np.empty_like(pts)
+  tri_strip = np.empty(pts.shape, dtype=np.float32)
   tri_strip[0::2] = pts[:half]
   tri_strip[1::2] = pts[half:][::-1]
-  return cast(list, tri_strip.tolist())
+  return tri_strip
 
 
 def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
@@ -210,15 +210,15 @@ def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
   if len(points) < 3:
     return
 
-  # Ensure (N,2) float32 contiguous array
-  pts = np.ascontiguousarray(points, dtype=np.float32)
+  pts = np.asarray(points)
   assert pts.ndim == 2 and pts.shape[1] == 2, "points must be (N,2)"
 
   # Triangulate via interleaving
   tri_strip = triangulate(pts)
+  vertices = rl.ffi.from_buffer("Vector2 *", tri_strip)
 
   if gradient is None:
-    rl.draw_triangle_strip(tri_strip, len(tri_strip), color or rl.WHITE)
+    rl.draw_triangle_strip(vertices, len(tri_strip), color or rl.WHITE)
     return
 
   state = ShaderState.get_instance()
@@ -228,7 +228,7 @@ def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
 
   # Draw strip, color here doesn't matter
   rl.begin_shader_mode(state.shader)
-  rl.draw_triangle_strip(tri_strip, len(tri_strip), rl.WHITE)
+  rl.draw_triangle_strip(vertices, len(tri_strip), rl.WHITE)
   rl.end_shader_mode()
 
 

@@ -84,6 +84,14 @@ class NavWidget(Widget, abc.ABC):
   def set_shown_callback(self, callback: Callable[[], None] | None) -> None:
     self._shown_callback = callback
 
+  def covers_background(self, rect: rl.Rectangle) -> bool:
+    return (self.is_visible and type(self)._layout is NavWidget._layout and
+            self._rect.x == rect.x == 0 and self._rect.y == rect.y == 0 and
+            self._rect.width >= rect.width > 0 and self._rect.height >= rect.height > 0 and
+            self._y_pos_filter.x == 0 and self._y_pos_filter.velocity.x == 0 and
+            self._drag_start_pos is None and not self._dragging_down and
+            not self._playing_dismiss_animation and self._shown_callback is None)
+
   def _handle_mouse_event(self, mouse_event: MouseEvent) -> None:
     super()._handle_mouse_event(mouse_event)
 

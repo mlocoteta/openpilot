@@ -1,5 +1,6 @@
 import pyray as rl
 import pytest
+from types import SimpleNamespace
 
 from openpilot.system.ui import widgets
 from openpilot.system.ui.lib import scroll_panel2
@@ -32,7 +33,7 @@ def make_scroller(monkeypatch):
   monkeypatch.setattr(gui_app, "_show_touches", False)
   monkeypatch.setattr(gui_app, "_mouse_events", [])
   monkeypatch.setattr(widgets, "PC", False)
-  monkeypatch.setattr(widgets.device, "awake", True)
+  monkeypatch.setattr(widgets, "device", SimpleNamespace(awake=True))
   monkeypatch.setattr(scroll_panel2, "TICI", True)
 
   def make(items=None, **kwargs):

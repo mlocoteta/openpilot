@@ -2,18 +2,29 @@
 
 Parameter reads are file-backed.  The raylib UIs ask for the same values from
 multiple widgets during a frame, so a short cache avoids repeated open/read/
-close cycles without making settings changes sticky: every write invalidates
-the affected key immediately and the short TTL bounds visibility of writes
-from other processes.
+close cycles. Writes invalidate immediately; opt-in background refresh keeps
+expired reads off the render thread while retaining the latest cached value.
 """
 
 from __future__ import annotations
 
+import os
+import queue
+import threading
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
+from openpilot.system.hardware import PC
+
+
+class _RefreshRequest(NamedTuple):
+  cache_key: tuple[Any, ...]
+  cached: tuple[float, Any]
+  args: tuple[Any, ...]
+  kwargs: dict[str, Any]
 
 
 class UIParamCache:
@@ -23,9 +34,83 @@ class UIParamCache:
     self._ttl = max(0.0, ttl)
     self._clock = clock
     self._cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
+    self._lock = threading.Lock()
+    self._worker: threading.Thread | None = None
+    self._refresh_queue: queue.Queue[_RefreshRequest | None] = queue.Queue()
+    self._pending: set[tuple[Any, ...]] = set()
+    self._stop_event = threading.Event()
+
+  def start(self) -> None:
+    with self._lock:
+      if self._worker is not None:
+        return
+      self._refresh_queue = queue.Queue()
+      self._pending = set()
+      self._stop_event = threading.Event()
+      self._worker = threading.Thread(target=self._refresh_worker, name="ui-param-cache", daemon=True,
+                                      args=(self._refresh_queue, self._pending, self._stop_event))
+      self._worker.start()
+
+  def stop(self, timeout: float = 1.0) -> None:
+    with self._lock:
+      worker = self._worker
+      if worker is None:
+        return
+      self._worker = None
+      self._stop_event.set()
+      self._refresh_queue.put(None)
+    worker.join(timeout)
+
+  def _refresh_worker(self, requests: queue.Queue[_RefreshRequest | None], pending: set[tuple[Any, ...]],
+                      stop_event: threading.Event) -> None:
+    if not PC:
+      try:
+        os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+      except OSError:
+        cloudlog.exception("Unable to lower UI parameter worker priority")
+        with self._lock:
+          if self._stop_event is stop_event:
+            self._worker = None
+        return
+
+    while True:
+      request = requests.get()
+      try:
+        if request is None:
+          return
+        with self._lock:
+          current = not stop_event.is_set() and self._cache.get(request.cache_key) is request.cached
+        if not current:
+          continue
+
+        method, key = request.cache_key[:2]
+        try:
+          value = getattr(self._params, method)(key, *request.args, **request.kwargs)
+        except Exception:
+          value = request.cached[1]
+        refreshed_at = self._clock()
+        with self._lock:
+          if not stop_event.is_set() and self._cache.get(request.cache_key) is request.cached:
+            self._cache[request.cache_key] = (refreshed_at, value)
+      finally:
+        if request is not None:
+          with self._lock:
+            pending.discard(request.cache_key)
+        requests.task_done()
+
+  def _queue_refresh(self, cache_key: tuple[Any, ...], cached: tuple[float, Any],
+                     args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    if cache_key in self._pending:
+      return
+    with self._lock:
+      if self._worker is not None and cache_key not in self._pending and self._cache.get(cache_key) is cached:
+        self._pending.add(cache_key)
+        self._refresh_queue.put(_RefreshRequest(cache_key, cached, args, kwargs))
 
   @staticmethod
   def _cache_key(method: str, key: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[Any, ...]:
+    if not args and not kwargs:
+      return method, key
     # Params arguments are primitive values in UI call sites. repr keeps this
     # robust for an occasional list/dict default without requiring hashability.
     return (method, key, repr(args), repr(sorted(kwargs.items())))
@@ -37,8 +122,14 @@ class UIParamCache:
     if cached is not None and now - cached[0] < self._ttl:
       return cached[1]
 
+    blocking = kwargs.get("block", args[0] if args else False)
+    if cached is not None and self._worker is not None and self._ttl > 0 and not blocking:
+      self._queue_refresh(cache_key, cached, args, kwargs)
+      return cached[1]
+
     value = getattr(self._params, method)(key, *args, **kwargs)
-    self._cache[cache_key] = (now, value)
+    with self._lock:
+      self._cache[cache_key] = (now, value)
     return value
 
   def get(self, key: str, *args: Any, **kwargs: Any) -> Any:
@@ -54,11 +145,12 @@ class UIParamCache:
     return self._read("get_float", key, *args, **kwargs)
 
   def invalidate(self, key: str | None = None) -> None:
-    if key is None:
-      self._cache.clear()
-      return
-    self._cache = {cache_key: value for cache_key, value in self._cache.items()
-                   if cache_key[1] != key}
+    with self._lock:
+      if key is None:
+        self._cache.clear()
+        return
+      self._cache = {cache_key: value for cache_key, value in self._cache.items()
+                     if cache_key[1] != key}
 
   def put(self, key: str, value: Any, *args: Any, **kwargs: Any) -> None:
     self._params.put(key, value, *args, **kwargs)
