@@ -6,6 +6,8 @@ def preap_lateral_authorized(CP, CS, panda_states, panda_states_valid: bool) -> 
   """Match Pre-AP's existing safety authorization without treating software CC availability as ACC main."""
   if not panda_states_valid or CS.out.gearShifter != structs.CarState.GearShifter.drive or CS.out.doorOpen or CS.out.steeringDisengage:
     return False
+  if CS.engagement.lateralRearmRequired:
+    return False
   config = CP.safetyConfigs[0]
   matching = [p for p in panda_states if p.safetyModel == config.safetyModel and p.safetyParam == config.safetyParam]
   if len(matching) != 1 or matching[0].safetyRxChecksInvalid:

@@ -63,14 +63,14 @@ def test_preap_aol_stalk_cancel_and_reengagement(stock_main):
       assert safety.safety_tx_hook(libsafety_py.make_CANPacket(addr, bus, dat)), (frame, hex(addr), dat.hex())
       if addr == 0x488 and dat[2] >> 6 == 1:
         active_commands += 1
-  assert active_commands == (290 if stock_main else 140)
+  assert active_commands == (240 if stock_main else 140)
 
 
 @pytest.mark.parametrize('failure', ['stale', 'wrong_mode', 'wrong_param', 'rx_invalid', 'park', 'door', 'override', 'cancel'])
 def test_preap_authorization_fails_closed(failure):
   cp = CarInterface.get_non_essential_params(CAR.TESLA_MODEL_S_PREAP)
   out = SimpleNamespace(gearShifter=structs.CarState.GearShifter.drive, doorOpen=False, steeringDisengage=False)
-  cs = SimpleNamespace(out=out, engagement=SimpleNamespace(lateralEnabled=True), di_cruise_state='OFF')
+  cs = SimpleNamespace(out=out, engagement=SimpleNamespace(lateralEnabled=True, lateralRearmRequired=False), di_cruise_state='OFF')
   panda = SimpleNamespace(safetyModel=cp.safetyConfigs[0].safetyModel, safetyParam=0,
                           safetyRxChecksInvalid=False, alternativeExperience=32, controlsAllowed=True)
   assert preap_lateral_authorized(cp, cs, [panda], True)
@@ -106,5 +106,13 @@ def test_preap_physical_lateral_session_requires_new_pull_after_reset(reset):
     engagement.check_can_engage(reset == 'door', gear, False)
     engagement.check_can_engage(False, structs.CarState.GearShifter.drive, False)
   assert not engagement.lateralEnabled
+  cp = CarInterface.get_non_essential_params(CAR.TESLA_MODEL_S_PREAP)
+  cs = SimpleNamespace(engagement=engagement, di_cruise_state='STANDBY',
+                       out=SimpleNamespace(gearShifter=structs.CarState.GearShifter.drive, doorOpen=False, steeringDisengage=False))
+  panda = SimpleNamespace(safetyModel=cp.safetyConfigs[0].safetyModel, safetyParam=0,
+                          safetyRxChecksInvalid=False, alternativeExperience=32, controlsAllowed=True)
+  for _ in range(50):
+    assert not preap_lateral_authorized(cp, cs, [panda], True)
   engagement.process_buttons(2, 0, 12000, 10., 'KPH', False, False, True, False)
   assert engagement.lateralEnabled
+  assert preap_lateral_authorized(cp, cs, [panda], True)

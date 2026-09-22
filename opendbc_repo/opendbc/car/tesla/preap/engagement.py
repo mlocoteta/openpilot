@@ -14,6 +14,7 @@ class PreAPEngagement:
     self.double_pull_window_ms = double_pull_window_ms
     self.cruiseEnabled = False
     self.lateralEnabled = False
+    self.lateralRearmRequired = False
     self.enableLongControl = False
     self.enableJustCC = False
     self.pending_enable = False
@@ -30,6 +31,7 @@ class PreAPEngagement:
   def handle_steering_disengage(self, steering_disengage: bool) -> None:
     if steering_disengage and not self.prev_steering_disengage:
       self.lateralEnabled = False
+      self.lateralRearmRequired = True
       self.cruiseEnabled = False
       self.enableLongControl = False
       self.enableJustCC = False
@@ -48,6 +50,7 @@ class PreAPEngagement:
 
     if cruise_buttons == CruiseButtons.MAIN and prev_cruise_buttons != CruiseButtons.MAIN:
       self.lateralEnabled = True
+      self.lateralRearmRequired = False
       if self.enableDoublePull:
         self._handle_double_pull(curr_time_ms, v_ego, speed_units, use_pedal, pedal_long_allowed, long_control_allowed, di_cruise_state)
       else:
@@ -79,6 +82,7 @@ class PreAPEngagement:
     can_engage = not door_open and gear_shifter == structs.CarState.GearShifter.drive and not seatbelt_unlatched
     if not can_engage:
       self.lateralEnabled = False
+      self.lateralRearmRequired = True
       self.cruiseEnabled = False
       self.enableLongControl = False
       self.enableJustCC = False
@@ -123,6 +127,7 @@ class PreAPEngagement:
       be.type = ButtonType.unknown if is_echo else ButtonType.cancel
       if not is_echo:
         self.lateralEnabled = False
+        self.lateralRearmRequired = True
         self.cruiseEnabled = False
         self.enableLongControl = False
         self.enableJustCC = False

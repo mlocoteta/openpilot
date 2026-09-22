@@ -23,6 +23,7 @@ class StarPilotEvents:
     self.events = Events(starpilot=True)
 
     self.always_on_lateral_allowed_previously = False
+    self.aol_alert_active_previously = False
     self.previous_traffic_mode = False
     self.previous_switchback_mode = False
     self.random_event_playing = False
@@ -58,11 +59,7 @@ class StarPilotEvents:
     else:
       self.max_acceleration = 0
 
-    if sm["starpilotCarState"].alwaysOnLateralAllowed != self.always_on_lateral_allowed_previously:
-      if sm["starpilotCarState"].alwaysOnLateralAllowed:
-        self.events.add(StarPilotEventName.lkasEnable)
-      else:
-        self.events.add(StarPilotEventName.lkasDisable)
+    self.update_aol_alerts(sm["carParams"], sm["starpilotCarState"])
 
     if self.starpilot_planner.starpilot_vcruise.forcing_stop:
       self.events.add(StarPilotEventName.forcingStop)
@@ -220,3 +217,10 @@ class StarPilotEvents:
 
     self.always_on_lateral_allowed_previously = sm["starpilotCarState"].alwaysOnLateralAllowed
     self.played_events.update(STARPILOT_EVENT_NAME[event] for event in self.events.names)
+
+  def update_aol_alerts(self, car_params, car_state):
+    active = (car_state.alwaysOnLateralEnabled if car_params.carFingerprint == "TESLA_MODEL_S_PREAP"
+              else car_state.alwaysOnLateralAllowed)
+    if active != self.aol_alert_active_previously:
+      self.events.add(StarPilotEventName.lkasEnable if active else StarPilotEventName.lkasDisable)
+    self.aol_alert_active_previously = active
