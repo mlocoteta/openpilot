@@ -293,7 +293,6 @@ def test_requested_simple_and_advanced_settings_tiers():
         param for param in params
         if not param["key"].startswith("PIPPreview")
         and param["key"] != "DisableWideRoad"
-        and param["key"] != "HomeScreenName"
       ]
     if section_name == "Device & Data":
       params = [
@@ -348,8 +347,6 @@ def test_requested_simple_and_advanced_settings_tiers():
   assert developer["DeveloperUI"]["settings_tier"] == "advanced"
   assert developer["RedneckCruise"]["settings_tier"] == "advanced"
   assert sections["Visual (Display & UI)"]["DisableWideRoad"]["settings_tier"] == "advanced"
-  assert sections["Visual (Display & UI)"]["HomeScreenName"]["settings_tier"] == "advanced"
-  assert sections["Visual (Display & UI)"]["HomeScreenName"]["max_length"] == 12
 
   device = sections["Device & Data"]
   assert device["ScreenBrightness"]["settings_tier"] == "advanced"
