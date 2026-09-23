@@ -4,21 +4,24 @@ Handoff notes for updating this fork onto a newer StarPilot base.
 Car: **2017 Honda Accord (`HONDA_ACCORD_9G`, Nidec)** with a **Torque Interceptor (TI)**.
 Device: **comma three (tici)** with a **failed digitizer** (touchscreen is dead).
 
-## State of play (2026-09-10)
+## State of play (2026-09-23)
 
 **The TI works.** Encoding, panda acceptance and board state are verified on car; the
-remaining work is tuning, and **every tuning number predating `f27c9eaf` is worthless**
-because it was measured through a broken encoding.
+remaining work is tuning, and **every tuning number predating the gen1 12-bit layout fix
+(`f27c9eaf`, now part of `81205cc4d`) is worthless** because it was measured through a
+broken encoding.
 
 Where the work lives — check this first, it is easy to edit the wrong tree:
 
-| where | branch | has the TI fix? |
-| --- | --- | --- |
-| **device** `/data/openpilot` | `starpilot-2017-accord-ti-c3-update` | **yes** — `f27c9eaf`, unpushed |
-| dev box `~/openpilot` | `starpilot-honda-accord-ti` | **no** — still the broken 16-bit layout |
+| branch (`origin`) | role |
+| --- | --- |
+| **`starpilot-2017-accord-ti-dom-consolidated`** | consolidated fork: reviewable commits on StarPilot `Dom` (`f15a1974d`), incl. the TI discovery handshake |
+| `starpilot-2017-accord-ti-dom` | previous maintained branch (96 commits + merges); lacks the handshake fix |
+| `starpilot-2017-accord-ti-c3-update`, `starpilot-honda-accord-ti` | historical; do not build from these |
 
-`f27c9eaf` exists only on the device and is not pushed to `origin`. Push it before doing
-anything that could reset the tree. Do not "fix" the TI from the dev-box branch; it is behind.
+Everything must be pushed. The device's `updated` daemon hard-resets `/data/openpilot` to
+the tracked origin branch, so device-only commits are lost (this happened to the
+handshake fix once).
 
 Currently disabled on purpose, re-enable when wanted:
 `SpeedLimitController=0`, `CurveSpeedController=0` (gates mapd off for memory).
@@ -27,20 +30,21 @@ Currently disabled on purpose, re-enable when wanted:
 
 | remote | url | role |
 | --- | --- | --- |
-| `starpilot` | `https://github.com/firestar5683/StarPilot` | the base we track. Default branch **`StarPilot`** |
-| `origin` | `https://github.com/mlocoteta/openpilot` | our fork. Branch **`starpilot-2017-accord-ti-c3-update`** |
+| `starpilot` | `https://github.com/firestar5683/StarPilot` | the base we track. Branch **`Dom`** (not the default `StarPilot`) |
+| `origin` | `https://github.com/mlocoteta/openpilot` | our fork. Branch **`starpilot-2017-accord-ti-dom-consolidated`** |
 | `upstream` | `https://github.com/commaai/openpilot` | comma upstream. Not merged directly |
 
 Ignore `starpilot/StarPilot-2017` — despite the name it is stale (last commit Feb 2026)
-and is **not** the 2017-Accord branch. `StarPilot` is the live one.
+and is **not** the 2017-Accord branch. `Dom` is a separate branch from `StarPilot` and easy to
+miss in `git ls-remote --heads`; it is the one this fork follows.
 
 **Always merge, never rebase.** Every past update is a merge commit
-(`Merge remote-tracking branch 'firestar5683/StarPilot' into ...`). ~47 local commits and
+(`Merge remote-tracking branch 'starpilot/Dom' into ...`). The fork's local commits and
 118 tracked build artifacts make a rebase far more painful than a merge, for no benefit.
 
 ```bash
-git fetch starpilot --no-tags StarPilot:refs/remotes/starpilot/StarPilot
-git merge --no-edit starpilot/StarPilot
+git fetch starpilot --no-tags Dom:refs/remotes/starpilot/Dom
+git merge --no-edit starpilot/Dom
 ```
 
 Push over SSH (`git@github.com:mlocoteta/openpilot.git`) — the HTTPS remote has no
@@ -110,7 +114,7 @@ SG_ KEY          : 39|32@0+ (1,0)               ""  XXX   # value 3294744160 (0x
 The `4_2026_ti` port brought the **gen2** 16-bit layout onto this gen1 car. Symptom: a
 **zero** command encodes as `0x0000`, the board reads `raw 0 - 2048 = -2048`, i.e. full-scale
 deflection with the sign effectively inverted. On car it pulls hard immediately, then the
-board latches `STATE=OFF` with `VIOL=17`. Fixed in `f27c9eaf`.
+board latches `STATE=OFF` with `VIOL=17`. Fixed in `f27c9eaf` (now part of `81205cc4d`).
 
 Neutral on the wire is **`0800`**, not `0000`. If you see `0000` going out, the layout is wrong.
 
@@ -124,8 +128,20 @@ the command and the TI torque sensor in opposite conventions, which makes
 `apply_ti_steer_torque_limits` fight the command instead of the driver.
 
 **State machine** (`TI_STATE` in `honda/values.py`): `DISCOVER=0 OFF=1 DRIVER_OVER=2 RUN=3`.
-`ti_lkas_allowed` requires `RUN`. The board recovers on its own -- once it receives
-well-formed frames it goes `OFF -> RUN` and clears `VIOL` to 0. No arming sequence needed.
+`ti_lkas_allowed` requires `RUN`. **The board needs a zero-torque handshake**: it starts in
+`OFF` and only promotes to `RUN` after a run of well-formed *zero-torque* 0x249 frames
+(working rlog 2026-09-11, `00000284--5800249712--75`: 1571 frames `OFF`/`VIOL=23`, 200 frames
+`OFF`/`VIOL=0`, then `RUN`). Ramping torque before `RUN` latches a violation and the board
+never gets there (`239b193d1` did exactly that). So:
+
+- `carstate.py`: `ti_state` starts `OFF`; the gate opens only on a live `STATE == RUN`
+  (no `RAMP_DOWN`) once `TI_FEEDBACK` has been seen, and closes if feedback goes silent for
+  `TI_FEEDBACK_TIMEOUT_FRAMES` (200 ms). `TI_DISCOVERY_FRAMES` (500, 5 s) opens it only if
+  `TI_FEEDBACK` was never seen this drive (feedback-less firmware); never after a dropout.
+- `carcontroller.py`: torque needs `has_ti and latActive and CS.ti_lkas_allowed`, but the
+  0x249 frame is sent **every frame** regardless, with zero torque while gated. That
+  stream *is* the handshake -- never stop sending it while the gate is closed.
+- Tests: `opendbc/car/honda/tests/test_honda_ti.py` replays the measured sequence.
 
 ## Diagnosing "the TI gets no command"
 

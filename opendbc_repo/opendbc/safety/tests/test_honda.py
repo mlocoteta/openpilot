@@ -286,6 +286,21 @@ class TestHondaNidecSafetyBase(HondaBase):
     values = {"PCM_GAS": pcm_gas, "PCM_SPEED": pcm_speed}
     return self.packer.make_can_msg_safety("ACC_HUD", 0, values)
 
+  def _ti_steer_msg(self, steer):
+    # TI_STEERING_CONTROL (0x249): 12-bit LKAS_REQUEST with a +2048 offset, so neutral is 0x800.
+    raw = steer + 2048
+    to_send = common.make_msg(0, 0x249, 8)
+    for i, b in enumerate([(raw >> 8) & 0x0F, raw & 0xFF, (raw >> 8) & 0x0F, raw & 0xFF, 0xC4, 0x61, 0xCE, 0x60]):
+      to_send[0].data[i] = b
+    return to_send
+
+  def test_ti_steer_safety_check(self):
+    for controls_allowed in [True, False]:
+      self.safety.set_controls_allowed(controls_allowed)
+      for steer in (-2048, -600, -599, -15, -1, 0, 1, 15, 599, 600, 2047):
+        send = steer == 0 or (controls_allowed and abs(steer) <= 599)
+        self.assertEqual(send, self._tx(self._ti_steer_msg(steer)), (controls_allowed, steer))
+
   def test_acc_hud_safety_check(self):
     for controls_allowed in [True, False]:
       self.safety.set_controls_allowed(controls_allowed)

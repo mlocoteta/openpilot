@@ -70,7 +70,6 @@ class TI_LIMITS:
   TI_STEER_DRIVER_ALLOWANCE = 5      # allowed driver torque before start limiting
   TI_STEER_DRIVER_MULTIPLIER = 40    # weight driver torque
   TI_STEER_DRIVER_FACTOR = 1         # from dbc
-  TI_STEER_ERROR_MAX = 350           # max delta between torque cmd and torque motor
   TI_STEER_THRESHOLD = 15            # steeringPressed threshold on the TI torque sensor
 
 

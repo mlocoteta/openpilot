@@ -102,8 +102,6 @@ class CarState(CarStateBase):
     # The gen1 board starts in OFF and only promotes to RUN after a run of
     # zero-torque TI_STEERING_CONTROL frames, so never assume RUN before it says so.
     self.ti_state = TI_STATE.OFF
-    self.ti_violation = 0
-    self.ti_error = 0
     self.ti_feedback_seen = False
     self.ti_no_feedback_frames = 0
     self.ti_lkas_allowed = False
@@ -121,8 +119,6 @@ class CarState(CarStateBase):
       self.ti_no_feedback_frames = 0
       self.ti_version = ti["VERSION_NUMBER"]
       self.ti_state = ti["STATE"]
-      self.ti_violation = ti["VIOL"]
-      self.ti_error = ti["ERROR"]
       if self.ti_version > 1:
         self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
     else:

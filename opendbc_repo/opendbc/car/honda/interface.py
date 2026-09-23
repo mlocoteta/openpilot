@@ -11,7 +11,6 @@ from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
 from opendbc.car.interfaces import CarInterfaceBase
-from openpilot.common.params import Params
 
 TransmissionType = structs.CarParams.TransmissionType
 
