@@ -1,0 +1,24 @@
+{
+  "sources_sha256": "a4a23d53fbacf0368fb8e35fa18326bc1d27f5e004705dc8178be0c64aa39480",
+  "bins": {
+    "body_h7": "d3e443c889f892f6901f8160f0d04df0d35b4378aad39add57b2d4eba03ec887",
+    "panda": "28524b77d403d01a5a2d403d2d9d981cb085006be64564ad45472c4bdb4653f5",
+    "panda_can_ignition_only": "fa7eb89649162aeb7b70274bd4e321803df54f32fca07b0cce2c68857e191868",
+    "panda_h7": "cd764dcc9c2952e2b026a9f51d406a583f80d441f5f41437c9b60ab345b5a106",
+    "panda_h7_can_ignition_only": "e46d92c75431c1aaf1bdda9066b1ec2e67bedf13e2734b2ff3970ef9f77d5d2f",
+    "panda_h7_hkg_remote": "4f95f50091bf17f01df0d31d39f745bb6f75c909978b6dfa11253e0932df4fa9",
+    "panda_h7_hkg_remote_can_ignition_only": "dd24d47a3ac3cae8cf4e8bc9f217013488cd24f055213c0cbf30131489263d41",
+    "panda_h7_remote": "78fe5346d0351f96df28385c6d91af98507786f0b9e4c007efb866c87d9c70ce",
+    "panda_h7_remote_can_ignition_only": "9b7640cc5ad4b3820291253f1b1dde20b24b5721b5100090f257ebf4e6a926c7",
+    "panda_h7_tesla_wake": "8da2714ea8a156d32797d9c02532975e3dae6d5f79b7cc6bf9d27efb2d0e7058",
+    "panda_h7_tesla_wake_can_ignition_only": "00ffd07f0279b27d3d6db0e35962fd7ccd7635c8c68854cf8fba455eb17591f6",
+    "panda_hkg_remote": "6cfaf9846eecbd232e6bc7cae556604815e3d61eb19e6f047bba620f21969404",
+    "panda_hkg_remote_can_ignition_only": "4a3a1013caf2fc7dcacb3e37f893af25dcf7a686cbc100c5859d78274d10b2e7",
+    "panda_jungle_h7": "f5a77fd10ee07bae011609e966e1ea36429fc2f775ee315283175ea2248b8f8f",
+    "panda_remote": "6a4ca22e7cb59587dc72451835379092571d0b161ff423178da323593783ec29",
+    "panda_remote_can_ignition_only": "1e2963fdd3cb4bbf64d92e757917f0273c2a8e58e949e5504d071f6a580127b8",
+    "panda_tesla_wake": "76150797559f597f51df421a3979a8dfa3d7b39e9a7baed3b49505e56de17600",
+    "panda_tesla_wake_can_ignition_only": "e60f922c3c6ca703676707113be9b871c0b7ac00d3b0d1b287c3e6c8401fa1c2"
+  },
+  "note": "system/manager/prebuilt_guard.py; regenerate with --write-stamp after rebuilding panda/board/obj"
+}
