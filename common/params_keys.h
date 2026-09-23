@@ -749,6 +749,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ThemesDownloaded", {PERSISTENT, JSON, "{}", "{}"}},
     {"Timezone", {PERSISTENT, STRING, "", ""}},
     {"TinygradUpdateAvailable", {PERSISTENT, BOOL, "0", "0", 1}},
+    // Show the external GPU (Chestnut) temperatures in the sidebar's GPU phase
+    // instead of the on-die GPU zones; shows a placeholder when no eGPU is present.
+    {"SidebarEgpuTemp", {PERSISTENT, BOOL, "0", "0", 3}},
     // Honda 9G Accord Torque Interceptor (TI) — opt-in via the StarPilot toggle.
     // OFF by default so a stock 9G Accord runs normal LKAS. When ON, the sigmoid
     // tune applies (a=15, b=0.72, c=0.16, Kp=0.3; sigmoid + live-update default ON).
