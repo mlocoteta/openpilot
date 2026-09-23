@@ -80,6 +80,9 @@ class Widget(abc.ABC):
   def set_visible(self, visible: bool | Callable[[], bool]) -> None:
     self._is_visible = visible
 
+  def covers_background(self, rect: rl.Rectangle) -> bool:
+    return False
+
   def set_click_callback(self, click_callback: Callable[[], None] | None) -> None:
     """Set a callback to be called when the widget is clicked."""
     self._click_callback = click_callback

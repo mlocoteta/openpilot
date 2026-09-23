@@ -1,0 +1,56 @@
+name: Fleet controller safety
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'opendbc_repo/**'
+      - 'selfdrive/car/**'
+      - 'starpilot/car/**'
+      - 'starpilot/controls/**'
+      - 'cereal/**'
+      - '.github/workflows/fleet_safety.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r selfdrive/car/tests/fleet_requirements.txt
+      - name: Audit accounting and runner failures
+        run: >-
+          python -m pytest --noconftest -o addopts='' -q
+          selfdrive/car/tests/test_fleet_safety_core.py
+          selfdrive/car/tests/test_fleet_safety_runner.py
+          opendbc_repo/opendbc/safety/tests/safety_replay/test_replay_drive.py
+  recorded_fleet:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r selfdrive/car/tests/fleet_requirements.txt
+      - name: Current controllers against freshly compiled release safety
+        run: >-
+          python -m selfdrive.car.tests.fleet_safety --all --release
+          --shard-count 8 --shard-index ${{ matrix.shard }}
+          --out selfdrive/car/tests/fleet_results/ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fleet-safety-${{ matrix.shard }}
+          path: |
+            selfdrive/car/tests/fleet_results/ci/**/*.json
+            selfdrive/car/tests/fleet_results/ci/**/*.log

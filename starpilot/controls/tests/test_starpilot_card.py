@@ -102,6 +102,21 @@ def make_toggles(**overrides):
   return SimpleNamespace(**defaults)
 
 
+def test_preap_aol_stays_available_but_waits_for_authorization(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  card = spc.StarPilotCard(SimpleNamespace(brand="tesla", carFingerprint="TESLA_MODEL_S_PREAP"),
+                           SimpleNamespace(alternativeExperience=32))
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True)
+  sm = make_sm()
+  for authorized in (False, True, False, True):
+    ret = card.update(make_car_state(available=True, enabled=False), SimpleNamespace(distancePressed=False),
+                      sm, toggles, preap_authorized=authorized)
+    assert card.always_on_lateral_supported
+    assert ret.alwaysOnLateralAllowed
+    assert ret.alwaysOnLateralEnabled == authorized
+
+
 def test_pulse_and_glide_requires_developer_access_and_active_longitudinal(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)

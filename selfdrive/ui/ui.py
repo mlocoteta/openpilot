@@ -23,6 +23,7 @@ def _stall_context() -> dict[str, object]:
     "ui_state_frame": ui_state.sm.frame,
     "target_fps": gui_app.target_fps,
     "active_widget": type(active_widget).__name__ if active_widget is not None else "none",
+    "frame_timing": gui_app.frame_timing._asdict(),
   }
 
   try:
@@ -51,6 +52,7 @@ def main():
   stall_monitor.start()
 
   try:
+    ui_state.ui_params.start()
     gui_app.init_window("UI")
     stall_monitor.progress("ui.after_init_window")
     gui_app.set_progress_hook(stall_monitor.progress)
@@ -88,6 +90,7 @@ def main():
       stall_monitor.progress("ui.loop_idle")
   finally:
     gui_app.set_progress_hook(None)
+    ui_state.ui_params.stop()
     stall_monitor.stop()
 
 

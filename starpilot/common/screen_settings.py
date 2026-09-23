@@ -15,6 +15,9 @@ from openpilot.common.params import UnknownKeyName
 BRIGHTNESS_KEYS = ('ScreenBrightness', 'ScreenBrightnessOnroad')
 SCREEN_INT_KEYS = frozenset(key + suffix for key in BRIGHTNESS_KEYS for suffix in ('', 'Manual', 'Offset'))
 STANDBY_BUTTON_PRESS_PARAM = 'StandbyButtonPressTime'
+SCREEN_OFF_TOGGLE_PARAM = 'ScreenOffToggleCounter'
+
+
 SCREEN_WAKE_OPTIONS = (
   ('StandbyWakeEngage', 'Engagement', True),
   ('StandbyWakeDisengage', 'Disengagement', True),
@@ -190,6 +193,13 @@ def alert_wake_key(alert):
   if size not in ('none', '0'):
     return 'StandbyWakeInfoAlert'
   return None
+
+
+def screen_off_toggle_counter(params):
+  try:
+    return int(_raw(params, SCREEN_OFF_TOGGLE_PARAM) or 0)
+  except (TypeError, ValueError, OverflowError):
+    return 0
 
 
 def standby_button_press_time(params):

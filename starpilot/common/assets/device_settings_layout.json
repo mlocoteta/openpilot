@@ -3610,6 +3610,16 @@
         "settings_tier": "simple"
       },
       {
+        "key": "SubaruAvhStartup",
+        "label": "AVH On at Startup (Experimental)",
+        "description": "For the 2025 Subaru Legacy, request Auto Vehicle Hold once at startup while stopped in Park with the engine running. Manual choices are preserved. Enable before the next drive.",
+        "picker_description": "Requests AVH ON at startup on the 2025 Legacy.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "settings_tier": "simple"
+      },
+      {
         "key": "SubaruStopStartOff",
         "label": "Stop/Start Off at Startup",
         "description": "For supported Subaru Outback 2023-24 and Legacy 2025 vehicles, send one momentary Stop/Start request after ignition while stationary and in Park or Neutral.",

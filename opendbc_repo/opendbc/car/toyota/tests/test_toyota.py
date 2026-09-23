@@ -6,12 +6,14 @@ from hypothesis import given, settings, strategies as st
 from opendbc.car import Bus, structs
 from opendbc.can import CANPacker, CANParser
 from opendbc.car.structs import CarParams
+from opendbc.car.lateral import common_fault_avoidance
 from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
                                              get_rav4_interceptor_pedal_scale, \
-                                             get_toyota_lat_active, \
+                                             get_toyota_lat_active, get_toyota_steer_rate_limit, \
+                                             MAX_STEER_RATE, MAX_STEER_RATE_FRAMES, MAX_USER_TORQUE, \
                                              limit_interceptor_pcm_accel, \
                                              limit_interceptor_stopping_accel, limit_no_lead_cruise_sign_flip, \
                                              limit_prius_stopping_accel, should_bypass_toyota_long_pid, supports_toyota_auto_hold, \
@@ -735,14 +737,43 @@ class TestToyotaFingerprint:
 
 
 class TestToyotaCarController:
-  def test_corolla_tss2_hands_off_immediately_when_driver_is_steering(self):
-    assert not get_toyota_lat_active(CAR.TOYOTA_COROLLA_TSS2, True, 117, True)
+  @pytest.mark.parametrize("driver_torque", [-191, -117, -99, 99, 117, 191])
+  def test_toyota_assisting_driver_keeps_lateral_active(self, driver_torque):
+    assert get_toyota_lat_active(True, driver_torque)
 
-  def test_corolla_tss2_stays_active_without_driver_input(self):
-    assert get_toyota_lat_active(CAR.TOYOTA_COROLLA_TSS2, True, 99, False)
+  @pytest.mark.parametrize("driver_torque", [-MAX_USER_TORQUE, MAX_USER_TORQUE, MAX_USER_TORQUE + 1])
+  def test_toyota_high_driver_torque_still_disables_lateral(self, driver_torque):
+    assert not get_toyota_lat_active(True, driver_torque)
 
-  def test_toyota_driver_handoff_behavior_is_corolla_only(self):
-    assert get_toyota_lat_active(CAR.TOYOTA_RAV4_TSS2, True, 117, True)
+  def test_toyota_inactive_request_stays_inactive(self):
+    assert not get_toyota_lat_active(False, 0)
+
+  def test_toyota_assisting_driver_retains_rate_fault_protection(self):
+    counter = 0
+    requests = []
+    for _ in range(36):
+      counter, request = common_fault_avoidance(
+        150 >= MAX_STEER_RATE, get_toyota_lat_active(True, 117), counter, MAX_STEER_RATE_FRAMES,
+      )
+      requests.append(request)
+    assert requests == ([True] * 17 + [False]) * 2
+
+  @pytest.mark.parametrize("candidate", list(CAR))
+  def test_steer_rate_margin_is_corolla_only(self, candidate):
+    expected = 80 if candidate == CAR.TOYOTA_COROLLA_TSS2 else MAX_STEER_RATE
+    assert get_toyota_steer_rate_limit(candidate) == expected
+
+  @pytest.mark.parametrize("direction", [-1, 1])
+  def test_corolla_rate_margin_preserves_request_spacing(self, direction):
+    counter = 0
+    requests = []
+    for rate in [0] * 30 + [90 * direction] * 36 + [0] * 30:
+      counter, request = common_fault_avoidance(
+        abs(rate) >= get_toyota_steer_rate_limit(CAR.TOYOTA_COROLLA_TSS2),
+        get_toyota_lat_active(True, 117 * direction), counter, MAX_STEER_RATE_FRAMES,
+      )
+      requests.append(request)
+    assert requests == [True] * 30 + ([True] * 17 + [False]) * 2 + [True] * 30
 
   @staticmethod
   def _make_controller(*, standstill_req=False, last_standstill=False):

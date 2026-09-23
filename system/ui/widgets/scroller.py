@@ -1,3 +1,4 @@
+import math
 import pyray as rl
 import numpy as np
 from collections.abc import Callable
@@ -139,6 +140,7 @@ class _Scroller(Widget):
 
     self._scrolling_to: tuple[float | None, bool] = (None, False)  # target offset, block_interaction
     self._scrolling_to_filter = FirstOrderFilter(0.0, SCROLL_RC, 1 / gui_app.target_fps)
+    self._animation_dt = self._scrolling_to_filter.dt
     self._zoom_filter = FirstOrderFilter(1.0, 0.2, 1 / gui_app.target_fps)
     self._zoom_out_t: float = 0.0
 
@@ -221,6 +223,7 @@ class _Scroller(Widget):
     self._scroll_enabled = enabled
 
   def _update_state(self):
+    self._animation_dt = min(rl.get_frame_time() or self._scrolling_to_filter.dt, 0.1)
     if DO_ZOOM:
       if self._scrolling_to[0] is not None or self.scroll_panel.state != ScrollState.STEADY:
         self._zoom_out_t = rl.get_time() + MIN_ZOOM_ANIMATION_TIME
@@ -238,7 +241,8 @@ class _Scroller(Widget):
       self._scrolling_to = None, False
 
     if self._scrolling_to[0] is not None and len(self._pending_lift) == 0:
-      self._scrolling_to_filter.update(self._scrolling_to[0])
+      alpha = 1 - (1 - self._scrolling_to_filter.alpha) ** (self._animation_dt / self._scrolling_to_filter.dt)
+      self._scrolling_to_filter.x += alpha * (self._scrolling_to[0] - self._scrolling_to_filter.x)
       self.scroll_panel.set_offset(self._scrolling_to_filter.x)
 
       if abs(self._scrolling_to_filter.x - self._scrolling_to[0]) < 1:
@@ -253,38 +257,43 @@ class _Scroller(Widget):
       self._scrolling_to = None, False
     if not self._snap_items:
       return self.scroll_panel.get_offset()
+    if self._scrolling_to[0] is not None:
+      self._scroll_snap_filter.x = 0
+      return self.scroll_panel.get_offset()
 
     # Snap closest item to center
-    center_pos = self._rect.x + self._rect.width / 2 if self._horizontal else self._rect.y + self._rect.height / 2
+    bounds_size = self._rect.width if self._horizontal else self._rect.height
+    offset = self.scroll_panel.get_offset()
+    center_pos = bounds_size / 2
     closest_delta_pos = float('inf')
-    scroll_snap_idx: int | None = None
-    for idx, item in enumerate(visible_items):
-      if self._horizontal:
-        delta_pos = (item.rect.x + item.rect.width / 2) - center_pos
-      else:
-        delta_pos = (item.rect.y + item.rect.height / 2) - center_pos
+    snap_target: float | None = None
+    item_pos = self._pad
+    for item in visible_items:
+      size = item.rect.width if self._horizontal else item.rect.height
+      item_center = item_pos + size / 2
+      delta_pos = item_center + offset - center_pos
       if abs(delta_pos) < abs(closest_delta_pos):
         closest_delta_pos = delta_pos
-        scroll_snap_idx = idx
+        snap_target = center_pos - item_center
+      item_pos += size + self._spacing
 
-    if scroll_snap_idx is not None:
-      snap_item = visible_items[scroll_snap_idx]
+    if snap_target is not None:
       if self.scroll_panel.state in (ScrollState.PRESSED, ScrollState.MANUAL_SCROLL):
         # no snapping until released
         self._scroll_snap_filter.x = 0
       else:
-        # TODO: this doesn't handle two small buttons at the edges well
-        if self._horizontal:
-          snap_delta_pos = (center_pos - (snap_item.rect.x + snap_item.rect.width / 2)) / 10
-          snap_delta_pos = min(snap_delta_pos, -self.scroll_panel.get_offset() / 10)
-          snap_delta_pos = max(snap_delta_pos, (self._rect.width - self.scroll_panel.get_offset() - content_size) / 10)
-        else:
-          snap_delta_pos = (center_pos - (snap_item.rect.y + snap_item.rect.height / 2)) / 10
-          snap_delta_pos = min(snap_delta_pos, -self.scroll_panel.get_offset() / 10)
-          snap_delta_pos = max(snap_delta_pos, (self._rect.height - self.scroll_panel.get_offset() - content_size) / 10)
-        self._scroll_snap_filter.update(snap_delta_pos)
-
-      self.scroll_panel.set_offset(self.scroll_panel.get_offset() + self._scroll_snap_filter.x)
+        snap_target = max(min(0.0, bounds_size - content_size), min(0.0, snap_target))
+        steps = max(1, math.ceil(self._animation_dt / self._scroll_snap_filter.dt))
+        scale = self._animation_dt / (steps * self._scroll_snap_filter.dt)
+        alpha = 1 - (1 - self._scroll_snap_filter.alpha) ** scale
+        for _ in range(steps):
+          snap_delta_pos = (snap_target - offset) / 10
+          self._scroll_snap_filter.x += alpha * (snap_delta_pos - self._scroll_snap_filter.x)
+          offset += self._scroll_snap_filter.x * scale
+        if abs(snap_target - offset) < 1 and abs(self._scroll_snap_filter.x) < 0.5:
+          offset = snap_target
+          self._scroll_snap_filter.x = 0
+        self.scroll_panel.set_offset(offset)
 
     return self.scroll_panel.get_offset()
 

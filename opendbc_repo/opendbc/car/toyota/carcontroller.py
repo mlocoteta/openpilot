@@ -47,6 +47,7 @@ TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES = 100
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
 MAX_STEER_RATE = 100  # deg/s
 MAX_STEER_RATE_FRAMES = 17  # tx control frames needed before torque can be cut
+COROLLA_MAX_STEER_RATE = 80
 
 # EPS allows user torque above threshold for 50 frames before permanently faulting
 MAX_USER_TORQUE = 500
@@ -77,12 +78,12 @@ def should_bypass_toyota_long_pid(CP, starpilot_toggles=None) -> bool:
   ) or highlander_sdsu)
 
 
-def get_toyota_lat_active(car_fingerprint, requested_active: bool, steering_torque: float,
-                          steering_pressed: bool) -> bool:
-  if not requested_active or abs(steering_torque) >= MAX_USER_TORQUE:
-    return False
+def get_toyota_lat_active(requested_active: bool, steering_torque: float) -> bool:
+  return requested_active and abs(steering_torque) < MAX_USER_TORQUE
 
-  return not (car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 and steering_pressed)
+
+def get_toyota_steer_rate_limit(car_fingerprint) -> int:
+  return COROLLA_MAX_STEER_RATE if car_fingerprint == CAR.TOYOTA_COROLLA_TSS2 else MAX_STEER_RATE
 
 
 def supports_toyota_auto_hold(CP, auto_hold_enabled: bool) -> bool:
@@ -252,6 +253,7 @@ class CarController(CarControllerBase):
     self.standstill_req = False
     self.permit_braking = True
     self.steer_rate_counter = 0
+    self.steer_rate_limit = get_toyota_steer_rate_limit(self.CP.carFingerprint)
     self.distance_button = 0
 
     # *** start long control state ***
@@ -343,8 +345,7 @@ class CarController(CarControllerBase):
     stopping = actuators.longControlState == LongCtrlState.stopping
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
-    lat_active = get_toyota_lat_active(self.CP.carFingerprint, CC.latActive,
-                                       CS.out.steeringTorque, CS.out.steeringPressed)
+    lat_active = get_toyota_lat_active(CC.latActive, CS.out.steeringTorque)
 
     if len(CC.orientationNED) == 3:
       self.pitch.update(CC.orientationNED[1])
@@ -371,7 +372,7 @@ class CarController(CarControllerBase):
 
     # >100 degree/sec steering fault prevention
     self.steer_rate_counter, apply_steer_req = common_fault_avoidance(
-      abs(CS.out.steeringRateDeg) >= MAX_STEER_RATE, lat_active,
+      abs(CS.out.steeringRateDeg) >= self.steer_rate_limit, lat_active,
       self.steer_rate_counter, MAX_STEER_RATE_FRAMES,
     )
 

@@ -297,6 +297,8 @@ GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT = 0.55
 GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC = 0.065
 
 GENESIS_G70_FRICTION_THRESHOLD_GAIN = 0.10
+GENESIS_G70_FRICTION_THRESHOLD_SPEED_BP = [10.0, 20.0]
+GENESIS_G70_FRICTION_THRESHOLD_SPEED_V = [1.0, 2.0]
 GENESIS_G70_FRICTION_SPEED_ONSET = 10.0
 GENESIS_G70_FRICTION_SPEED_ONSET_WIDTH = 3.0
 GENESIS_G70_FRICTION_SPEED_CUTOFF = 35.0
@@ -3364,6 +3366,7 @@ def get_genesis_gv70_stabilized_output(output_torque: float, prev_output_torque:
 def get_genesis_g70_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
                                        desired_lateral_jerk: float = 0.0) -> float:
   base_threshold = get_standard_friction_threshold(v_ego)
+  base_threshold *= np.interp(v_ego, GENESIS_G70_FRICTION_THRESHOLD_SPEED_BP, GENESIS_G70_FRICTION_THRESHOLD_SPEED_V)
   speed_onset = _sigmoid((v_ego - GENESIS_G70_FRICTION_SPEED_ONSET) / GENESIS_G70_FRICTION_SPEED_ONSET_WIDTH)
   speed_cutoff = _sigmoid((GENESIS_G70_FRICTION_SPEED_CUTOFF - v_ego) / GENESIS_G70_FRICTION_SPEED_CUTOFF_WIDTH)
   center_weight = _sigmoid((GENESIS_G70_FRICTION_CENTER_LAT - abs(desired_lateral_accel)) /

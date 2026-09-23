@@ -40,6 +40,24 @@ def source(name="Macro Pad"):
   return wheel_controlsd.InputSource("/dev/input/event9", "stable-device", name, 3, 0x1234, 0x5678)
 
 
+def test_screen_off_action_from_favorite_and_controller_changes_only_display_request():
+  from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_SCREEN_OFF
+  from openpilot.starpilot.common.favorite_slots import FAVORITE_ACTION_KEYS, execute_favorite_key
+  from openpilot.starpilot.common.screen_settings import SCREEN_OFF_TOGGLE_PARAM
+
+  params = FakeParams({'IsOnroad': True, 'ScreenBrightnessOnroad': 70})
+  memory = FakeParams()
+  assert CONTROLLER_ACTION_SCREEN_OFF in FAVORITE_ACTION_KEYS
+  assert execute_favorite_key(CONTROLLER_ACTION_SCREEN_OFF, params, memory)
+  assert memory.values == {SCREEN_OFF_TOGGLE_PARAM: 1}
+  wheel_controlsd.set_controller_action_slot(0, CONTROLLER_ACTION_SCREEN_OFF, 'Toggle Screen Off', params,
+                                           eligible_keys={CONTROLLER_ACTION_SCREEN_OFF})
+  before = dict(params.values)
+  assert wheel_controlsd.execute_mapping_slot(3, params, memory)
+  assert memory.values == {SCREEN_OFF_TOGGLE_PARAM: 2}
+  assert params.values == before
+
+
 def test_mapping_round_trip_and_reassignment():
   params = FakeParams()
 

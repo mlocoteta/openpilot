@@ -71,14 +71,12 @@ class CarControllerParams:
   # (potholes, lane corrections) get full yield while light sustained pressure
   # only gets a soft yield. yield_signed = YIELD_BASE − YIELD_SLOPE *
   # max(0, drv_mag_filt − OVERRIDE_ENTER), clamped to [YIELD_MIN, YIELD_BASE].
-  # At |drv|=7 (just over threshold): yield = +60 (light resistance).
-  # At |drv|=14: yield ≈ -4 (crosses past zero — EPS hands wheel to driver).
   # drv_mag_filt is a low-pass of |drv| (alpha=0.04, ~250 ms time constant) —
   # without it, 1-2 unit driver-torque jitter became ~10 unit yield-arm jitter
   # which PSCM converted to felt ripple at sustained co-steering pressure.
   LCA_AUTH_YIELD_BASE = 60        # yield-arm magnitude at the override threshold
   LCA_AUTH_YIELD_SLOPE = 8        # counts of yield reduction per unit |drv torque| above threshold
-  LCA_AUTH_YIELD_MIN = -30        # cap how far past zero the yield arm can go (full hand-over)
+  LCA_AUTH_YIELD_MIN = 0          # yield authority without crossing the safety sign boundary
   LCA_AUTH_YIELD_LP_ALPHA = 0.04  # LP-filter coefficient on |drv| for yield calc (~250 ms tau)
   LCA_AUTH_SPLIT = 200            # symmetric → asymmetric handover
   LCA_AUTH_REBUILD_RATE = 230     # counts/s (≈ 2.7 s rebuild from 0 to 614)

@@ -811,7 +811,7 @@ class CarController(CarControllerBase):
     if not self.long_active_ecu:
       if self.cancel_counter > CANCEL_BUTTON_DELAY_FRAMES:
         can_sends.append(hyundaican.create_clu11(self.packer, self.frame, CS.clu11, Buttons.CANCEL, self.CP))
-      elif self._ray_pedal and CC.longActive and CS.out.cruiseState.enabled:
+      elif self._ray_pedal and CC.enabled and CS.out.cruiseState.enabled:
         if (self.frame - self.last_button_frame) * DT_CTRL > 0.1:
           can_sends.append(hyundaican.create_clu11(self.packer, self.frame, CS.clu11, Buttons.CANCEL, self.CP))
           self.last_button_frame = self.frame
@@ -830,7 +830,7 @@ class CarController(CarControllerBase):
       pedal_ready = CS.ray_pedal_valid and CS.ray_pedal_state == 0
       pedal_active = (CC.longActive and pedal_ready and not CC.cruiseControl.override and
                       not CS.out.gasPressed and not CS.out.brakePressed and
-                      not CS.out.cruiseState.enabled and CS.out.vEgo >= self.CP.minEnableSpeed)
+                      not CS.out.cruiseState.enabled)
       if pedal_active:
         target = float(np.clip(accel / CarControllerParams.ACCEL_MAX * RAY_PEDAL_COMMAND_CAP,
                                0.0, RAY_PEDAL_COMMAND_CAP))

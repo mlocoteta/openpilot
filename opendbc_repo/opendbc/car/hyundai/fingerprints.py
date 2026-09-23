@@ -1556,6 +1556,7 @@ FW_VERSIONS = {
   },
   CAR.HYUNDAI_STARIA_4TH_GEN: {
     (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00US4 MFC  AT AUS RHD 1.00 1.04 99211-CG000 210819',
       b'\xf1\x00US4 MFC  AT KOR LHD 1.00 1.06 99211-CG000 230524',
     ],
     (Ecu.fwdRadar, 0x7d0, None): [

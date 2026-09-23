@@ -108,8 +108,10 @@ class ModelRenderer(Widget):
       self._longitudinal_control = cp.openpilotLongitudinalControl
 
   def set_transform(self, transform: np.ndarray):
-    self._car_space_transform = transform.astype(np.float32)
-    self._transform_dirty = True
+    transform = transform.astype(np.float32)
+    if not np.array_equal(transform, self._car_space_transform):
+      self._car_space_transform = transform
+      self._transform_dirty = True
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
@@ -245,20 +247,13 @@ class ModelRenderer(Widget):
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
     max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
-    # Update lane lines using raw points
-    line_width_factor = 0.12
-    for i, lane_line in enumerate(self._lane_lines):
-      if i in (1, 2):
-        line_width_factor = 0.16
-      line_width = lane_line_width if lane_line_width is not None else line_width_factor
-      lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, line_width * self._lane_line_probs[i], 0.0, max_idx
-      )
-
-    # Update road edges using raw points
-    edge_width = road_edge_width if road_edge_width is not None else line_width_factor
-    for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, edge_width, 0.0, max_idx)
+    line_widths = [0.12, 0.16, 0.16, 0.16] if lane_line_width is None else [lane_line_width] * 4
+    widths = [width * probability for width, probability in zip(line_widths, self._lane_line_probs, strict=True)]
+    widths.extend([0.16 if road_edge_width is None else road_edge_width] * len(self._road_edges))
+    lines = [*self._lane_lines, *self._road_edges]
+    polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, max_idx)
+    for line, polygon in zip(lines, polygons, strict=True):
+      line.projected_points = polygon
 
     # Update path using raw points
     if lead and lead.status:
@@ -578,66 +573,57 @@ class ModelRenderer(Widget):
     if line.shape[0] == 0:
       return np.empty((0, 2), dtype=np.float32)
 
-    # Slice points and filter non-negative x-coordinates
     points = line[:max_idx + 1]
-    points = points[points[:, 0] >= 0]
-    if points.shape[0] == 0:
+    n = len(points)
+    if n == 0:
       return np.empty((0, 2), dtype=np.float32)
 
-    N = points.shape[0]
-    # Generate left and right 3D points in one array using broadcasting
     offsets = np.array([[0, -y_off, z_off], [0, y_off, z_off]], dtype=np.float32)
-    points_3d = points[None, :, :] + offsets[:, None, :]  # Shape: 2xNx3
-    points_3d = points_3d.reshape(2 * N, 3)  # Shape: (2*N)x3
+    proj, valid = self._project_points(points, offsets[:, None, :])
 
-    # Transform all points to projected space in one operation
-    proj = self._car_space_transform @ points_3d.T  # Shape: 3x(2*N)
-    proj = proj.reshape(3, 2, N)
-    left_proj = proj[:, 0, :]
-    right_proj = proj[:, 1, :]
+    screen = proj[:2, :, valid]
+    if not allow_invert:
+      keep = screen[1, 0] == np.minimum.accumulate(screen[1, 0])
+      screen = screen[:, :, keep]
 
-    # Filter points where z is sufficiently large
-    valid_proj = (np.abs(left_proj[2]) >= 1e-6) & (np.abs(right_proj[2]) >= 1e-6)
-    if not np.any(valid_proj):
-      return np.empty((0, 2), dtype=np.float32)
+    return np.concatenate((screen[:, 0].T, screen[:, 1, ::-1].T)).astype(np.float32, copy=False)
 
-    # Compute screen coordinates
-    left_screen = left_proj[:2, valid_proj] / left_proj[2, valid_proj][None, :]
-    right_screen = right_proj[:2, valid_proj] / right_proj[2, valid_proj][None, :]
+  def _map_lines_to_polygons(self, lines: list[np.ndarray], y_offsets: list[float], max_idx: int) -> list[np.ndarray]:
+    points = [line[:max_idx + 1] for line in lines]
+    counts = [len(line) for line in points]
+    total = sum(counts)
+    if total == 0:
+      return [np.empty((0, 2), dtype=np.float32) for _ in lines]
 
-    # Define clip region bounds
+    offsets = np.zeros((2, total, 3), dtype=np.float32)
+    offsets[1, :, 1] = np.repeat(y_offsets, counts)
+    offsets[0, :, 1] = -offsets[1, :, 1]
+    proj, valid = self._project_points(np.concatenate(points), offsets)
+
+    polygons = []
+    start = 0
+    for count in counts:
+      end = start + count
+      screen = proj[:2, :, start:end][:, :, valid[start:end]]
+      polygons.append(np.concatenate((screen[:, 0].T, screen[:, 1, ::-1].T)).astype(np.float32, copy=False))
+      start = end
+    return polygons
+
+  def _project_points(self, points: np.ndarray, offsets: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    n = len(points)
+    points_3d = points[None, :, :] + offsets
+    proj = (self._car_space_transform @ points_3d.reshape(2 * n, 3).T).reshape(3, 2, n)
+
+    valid = (points[:, 0] >= 0) & (np.abs(proj[2, 0]) >= 1e-6) & (np.abs(proj[2, 1]) >= 1e-6)
+    np.divide(proj[:2], proj[2], out=proj[:2], where=valid)
+
     clip = self._clip_region
     x_min, x_max = clip.x, clip.x + clip.width
     y_min, y_max = clip.y, clip.y + clip.height
-
-    # Filter points within clip region
-    left_in_clip = (
-      (left_screen[0] >= x_min) & (left_screen[0] <= x_max) &
-      (left_screen[1] >= y_min) & (left_screen[1] <= y_max)
-    )
-    right_in_clip = (
-      (right_screen[0] >= x_min) & (right_screen[0] <= x_max) &
-      (right_screen[1] >= y_min) & (right_screen[1] <= y_max)
-    )
-    both_in_clip = left_in_clip & right_in_clip
-
-    if not np.any(both_in_clip):
-      return np.empty((0, 2), dtype=np.float32)
-
-    # Select valid and clipped points
-    left_screen = left_screen[:, both_in_clip]
-    right_screen = right_screen[:, both_in_clip]
-
-    # Handle Y-coordinate inversion on hills
-    if not allow_invert and left_screen.shape[1] > 1:
-      y = left_screen[1, :]  # y-coordinates
-      keep = y == np.minimum.accumulate(y)
-      if not np.any(keep):
-        return np.empty((0, 2), dtype=np.float32)
-      left_screen = left_screen[:, keep]
-      right_screen = right_screen[:, keep]
-
-    return np.vstack((left_screen.T, right_screen[:, ::-1].T)).astype(np.float32)
+    for side in (0, 1):
+      valid &= ((proj[0, side] >= x_min) & (proj[0, side] <= x_max) &
+                (proj[1, side] >= y_min) & (proj[1, side] <= y_max))
+    return proj, valid
 
   @staticmethod
   def _hsla_to_color(h, s, l, a):

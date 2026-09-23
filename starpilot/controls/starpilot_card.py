@@ -213,7 +213,7 @@ class StarPilotCard:
     else:
       self.params.put_bool_nonblocking("ExperimentalMode", not sm["selfdriveState"].experimentalMode)
 
-  def update(self, carState, starpilotCarState, sm, starpilot_toggles):
+  def update(self, carState, starpilotCarState, sm, starpilot_toggles, *, preap_authorized=False):
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")
     self._handle_favorite_traffic_mode_action(sm)
 
@@ -348,6 +348,8 @@ class StarPilotCard:
       self.always_on_lateral_allowed = False
 
     self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
+    if getattr(self.CP, "carFingerprint", None) == "TESLA_MODEL_S_PREAP":
+      self.always_on_lateral_enabled &= preap_authorized
     self.always_on_lateral_enabled &= carState.gearShifter not in NON_DRIVING_GEARS
     self.always_on_lateral_enabled &= not hyundai_aol_needs_engagement or self.hyundai_aol_ready
     self.always_on_lateral_enabled &= sm["starpilotPlan"].lateralCheck

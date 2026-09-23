@@ -64,6 +64,49 @@ def test_driving_and_parked_offsets_apply_independently():
   assert device._calculate_brightness() == 52
 
 
+@pytest.mark.parametrize('wake', ['button', 'touch', 'offroad', 'ignition', 'critical'])
+@pytest.mark.parametrize('management', [False, True])
+def test_manual_screen_off_and_wake_only_change_display(wake, management):
+  device, state, app = make_device(ScreenManagement=management, StandbyMode=False)
+  original_settings = dict(state.ui_params.values)
+  state.params_memory.values[screen.SCREEN_OFF_TOGGLE_PARAM] = 1
+  device._update_wakefulness()
+  assert not device.awake
+  assert device._calculate_brightness() == 0
+  device._update_wakefulness()
+  assert not device.awake
+  if wake == 'button':
+    state.params_memory.values[screen.SCREEN_OFF_TOGGLE_PARAM] = 2
+  elif wake == 'touch':
+    app.mouse_events = [SimpleNamespace(left_down=True)]
+  elif wake == 'offroad':
+    state.started = False
+  elif wake == 'ignition':
+    state.ignition = False
+  else:
+    state.sm['selfdriveState'].alertStatus = 'critical'
+    state.sm['selfdriveState'].alertSize = 'full'
+  device._update_wakefulness()
+  assert device.awake
+  assert device._calculate_brightness() > 0
+  assert state.ui_params.values == original_settings
+
+
+def test_screen_off_action_ignores_offroad_and_old_requests():
+  device, state, app = make_device(StandbyMode=False)
+  state.started = False
+  state.params_memory.values[screen.SCREEN_OFF_TOGGLE_PARAM] = 1
+  device._update_wakefulness()
+  assert device.awake
+  state.started = True
+  device._update_wakefulness()
+  assert device.awake
+  app.mouse_events = [SimpleNamespace(left_down=True)]
+  state.params_memory.values[screen.SCREEN_OFF_TOGGLE_PARAM] = 2
+  device._update_wakefulness()
+  assert not device.awake
+
+
 def test_offset_is_ignored_in_manual_and_when_screen_settings_disabled():
   device, _, _ = make_device(StandbyMode=False, ScreenBrightnessOnroad=22, ScreenBrightnessOnroadOffset=50)
   assert device._calculate_brightness() == 22

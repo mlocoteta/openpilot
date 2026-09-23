@@ -20,6 +20,7 @@ def replay_drive(msgs, safety_mode, param, alternative_experience):
   init_segment(safety, msgs, safety_mode, param)
 
   rx_tot, rx_invalid, tx_tot, tx_blocked, tx_controls, tx_controls_blocked = 0, 0, 0, 0, 0, 0
+  tx_lateral, tx_lateral_blocked = 0, 0
   safety_tick_rx_invalid = False
   blocked_addrs = Counter()
   invalid_addrs = set()
@@ -38,14 +39,20 @@ def replay_drive(msgs, safety_mode, param, alternative_experience):
     if msg.which() == 'sendcan':
       for canmsg in msg.sendcan:
         _msg = package_can_msg(canmsg)
+        # TX hooks can revoke permission on a violation. Count the permission
+        # before checking the message, including lateral-only AOL operation.
+        controls_allowed = safety.get_controls_allowed()
+        lateral_allowed = controls_allowed or safety.get_aol_allowed()
         sent = safety.safety_tx_hook(_msg)
         if not sent:
           tx_blocked += 1
-          tx_controls_blocked += safety.get_controls_allowed()
+          tx_controls_blocked += controls_allowed
+          tx_lateral_blocked += lateral_allowed
           blocked_addrs[canmsg.address] += 1
 
           carlog.debug("blocked bus %d msg %d at %f" % (canmsg.src, canmsg.address, (msg.logMonoTime - start_t) / 1e9))
-        tx_controls += safety.get_controls_allowed()
+        tx_controls += controls_allowed
+        tx_lateral += lateral_allowed
         tx_tot += 1
     elif msg.which() == 'can':
       # ignore msgs we sent
@@ -68,9 +75,11 @@ def replay_drive(msgs, safety_mode, param, alternative_experience):
   print("total msgs with controls allowed:", tx_controls)
   print("blocked msgs:", tx_blocked)
   print("blocked with controls allowed:", tx_controls_blocked)
+  print("total msgs with lateral allowed:", tx_lateral)
+  print("blocked with lateral allowed:", tx_lateral_blocked)
   print("blocked addrs:", blocked_addrs)
 
-  return tx_controls_blocked == 0 and rx_invalid == 0 and not safety_tick_rx_invalid
+  return tx_lateral_blocked == 0 and rx_invalid == 0 and not safety_tick_rx_invalid
 
 
 if __name__ == "__main__":

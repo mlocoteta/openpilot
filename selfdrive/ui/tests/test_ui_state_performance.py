@@ -1,6 +1,8 @@
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.selfdrive.ui.lib.ui_param_cache import UIParamCache
 from openpilot.selfdrive.ui import ui_state as ui_state_module
 
@@ -77,3 +79,73 @@ def test_ui_update_reports_offroad_callback(monkeypatch):
     "ui.update.before_offroad_callback.<lambda>",
     "ui.update.after_offroad_callback.<lambda>",
   ]
+
+
+@pytest.fixture
+def toggles_state(monkeypatch):
+  class SubMaster(dict):
+    frame = 0
+    updated = {"pandaStates": False, "wideRoadCameraState": False, "starpilotPlan": True}
+    valid = {"starpilotCarState": False}
+    alive = {"wideRoadCameraState": False}
+    recv_frame = {"pandaStates": 0}
+
+  state = object.__new__(ui_state_module.UIState)
+  state.sm = SubMaster({
+    "deviceState": SimpleNamespace(started=True, chestnutPresent=False),
+    "starpilotPlan": SimpleNamespace(starpilotToggles=""),
+  })
+  state.ui_params = SimpleNamespace(get_bool=lambda key: False)
+  state.params_memory = SimpleNamespace(get_bool=lambda key: False, get_int=lambda key, default=0: default)
+  state.usbgpu = False
+  state.starpilot_toggles = {"standby_mode": False}
+  state._last_starpilot_toggles = ""
+  monkeypatch.setattr(ui_state_module.rl, "get_fps", lambda: 60)
+  return state
+
+
+def test_identical_starpilot_toggles_are_decoded_once(toggles_state, monkeypatch):
+  payloads = []
+  original_loads = ui_state_module.json.loads
+
+  def loads(payload):
+    payloads.append(payload)
+    return original_loads(payload)
+
+  monkeypatch.setattr(ui_state_module.json, "loads", loads)
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": true, "path_width": 6.1}'
+
+  toggles_state._update_state()
+  toggles_state._update_state()
+  toggles_state.sm["starpilotPlan"].starpilotToggles = ""
+  toggles_state._update_state()
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": true, "path_width": 6.1}'
+  toggles_state._update_state()
+
+  assert len(payloads) == 1
+  assert toggles_state.starpilot_toggles["standby_mode"] is True
+  assert toggles_state.starpilot_toggles["path_width"] == 6.1
+
+
+def test_changed_starpilot_toggles_apply_immediately(toggles_state):
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": true, "path_width": 6.1}'
+  toggles_state._update_state()
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": false}'
+  toggles_state._update_state()
+
+  assert toggles_state.starpilot_toggles["standby_mode"] is False
+  assert toggles_state.starpilot_toggles["path_width"] == 6.1
+
+
+@pytest.mark.parametrize("invalid_payload", ['{"standby_mode":', '[]', 'null'])
+def test_invalid_starpilot_toggles_preserve_state_and_recover(toggles_state, monkeypatch, invalid_payload):
+  monkeypatch.setattr(ui_state_module.cloudlog, "warning", lambda message: None)
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": true}'
+  toggles_state._update_state()
+  toggles_state.sm["starpilotPlan"].starpilotToggles = invalid_payload
+  toggles_state._update_state()
+  assert toggles_state.starpilot_toggles["standby_mode"] is True
+
+  toggles_state.sm["starpilotPlan"].starpilotToggles = '{"standby_mode": false}'
+  toggles_state._update_state()
+  assert toggles_state.starpilot_toggles["standby_mode"] is False

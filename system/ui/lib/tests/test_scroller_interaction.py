@@ -1,5 +1,6 @@
 import pyray as rl
 import pytest
+from types import SimpleNamespace
 
 from openpilot.system.ui import widgets
 from openpilot.system.ui.lib import scroll_panel2
@@ -21,6 +22,16 @@ class Item(widgets.Widget):
     pass
 
 
+class Page(Item):
+  def __init__(self):
+    super().__init__()
+    self.set_rect(rl.Rectangle(0, 0, 536, 240))
+    self.render_count = 0
+
+  def _render(self, _):
+    self.render_count += 1
+
+
 @pytest.fixture
 def make_scroller(monkeypatch):
   monkeypatch.setattr(rl, "begin_scissor_mode", lambda *args: None)
@@ -32,7 +43,7 @@ def make_scroller(monkeypatch):
   monkeypatch.setattr(gui_app, "_show_touches", False)
   monkeypatch.setattr(gui_app, "_mouse_events", [])
   monkeypatch.setattr(widgets, "PC", False)
-  monkeypatch.setattr(widgets.device, "awake", True)
+  monkeypatch.setattr(widgets, "device", SimpleNamespace(awake=True))
   monkeypatch.setattr(scroll_panel2, "TICI", True)
 
   def make(items=None, **kwargs):
@@ -59,6 +70,66 @@ def test_tap_interrupts_programmatic_scroll_tail(make_scroller):
 
   assert not scroller.is_auto_scrolling
   assert sum(item.clicks for item in scroller.items) == 1
+
+
+def page_scroller(make_scroller):
+  pages = [Page() for _ in range(3)]
+  scroller = make_scroller(items=pages, snap_items=True, spacing=0, pad=0)
+  scroller._scroll_snap_filter.x = 0
+  scroller.scroll_panel.set_offset(-1072)
+  scroller.render()
+  return scroller, pages
+
+
+@pytest.mark.parametrize("fps", [20, 60])
+def test_onroad_home_transition_duration_and_offscreen_culling(make_scroller, monkeypatch, fps):
+  monkeypatch.setattr(gui_app, "_target_fps", 60)
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 1 / fps)
+  scroller, pages = page_scroller(make_scroller)
+
+  for page in (pages[1], pages[2], pages[1]):
+    scroller.scroll_to(page.rect.x, smooth=True)
+    for _frames in range(1, fps * 2):
+      scroller.render()
+      if not scroller.is_auto_scrolling:
+        break
+    assert _frames / fps == pytest.approx(1.0, abs=1 / fps)
+    assert page.rect.x == 0
+    hidden = [item for item in pages if item is not page]
+    previous_draws = [item.render_count for item in hidden]
+    for _ in range(fps * 2):
+      scroller.render()
+    assert [item.render_count for item in hidden] == previous_draws
+    assert page.rect.x == 0
+
+
+def test_snap_settles_at_same_time_across_frame_rates(make_scroller, monkeypatch):
+  monkeypatch.setattr(gui_app, "_target_fps", 60)
+  durations = []
+  for fps in (20, 60):
+    monkeypatch.setattr(rl, "get_frame_time", lambda fps=fps: 1 / fps)
+    scroller, pages = page_scroller(make_scroller)
+    scroller.scroll_panel.set_offset(-600)
+    for _frames in range(1, fps * 3):
+      scroller.render()
+      if pages[1].rect.x == 0 and scroller._scroll_snap_filter.x == 0:
+        break
+    assert pages[1].rect.x == 0
+    assert pages[2].rect.x == 536
+    durations.append(_frames / fps)
+  assert durations[0] == pytest.approx(durations[1], abs=1 / 20)
+
+
+def test_programmatic_scroll_caps_long_frame_without_overshoot(make_scroller, monkeypatch):
+  scroller, pages = page_scroller(make_scroller)
+  scroller.scroll_to(pages[1].rect.x, smooth=True)
+  monkeypatch.setattr(rl, "get_frame_time", lambda: 10.0)
+
+  scroller.render()
+
+  assert -1072 < scroller.scroll_panel.get_offset() < -804
+  assert scroller.is_auto_scrolling
+  assert -536 < pages[1].rect.x < -268
 
 
 def test_blocking_programmatic_scroll_still_rejects_taps(make_scroller):

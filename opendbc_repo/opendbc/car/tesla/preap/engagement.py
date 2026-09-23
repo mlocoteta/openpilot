@@ -13,6 +13,8 @@ class PreAPEngagement:
     self.enableDoublePull = double_pull_enabled
     self.double_pull_window_ms = double_pull_window_ms
     self.cruiseEnabled = False
+    self.lateralEnabled = False
+    self.lateralRearmRequired = False
     self.enableLongControl = False
     self.enableJustCC = False
     self.pending_enable = False
@@ -28,6 +30,8 @@ class PreAPEngagement:
 
   def handle_steering_disengage(self, steering_disengage: bool) -> None:
     if steering_disengage and not self.prev_steering_disengage:
+      self.lateralEnabled = False
+      self.lateralRearmRequired = True
       self.cruiseEnabled = False
       self.enableLongControl = False
       self.enableJustCC = False
@@ -45,6 +49,8 @@ class PreAPEngagement:
     button_events: list[structs.CarState.ButtonEvent] = []
 
     if cruise_buttons == CruiseButtons.MAIN and prev_cruise_buttons != CruiseButtons.MAIN:
+      self.lateralEnabled = True
+      self.lateralRearmRequired = False
       if self.enableDoublePull:
         self._handle_double_pull(curr_time_ms, v_ego, speed_units, use_pedal, pedal_long_allowed, long_control_allowed, di_cruise_state)
       else:
@@ -75,6 +81,8 @@ class PreAPEngagement:
   def check_can_engage(self, door_open: bool, gear_shifter, seatbelt_unlatched: bool) -> bool:
     can_engage = not door_open and gear_shifter == structs.CarState.GearShifter.drive and not seatbelt_unlatched
     if not can_engage:
+      self.lateralEnabled = False
+      self.lateralRearmRequired = True
       self.cruiseEnabled = False
       self.enableLongControl = False
       self.enableJustCC = False
@@ -118,6 +126,8 @@ class PreAPEngagement:
                 ((curr_time_ms - self.preap_last_cc_spoof_ms) < SPOOF_ECHO_WINDOW_MS)
       be.type = ButtonType.unknown if is_echo else ButtonType.cancel
       if not is_echo:
+        self.lateralEnabled = False
+        self.lateralRearmRequired = True
         self.cruiseEnabled = False
         self.enableLongControl = False
         self.enableJustCC = False
@@ -145,4 +155,3 @@ class PreAPEngagement:
   def _capture_target_speed(v_ego: float, speed_units: str) -> float:
     speed_uom_kph = CV.MPH_TO_KPH if speed_units == "MPH" else 1.0
     return max(int(v_ego * CV.MS_TO_KPH / speed_uom_kph + 0.5) * speed_uom_kph, 0.0)
-

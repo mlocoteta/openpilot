@@ -17,6 +17,7 @@ from openpilot.starpilot.common.car_params_capability import capability_car_para
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.starpilot.common.screen_settings import (
   alert_wake_key, brightness_preferences, calculate_screen_brightness, enabled_wake_keys, standby_button_press_time,
+  screen_off_toggle_counter,
 )
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
@@ -112,6 +113,7 @@ class UIState:
     self.switchback_mode_enabled: bool = False
     self.traffic_mode_enabled: bool = False
     self.conditional_status: int = 0
+    self._last_starpilot_toggles: str = ""
     self.starpilot_toggles: dict = {
       "debug_mode": False,
       "driver_camera_in_reverse": False,
@@ -236,11 +238,12 @@ class UIState:
     if self.sm.updated["starpilotPlan"]:
       plan = self.sm["starpilotPlan"]
       toggles_str = plan.starpilotToggles
-      if toggles_str:
+      if toggles_str and toggles_str != self._last_starpilot_toggles:
         try:
           parsed = json.loads(toggles_str)
           if isinstance(parsed, dict):
             self.starpilot_toggles.update(parsed)
+            self._last_starpilot_toggles = toggles_str
         except Exception as e:
           cloudlog.warning(f"Error parsing starpilot_toggles: {e}")
 
@@ -309,6 +312,9 @@ class Device:
 
   def __init__(self):
     self._ignition = False
+    self._screen_off = False
+    self._screen_off_started = ui_state.started
+    self._screen_off_counter = screen_off_toggle_counter(ui_state.params_memory)
     self._last_button_press = standby_button_press_time(ui_state.params_memory)
     self._last_car_button_frame = int(time.monotonic() * 1e9)
     self._last_turn_signal = None
@@ -445,6 +451,8 @@ class Device:
         self._last_brightness = brightness
 
   def _calculate_brightness(self) -> int:
+    if self._screen_off:
+      return 0
     clipped_brightness = self._offroad_brightness
 
     if ui_state.started and ui_state.light_sensor >= 0:
@@ -485,7 +493,22 @@ class Device:
     wake_for_onroad_event = (ui_state.started and self._standby_mode and self._screen_brightness_onroad != 0 and
                              (selected_status_change or self._visible_onroad_alert() or selected_turn_signal))
 
-    if ignition_state_changed or any(ev.left_down for ev in gui_app.mouse_events) or button_pressed or wake_for_onroad_event:
+    counter = screen_off_toggle_counter(ui_state.params_memory)
+    presses = counter - self._screen_off_counter
+    self._screen_off_counter = counter
+    road_changed = ui_state.started != self._screen_off_started
+    self._screen_off_started = ui_state.started
+    touched = any(ev.left_down for ev in gui_app.mouse_events)
+    was_screen_off = self._screen_off
+    if not ui_state.started or road_changed or ignition_state_changed:
+      self._screen_off = False
+    elif presses > 0:
+      if presses % 2:
+        self._screen_off = not self._screen_off
+    elif touched or wake_for_onroad_event or "StandbyWakeCriticalAlert" in self._active_standby_alerts():
+      self._screen_off = False
+
+    if ignition_state_changed or touched or button_pressed or wake_for_onroad_event or presses > 0 or (was_screen_off and not self._screen_off):
       self._reset_interactive_timeout()
 
     interaction_timeout = time.monotonic() > self._interaction_time
@@ -497,7 +520,7 @@ class Device:
     standby_active = ui_state.started and self._standby_mode
     keep_display_awake = not interaction_timeout or PC
     keep_display_awake |= ui_state.ignition and not standby_active
-    self._set_awake(keep_display_awake)
+    self._set_awake(keep_display_awake and not self._screen_off)
 
   @staticmethod
   def _fresh_message(name):

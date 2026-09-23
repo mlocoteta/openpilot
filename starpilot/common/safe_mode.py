@@ -211,6 +211,7 @@ SAFE_MODE_MANAGED_KEYS = (
   "SubaruSNG",
   "SubaruSNGManualParkingBrake",
   "SubaruStopStartOff",
+  "SubaruAvhStartup",
   "SubaruRedneckCruise",
   "VoltSNG",
   "JeepBrakeHold",
@@ -230,6 +231,7 @@ SAFE_MODE_FIXED_VALUES = {
   "LongitudinalPersonality": int(log.LongitudinalPersonality.relaxed),
   "UseAutoSteerDelay": True,
   "SubaruStopStartOff": False,
+  "SubaruAvhStartup": False,
   "SubaruRedneckCruise": False,
   PERSONALITY_PROFILES_PARAM: profile_document(default_personality_profiles(False), enabled=False),
 }

@@ -136,6 +136,8 @@ static uint32_t subaru_compute_checksum(const CANPacket_t *msg) {
   return checksum;
 }
 
+#include "opendbc/safety/modes/subaru_avh.h"
+
 static void subaru_rx_hook(const CANPacket_t *msg) {
   const unsigned int alt_main_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS;
   const unsigned int status_bus = subaru_gen2 ? SUBARU_ALT_BUS : SUBARU_CAM_BUS;
@@ -308,6 +310,10 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
     violation |= subaru_get_checksum(msg) != subaru_compute_checksum(msg);
   }
 
+  if (msg->addr == 0x6BBU) {
+    violation |= !subaru_avh_tx(msg);
+  }
+
   if (violation){
     tx = false;
   }
@@ -315,6 +321,12 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config subaru_init(uint16_t param) {
+  static const CanMsg SUBARU_LEGACY_AVH_TX_MSGS[] = {
+    SUBARU_BASE_TX_MSGS(SUBARU_ALT_BUS, MSG_SUBARU_ES_LKAS_ANGLE)
+    SUBARU_COMMON_TX_MSGS(SUBARU_ALT_BUS)
+    SUBARU_STOP_START_TX_MSGS(SUBARU_ALT_BUS)
+    {0x6BBU, SUBARU_ALT_BUS, 8, .check_relay = false},
+  };
   static const CanMsg SUBARU_TX_MSGS[] = {
     SUBARU_BASE_TX_MSGS(SUBARU_MAIN_BUS, MSG_SUBARU_ES_LKAS)
     SUBARU_COMMON_TX_MSGS(SUBARU_MAIN_BUS)
@@ -455,12 +467,22 @@ static safety_config subaru_init(uint16_t param) {
           subaru_stop_and_go  ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_STOP_AND_GO_TX_MSGS) : \
                                 BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
   }
+  bool avh_enabled = false;
+#ifdef ALLOW_DEBUG
+  avh_enabled = GET_FLAG(param, 1024U) && subaru_gen2 && subaru_lkas_angle && subaru_fixed_angle_limits &&
+                subaru_stop_start_button && !subaru_d_platform && !GET_FLAG(param, 2U) && !subaru_redneck_cruise;
+#endif
+  subaru_avh_init(avh_enabled);
+  if (avh_enabled) {
+    ret = BUILD_SAFETY_CFG(subaru_gen2_lkas_angle_rx_checks, SUBARU_LEGACY_AVH_TX_MSGS);
+  }
   return ret;
 }
 
 const safety_hooks subaru_hooks = {
   .init = subaru_init,
   .rx = subaru_rx_hook,
+  .rx_all = subaru_avh_rx,
   .tx = subaru_tx_hook,
   .get_counter = subaru_get_counter,
   .get_checksum = subaru_get_checksum,

@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import math
 import os
 import platform
 import weakref
@@ -147,6 +150,7 @@ FRAME_FRAGMENT_SHADER_YUV_MICI = VERSION + """
 
 class CameraView(Widget):
   _use_upstream_engaged_color = False
+  _use_roi_upload = False
 
   def __init__(self, name: str, stream_type: VisionStreamType):
     super().__init__()
@@ -183,6 +187,8 @@ class CameraView(Widget):
     self._regressive_frame_count = 0
     self.texture_y: rl.Texture | None = None
     self.texture_uv: rl.Texture | None = None
+    self._texture_frame_data: np.ndarray | None = None
+    self._texture_upload_rect: tuple[int, int, int, int] | None = None
 
     # EGL resources
     self.egl_images: dict[int, EGLImage] = {}
@@ -413,7 +419,11 @@ class CameraView(Widget):
         self._fallback_to_textures("EGL frame rendering failed")
 
     if not self._use_egl:
-      self._render_textures(src_rect, dst_rect)
+      if (self._use_roi_upload and self.frame.height % 2 == 0 and self.frame.stride % 2 == 0 and
+          self._stream_type in (VisionStreamType.VISION_STREAM_ROAD, VisionStreamType.VISION_STREAM_WIDE_ROAD)):
+        self._render_textures(src_rect, dst_rect, rect)
+      else:
+        self._render_textures(src_rect, dst_rect)
 
   def _draw_placeholder(self, rect: rl.Rectangle):
     if self._placeholder_color:
@@ -516,7 +526,47 @@ class CameraView(Widget):
     except Exception:
       cloudlog.exception("CameraView texture fallback initialization failed")
 
-  def _render_textures(self, src_rect: rl.Rectangle, dst_rect: rl.Rectangle) -> None:
+  def _upload_texture_region(self, src_rect: rl.Rectangle, dst_rect: rl.Rectangle, clip: rl.Rectangle) -> bool:
+    frame = self.frame
+    stride, height = frame.stride, frame.height
+    if self._texture_needs_update:
+      # Camera buffers can be reused before a later viewport change exposes more pixels.
+      size = stride * height * 3 // 2
+      if self._texture_frame_data is None or len(self._texture_frame_data) != size:
+        self._texture_frame_data = np.empty(size, dtype=np.uint8)
+      self._texture_frame_data[:stride * height] = frame.data[:stride * height]
+      self._texture_frame_data[stride * height:] = frame.data[frame.uv_offset:frame.uv_offset + stride * (height // 2)]
+      self._texture_upload_rect = None
+      self._texture_needs_update = False
+
+    left = max(clip.x, dst_rect.x)
+    top = max(clip.y, dst_rect.y)
+    right = min(clip.x + clip.width, dst_rect.x + dst_rect.width)
+    bottom = min(clip.y + clip.height, dst_rect.y + dst_rect.height)
+    if left >= right or top >= bottom:
+      return False
+
+    x0 = max(0, math.floor(src_rect.x + (left - dst_rect.x) * src_rect.width / dst_rect.width) - 2) // 2 * 2
+    y0 = max(0, math.floor(src_rect.y + (top - dst_rect.y) * src_rect.height / dst_rect.height) - 2) // 2 * 2
+    x1 = min(stride, (math.ceil(src_rect.x + (right - dst_rect.x) * src_rect.width / dst_rect.width) + 3) // 2 * 2)
+    y1 = min(height, (math.ceil(src_rect.y + (bottom - dst_rect.y) * src_rect.height / dst_rect.height) + 3) // 2 * 2)
+    if self._texture_upload_rect is not None:
+      prev_x0, prev_y0, prev_x1, prev_y1 = self._texture_upload_rect
+      if prev_x0 <= x0 and prev_y0 <= y0 and prev_x1 >= x1 and prev_y1 >= y1:
+        return True
+      x0, y0 = min(x0, prev_x0), min(y0, prev_y0)
+      x1, y1 = max(x1, prev_x1), max(y1, prev_y1)
+
+    y_plane = self._texture_frame_data[:stride * height].reshape(height, stride)
+    uv_plane = self._texture_frame_data[stride * height:].reshape(height // 2, stride // 2, 2)
+    y_data = np.ascontiguousarray(y_plane[y0:y1, x0:x1])
+    uv_data = np.ascontiguousarray(uv_plane[y0 // 2:y1 // 2, x0 // 2:x1 // 2])
+    rl.update_texture_rec(self.texture_y, rl.Rectangle(x0, y0, x1 - x0, y1 - y0), rl.ffi.cast("void *", rl.ffi.from_buffer(y_data)))
+    rl.update_texture_rec(self.texture_uv, rl.Rectangle(x0 // 2, y0 // 2, (x1 - x0) // 2, (y1 - y0) // 2), rl.ffi.cast("void *", rl.ffi.from_buffer(uv_data)))
+    self._texture_upload_rect = x0, y0, x1, y1
+    return True
+
+  def _render_textures(self, src_rect: rl.Rectangle, dst_rect: rl.Rectangle, clip: rl.Rectangle | None = None) -> None:
     """Copy camera data into ordinary Raylib textures before drawing.
 
     Raylib batches camera draws as GL_TEXTURE_2D. Imported EGL images are
@@ -529,7 +579,10 @@ class CameraView(Widget):
       return
 
     # Update textures with new frame data
-    if self._texture_needs_update:
+    if clip is not None:
+      if not self._upload_texture_region(src_rect, dst_rect, clip):
+        return
+    elif self._texture_needs_update:
       y_data = self.frame.data[: self.frame.uv_offset]
       uv_data = self.frame.data[self.frame.uv_offset:]
 
@@ -681,6 +734,8 @@ class CameraView(Widget):
           cloudlog.exception("CameraView failed to unload temporary EGL image")
 
   def _clear_textures(self):
+    self._texture_frame_data = None
+    self._texture_upload_rect = None
     if ((self._external_texture_id or self.egl_texture is not None or self.egl_images) and is_egl_initialized()):
       try:
         # Raylib queues draw calls. Submit them before waiting for the GPU so
