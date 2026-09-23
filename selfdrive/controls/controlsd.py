@@ -441,6 +441,49 @@ class Controls:
     self.has_ti_sigmoid = (self.CP.carFingerprint == "HONDA_ACCORD_9G") and self.params.get_bool("TorqueInterceptorEnabled")
     self._ti_frame = 0
     self._ti_sigmoid_hash = getattr(self.CI.__class__, "_sigmoid_params", None)
+    self._ti_kp = None
+    self._ti_error_logged_time = 0.0
+    if self.has_ti_sigmoid:
+      self._update_ti_live_params()
+
+  def _lateral_kp(self):
+    # On the TI car TISteerKp replaces StarPilot's SteerKP. It used to be applied
+    # only every 100th frame and overwritten by steerKp on the next one.
+    return self._ti_kp if self._ti_kp is not None else self.starpilot_toggles.steerKp
+
+  def _read_ti_kp(self):
+    ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
+    return [[0], [ti_kp]] if ti_kp > 0 else None
+
+  def _update_ti_live_params(self):
+    """Honda 9G TI: live sigmoid params, Kp and damping policy (~1 s cadence)."""
+    try:
+      if not self.params.get_bool("TISigmoidEnabled"):
+        if self._ti_sigmoid_hash is not None and hasattr(self.LaC, "reset_to_linear"):
+          self.LaC.reset_to_linear()
+          self._ti_sigmoid_hash = None
+      elif self.params.get_bool("TISigmoidLive") and hasattr(self.LaC, "update_sigmoid_lookup"):
+        a = self.params.get_float("TISigmoidA")
+        b = self.params.get_float("TISigmoidB")
+        c = self.params.get_float("TISigmoidC")
+        if a > 0 and b > 0 and c > 0 and (a, b, c) != self._ti_sigmoid_hash:
+          self.LaC.update_sigmoid_lookup(a, b, c)
+          self._ti_sigmoid_hash = (a, b, c)
+      self._ti_kp = self._read_ti_kp()
+      if hasattr(self.LaC, "update_honda_accord_low_speed_damping"):
+        self.LaC.update_honda_accord_low_speed_damping(
+          self.params.get_bool("TILowSpeedDampingEnabled"),
+          self.params.get_float("TILowSpeedDampingMax") or 0.12,
+          self.params.get_bool("TILowSpeedCenterDampingEnabled"),
+          self.params.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62,
+        )
+    except Exception:
+      # Keep the last good values, but never fail silently. Rate-limited so a
+      # persistent fault cannot flood the log at the 1 Hz update cadence.
+      now = time.monotonic()
+      if now - self._ti_error_logged_time > 60.0:
+        self._ti_error_logged_time = now
+        cloudlog.exception("controlsd: Honda TI live parameter update failed")
 
   def update(self):
     self.sm.update(15)
@@ -451,37 +494,12 @@ class Controls:
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
 
     if hasattr(self.LaC, "pid") and self.CP.lateralTuning.which() != "pid":
-      self.LaC.pid._k_p = self.starpilot_toggles.steerKp
+      self.LaC.pid._k_p = self._lateral_kp()
 
-    # Honda 9G TI: live sigmoid params + Kp (~1s cadence). Gated to the 9G so no
-    # other torque car is affected.
     if self.has_ti_sigmoid:
       self._ti_frame += 1
       if self._ti_frame % 100 == 0:
-        try:
-          if not self.params.get_bool("TISigmoidEnabled"):
-            if self._ti_sigmoid_hash is not None and hasattr(self.LaC, "reset_to_linear"):
-              self.LaC.reset_to_linear()
-              self._ti_sigmoid_hash = None
-          elif self.params.get_bool("TISigmoidLive") and hasattr(self.LaC, "update_sigmoid_lookup"):
-            a = self.params.get_float("TISigmoidA")
-            b = self.params.get_float("TISigmoidB")
-            c = self.params.get_float("TISigmoidC")
-            if a > 0 and b > 0 and c > 0 and (a, b, c) != self._ti_sigmoid_hash:
-              self.LaC.update_sigmoid_lookup(a, b, c)
-              self._ti_sigmoid_hash = (a, b, c)
-          ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
-          if ti_kp > 0 and hasattr(self.LaC, "pid"):
-            self.LaC.pid._k_p = [[0], [ti_kp]]
-          if hasattr(self.LaC, "update_honda_accord_low_speed_damping"):
-            self.LaC.update_honda_accord_low_speed_damping(
-              self.params.get_bool("TILowSpeedDampingEnabled"),
-              self.params.get_float("TILowSpeedDampingMax") or 0.12,
-              self.params.get_bool("TILowSpeedCenterDampingEnabled"),
-              self.params.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62,
-            )
-        except Exception:
-          pass
+        self._update_ti_live_params()
 
     if self.sm.updated['liveDelay'] and hasattr(self.LaC, "update_live_delay"):
       self.LaC.update_live_delay(self.sm['liveDelay'].lateralDelay)
