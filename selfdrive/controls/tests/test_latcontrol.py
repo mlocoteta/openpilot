@@ -2057,9 +2057,11 @@ class TestLatControl:
     assert 0.88 <= scale < 1.0
     assert 0.0 < envelope <= 1.0
     assert damped < 1.0
-    assert highway == pytest.approx(1.0)
-    assert highway_scale == pytest.approx(1.0)
-    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    # The sigmoid speed envelopes fade out rather than cut off: at 12 m/s the
+    # residual effect is <0.5% of output (envelope ~0.004 / ~0.002).
+    assert highway == pytest.approx(1.0, abs=0.005)
+    assert highway_scale == pytest.approx(1.0, abs=0.001)
+    assert highway_envelope == pytest.approx(0.0, abs=0.005)
     assert strong_turn_scale > scale
     assert strong_turn_envelope < envelope
     assert strong_turn > damped
@@ -2096,9 +2098,11 @@ class TestLatControl:
     assert outside > damped
     assert outside_scale > scale
     assert outside_envelope < envelope
-    assert highway == pytest.approx(1.0)
-    assert highway_scale == pytest.approx(1.0)
-    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    # The sigmoid speed envelopes fade out rather than cut off: at 12 m/s the
+    # residual effect is <0.5% of output (envelope ~0.004 / ~0.002).
+    assert highway == pytest.approx(1.0, abs=0.005)
+    assert highway_scale == pytest.approx(1.0, abs=0.001)
+    assert highway_envelope == pytest.approx(0.0, abs=0.005)
     assert lighter_cap > damped
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
