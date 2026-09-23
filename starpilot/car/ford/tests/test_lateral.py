@@ -46,6 +46,72 @@ def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, stee
   ))
 
 
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("speed,weight", ((4.0, 0.0), (5.0, 0.0), (6.0, 0.5), (7.0, 1.0),
+                                         (12.0, 1.0), (13.5, 0.5), (15.0, 0.0), (20.0, 0.0)))
+def test_mach_e_unwind_preview_speed_and_direction(controller, monkeypatch, sign, speed, weight):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = sign * 0.011
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.004)
+  result = controller._unwind_preview(sign * 0.010, sign * 0.009, sign * 0.011, speed)
+  assert result == pytest.approx(sign * (0.009 - 0.005 * weight))
+
+
+@pytest.mark.parametrize("desired,last,current,preview", (
+  (0.010, 0.009, 0.011, 0.004),
+  (0.010, 0.010, 0.011, 0.004),
+  (0.010, 0.011, 0.009, 0.004),
+  (0.010, 0.011, 0.010, 0.004),
+  (0.010, -0.011, 0.011, 0.004),
+  (0.010, 0.011, -0.011, 0.004),
+  (0.010, 0.011, 0.011, -0.004),
+  (0.010, 0.011, 0.011, 0.009),
+  (0.010, 0.011, 0.011, 0.012),
+  (0.001, 0.002, 0.003, 0.0005),
+))
+def test_mach_e_unwind_preserves_other_phases(controller, monkeypatch, desired, last, current, preview):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = last
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: preview)
+  assert controller._unwind_preview(desired, 0.009, current, 10.0) == 0.009
+
+
+@pytest.mark.parametrize("fingerprint", (CAR.FORD_EDGE_MK2, CAR.FORD_EXPLORER_MK6, CAR.FORD_F_150_MK14))
+def test_unwind_preview_does_not_change_other_fords(controller, fingerprint):
+  controller.CP.carFingerprint = fingerprint
+  controller.desired_curvature_last = 0.011
+  assert controller._unwind_preview(0.010, 0.009, 0.011, 10.0) == 0.009
+
+
+def test_mach_e_unwind_lag_ramps_continuously(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.desired_curvature_last = 0.011
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: 0.004)
+  assert controller._unwind_preview(0.010, 0.009, 0.01025, 10.0) == pytest.approx(0.0065)
+  assert controller._unwind_preview(0.010, -0.009, 0.011, 10.0) == -0.009
+
+
+@pytest.mark.parametrize("driver,lane_change,active", ((False, False, True), (True, False, True),
+                                                    (False, True, True), (False, False, False)))
+def test_mach_e_unwind_update_scope_and_rate(controller, monkeypatch, driver, lane_change, active):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = 0.011
+  controller.curvature_last = 0.010
+  controller.curvature_samples.append(0.010)
+  monkeypatch.setattr(controller, "_lane_change", lambda: (lane_change, 0))
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda v, t: 0.010 if t < 0.5 else 0.004)
+  result = controller.update(SimpleNamespace(latActive=active),
+                             car_state(speed=10.0, curvature=0.011, steering_pressed=driver),
+                             SimpleNamespace(curvature=0.010))
+  assert result.curvature_rate == 0.0
+  if not active:
+    assert not result.active
+    assert controller.desired_curvature_last == 0.0
+  else:
+    assert result.curvature == pytest.approx(0.010 if driver or lane_change else 0.009)
+
+
 def test_human_turn_requires_sustained_input():
   detector = HumanTurnDetector()
   assert not detector.update(True, True, 0.0)

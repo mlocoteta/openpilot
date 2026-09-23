@@ -43,6 +43,8 @@ MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 12.0
 MACH_E_TURN_IN_MIN_CURVATURE = 0.002
 MACH_E_TURN_IN_FULL_CURVATURE = 0.008
 MACH_E_TURN_IN_LAG_CURVATURE = 0.006
+MACH_E_UNWIND_LOOKAHEAD_EXTRA = 0.80
+MACH_E_UNWIND_FULL_LAG_CURVATURE = 0.0005
 MACH_E_DIRECTION_CHANGE_MIN_SPEED = 9.0
 MACH_E_DIRECTION_CHANGE_LOOKAHEAD_RAMP_SPEED = 10.0
 MACH_E_DIRECTION_CHANGE_LOOKAHEAD_FULL_SPEED = 12.0
@@ -224,6 +226,21 @@ class FordLateralController:
         requested *= factor
         precision = 0
     return requested, precision
+
+  def _unwind_preview(self, desired: float, predicted: float, current: float, v_ego: float) -> float:
+    if self.CP.carFingerprint != CAR.FORD_MUSTANG_MACH_E_MK1:
+      return predicted
+    if desired * current <= 0.0 or desired * predicted <= 0.0 or desired * self.desired_curvature_last <= 0.0:
+      return predicted
+    if abs(desired) >= abs(self.desired_curvature_last) or abs(current) <= abs(desired):
+      return predicted
+    preview = self._predicted_curvature(v_ego, self._curvature_lookahead() + MACH_E_UNWIND_LOOKAHEAD_EXTRA)
+    if desired * preview <= 0.0 or abs(preview) >= min(abs(desired), abs(predicted)):
+      return predicted
+    speed_weight = float(np.interp(v_ego, [5.0, 7.0, 12.0, 15.0], [0.0, 1.0, 1.0, 0.0]))
+    curvature_weight = float(np.interp(abs(desired), [0.002, 0.008], [0.0, 1.0]))
+    lag_weight = float(np.interp(abs(current) - abs(desired), [0.0, MACH_E_UNWIND_FULL_LAG_CURVATURE], [0.0, 1.0]))
+    return predicted + speed_weight * curvature_weight * lag_weight * (preview - predicted)
 
   def _turn_in_preview_weight(self, desired: float, preview: float, current: float) -> float:
     if self.CP.carFingerprint not in FORD_CONSERVATIVE_PREVIEW_CARS:
@@ -463,7 +480,10 @@ class FordLateralController:
         if turn_in_weight > 0.0:
           turn_in_target = float(np.copysign(max(abs(desired), abs(turn_in_predicted)), desired))
           predicted = float(np.interp(turn_in_weight, [0.0, 1.0], [predicted, turn_in_target]))
-    requested, precision = self._blend_and_scale(desired, predicted, v_ego, current, allow_opposite_preview)
+    command_predicted = predicted
+    if not allow_opposite_preview and not CS.out.steeringPressed and not self._lane_change()[0]:
+      command_predicted = self._unwind_preview(desired, predicted, current, v_ego)
+    requested, precision = self._blend_and_scale(desired, command_predicted, v_ego, current, allow_opposite_preview)
     self.desired_curvature_last = desired
 
     if v_ego > 9.0:
