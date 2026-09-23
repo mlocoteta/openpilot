@@ -81,6 +81,7 @@ EXCLUDED_KEYS = {
   "OverpassRequests",
   "SpeedLimits",
   "SpeedLimitsFiltered",
+  "TorqueInterceptorEnabled",  # hardware setting (Accord TI fork): not a toggle to reset
   "UpdaterAvailableBranches",
 }
 

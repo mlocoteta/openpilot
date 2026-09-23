@@ -280,6 +280,7 @@ EXCLUDED_KEYS = {
   "PersistedCEStatus",
   "SpeedLimits",
   "SpeedLimitsFiltered",
+  "TorqueInterceptorEnabled",  # hardware setting (Accord TI fork): never synced/restored
   "UpdateFailedCount",
   "UpdaterAvailableBranches",
   "UpdaterCurrentDescription",

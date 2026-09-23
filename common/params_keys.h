@@ -754,10 +754,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // Show the external GPU (Chestnut) temperatures in the sidebar's GPU phase
     // instead of the on-die GPU zones; shows a placeholder when no eGPU is present.
     {"SidebarEgpuTemp", {PERSISTENT, BOOL, "0", "0", 3}},
-    // Honda 9G Accord Torque Interceptor (TI) — opt-in via the StarPilot toggle.
-    // OFF by default so a stock 9G Accord runs normal LKAS. When ON, the sigmoid
-    // tune applies (a=15, b=0.72, c=0.16, Kp=0.3; sigmoid + live-update default ON).
-    {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "0", "0", 3}},
+    // Honda 9G Accord Torque Interceptor (TI). ON by default (and as the "stock"
+    // value) because this fork's car has the TI fitted; it only takes effect on
+    // HONDA_ACCORD_9G. Excluded from toggle reset/sync/backup restores. When ON, the
+    // sigmoid tune applies (a=15, b=0.72, c=0.16, Kp=0.3; sigmoid + live-update ON).
+    {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1", "1", 3}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1", "1", 3}},
     {"TISigmoidA", {PERSISTENT, FLOAT, "15.0", "15.0", 3}},
