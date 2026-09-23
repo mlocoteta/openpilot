@@ -81,6 +81,15 @@ class TI_STATE:
   RUN = 3
 
 
+# The gen1 TI only leaves OFF after a run of zero-torque commands (2026-09-11 rlog:
+# 1571 + 200 frames). If a board never sends TI_FEEDBACK at all (older firmware),
+# open the gate after this many silent frames (5 s at 100 Hz) so it is not stranded.
+TI_DISCOVERY_FRAMES = 500
+# Once feedback has been seen, treat it as lost (gate closed) after this many
+# frames without a TI_FEEDBACK message (200 ms at 100 Hz).
+TI_FEEDBACK_TIMEOUT_FRAMES = 20
+
+
 class HondaFlags(IntFlag):
   # Detected flags
   # Bosch models with alternate set of LKAS_HUD messages

@@ -9,7 +9,7 @@ from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
                                                  HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
-                                                 TI_LIMITS, TI_STATE
+                                                 TI_LIMITS, TI_STATE, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES
 from opendbc.car.interfaces import CarStateBase
 from openpilot.common.params import Params
 
@@ -56,12 +56,7 @@ class CarState(CarStateBase):
     # CAN device (TI_FEEDBACK) instead of the stock EPS. Gated to the 9G platform and
     # the TorqueInterceptorEnabled toggle so no other Honda is affected.
     self.ti_enabled = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and Params().get_bool("TorqueInterceptorEnabled")
-    self.ti_ramp_down = False
-    self.ti_version = 1
-    self.ti_state = TI_STATE.RUN
-    self.ti_violation = 0
-    self.ti_error = 0
-    self.ti_lkas_allowed = False
+    self.reset_ti_gate()
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -100,6 +95,45 @@ class CarState(CarStateBase):
     self.camera_steer_seen = False
     self.canfd_frames = 0
     self.canfd_relay_open = False
+
+  def reset_ti_gate(self):
+    self.ti_ramp_down = False
+    self.ti_version = 1
+    # The gen1 board starts in OFF and only promotes to RUN after a run of
+    # zero-torque TI_STEERING_CONTROL frames, so never assume RUN before it says so.
+    self.ti_state = TI_STATE.OFF
+    self.ti_violation = 0
+    self.ti_error = 0
+    self.ti_feedback_seen = False
+    self.ti_no_feedback_frames = 0
+    self.ti_lkas_allowed = False
+
+  def update_ti_gate(self, ti):
+    """Decide whether the Torque Interceptor may be commanded this frame.
+
+    `ti` is this frame's TI_FEEDBACK signal dict, or None when none arrived.
+    Once feedback has been seen, only a live STATE == RUN (without RAMP_DOWN)
+    opens the gate; a feedback dropout closes it and never falls back. The
+    discovery fallback exists only for firmware that never sends feedback.
+    """
+    if ti is not None:
+      self.ti_feedback_seen = True
+      self.ti_no_feedback_frames = 0
+      self.ti_version = ti["VERSION_NUMBER"]
+      self.ti_state = ti["STATE"]
+      self.ti_violation = ti["VIOL"]
+      self.ti_error = ti["ERROR"]
+      if self.ti_version > 1:
+        self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
+    else:
+      self.ti_no_feedback_frames += 1
+
+    if self.ti_feedback_seen:
+      self.ti_lkas_allowed = (self.ti_no_feedback_frames <= TI_FEEDBACK_TIMEOUT_FRAMES and
+                              not self.ti_ramp_down and self.ti_state == TI_STATE.RUN)
+    else:
+      self.ti_lkas_allowed = self.ti_no_feedback_frames >= TI_DISCOVERY_FRAMES
+    return self.ti_lkas_allowed
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -219,26 +253,17 @@ class CarState(CarStateBase):
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     if self.ti_enabled:
-      # Only consume TI_FEEDBACK when the board actually sent it. It is registered
-      # optional (freq 0), so an absent message decodes as all-zero -- which would
-      # drive ti_state to DISCOVER(0), leave ti_lkas_allowed False forever and
-      # silently disable the interceptor, and would also zero steeringTorque and
-      # so kill driver-override detection. Older TI firmware does not emit
-      # feedback at all, so treat "never seen" as the RUN default it starts in.
-      if cp.vl_all.get("TI_FEEDBACK", {}).get("STATE", []):
-        ti = cp.vl["TI_FEEDBACK"]
+      # Only consume TI_FEEDBACK when the board actually sent it this frame. It is
+      # registered optional (freq 0), so an absent message decodes as all-zero
+      # (DISCOVER) and would also zero steeringTorque, killing driver-override detection.
+      ti = cp.vl["TI_FEEDBACK"] if cp.vl_all.get("TI_FEEDBACK", {}).get("STATE", []) else None
+      if ti is not None:
         ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
-        self.ti_version = ti["VERSION_NUMBER"]
-        self.ti_state = ti["STATE"]
-        self.ti_violation = ti["VIOL"]
-        self.ti_error = ti["ERROR"]
-        if self.ti_version > 1:
-          self.ti_ramp_down = (ti["RAMP_DOWN"] == 1)
         ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
       else:
         # no feedback: keep the stock EPS torque so steeringPressed still works
         ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
-      self.ti_lkas_allowed = (not self.ti_ramp_down) and (self.ti_state == TI_STATE.RUN)
+      self.update_ti_gate(ti)
     else:
       ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
