@@ -320,6 +320,8 @@ struct StarPilotLateralState @0xc2243c65e0340384 {
   frictionJerkDeadzone @5 :Float32;
   lowSpeedFactor @6 :Float32;
   unwindDetected @7 :Bool;
+  tiLowSpeedDampingActive @8 :Bool;
+  tiLowSpeedDampingScale @9 :Float32;
 }
 
 struct CustomReserved12 @0x9ccdc8676701b412 {

@@ -79,6 +79,27 @@ HONDA_ACCORD_TORQUE_KI = 0.15
 HONDA_ACCORD_TURN_FF_REDUCTION_MAX = 0.10
 HONDA_ACCORD_TURN_FF_ONSET = 0.45
 HONDA_ACCORD_TURN_FF_WIDTH = 0.12
+HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED = 2.5
+# Cover the observed low-speed/city transition. A broad sigmoid onset gives
+# reversal-gated damping a very small crawl-speed tail instead of a hard
+# cutoff below 2.5 m/s; it still fades away before normal highway control.
+HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED = 8.2
+HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH = 0.70
+HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL = 1.20
+HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH = 0.25
+HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION = 0.35
+# MoreTore-style continuous center damper. These intentionally match the
+# Bolt 2022–23 reference envelope, but are kept disabled and separate from
+# the Accord-specific reversal-gated experiment.
+HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED = 2.5
+HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED_WIDTH = 0.7
+HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED = 8.2
+HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED_WIDTH = 0.6
+HONDA_ACCORD_CENTER_DAMPING_LAT_ACCEL = 0.17
+HONDA_ACCORD_CENTER_DAMPING_LAT_WIDTH = 0.04
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_LIMIT = 0.38
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_SCALE_MIN = 0.62
+HONDA_ACCORD_CENTER_DAMPING_OUTPUT_ALPHA_MIN = 0.28
 VOLT_STANDARD_CARS = (
   GM_CAR.CHEVROLET_VOLT,
   GM_CAR.CHEVROLET_VOLT_2019,
@@ -2193,6 +2214,60 @@ def get_honda_accord_ff_scale(desired_lateral_accel: float) -> float:
   turn_weight = _sigmoid((abs(desired_lateral_accel) - HONDA_ACCORD_TURN_FF_ONSET) /
                          HONDA_ACCORD_TURN_FF_WIDTH)
   return 1.0 - (HONDA_ACCORD_TURN_FF_REDUCTION_MAX * turn_weight)
+
+
+def get_honda_accord_low_speed_damped_output(output_torque: float, prev_output_torque: float,
+                                              desired_lateral_accel: float, v_ego: float,
+                                              max_reduction: float, activation: float = 1.0) -> tuple[float, float, float]:
+  """Smooth TI output only during a detected low-speed reversal episode.
+
+  The static sigmoid mapping stays untouched. This envelope has a gentle crawl-speed
+  tail, then fades out above 8.2 m/s and for stronger turns. The returned scale/envelope are telemetry
+  values for rlog review; callers must keep this feature explicitly opt-in.
+  """
+  speed_weight = (_sigmoid((v_ego - HONDA_ACCORD_LOW_SPEED_DAMPING_MIN_SPEED) /
+                           HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH) *
+                  _sigmoid((HONDA_ACCORD_LOW_SPEED_DAMPING_MAX_SPEED - v_ego) /
+                           HONDA_ACCORD_LOW_SPEED_DAMPING_SPEED_WIDTH))
+  lat_weight = _sigmoid((HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
+                        HONDA_ACCORD_LOW_SPEED_DAMPING_LAT_WIDTH)
+  # ``activation`` is the controller's short reversal hold. Keeping the static
+  # envelope separate lets a normal gentle turn pass through untouched.
+  envelope = speed_weight * lat_weight * float(np.clip(activation, 0.0, 1.0))
+  reduction = min(max(float(max_reduction), 0.0), 0.25) * envelope
+  scale = 1.0 - reduction
+  # Limit abrupt command-to-command reversals without adding a second hard limiter.
+  alpha = 1.0 - HONDA_ACCORD_LOW_SPEED_DAMPING_ALPHA_REDUCTION * envelope
+  damped = prev_output_torque + alpha * ((output_torque * scale) - prev_output_torque)
+  return float(damped), float(scale), float(envelope)
+
+
+def get_honda_accord_continuous_center_damped_output(output_torque: float, prev_output_torque: float,
+                                                      desired_lateral_accel: float, v_ego: float,
+                                                      max_reduction: float = 0.62) -> tuple[float, float, float]:
+  """MoreTore-style continuous small-signal center damping for an Accord TI.
+
+  This deliberately mirrors the reference output cap/scale/alpha strategy,
+  rather than the Accord's reversal-triggered experiment. It must be selected
+  explicitly and is intended for an A/B rlog comparison, not to stack with it.
+  """
+  speed_weight = (_sigmoid((v_ego - HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED) /
+                           HONDA_ACCORD_CENTER_DAMPING_MIN_SPEED_WIDTH) *
+                  _sigmoid((HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED - v_ego) /
+                           HONDA_ACCORD_CENTER_DAMPING_MAX_SPEED_WIDTH))
+  center_weight = _sigmoid((HONDA_ACCORD_CENTER_DAMPING_LAT_ACCEL - abs(desired_lateral_accel)) /
+                           HONDA_ACCORD_CENTER_DAMPING_LAT_WIDTH)
+  envelope = speed_weight * center_weight
+  # At the MoreTore-reference default (0.62), this produces its 0.38
+  # normalized-output floor. The slider only adjusts this cap; the reference
+  # smoothing scale/alpha remain fixed for an interpretable A/B test.
+  capped_reduction = float(np.clip(max_reduction, 0.0, 0.75))
+  output_limit = 1.0 - (capped_reduction * envelope)
+  limited_output = float(np.clip(output_torque, -output_limit, output_limit))
+  output_scale = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_SCALE_MIN) * envelope)
+  output_alpha = 1.0 - ((1.0 - HONDA_ACCORD_CENTER_DAMPING_OUTPUT_ALPHA_MIN) * envelope)
+  damped = prev_output_torque + output_alpha * ((limited_output * output_scale) - prev_output_torque)
+  return float(damped), float(output_scale), float(envelope)
 
 
 def get_bolt_2017_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:

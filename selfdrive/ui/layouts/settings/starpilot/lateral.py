@@ -370,6 +370,36 @@ class StarPilotLateralLayout(_SettingsPage):
         on_click=lambda: self._show_slider("TISteerKp", 0.3, 3.0, step=0.05, value_type="float"),
         visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
       ),
+      SettingRow(
+        "TILowSpeedDampingEnabled", "toggle", tr_noop("TI Low-speed Damping (Experimental)"),
+        subtitle=tr_noop("Reversal-gated damping through 5.6–18.3 mph. Off by default; does not change A/B/C."),
+        get_state=lambda: p.get_bool("TILowSpeedDampingEnabled"),
+        set_state=lambda s: (p.put_bool("TILowSpeedDampingEnabled", s),
+                             p.put_bool("TILowSpeedCenterDampingEnabled", False)) if s else p.put_bool("TILowSpeedDampingEnabled", False),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
+      SettingRow(
+        "TILowSpeedDampingMax", "value", tr_noop("TI Low-speed Damping Maximum"),
+        subtitle=tr_noop("Maximum output reduction in the experimental low-speed envelope. Start at 0.12."),
+        get_value=lambda: f"{(p.get_float('TILowSpeedDampingMax') or 0.12):.2f}",
+        on_click=lambda: self._show_slider("TILowSpeedDampingMax", 0.02, 0.25, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TILowSpeedDampingEnabled"),
+      ),
+      SettingRow(
+        "TILowSpeedCenterDampingEnabled", "toggle", tr_noop("TI Continuous Center Damping (MoreTore-style)"),
+        subtitle=tr_noop("Continuously limits and smooths small center commands from 5.6–18.3 mph. Alternative to reversal-gated damping."),
+        get_state=lambda: p.get_bool("TILowSpeedCenterDampingEnabled"),
+        set_state=lambda s: (p.put_bool("TILowSpeedCenterDampingEnabled", s),
+                             p.put_bool("TILowSpeedDampingEnabled", False)) if s else p.put_bool("TILowSpeedCenterDampingEnabled", False),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled"),
+      ),
+      SettingRow(
+        "TILowSpeedCenterDampingMaxReduction", "value", tr_noop("TI Continuous Center Maximum Reduction"),
+        subtitle=tr_noop("Hard-cap reduction at the center. 0.62 matches the MoreTore reference (0.38 output floor); smoothing remains fixed."),
+        get_value=lambda: f"{(p.get_float('TILowSpeedCenterDampingMaxReduction') or 0.62):.2f}",
+        on_click=lambda: self._show_slider("TILowSpeedCenterDampingMaxReduction", 0.10, 0.75, step=0.01, value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("TorqueInterceptorEnabled") and p.get_bool("TILowSpeedCenterDampingEnabled"),
+      ),
     ]
 
     self._manager_view = SteeringManagerView(

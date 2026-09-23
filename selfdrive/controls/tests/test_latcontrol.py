@@ -104,6 +104,8 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_genesis_gv70_reversal_output_scale,
   get_genesis_gv70_unwind_ff_scale,
   get_honda_accord_ff_scale,
+  get_honda_accord_continuous_center_damped_output,
+  get_honda_accord_low_speed_damped_output,
   get_elantra_non_scc_ff_scale,
   get_honda_accord_steer_ratio_scale,
   get_palisade_ff_scale,
@@ -2046,6 +2048,58 @@ class TestLatControl:
     assert get_honda_accord_ff_scale(0.0) > get_honda_accord_ff_scale(0.8)
     assert get_honda_accord_ff_scale(-0.8) == pytest.approx(get_honda_accord_ff_scale(0.8))
     assert get_honda_accord_ff_scale(0.0) == pytest.approx(1.0, abs=0.01)
+
+  def test_honda_accord_low_speed_damping_is_bounded_and_local(self):
+    damped, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12)
+    highway, highway_scale, highway_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 12.0, 0.12)
+    strong_turn, strong_turn_scale, strong_turn_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 2.0, 4.0, 0.12)
+
+    assert 0.88 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    assert highway == pytest.approx(1.0)
+    assert highway_scale == pytest.approx(1.0)
+    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    assert strong_turn_scale > scale
+    assert strong_turn_envelope < envelope
+    assert strong_turn > damped
+
+  def test_honda_accord_low_speed_damping_requires_reversal_activation(self):
+    untouched, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=0.0)
+    active, active_scale, active_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=1.0)
+
+    assert untouched == pytest.approx(1.0)
+    assert scale == pytest.approx(1.0)
+    assert envelope == pytest.approx(0.0)
+    assert active < untouched
+    assert active_scale < 1.0
+    assert active_envelope > 0.0
+
+  def test_honda_accord_low_speed_damping_has_gentle_crawl_tail(self):
+    # One mph has only a small smooth-envelope contribution, and still needs
+    # reversal activation before any output is changed.
+    _, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 1.0 * 0.44704, 0.12, activation=1.0)
+
+    assert 0.0 < envelope < 0.10
+    assert 0.98 < scale < 1.0
+
+  def test_honda_accord_continuous_center_damping_matches_reference_envelope(self):
+    # MoreTore-style path acts continuously in the small-signal center band.
+    damped, scale, envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0)
+    outside, outside_scale, outside_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.8, 4.0)
+    highway, highway_scale, highway_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 12.0)
+    lighter_cap, _, _ = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0, max_reduction=0.20)
+
+    assert 0.62 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    assert outside > damped
+    assert outside_scale > scale
+    assert outside_envelope < envelope
+    assert highway == pytest.approx(1.0)
+    assert highway_scale == pytest.approx(1.0)
+    assert highway_envelope == pytest.approx(0.0, abs=1e-6)
+    assert lighter_cap > damped
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0

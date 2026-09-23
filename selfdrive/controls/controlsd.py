@@ -473,6 +473,13 @@ class Controls:
           ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
           if ti_kp > 0 and hasattr(self.LaC, "pid"):
             self.LaC.pid._k_p = [[0], [ti_kp]]
+          if hasattr(self.LaC, "update_honda_accord_low_speed_damping"):
+            self.LaC.update_honda_accord_low_speed_damping(
+              self.params.get_bool("TILowSpeedDampingEnabled"),
+              self.params.get_float("TILowSpeedDampingMax") or 0.12,
+              self.params.get_bool("TILowSpeedCenterDampingEnabled"),
+              self.params.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62,
+            )
         except Exception:
           pass
 
