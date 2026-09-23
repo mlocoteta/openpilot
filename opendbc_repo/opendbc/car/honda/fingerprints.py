@@ -1042,9 +1042,6 @@ FW_VERSIONS = {
     (Ecu.vsa, 0x18da28f1, None): [
       b'57114-T2F-X840\x00\x00',
     ],
-    (Ecu.combinationMeter, 0x18da60f1, None): [
-      b'78109-T2F-L110\x00\x00',
-    ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-T2F-A030\x00\x00',
     ],
