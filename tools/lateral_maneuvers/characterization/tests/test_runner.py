@@ -324,3 +324,83 @@ def test_lateral_maneuversd_plan_switch(tmp_path, monkeypatch):
   assert lateral_maneuversd._characterization_plan()["name"] == "quick"
   path.write_text(json.dumps({"version": 1, "blocks": [{"speed_mph": 20, "settings": {"steer_friction": 0.1}}]}))
   assert isinstance(lateral_maneuversd._characterization_plan(), P.PlanError)
+
+
+def test_build_frame_reads_real_cereal_fields():
+  from cereal import messaging
+
+  class FakeSM:
+    def __init__(self):
+      self.msgs = {}
+      for s in R.SUBSCRIBED:
+        self.msgs[s] = messaging.new_message(s)
+      self.recv_frame = {s: 1 for s in R.SUBSCRIBED}
+      self.updated = {s: True for s in R.SUBSCRIBED}
+
+    def __getitem__(self, s):
+      return getattr(self.msgs[s], s)
+
+  sm = FakeSM()
+  sm.msgs['carState'].carState.vEgo = 5.5
+  sm.msgs['carState'].carState.steeringPressed = True
+  sm.msgs['carControl'].carControl.latActive = True
+  sm.msgs['carControl'].carControl.orientationNED = [0.01, 0.0, 0.0]
+  sm.msgs['selfdriveState'].selfdriveState.enabled = True
+  cs = sm.msgs['controlsState'].controlsState
+  cs.desiredCurvature = 0.001
+  ts = cs.lateralControlState.init('torqueState')
+  ts.active = True
+  ts.p = 0.04
+  ts.error = 0.05
+  sm.msgs['liveDelay'].liveDelay.lateralDelay = 0.35
+  sp = sm.msgs['starpilotLateralState'].starpilotLateralState
+  sp.active = True
+  sp.frictionThreshold = 1.2
+
+  f = R.build_frame(sm, 123, None)
+  assert (f.v_ego, f.steering_pressed, f.lat_active, f.enabled) == (5.5, True, True, True)
+  assert f.curvature == pytest.approx(0.001) and f.roll == pytest.approx(0.01)
+  assert f.live_delay == pytest.approx(0.35) and f.live_delay_fresh
+  assert f.friction_threshold == pytest.approx(1.2)
+  assert (f.pid_p, f.pid_error, f.pid_fresh) == (pytest.approx(0.04), pytest.approx(0.05), True)
+  sm.recv_frame['liveDelay'] = 0
+  assert R.build_frame(sm, 124, None).live_delay is None
+
+
+def test_daemon_restores_params_on_sigint(tmp_path):
+  import signal
+  import time
+  import multiprocessing
+  from cereal import car
+  from openpilot.common.params import Params
+
+  params = Params()
+  params.put("CarParams", car.CarParams.new_message(carFingerprint="HONDA_ACCORD_9G").to_bytes())
+  params.put_bool("TorqueInterceptorEnabled", True)
+  params.put("TISteerKp", 0.3)
+  params.put("CurrentRoute", "00000abc--smoke")
+  snap = tmp_path / "snap.json"
+  plan = P.normalize_plan(P.build_plan("quick"))
+
+  ctx = multiprocessing.get_context("fork")
+  proc = ctx.Process(target=R.run_daemon, args=(plan,), kwargs={"snapshot_path": str(snap),
+                                                                 "sidecar_dir": str(tmp_path / "sidecar")})
+  proc.start()
+  try:
+    deadline = time.monotonic() + 20
+    while not snap.exists() and time.monotonic() < deadline:
+      time.sleep(0.05)
+    assert snap.exists(), "daemon never took its snapshot"
+    time.sleep(1.5)  # not engaged -> the runner pauses (writes nothing new)
+    # simulate a mid-run state: a block's settings are live when manager stops the process
+    params.put("TISteerKp", 0.8)
+  finally:
+    os.kill(proc.pid, signal.SIGINT)
+    proc.join(10)
+  assert proc.exitcode is not None
+  assert not snap.exists()
+  assert params.get_float("TISteerKp") == 0.3
+  sidecar_file = tmp_path / "sidecar" / "00000abc--smoke.json"
+  events = [e["type"] for e in json.loads(sidecar_file.read_text())["events"]]
+  assert events[0] == "run_start" and "paused" in events and events[-1] == "run_end"
+  assert json.loads(sidecar_file.read_text())["events"][-1]["reason"] == "process_exit"

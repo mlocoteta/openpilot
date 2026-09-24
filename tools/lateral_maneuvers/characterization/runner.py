@@ -522,7 +522,7 @@ def build_frame(sm, mono_ns, toggles):
   )
 
 
-def run_daemon(plan):
+def run_daemon(plan, snapshot_path=None, sidecar_dir=None):
   import atexit
   import signal
 
@@ -530,9 +530,9 @@ def run_daemon(plan):
   from openpilot.common.params import Params
   from openpilot.common.swaglog import cloudlog
   from openpilot.tools.lateral_maneuvers.characterization.settings import (
-    ParamStore, SettingsManager, parse_toggles, touched_keys,
+    SNAPSHOT_PATH, ParamStore, SettingsManager, parse_toggles, touched_keys,
   )
-  from openpilot.tools.lateral_maneuvers.characterization.sidecar import Sidecar, boot_ns
+  from openpilot.tools.lateral_maneuvers.characterization.sidecar import SIDECAR_DIR, Sidecar, boot_ns
   from openpilot.tools.lateral_maneuvers.lateral_maneuversd import _load_status, _save_status, _status_signature
 
   params = Params()
@@ -540,14 +540,14 @@ def run_daemon(plan):
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
   ti_enabled = CP.carFingerprint == "HONDA_ACCORD_9G" and params.get_bool("TorqueInterceptorEnabled")
 
-  mgr = SettingsManager(ParamStore(params, params_memory), keys=touched_keys(plan["enable_advanced_lateral_tune"]),
-                        log=cloudlog.warning)
+  mgr = SettingsManager(ParamStore(params, params_memory), snapshot_path or SNAPSHOT_PATH,
+                        keys=touched_keys(plan["enable_advanced_lateral_tune"]), log=cloudlog.warning)
   header = {
     "plan": plan, "carFingerprint": CP.carFingerprint, "tiEnabled": bool(ti_enabled),
     "gitCommit": params.get("GitCommit") or "", "gitBranch": params.get("GitBranch") or "",
     "advancedLateralTune": params.get_bool("AdvancedLateralTune"),
   }
-  sidecar = Sidecar(header=header, log=cloudlog.warning)
+  sidecar = Sidecar(sidecar_dir or SIDECAR_DIR, header=header, log=cloudlog.warning)
   runner = CharacterizationRunner(plan, mgr, sidecar, log=cloudlog.info, ti_enabled=ti_enabled)
   last_mono = [boot_ns()]
 
