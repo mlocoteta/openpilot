@@ -162,8 +162,49 @@ MANEUVERS = [
 ]
 
 
+def _characterization_plan():
+  """Plan from /data/lateral_characterization_plan.json, None when absent, or a PlanError."""
+  from openpilot.tools.lateral_maneuvers.characterization.plan import PLAN_PATH, PlanError, load_plan
+  from openpilot.tools.lateral_maneuvers.characterization.settings import restore_stale_snapshot
+  try:
+    restore_stale_snapshot(log=cloudlog.warning)
+  except Exception:
+    cloudlog.exception("lateral_maneuversd: stale characterization snapshot restore failed")
+  try:
+    return load_plan(PLAN_PATH)
+  except PlanError as e:
+    return e
+
+
+def _plan_error_loop(error):
+  """Invalid plan: show why, command nothing, change no params."""
+  cloudlog.error(f"lateral_maneuversd: invalid characterization plan: {error}")
+  sm = messaging.SubMaster(['modelV2'], poll='modelV2')
+  pm = messaging.PubMaster(['lateralManeuverPlan', 'alertDebug'])
+  while True:
+    sm.update()
+    alert_msg = messaging.new_message('alertDebug')
+    alert_msg.valid = True
+    alert_msg.alertDebug.alertText1 = "Characterization plan invalid"
+    alert_msg.alertDebug.alertText2 = str(error)[:120]
+    pm.send('alertDebug', alert_msg)
+    plan_send = messaging.new_message('lateralManeuverPlan')
+    plan_send.valid = False
+    pm.send('lateralManeuverPlan', plan_send)
+
+
 def main():
   config_realtime_process(5, Priority.CTRL_LOW)
+
+  characterization = _characterization_plan()
+  if isinstance(characterization, Exception):
+    _plan_error_loop(characterization)
+    return
+  if characterization is not None:
+    from openpilot.tools.lateral_maneuvers.characterization.runner import run_daemon
+    cloudlog.info("lateral_maneuversd: running characterization plan")
+    run_daemon(characterization)
+    return
 
   params = Params()
   cloudlog.info("lateral_maneuversd is waiting for CarParams")

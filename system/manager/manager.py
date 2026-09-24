@@ -1028,6 +1028,14 @@ def manager_init() -> None:
   migrate_traffic_follow_default(params, params_cache)
   last_timing = _log_boot_timing("manager_init", "starpilot_migrations", manager_init_start, last_timing)
 
+  # A lateral characterization run that died without cleanup (power loss, SIGKILL) leaves its
+  # param snapshot behind; put the driver's settings back before they get cached below.
+  try:
+    from openpilot.tools.lateral_maneuvers.characterization.settings import restore_stale_snapshot
+    restore_stale_snapshot(log=cloudlog.warning)
+  except Exception:
+    cloudlog.exception("lateral characterization: stale snapshot restore failed")
+
   # set unset params to their default value
   for k in params.all_keys():
     current_value = params.get(k)

@@ -167,7 +167,25 @@ def test_restore_continues_past_a_failing_key(env):
   mgr.restore()
   assert params.raw("TISteerKp") is None
   assert any("SteerDelay" in line for line in logs)
+  assert os.path.exists(snap)  # kept so the next start retries the failed key
+  params.fail_keys.clear()
+  S.SettingsManager(store, snap).restore_stale()
+  assert params.raw("SteerDelay") == "0.01"
   assert not os.path.exists(snap)
+
+
+def test_revert_keeps_snapshot_for_resume(env):
+  params, _, store, snap = env
+  mgr = S.SettingsManager(store, snap)
+  mgr.take_snapshot()
+  mgr.apply({"ti_steer_kp": 0.8})
+  assert set(mgr.revert()) == {"TISteerKp"}
+  assert params.raw("TISteerKp") is None
+  assert os.path.exists(snap) and mgr.active
+  mgr.apply({"ti_steer_kp": 0.8})
+  assert params.raw("TISteerKp") == "0.8"
+  mgr.restore()
+  assert params.raw("TISteerKp") is None
 
 
 def test_snapshot_taken_once(env):

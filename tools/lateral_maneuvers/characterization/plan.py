@@ -59,8 +59,8 @@ TI_STEER_KP_RANGE = (0.3, 3.0)  # TISteerKp slider range
 # Settings that can be switched live between maneuvers, and ones that cannot.
 LIVE_SETTINGS = ("steer_delay", "friction_table", "ti_steer_kp")
 RESTART_REQUIRED_SETTINGS = {
-  "steer_friction": "SteerFriction applies live, but controlsd only pushes torque params while a custom/live value is "
-                    "in use, so restoring the stock value does not reach LatControlTorque until controlsd restarts.",
+  "steer_friction": ("SteerFriction applies live, but controlsd only pushes torque params while a custom/live value is " +
+                     "in use, so restoring the stock value does not reach LatControlTorque until controlsd restarts."),
   "steer_lat_accel": "SteerLatAccel has the same one-way live path as SteerFriction (restore needs a restart).",
   "steer_kp": "SteerKP is ignored on the TI car: controlsd replaces the Kp schedule with TISteerKp every frame.",
   "sigmoid": "TISigmoidA/B/C swap the torque lookup table; out of scope for this tool (static gain is fine).",
@@ -277,8 +277,8 @@ def normalize_maneuver(raw, speed_mph, max_displacement_m):
     max_hold = math.sqrt(max_displacement_m / amp)
     if hold > max_hold:
       new_hold = max(math.floor(max_hold / DT) * DT, STEP_HOLD_MIN)
-      notes.append(f"hold_s {hold:g} shortened to {new_hold:.2f} (peak lateral offset {amp * hold ** 2:.1f} m "
-                   f"> {max_displacement_m:g} m)")
+      notes.append(f"hold_s {hold:g} shortened to {new_hold:.2f} " +
+                   f"(peak lateral offset {amp * hold ** 2:.1f} m > {max_displacement_m:g} m)")
       hold = new_hold
     spec = {"type": "step", "amplitude": round(amp, 3), "hold_s": round(hold, 2)}
   elif kind == "sine":

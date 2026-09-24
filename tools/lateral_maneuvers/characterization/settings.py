@@ -204,7 +204,7 @@ class SettingsManager:
     if self.snapshot is not None:
       return self.snapshot
     keys = {key: self.store.read_raw(key) for key in self.keys}
-    payload = {"version": SNAPSHOT_VERSION, "createdWall": time.time(), "createdMono": time.monotonic(),
+    payload = {"version": SNAPSHOT_VERSION, "createdWall": time.time(), "createdMono": time.monotonic(),  # noqa: TID251 (human-readable wall time)
                "pid": os.getpid(), "keys": keys}
     if extra:
       payload.update(extra)
@@ -229,26 +229,46 @@ class SettingsManager:
     self.store.request_toggle_refresh()
     return changes
 
-  def restore(self):
-    """Write the snapshot back and delete the snapshot file. Idempotent; never raises on one bad key."""
+  def revert(self):
+    """Write the snapshot values back but keep the snapshot (run paused, e.g. on disengage)."""
     if self.snapshot is None:
       return {}
-    changes = {}
+    changes, _ = self._write_snapshot_values()
+    self.store.request_toggle_refresh()
+    return changes
+
+  def restore(self):
+    """Write the snapshot back and delete the snapshot file. Idempotent; never raises on one bad key.
+
+    If any key fails to restore, the snapshot file is kept so the next daemon/manager start retries.
+    """
+    if self.snapshot is None:
+      return {}
+    failed = list(self.snapshot)
+    try:
+      changes, failed = self._write_snapshot_values()
+      self.store.request_toggle_refresh()
+    finally:
+      if failed:
+        self.log(f"lateral characterization: kept {self.snapshot_path} for retry, failed keys: {failed}")
+      else:
+        self._remove_snapshot_file()
+      self.snapshot = None
+    return changes
+
+  def _write_snapshot_values(self):
+    changes, failed = {}, []
     for key, raw in self.snapshot.items():
       try:
         old = self.store.read_raw(key)
         if not same_raw(key, old, raw):
           self.store.write_raw(key, raw)
           changes[key] = (old, raw)
+        self.current[key] = raw
       except Exception as e:  # keep restoring the other keys
+        failed.append(key)
         self.log(f"lateral characterization: failed to restore {key}: {e}")
-    try:
-      self.store.request_toggle_refresh()
-    finally:
-      self._remove_snapshot_file()
-      self.current = dict(self.snapshot)
-      self.snapshot = None
-    return changes
+    return changes, failed
 
   @property
   def active(self):
