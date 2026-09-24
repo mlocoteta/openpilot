@@ -84,7 +84,7 @@ class SimCar:
     err = float(self.rng.normal(0, 0.05))
     mono_ns = int(1e12 + self.frame * P.DT * 1e9)
     return R.Frame(t=mono_ns * 1e-9, mono_ns=mono_ns, v_ego=v, steering_pressed=self.pressed,
-                   lat_active=self.enabled, enabled=self.enabled, curvature=self.curvature, roll=0.0,
+                   lat_active=self.enabled, enabled=self.enabled, curvature=self.curvature, roll=0.01, pitch=-0.02,
                    live_delay=live, live_delay_fresh=live_fresh, toggles=toggles,
                    friction_threshold=self.friction_threshold(v) if self.enabled else 0.0,
                    pid_p=self.kp * err, pid_error=err, pid_fresh=True)
@@ -144,6 +144,13 @@ def test_full_plan_completes_and_restores(rig, tmp_path):
   assert store.values == ORIGINAL
   assert not os.path.exists(str(tmp_path / "snap.json"))
 
+  starts = [e for e in runner.sidecar.doc["events"] if e["type"] == "block_start"]
+  assert [(e["block"], e["index"], e["of"], e["speed_mph"]) for e in starts] == [("b1", 1, 2, 8), ("b2", 2, 2, 20)]
+  assert starts[0]["roll"] == pytest.approx(0.01) and starts[0]["pitch"] == pytest.approx(-0.02)
+  m0 = next(e for e in runner.sidecar.doc["events"] if e["type"] == "maneuver_start")
+  assert m0["active_settings"]["steer_delay"] == 0.5 and m0["pitch"] == pytest.approx(-0.02)
+  assert (m0["block_index"], m0["maneuver_index"]) == (1, 1)
+
   verified = [e for e in runner.sidecar.doc["events"] if e["type"] == "settings_verified"]
   assert verified[0]["observed"]["steer_delay"] == 0.5
   assert verified[0]["observed"]["ti_steer_kp"] == pytest.approx(0.8)
@@ -159,9 +166,9 @@ def test_full_plan_completes_and_restores(rig, tmp_path):
   # every maneuver is bracketed by stock-report-compatible alerts with a stable text2
   active = [o for o in outs if o.text1.startswith("Active")]
   assert active and all(o.plan_valid for o in active)
-  assert {o.text2 for o in active} == {"LC b1/1 8mph hold 2s · d0.50 flowspeed kp0.80",
-                                       "LC b1/2 8mph step ±0.6 0.5s · d0.50 flowspeed kp0.80",
-                                       "LC b2/1 20mph sine 0.8Hz ±0.3 · dauto fflat kp0.50"}
+  assert {o.text2 for o in active} == {"Block 1/2 m1/2, hold 2s, set 8 mph · d0.50 flowspeed kp0.80",
+                                       "Block 1/2 m2/2, step ±0.6 0.5s, set 8 mph · d0.50 flowspeed kp0.80",
+                                       "Block 2/2 m1/1, sine 0.8Hz ±0.3, set 20 mph · dauto fflat kp0.50"}
   assert sum(o.text1 == "Complete" for o in outs) >= 3
   settings_frames = [o for o in outs if o.text1.startswith("LC settings")]
   assert len(settings_frames) == 2 * R.SETTINGS_FRAMES
@@ -181,7 +188,7 @@ def test_settings_applied_only_while_straight_and_hands_off(rig):
 def test_output_clamped_at_low_speed(rig):
   runner, car, _ = rig()
   outs = drive(runner, car, 6000)
-  low = [o for o in outs if o.plan_valid and "8mph" in o.text2]
+  low = [o for o in outs if o.plan_valid and "set 8 mph" in o.text2]
   assert low and max(abs(o.accel) for o in low) <= P.LOW_SPEED_LAT_ACCEL_MAX + 1e-9
   v = runner.blocks[0]["speed_mps"]  # SimCar holds the block speed exactly
   o = next(o for o in low if abs(o.accel) > 0.5)

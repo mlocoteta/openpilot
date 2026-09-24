@@ -48,6 +48,7 @@ class Frame:
   enabled: bool = False
   curvature: float = 0.0  # controlsState.desiredCurvature
   roll: float = 0.0
+  pitch: float = 0.0
   live_delay: float | None = None
   live_delay_fresh: bool = False
   toggles: dict | None = None  # set only on frames where a new toggle broadcast was parsed
@@ -170,6 +171,7 @@ class CharacterizationRunner:
     self._holdoff_text2 = ""
     self.initial_toggles = None
     self.finish_reason = None
+    self._started_block = None
     self.history = []
     self._pending_events = []
 
@@ -219,9 +221,15 @@ class CharacterizationRunner:
     block, spec = self.block, self._maneuver()
     if block is None:
       return ""
+    where = f"Block {self.block_idx + 1}/{len(self.blocks)}"
     if spec is None or self.state in ("apply_wait", "verify"):
-      return f"LC {block['id']} {block['speed_mph']:g}mph settings · {block['tag']}"
-    return f"LC {block['id']}/{self.man_idx + 1} {block['speed_mph']:g}mph {spec['desc']} · {block['tag']}"
+      return f"{where}, settings, set {block['speed_mph']:g} mph · {block['tag']}"
+    n = len(block['maneuvers'])
+    return f"{where} m{self.man_idx + 1}/{n}, {spec['desc']}, set {block['speed_mph']:g} mph · {block['tag']}"
+
+  @staticmethod
+  def _road(f):
+    return {"roll": round(f.roll, 5), "pitch": round(f.pitch, 5), "v_ego": round(f.v_ego, 3)}
 
   # -- lifecycle -------------------------------------------------------------
   def start(self, mono_ns, extra=None):
@@ -305,7 +313,7 @@ class CharacterizationRunner:
     if self.player is not None and self.player.active:
       self.player.abort()
       self._event("maneuver_aborted", f.mono_ns, maneuver=self.player.spec["id"], reason="disengaged",
-                  attempt=self.attempts)
+                  attempt=self.attempts, **self._road(f))
     changes = self.mgr.revert()
     self.verifier = None
     self.state = "paused"
@@ -319,6 +327,10 @@ class CharacterizationRunner:
     out.text1 = "Hold straight: applying settings" if f.lat_active else "Engage lateral to apply settings"
     if self.stable_s < APPLY_STABLE_S:
       return
+    if self._started_block != self.block_idx:
+      self._started_block = self.block_idx
+      self._event("block_start", f.mono_ns, index=self.block_idx + 1, of=len(self.blocks), speed_mph=block["speed_mph"],
+                  variant=block["variant"], tag=block["tag"], settings=block["settings"], **self._road(f))
     changes = self.mgr.apply(block["settings"], self.plan["enable_advanced_lateral_tune"])
     self.apply_attempts += 1
     self.verifier = SettingsVerifier(block["settings"], t_apply=f.t)
@@ -326,7 +338,7 @@ class CharacterizationRunner:
     self.state = "verify"
     self._event("settings_applied", f.mono_ns, settings=block["settings"], tag=block["tag"],
                 speed_mph=block["speed_mph"], attempt=self.apply_attempts,
-                changes={k: v[1] for k, v in changes.items()})
+                changes={k: v[1] for k, v in changes.items()}, **self._road(f))
 
   def _step_verify(self, f, out):
     block = self.block
@@ -394,7 +406,7 @@ class CharacterizationRunner:
         player.abort()
         self.attempts += 1
         self._event("maneuver_aborted", f.mono_ns, maneuver=player.spec["id"], maneuver_desc=player.spec["desc"],
-                    reason=reason, attempt=self.attempts)
+                    reason=reason, attempt=self.attempts, **self._road(f))
         if reason == "settings drift":
           self.verifier = SettingsVerifier(block["settings"], t_apply=f.t)
           self.verify_active_s = 0.0
@@ -417,7 +429,9 @@ class CharacterizationRunner:
       self._event("maneuver_start", f.mono_ns, maneuver=player.spec["id"], maneuver_desc=player.spec["desc"],
                   spec={k: v for k, v in player.spec.items() if k != "notes"}, meta=player.meta,
                   settings=block["settings"], tag=block["tag"], speed_mph=block["speed_mph"],
-                  baseline_curvature=player.baseline_curvature, v_ego=f.v_ego, attempt=self.attempts + 1)
+                  active_settings={k: r["observed"] for k, r in self.verifier.results().items()},
+                  block_index=self.block_idx + 1, maneuver_index=self.man_idx + 1,
+                  baseline_curvature=player.baseline_curvature, attempt=self.attempts + 1, **self._road(f))
 
     if player.active or player.finished:
       out.accel = accel
@@ -434,7 +448,7 @@ class CharacterizationRunner:
       if player.finished:
         self._event("maneuver_end", f.mono_ns, maneuver=player.spec["id"], maneuver_desc=player.spec["desc"],
                     settings=block["settings"], tag=block["tag"], attempt=self.attempts + 1,
-                    observed={k: r["observed"] for k, r in self.verifier.results().items()})
+                    observed={k: r["observed"] for k, r in self.verifier.results().items()}, **self._road(f))
         self._holdoff_text2 = self._text2()
         self.holdoff_s = COMPLETE_HOLDOFF_S
         out.text1, out.phase = "Complete", "run_complete"
@@ -455,7 +469,7 @@ class CharacterizationRunner:
     self.attempts = 0
     self.holdoff_s = 0.0
     if self.man_idx >= len(self.block["maneuvers"]):
-      self._event("block_end", f.mono_ns)
+      self._event("block_end", f.mono_ns, **self._road(f))
       self._next_block(f)
     else:
       self._new_player()
@@ -512,6 +526,7 @@ def build_frame(sm, mono_ns, toggles):
     enabled=bool(sm['selfdriveState'].enabled),
     curvature=float(cs.desiredCurvature),
     roll=float(cc.orientationNED[0]) if len(cc.orientationNED) == 3 else 0.0,
+    pitch=float(cc.orientationNED[1]) if len(cc.orientationNED) == 3 else 0.0,
     live_delay=float(sm['liveDelay'].lateralDelay) if sm.recv_frame['liveDelay'] > 0 else None,
     live_delay_fresh=bool(sm.updated['liveDelay']),
     toggles=toggles,
