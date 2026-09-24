@@ -341,8 +341,8 @@ def test_build_frame_reads_real_cereal_fields():
       self.msgs = {}
       for s in R.SUBSCRIBED:
         self.msgs[s] = messaging.new_message(s)
-      self.recv_frame = {s: 1 for s in R.SUBSCRIBED}
-      self.updated = {s: True for s in R.SUBSCRIBED}
+      self.recv_frame = dict.fromkeys(R.SUBSCRIBED, 1)
+      self.updated = dict.fromkeys(R.SUBSCRIBED, True)
 
     def __getitem__(self, s):
       return getattr(self.msgs[s], s)
