@@ -208,3 +208,77 @@ def test_extract_series_from_cereal():
   assert s["roll"][1][0] == pytest.approx(0.02) and s["pitch"][1][0] == pytest.approx(-0.03)
   assert (s["des"][1][0], s["act"][1][0]) == (pytest.approx(0.4), pytest.approx(0.3))
   assert s["fric"][1][0] == pytest.approx(1.2)
+
+
+def _synth_run(plan, blocks, route, started, dyn=None, partial=None, seed=0):
+  """One drive: completes `blocks`; `partial` block only gets its first maneuver."""
+  s = Synth(seed)
+  for block in plan["blocks"]:
+    if block["id"] in blocks or block["id"] == partial:
+      kp = block["settings"]["ti_steer_kp"]
+      specs = block["maneuvers"][:1] if block["id"] == partial else block["maneuvers"]
+      for spec in specs:
+        s.maneuver(block, spec, (dyn or DYN)[kp])
+  s.idle(2.0, 6.7)
+  return s.series(), {"route": route, "plan": plan, "startedWall": started, "gitCommit": "x", "gitBranch": "y",
+                      "events": s.events + [{"type": "run_end", "mono_ns": int(s.t * SEC), "reason": "process_exit"}]}
+
+
+def test_multi_route_merge_newest_completed_wins(run):
+  _, plan = run
+  slow = {0.5: DYN[0.5], 0.8: {"zeta": 0.8, "wn": 2 * math.pi * 1.5, "sine_delay": 0.4}}
+  older = _synth_run(plan, {"k0.5", "k0.8"}, "00000001--a", 100.0)
+  newer = _synth_run(plan, {"k0.8"}, "00000002--b", 200.0, dyn=slow, seed=1)
+  newest_partial = _synth_run(plan, set(), "00000003--c", 300.0, partial="k0.5", seed=2)
+  report = A.analyze_runs([newer, newest_partial, older])  # input order does not matter
+  assert report["block_sources"] == {"k0.5": "00000001--a", "k0.8": "00000002--b"}
+  assert report["routes"] == ["00000001--a", "00000002--b", "00000003--c"]
+  assert len(report["maneuvers"]) == 6
+  sine08 = _by(report, "k0.8", "sine")[0]
+  assert sine08["route"] == "00000002--b" and sine08["phase_delay_s"] == pytest.approx(0.4, abs=0.05)
+  assert {r["route"] for r in _by(report, "k0.5", "hold")} == {"00000001--a"}
+  assert "Runs merged" in A.render_markdown(report)
+
+
+def test_multi_route_newest_partial_used_when_never_completed(run):
+  _, plan = run
+  a = _synth_run(plan, {"k0.8"}, "00000001--a", 100.0)
+  b = _synth_run(plan, set(), "00000002--b", 200.0, partial="k0.5")
+  report = A.analyze_runs([a, b])
+  assert report["block_sources"] == {"k0.5": "00000002--b", "k0.8": "00000001--a"}
+  assert len(_by(report, "k0.5", "hold")) == 1
+
+
+def test_multi_route_ignores_other_plans(run):
+  _, plan = run
+  other = P.normalize_plan({"version": 1, "name": "other", "blocks": [
+    {"id": "k0.5", "speed_mph": 20, "settings": {"ti_steer_kp": 0.5}, "maneuvers": "quick"}]})
+  a = _synth_run(other, {"k0.5"}, "00000001--a", 100.0)
+  b = _synth_run(plan, {"k0.8"}, "00000002--b", 200.0)
+  report = A.analyze_runs([a, b])
+  assert report["routes"] == ["00000002--b"]
+  assert [i["route"] for i in report["ignored_sidecars"]] == ["00000001--a"]
+  assert set(report["block_sources"]) == {"k0.8"}
+
+
+def test_cli_accepts_multiple_sidecars_one_rlog_dir(run, tmp_path, monkeypatch, capsys):
+  _, plan = run
+  a = _synth_run(plan, {"k0.5"}, "00000001--a", 100.0)
+  b = _synth_run(plan, {"k0.8"}, "00000002--b", 200.0)
+  series = {"00000001--a": a[0], "00000002--b": b[0]}
+  loaded = []
+
+  def fake_load(directory, route=None):
+    loaded.append((directory, route))
+    return series[route]
+  monkeypatch.setattr(A, "load_rlogs", fake_load)
+  paths = []
+  for _, sc in (a, b):
+    p = tmp_path / f"{sc['route']}.json"
+    p.write_text(json.dumps(sc, default=lambda o: o.tolist()))
+    paths += ["--sidecar", str(p)]
+  A.main(paths + ["--rlogs", str(tmp_path / "rlogs"), "--out", str(tmp_path / "out")])
+  assert loaded == [(str(tmp_path / "rlogs"), "00000001--a"), (str(tmp_path / "rlogs"), "00000002--b")]
+  report = json.loads((tmp_path / "out" / "report.json").read_text())
+  assert report["block_sources"] == {"k0.5": "00000001--a", "k0.8": "00000002--b"}
+  assert "00000001--a, 00000002--b" in capsys.readouterr().out

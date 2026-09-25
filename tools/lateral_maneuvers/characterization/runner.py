@@ -11,6 +11,9 @@ Per maneuver: stock readiness (speed, latActive, straight, flat for 2 s) -> acti
 Disengage (selfdriveState.enabled false for 0.5 s): the snapshot values are written back
             (run paused); on re-engage the block's settings are re-applied and re-verified.
 Completion / process exit: snapshot restored and snapshot file deleted.
+Resume: blocks recorded complete (progress.py, all maneuvers ended) are skipped; a block that
+            ends with a skipped maneuver or unverified settings is retried on the next drive.
+            With every block complete the runner starts in "done" and changes nothing.
 """
 import json
 from dataclasses import dataclass, field
@@ -34,6 +37,7 @@ DISENGAGE_RESTORE_S = 0.5
 DRIFT_ABORT_S = 1.0
 COMPLETE_HOLDOFF_S = 1.0
 RESTORE_CHECK_S = 15.0
+RESUME_NOTE_S = 5.0  # "Resuming: block N/M (K done)" shown this long at run start
 SETTINGS_FRAMES = 3  # alertDebug frames carrying the block JSON (rlog-recoverable settings)
 MIN_SPEED = 1.0  # drive_helpers.MIN_SPEED
 
@@ -144,7 +148,8 @@ def settings_from_snapshot(snapshot, initial_toggles):
 
 
 class CharacterizationRunner:
-  def __init__(self, plan, settings_mgr, sidecar=None, log=None, ti_enabled=True):
+  def __init__(self, plan, settings_mgr, sidecar=None, log=None, ti_enabled=True, completed=None,
+               on_block_complete=None):
     self.plan = plan
     self.mgr = settings_mgr
     self.sidecar = sidecar
@@ -174,6 +179,14 @@ class CharacterizationRunner:
     self._started_block = None
     self.history = []
     self._pending_events = []
+    ids = {b["id"] for b in self.blocks}
+    self.completed = {i for i in (completed or ()) if i in ids}
+    self.resumed_done = len(self.completed)
+    self.on_block_complete = on_block_complete
+    self._block_ok = True
+    self._resume_note_s = 0.0
+    self._resume_text = ""
+    self.already_complete = False
 
   # -- helpers ---------------------------------------------------------------
   @property
@@ -201,11 +214,12 @@ class CharacterizationRunner:
       "run_start": "Characterization started", "settings_verified": "Settings verified",
       "block_skipped": "Block skipped", "maneuver_start": "Started", "maneuver_end": "Completed",
       "maneuver_aborted": "Aborted", "maneuver_skipped": "Skipped", "paused": "Paused (settings restored)",
-      "resumed": "Resumed", "run_end": "Characterization ended",
+      "resumed": "Resumed", "run_end": "Characterization ended", "block_complete": "Block complete",
+      "resume": "Resuming",
     }
     if kind not in labels:
       return ""
-    detail = f.get("maneuver_desc") or f.get("tag") or f.get("reason") or ""
+    detail = f.get("maneuver_desc") or f.get("tag") or f.get("reason") or f.get("text") or ""
     who = f.get("maneuver") or f.get("block") or ""
     return f"{labels[kind]} {who} {detail}".strip()
 
@@ -232,13 +246,38 @@ class CharacterizationRunner:
     return {"roll": round(f.roll, 5), "pitch": round(f.pitch, 5), "v_ego": round(f.v_ego, 3)}
 
   # -- lifecycle -------------------------------------------------------------
+  def _first_incomplete(self, idx):
+    while idx < len(self.blocks) and self.blocks[idx]["id"] in self.completed:
+      idx += 1
+    return idx
+
+  @property
+  def progress(self):
+    return {"done": len(self.completed), "total": len(self.blocks)}
+
   def start(self, mono_ns, extra=None):
     restored = self.mgr.restore_stale()
+    self.block_idx = self._first_incomplete(0)
+    progress = {"completed_blocks": sorted(self.completed), "resumed_done": self.resumed_done}
+    if self.block_idx >= len(self.blocks):
+      # every block already done: no snapshot, no param writes, nothing commanded
+      self.already_complete = True
+      self._event("run_start", mono_ns, plan_name=self.plan["name"], blocks=len(self.blocks), snapshot=None,
+                  stale_restored=restored, already_complete=True, **progress, **(extra or {}))
+      self.finish_reason = "completed"
+      self.state = "done"
+      self._event("run_end", mono_ns, reason="already_complete", restored={})
+      return
     snapshot = self.mgr.take_snapshot()
     self.state = "apply_wait"
+    self._block_ok = True
     self._new_player()
     self._event("run_start", mono_ns, plan_name=self.plan["name"], blocks=len(self.blocks), snapshot=snapshot,
-                stale_restored=restored, estimated_minutes=self.plan["estimated_minutes"], **(extra or {}))
+                stale_restored=restored, estimated_minutes=self.plan["estimated_minutes"], **progress, **(extra or {}))
+    if self.resumed_done:
+      self._resume_text = f"Resuming: block {self.block_idx + 1}/{len(self.blocks)} ({self.resumed_done} done)"
+      self._resume_note_s = RESUME_NOTE_S
+      self._event("resume", mono_ns, text=self._resume_text, index=self.block_idx + 1)
     self.settings_label = "LC plan"
     self.settings_payload = _compact({"plan": self.plan["name"], "snapshot": snapshot})
     self.settings_frames = SETTINGS_FRAMES
@@ -270,7 +309,7 @@ class CharacterizationRunner:
   def step(self, f):
     out = Output()
     if f.toggles is not None and self.initial_toggles is None and self.state in ("init", "apply_wait") \
-       and self.block_idx == 0 and self.apply_attempts == 0:
+       and self._started_block is None and self.apply_attempts == 0:
       self.initial_toggles = f.toggles
       self._event("baseline_toggles", f.mono_ns, toggles=f.toggles)
 
@@ -300,6 +339,10 @@ class CharacterizationRunner:
 
     if self.state == "done":
       self._step_done(f, out)
+    if self._resume_note_s > 0.0:
+      self._resume_note_s -= DT
+      if self.state == "apply_wait":
+        out.text1 = self._resume_text
     if not out.text2:
       out.text2 = self._text2()
     if self.settings_frames > 0 and not out.plan_valid:
@@ -412,6 +455,7 @@ class CharacterizationRunner:
           self.verify_active_s = 0.0
           self.state = "verify"
         if self.attempts >= self.plan["max_attempts_per_maneuver"]:
+          self._block_ok = False
           self._event("maneuver_skipped", f.mono_ns, maneuver=player.spec["id"], maneuver_desc=player.spec["desc"],
                       reason=f"{self.attempts} aborted attempts")
           self._next_maneuver(f)
@@ -469,28 +513,51 @@ class CharacterizationRunner:
     self.attempts = 0
     self.holdoff_s = 0.0
     if self.man_idx >= len(self.block["maneuvers"]):
-      self._event("block_end", f.mono_ns, **self._road(f))
+      self._event("block_end", f.mono_ns, complete=self._block_ok, **self._road(f))
+      if self._block_ok:
+        self._mark_complete(f)
       self._next_block(f)
     else:
       self._new_player()
 
+  def _mark_complete(self, f):
+    block_id = self.block["id"]
+    self.completed.add(block_id)
+    self._event("block_complete", f.mono_ns, done=len(self.completed), of=len(self.blocks))
+    if self.on_block_complete is not None:
+      try:
+        self.on_block_complete(block_id)
+      except Exception as e:  # progress is a convenience: never stop the run for it
+        self.log(f"lateral characterization: progress write failed: {e}")
+
   def _next_block(self, f):
-    self.block_idx += 1
+    self.block_idx = self._first_incomplete(self.block_idx + 1)
     self.man_idx = 0
     self.attempts = 0
     self.apply_attempts = 0
     self.stable_s = 0.0
     self.verifier = None
+    self._block_ok = True
     if self.block_idx >= len(self.blocks):
-      self.finish("completed", f.mono_ns)
+      all_done = all(b["id"] in self.completed for b in self.blocks)
+      self.finish("completed" if all_done else "pass_incomplete", f.mono_ns)
       return
     self.state = "apply_wait"
     self._new_player()
 
   def _step_done(self, f, out):
     out.state, out.phase = "finished", "done"
-    out.text1 = "Characterization finished" if self.finish_reason == "completed" else f"Stopped: {self.finish_reason}"
-    out.text2 = "settings restored"
+    done, total = len(self.completed), len(self.blocks)
+    if self.finish_reason == "completed":
+      out.text1 = "Characterization finished"
+      out.text2 = f"all {total} blocks done · reset progress to run again" if self.already_complete else \
+        f"all {total} blocks done · settings restored"
+    elif self.finish_reason == "pass_incomplete":
+      out.text1 = f"Pass done: {done}/{total} blocks complete"
+      out.text2 = "skipped blocks retry next drive · settings restored"
+    else:
+      out.text1 = f"Stopped: {self.finish_reason}"
+      out.text2 = "settings restored"
     if self.restore_verifier is None:
       return
     self.restore_verifier.update(f.obs())
@@ -537,7 +604,7 @@ def build_frame(sm, mono_ns, toggles):
   )
 
 
-def run_daemon(plan, snapshot_path=None, sidecar_dir=None):
+def run_daemon(plan, snapshot_path=None, sidecar_dir=None, progress_path=None):
   import atexit
   import signal
 
@@ -546,6 +613,9 @@ def run_daemon(plan, snapshot_path=None, sidecar_dir=None):
   from openpilot.common.swaglog import cloudlog
   from openpilot.tools.lateral_maneuvers.characterization.settings import (
     SNAPSHOT_PATH, ParamStore, SettingsManager, parse_toggles, touched_keys,
+  )
+  from openpilot.tools.lateral_maneuvers.characterization.progress import (
+    PROGRESS_PATH, completed_blocks, mark_block_complete, plan_hash,
   )
   from openpilot.tools.lateral_maneuvers.characterization.sidecar import SIDECAR_DIR, Sidecar, boot_ns
   from openpilot.tools.lateral_maneuvers.lateral_maneuversd import _load_status, _save_status, _status_signature
@@ -560,10 +630,17 @@ def run_daemon(plan, snapshot_path=None, sidecar_dir=None):
   header = {
     "plan": plan, "carFingerprint": CP.carFingerprint, "tiEnabled": bool(ti_enabled),
     "gitCommit": params.get("GitCommit") or "", "gitBranch": params.get("GitBranch") or "",
-    "advancedLateralTune": params.get_bool("AdvancedLateralTune"),
+    "advancedLateralTune": params.get_bool("AdvancedLateralTune"), "planHash": plan_hash(plan),
   }
   sidecar = Sidecar(sidecar_dir or SIDECAR_DIR, header=header, log=cloudlog.warning)
-  runner = CharacterizationRunner(plan, mgr, sidecar, log=cloudlog.info, ti_enabled=ti_enabled)
+  progress_path = progress_path or PROGRESS_PATH
+  try:
+    completed = completed_blocks(plan, progress_path)
+  except Exception:
+    cloudlog.exception("lateral characterization: progress unreadable, starting from block 1")
+    completed = set()
+  runner = CharacterizationRunner(plan, mgr, sidecar, log=cloudlog.info, ti_enabled=ti_enabled, completed=completed,
+                                  on_block_complete=lambda block_id: mark_block_complete(plan, block_id, progress_path))
   last_mono = [boot_ns()]
 
   def _exit_restore():
@@ -632,6 +709,7 @@ def run_daemon(plan, snapshot_path=None, sidecar_dir=None):
         "uiShow": True, "uiSize": "mid", "uiText1": out.text1,
         "uiText2": out.text2 if not out.text2.startswith("{") else "",
         "history": list(runner.history),
+        "progressDone": len(runner.completed), "progressTotal": len(runner.blocks),
       })
       signature = _status_signature(status)
       now = mono_ns * 1e-9

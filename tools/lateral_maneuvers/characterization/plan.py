@@ -487,7 +487,27 @@ def main(argv=None):
   gen.add_argument("-o", "--output", default="-", help=f"output path ('-' = stdout; device path {PLAN_PATH})")
   chk = sub.add_parser("check", help="validate a plan file and print the clamped summary")
   chk.add_argument("path", nargs="?", default=PLAN_PATH)
+  prog = sub.add_parser("progress", help="show which blocks are done (runs resume from the first incomplete block)")
+  prog.add_argument("path", nargs="?", default=PLAN_PATH)
+  prog.add_argument("--progress-file", default=None)
+  rst = sub.add_parser("reset-progress", help="forget completed blocks (next run starts at block 1)")
+  rst.add_argument("--progress-file", default=None)
   args = parser.parse_args(argv)
+
+  if args.cmd in ("progress", "reset-progress"):
+    from openpilot.tools.lateral_maneuvers.characterization import progress as progress_mod
+    progress_path = args.progress_file or progress_mod.PROGRESS_PATH
+    if args.cmd == "reset-progress":
+      removed = progress_mod.reset_progress(progress_path)
+      print(f"{progress_path}: {'deleted' if removed else 'no progress file'}")
+      return 0
+    status = progress_mod.plan_status(args.path, progress_path)
+    if not status["ok"]:
+      print(status["error"])
+      return 1
+    print(f"plan '{status['planName']}' ({status['planHash']}): {status['text']}")
+    print(f"  done: {', '.join(status['completed']) or '-'}")
+    return 0
 
   if args.cmd == "generate":
     speeds = [float(s) for s in args.speeds.split(",")] if args.speeds else None

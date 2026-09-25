@@ -21,6 +21,12 @@ friction-threshold table and TISteerKp, each with the evidence it came from.
 
   analyze.py --sidecar run.json --rlogs /path/to/route_dir --out out/
   analyze.py --route 0000012a--abcdef0123 --pull --out out/   # ssh to the comma
+
+A plan driven over several drives (resume) gives one sidecar per route: pass them all
+(--sidecar/--rlogs or --route are repeatable; one --rlogs dir may hold every route). Results
+are merged per block id: a block's data comes from the newest run in which it completed (else
+the newest run with any completed maneuver of it). Sidecars of a different plan (hash) than the
+newest one are ignored and listed in the report.
 """
 import argparse
 import json
@@ -116,9 +122,11 @@ def _rlog_files(directory):
   return sorted(files, key=seg)
 
 
-def load_rlogs(directory):
+def load_rlogs(directory, route=None):
   from openpilot.tools.lib.logreader import _LogFileReader
   files = _rlog_files(directory)
+  if route:  # a directory holding several routes: only this route's segments (log clocks differ per boot)
+    files = [f for f in files if os.path.basename(os.path.dirname(f)).startswith(f"{route}--")] or files
   if not files:
     raise SystemExit(f"no rlog files under {directory}")
   msgs = []
@@ -350,9 +358,62 @@ def analyze_maneuver(series, win, sign=None):
   return res
 
 
+def sidecar_plan_hash(sidecar):
+  if sidecar.get("planHash"):
+    return sidecar["planHash"]
+  if isinstance(sidecar.get("plan"), dict):
+    from openpilot.tools.lateral_maneuvers.characterization.progress import plan_hash
+    return plan_hash(sidecar["plan"])
+  return None
+
+
+def completed_block_ids(sidecar):
+  """Blocks whose maneuvers all completed in this run (block_complete events, else from the plan)."""
+  events = sidecar.get("events", [])
+  ids = {e.get("block") for e in events if e["type"] == "block_complete"}
+  ended = {e.get("maneuver") for e in events if e["type"] == "maneuver_end"}
+  for block in (sidecar.get("plan") or {}).get("blocks", []):
+    if block.get("maneuvers") and all(m["id"] in ended for m in block["maneuvers"]):
+      ids.add(block["id"])
+  return ids
+
+
+def _run_key(sidecar, order):
+  return (sidecar.get("startedWall") or 0.0, order)
+
+
 def analyze_run(series, sidecar):
-  wins = maneuver_windows(sidecar)
-  results = [analyze_maneuver(series, w) for w in wins]
+  return analyze_runs([(series, sidecar)])
+
+
+def analyze_runs(runs):
+  """runs: [(series, sidecar)] of one plan, one entry per route/sidecar."""
+  runs = sorted(enumerate(runs), key=lambda r: _run_key(r[1][1], r[0]))
+  newest = runs[-1][1][1]
+  ref_hash = sidecar_plan_hash(newest)
+  used, ignored = [], []
+  for order, (series, sidecar) in runs:
+    h = sidecar_plan_hash(sidecar)
+    if ref_hash is not None and h is not None and h != ref_hash:
+      ignored.append({"route": sidecar.get("route"), "planHash": h, "reason": "different plan than the newest sidecar"})
+      continue
+    used.append((order, series, sidecar))
+
+  # newest wins per block: prefer runs that completed the block, then any run with data for it
+  per_block = defaultdict(list)
+  for order, series, sidecar in used:
+    complete = completed_block_ids(sidecar)
+    for w in maneuver_windows(sidecar):
+      per_block[w["start"].get("block")].append((order, series, sidecar, w, w["start"].get("block") in complete))
+  chosen, results = {}, []
+  for block, entries in per_block.items():
+    best = max(entries, key=lambda e: (e[4], _run_key(e[2], e[0])))
+    chosen[block] = best[2].get("route")
+    for order, series, sidecar, w, _ in entries:
+      if order == best[0]:
+        res = analyze_maneuver(series, w)
+        res["route"] = sidecar.get("route")
+        results.append(res)
   # command->accel sign: consensus of the strongest correlations, then re-pick delays with it
   peaks = [r["cmd_corr"] for r in results if r.get("cmd_corr") is not None and abs(r["cmd_corr"]) >= MIN_CORR]
   sign = 1 if not peaks or sum(np.sign(peaks)) >= 0 else -1
@@ -360,12 +421,14 @@ def analyze_run(series, sidecar):
     if "_xcorr_cmd" in r:
       lags, corr = r.pop("_xcorr_cmd")
       r["cmd_delay_s"], r["cmd_corr"] = delay_from_curve(lags, corr, sign)
-  report = {"route": sidecar.get("route"), "plan": (sidecar.get("plan") or {}).get("name"),
-            "git": {"commit": sidecar.get("gitCommit"), "branch": sidecar.get("gitBranch")},
-            "cmd_accel_sign": sign, "maneuvers": results,
-            "incidents": [e for e in sidecar.get("events", []) if e["type"] in
-                          ("maneuver_aborted", "maneuver_skipped", "block_skipped", "paused", "settings_retry")],
-            "run_end": next((e for e in reversed(sidecar.get("events", [])) if e["type"] == "run_end"), None)}
+  incident_types = ("maneuver_aborted", "maneuver_skipped", "block_skipped", "paused", "settings_retry")
+  report = {"route": newest.get("route"), "routes": [sc.get("route") for _, _, sc in used],
+            "plan": (newest.get("plan") or {}).get("name"), "planHash": ref_hash,
+            "git": {"commit": newest.get("gitCommit"), "branch": newest.get("gitBranch")},
+            "cmd_accel_sign": sign, "maneuvers": results, "block_sources": chosen, "ignored_sidecars": ignored,
+            "incidents": [{**e, "route": sc.get("route")} for _, _, sc in used for e in sc.get("events", [])
+                          if e["type"] in incident_types],
+            "run_end": next((e for e in reversed(newest.get("events", [])) if e["type"] == "run_end"), None)}
   report["blocks"] = summarize_blocks(results)
   report["recommendation"] = recommend(results)
   return report
@@ -512,7 +575,8 @@ def _f(x, fmt=".3f"):
 def render_markdown(report):
   rec = report["recommendation"]
   sd, ft, kp = rec["steer_delay"], rec["friction_table"], rec["ti_steer_kp"]
-  lines = [f"# Lateral characterization — {report.get('route')}", "",
+  routes = report.get("routes") or [report.get("route")]
+  lines = [f"# Lateral characterization — {', '.join(str(r) for r in routes)}", "",
            f"Plan `{report.get('plan')}`, branch `{report['git'].get('branch')}` @ `{report['git'].get('commit')}`. " +
            f"0x249→lat-accel sign: {'+' if report['cmd_accel_sign'] > 0 else '−'}.", "",
            "## Recommendation", "",
@@ -543,6 +607,10 @@ def render_markdown(report):
       lines.append(f"- {name} {v}: RMS dyn {_f(m.get('tracking_rms_dynamic'))}, RMS hold {_f(m.get('tracking_rms_hold'))}, " +
                    f"overshoot {_f(m.get('overshoot_pct'), '.0f')}%, cmd flips/s {_f(m.get('cmd_flips_per_s'), '.2f')}, " +
                    f"speeds {m.get('speeds_mph')}")
+  if len(routes) > 1 or report.get("ignored_sidecars"):
+    lines += ["", "## Runs merged (newest completed run wins per block)", ""]
+    lines += [f"- {b}: {r}" for b, r in sorted((report.get("block_sources") or {}).items(), key=lambda x: str(x[0]))]
+    lines += [f"- ignored {i['route']}: {i['reason']} ({i['planHash']})" for i in report.get("ignored_sidecars") or []]
   lines += ["", "## Incidents", ""]
   for e in report["incidents"] or []:
     lines.append(f"- {e['type']} {e.get('block', '')} {e.get('maneuver', '')}: {e.get('reason', e.get('pending', ''))}")
@@ -576,30 +644,41 @@ def write_report(report, out_dir):
 
 def main(argv=None):
   ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-  ap.add_argument("--sidecar", help="sidecar JSON (default: pulled or <rlogs>/<route>.json)")
-  ap.add_argument("--rlogs", help="local directory with <route>--<seg>/rlog*")
-  ap.add_argument("--route", help="route name (e.g. 0000012a--abcdef0123) for --pull")
+  ap.add_argument("--sidecar", action="append", default=[], help="sidecar JSON (repeatable: one per route/run)")
+  ap.add_argument("--rlogs", action="append", default=[],
+                  help="directory with <route>--<seg>/rlog* (repeatable, paired with --sidecar; one dir may hold all routes)")
+  ap.add_argument("--route", action="append", default=[], help="route name (e.g. 0000012a--abcdef0123) for --pull, repeatable")
   ap.add_argument("--pull", action="store_true", help="copy rlogs + sidecar from the comma over ssh")
   ap.add_argument("--host", default=DEVICE)
   ap.add_argument("--key", default=SSH_KEY)
   ap.add_argument("--out", default="lateral_characterization_report")
   args = ap.parse_args(argv)
 
-  sidecar_path = args.sidecar
-  rlog_dir = args.rlogs
+  sidecar_paths, rlog_dirs = list(args.sidecar), list(args.rlogs)
   if args.pull:
     if not args.route:
       ap.error("--pull needs --route")
-    rlog_dir = rlog_dir or os.path.join(args.out, "rlogs")
-    pulled = pull_route(args.route, rlog_dir, args.host, args.key)
-    sidecar_path = sidecar_path or (pulled[0] if pulled else None)
-  if not rlog_dir or not sidecar_path:
+    rlog_dir = rlog_dirs[0] if rlog_dirs else os.path.join(args.out, "rlogs")
+    rlog_dirs = [rlog_dir]
+    for route in args.route:
+      sidecar_paths += pull_route(route, rlog_dir, args.host, args.key)
+  if not rlog_dirs or not sidecar_paths:
     ap.error("need --rlogs and --sidecar (or --route --pull)")
-  with open(sidecar_path) as f:
-    sidecar = json.load(f)
-  report = analyze_run(load_rlogs(rlog_dir), sidecar)
+  if len(rlog_dirs) not in (1, len(sidecar_paths)):
+    ap.error("give one --rlogs for all sidecars or one per --sidecar")
+  runs, cache = [], {}
+  for i, path in enumerate(sidecar_paths):
+    with open(path) as f:
+      sidecar = json.load(f)
+    rlog_dir = rlog_dirs[0] if len(rlog_dirs) == 1 else rlog_dirs[i]
+    key = (rlog_dir, sidecar.get("route"))
+    if key not in cache:
+      cache[key] = load_rlogs(rlog_dir, sidecar.get("route"))
+    runs.append((cache[key], sidecar))
+  report = analyze_runs(runs)
   path = write_report(report, args.out)
-  print(open(path).read())
+  with open(path) as f:
+    print(f.read())
 
 
 if __name__ == "__main__":
