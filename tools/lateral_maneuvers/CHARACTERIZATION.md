@@ -56,12 +56,39 @@ the drive, or add `"enable_advanced_lateral_tune": true` to the plan JSON. With 
 tool turns it on and restores it afterwards. If neither is done, blocks A/C/F/K cannot confirm
 their delay and are skipped after about 40 s each.
 
-Every drive starts again at block 1. To finish a partial run, generate a reduced plan with the
-blocks that are left.
+**Friction-table blocks (variant F, `friction_table`) need the FLM double-parse fix** that ships
+with this tool (`starpilot/common/json_param.py`). Without it StarPilot always broadcast
+`flm_active_overrides = {}`, so no FLM table ever reached the controller and every
+`friction_table` block was skipped with "settings not confirmed".
+
+### Resume across drives
+
+A plan can span several drives. After every block whose maneuvers **all** completed, the block
+id is saved in `/data/lateral_characterization_progress.json` (keyed by a hash of the plan, written
+atomically, survives process exit, car off and reboot). The next run skips those blocks and
+starts at the first one that is not done; the alert shows `Resuming: block N/M (K done)` for 5 s.
+
+- A block with a skipped maneuver (4 aborted attempts) or settings that could not be confirmed is
+  **not** complete. The run moves on and that block is retried on the next drive. A pass that
+  leaves such blocks ends with `Pass done: K/M blocks complete`.
+- A block interrupted by car off / mode off is not complete and restarts from its first maneuver.
+- Once every block is done the screen shows `Characterization finished` and nothing runs (no
+  restart from block 1). Reset the progress to run the plan again.
+- Editing the plan (any setting, speed, maneuver or limit) changes its hash, so the edited plan
+  starts fresh. Progress of other plans stays in the file, so swapping plan files back and forth
+  resumes each one.
+- Reset: the on-device **Reset Characterization Progress** button, the Galaxy **Reset
+  Characterization Progress** button, or
+  `PYTHONPATH=/data/openpilot /usr/local/venv/bin/python tools/lateral_maneuvers/characterization/plan.py reset-progress`.
+  `plan.py progress` prints which blocks are done.
 
 ## Driver procedure
 
 Where to drive:
+- **Turn off StarPilot's Curve Speed Controller (CSC) for the test drive.** The tool never
+  changes ACC set speed or anything longitudinal, but CSC can slow the car below the block speed
+  (especially in the 8–15 mph blocks), and then maneuvers wait at `Set speed to X mph` or abort
+  with `speed out of range`. Other speed-limit / map controllers can do the same.
 - 8–12 mph blocks: a big, empty parking lot, or a flat, empty, uncrowned service road.
 - 15–30 mph blocks: a long, straight, flat road with little crown and no traffic close behind.
   Crown and bank show up as roll and pollute the noise and step data. The tool waits
@@ -70,8 +97,17 @@ Where to drive:
 - Every maneuver moves the car up to ~3 m sideways. Leave that much clear space on both sides.
 
 Steps:
-1. Parked and offroad: write the plan (above), then turn on **Lateral Maneuver Mode** in the
-   Galaxy / StarPilot settings (or `echo -n 1 > /data/params/d/LateralManeuverMode`).
+1. Write the plan (above), then arm the test with one of:
+   - on the comma: **Settings → StarPilot → Steering → Advanced Lateral Tuning → Lateral
+     Characterization Test** (the section shows with Advanced Lateral Tuning on). Its subtitle
+     shows the plan and progress, e.g. `Plan 'default': 7/25 blocks done — resumes at block 8 next
+     drive`. It can only be armed when a valid plan file exists; otherwise it is greyed out and
+     says why. Below it is **Reset Characterization Progress** (asks for confirmation).
+   - the Galaxy lateral maneuvers page (**Start / Arm**; it also shows the progress and has a
+     reset button), or `echo -n 1 > /data/params/d/LateralManeuverMode`.
+
+   Arming (either way) sets Lateral Maneuver Mode and turns Longitudinal Maneuver Mode off.
+   Arming while onroad works too: the manager starts `lateral_maneuversd` right away.
 2. Start the car. The screen shows "Lateral Maneuver Mode". If the plan file is invalid, the
    screen shows "Characterization plan invalid" and the reason on the second line, and nothing
    is sent.
@@ -95,11 +131,12 @@ Steps:
    screen shows `Paused: engage to continue`. When you re-engage, the block's settings are
    re-applied and re-checked, and the interrupted maneuver runs again.
    **Abort one maneuver:** touch the wheel. It shows `Aborted: steering touched` and repeats.
-7. **Stop:** turn off Lateral Maneuver Mode, or turn the car off. Either one ends the process,
-   which restores your settings. To stop using characterization altogether, delete
+7. **Stop:** turn off the toggle / Lateral Maneuver Mode, or turn the car off. Either one ends
+   the process, which restores your settings. Completed blocks are kept, so the next drive
+   resumes. To stop using characterization altogether, delete
    `/data/lateral_characterization_plan.json`, and the mode goes back to the stock maneuvers.
-8. When it is done, the screen shows `Characterization finished` / `settings restored`. Pull
-   over, turn the car off, and turn Lateral Maneuver Mode off.
+8. When every block is done, the screen shows `Characterization finished` / `all N blocks done`.
+   Pull over, turn the car off, and turn the test toggle off.
 
 ## Logs and report
 
@@ -108,7 +145,8 @@ Steps:
   clock (`mono_ns`), for example: `run_start`, `block_start` (settings, roll/pitch),
   `settings_applied`, `settings_verified` (observed values), `maneuver_start` (spec, active
   settings, roll/pitch), `maneuver_end`, `maneuver_aborted` (reason), `paused`/`resumed`,
-  `run_end`, `restore_verified`.
+  `block_end` (`complete`), `block_complete`, `run_end`, `restore_verified`. `run_start` records
+  `completed_blocks` / `resumed_done` when a run resumes. One sidecar per drive.
 - Report (on a PC; this reads from the device and never writes to it):
 
 ```sh
@@ -118,7 +156,14 @@ PYTHONPATH=$PWD python tools/lateral_maneuvers/characterization/analyze.py \
 # or with local files:
 PYTHONPATH=$PWD python tools/lateral_maneuvers/characterization/analyze.py \
   --rlogs /path/with/<route>--N/rlog.zst --sidecar <route>.json --out /tmp/lc_report
+# a plan driven over several drives: repeat --route (or --sidecar); one --rlogs dir can hold all routes
+PYTHONPATH=$PWD python tools/lateral_maneuvers/characterization/analyze.py \
+  --route 0000012a--abcdef0123 --route 0000012c--0123abcdef --pull --out /tmp/lc_report
 ```
+
+With several sidecars the results are merged per block id: a block's data comes from the newest
+drive that completed it (or, if none did, the newest drive with any completed maneuver of it).
+Sidecars from a different plan than the newest one are ignored and listed in the report.
 
 `report.md` and `report.json` include:
 - the 0x249→lat-accel delay (cross-correlation over 0–800 ms, sign checked) and the des→act delay
@@ -135,18 +180,18 @@ the evidence behind each one.
 
 ## Install (parked, offroad)
 
-This branch only adds Python and docs on top of `8170040cb` (the car's current
-`starpilot-2017-accord-ti-dom-next` build). The compiled aarch64 artifacts are unchanged, so no
-build is needed.
+Branch `char-resume-ui` adds only Python, docs and one Galaxy JS file on top of `521ccdd5e`
+(`lateral-characterization`, itself Python-only on `8170040cb`). No params key was added, so the
+compiled aarch64 artifacts are unchanged and no build is needed.
 
 ```sh
 ssh -i ~/.ssh/openclaw_comma_ed25519 comma@100.64.90.15
 cat /data/params/d/IsOnroad                       # must be 0
 cd /data/openpilot
-git fetch origin lateral-characterization
-git checkout --force -B lateral-characterization FETCH_HEAD
+git fetch origin char-resume-ui
+git checkout --force -B char-resume-ui FETCH_HEAD
 git log -1 --oneline
-git diff --stat 8170040cb HEAD -- '*.so' '*.a' '*.o' panda/board/obj   # must be empty
+git diff --stat 8170040cb HEAD -- '*.so' '*.a' '*.o' panda/board/obj common/params_pyx.cpp common/params_keys.h   # must be empty
 PYTHONPATH=/data/openpilot /usr/local/venv/bin/python system/manager/prebuilt_guard.py --check
 sudo reboot                                       # NOT `systemctl restart comma`
 ```
