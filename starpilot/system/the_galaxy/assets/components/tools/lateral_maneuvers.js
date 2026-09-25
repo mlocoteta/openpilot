@@ -83,6 +83,8 @@ function ensurePolling() {
 
 async function runAction(action) {
   if (state.busy) return
+  if (action === "reset_progress" &&
+      !window.confirm("Reset lateral characterization progress? The next run starts at block 1.")) return
   state.busy = true
 
   try {
@@ -109,6 +111,12 @@ function initialize() {
   initialized = true
   fetchStatus()
   ensurePolling()
+}
+
+function characterizationText(c) {
+  if (!c) return "n/a"
+  if (!c.ok) return c.error || "no plan (stock maneuvers)"
+  return `plan '${c.planName}': ${c.text}`
 }
 
 function statusLine(label, value) {
@@ -140,6 +148,12 @@ export function LateralManeuvers() {
             @click="${() => runAction("stop")}">
             Stop
           </button>
+          <button
+            class="longManeuverButton danger"
+            disabled="${() => state.busy || false}"
+            @click="${() => runAction("reset_progress")}">
+            Reset Characterization Progress
+          </button>
         </div>
 
         ${() => state.loading ? html`<p class="longManeuverMuted">Loading status...</p>` : ""}
@@ -155,6 +169,7 @@ export function LateralManeuvers() {
             ${statusLine("Step", `${safeNumber(state.data.stepIndex, 0)}/${safeNumber(state.data.stepTotal, 0)}`)}
             ${statusLine("Run", `${safeNumber(state.data.runIndex, 0)}/${safeNumber(state.data.runTotal, 0)}`)}
             ${statusLine("Updated", formatAgeSeconds(state.data.updatedAgeSec))}
+            ${statusLine("Characterization", characterizationText(state.data.characterization))}
           </div>
 
           <div class="longManeuverCurrent">

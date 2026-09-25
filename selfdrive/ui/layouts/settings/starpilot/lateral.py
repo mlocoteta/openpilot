@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from openpilot.system.hardware import HARDWARE
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
 from openpilot.system.ui.lib.application import gui_app
@@ -83,6 +85,8 @@ class StarPilotLateralLayout(_SettingsPage):
 
   def __init__(self):
     super().__init__()
+    self._lc_status: dict | None = None
+    self._lc_status_t = 0.0
     self._build_panels()
 
   def _make_parent(self, key: str, label: str, subtitle: str = "") -> ParentToggle:
@@ -402,6 +406,25 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
     ]
 
+    # ── Lateral characterization test (tools/lateral_maneuvers/CHARACTERIZATION.md) ──
+    self._lc_row = SettingRow(
+      "LateralCharacterization", "toggle", tr_noop("Lateral Characterization Test"),
+      subtitle="",
+      get_state=self._lc_get_state,
+      set_state=self._lc_set_state,
+      enabled=lambda: self._lc_refresh()["ok"] or p.get_bool("LateralManeuverMode"),
+      visible=alt_on,
+    )
+    self._lc_reset_row = SettingRow(
+      "LateralCharacterizationReset", "action", tr_noop("Reset Characterization Progress"),
+      subtitle="",
+      action_text=tr_noop("Reset"),
+      action_danger=True,
+      on_click=self._lc_confirm_reset,
+      visible=alt_on,
+    )
+    self._advanced_rows += [self._lc_row, self._lc_reset_row]
+
     self._manager_view = SteeringManagerView(
       self,
       header_title=tr_noop("Steering"),
@@ -446,6 +469,58 @@ class StarPilotLateralLayout(_SettingsPage):
       panel_style=PANEL_STYLE,
     )
     self._wire_sub_panels()
+
+  # ── lateral characterization test ──
+  def _lc_refresh(self, force: bool = False) -> dict:
+    now = time.monotonic()
+    if force or self._lc_status is None or now - self._lc_status_t > 2.0:
+      armed = self._params.get_bool("LateralManeuverMode")
+      try:
+        from openpilot.tools.lateral_maneuvers.characterization import control
+        from openpilot.tools.lateral_maneuvers.characterization.progress import plan_status
+        status = plan_status()
+        subtitle = control.subtitle(status, armed)
+      except Exception as e:  # never take the settings UI down for the test tool
+        status = {"ok": False, "error": f"tool unavailable ({e})", "done": 0}
+        subtitle = f"Unavailable: {status['error']}"
+      self._lc_status, self._lc_status_t = status, now
+      self._lc_row.subtitle = subtitle + " Arms lateral_maneuversd like The Galaxy; resumes where the last drive stopped."
+      self._lc_row.disabled_label = subtitle
+      if status["ok"]:
+        self._lc_reset_row.subtitle = f"{status['done']}/{status['total']} blocks done. Reset makes the next run start at block 1."
+      else:
+        self._lc_reset_row.subtitle = "Forget completed characterization blocks (next run starts at block 1)."
+    return self._lc_status
+
+  def _lc_get_state(self) -> bool:
+    self._lc_refresh()
+    return self._params.get_bool("LateralManeuverMode")
+
+  def _lc_set_state(self, state: bool):
+    try:
+      from openpilot.tools.lateral_maneuvers.characterization import control
+      ok, message = control.set_armed(self._params, state, source="comma settings")
+    except Exception as e:
+      ok, message = False, f"tool unavailable ({e})"
+    if not ok:
+      from openpilot.system.ui.widgets.confirm_dialog import alert_dialog
+      gui_app.push_widget(alert_dialog(tr("Cannot arm the characterization test:") + f"\n{message}"))
+    self._lc_refresh(force=True)
+
+  def _lc_confirm_reset(self):
+    from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+
+    def on_close(res):
+      if res == DialogResult.CONFIRM:
+        try:
+          from openpilot.tools.lateral_maneuvers.characterization import control
+          control.reset()
+        except Exception:
+          pass
+        self._lc_refresh(force=True)
+
+    gui_app.push_widget(ConfirmDialog(tr("Reset lateral characterization progress? The next run starts at block 1."),
+                                      tr("Reset"), tr("Cancel"), callback=on_close))
 
   def _on_pause_lateral_speed_clicked(self):
     def on_speed_close(res, val):

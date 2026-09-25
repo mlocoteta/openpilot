@@ -38,9 +38,9 @@ def _read(path):
   return payload
 
 
-def completed_blocks(plan, path=PROGRESS_PATH):
+def completed_blocks(plan, path=PROGRESS_PATH, key=None):
   """Ids of the plan's blocks recorded as complete (ids not in the plan are ignored)."""
-  entry = _read(path)["plans"].get(plan_hash(plan)) or {}
+  entry = _read(path)["plans"].get(key or plan_hash(plan)) or {}
   done = entry.get("completed") if isinstance(entry, dict) else None
   ids = {b["id"] for b in plan["blocks"]}
   return {str(i) for i in done if str(i) in ids} if isinstance(done, list) else set()
@@ -74,11 +74,12 @@ def reset_progress(path=PROGRESS_PATH):
     return False
 
 
-def summary(plan, path=PROGRESS_PATH):
-  done = completed_blocks(plan, path)
+def summary(plan, path=PROGRESS_PATH, key=None):
+  key = key or plan_hash(plan)
+  done = completed_blocks(plan, path, key)
   total = len(plan["blocks"])
   nxt = next((i for i, b in enumerate(plan["blocks"]) if b["id"] not in done), None)
-  return {"done": len(done), "total": total, "finished": len(done) >= total, "planHash": plan_hash(plan),
+  return {"done": len(done), "total": total, "finished": len(done) >= total, "planHash": key,
           "planName": plan["name"], "nextBlock": nxt + 1 if nxt is not None else None,
           "nextBlockId": plan["blocks"][nxt]["id"] if nxt is not None else None, "completed": sorted(done)}
 
@@ -92,17 +93,44 @@ def summary_text(s):
   return f"{s['done']}/{s['total']} blocks done — resumes at block {s['nextBlock']} next drive"
 
 
-def plan_status(plan_path=None, progress_path=PROGRESS_PATH):
-  """{ok, error, plan summary...} for UIs: never raises."""
-  from openpilot.tools.lateral_maneuvers.characterization.plan import PLAN_PATH, PlanError, load_plan
-  plan_path = plan_path or PLAN_PATH
+_plan_cache = {}
+
+
+def _load_plan_cached(plan_path):
+  """load_plan() memoized on the file's mtime/size (UIs poll this; normalizing a plan takes ~20 ms)."""
+  from openpilot.tools.lateral_maneuvers.characterization.plan import load_plan
+  try:
+    st = os.stat(plan_path)
+    key = (st.st_mtime_ns, st.st_size)
+  except FileNotFoundError:
+    _plan_cache.pop(plan_path, None)
+    return None
+  cached = _plan_cache.get(plan_path)
+  if cached is not None and cached[0] == key:
+    if isinstance(cached[1], Exception):
+      raise cached[1]
+    return cached[1]
   try:
     plan = load_plan(plan_path)
-  except (PlanError, OSError) as e:
+  except Exception as e:
+    _plan_cache[plan_path] = (key, e)
+    raise
+  _plan_cache[plan_path] = (key, (plan, plan_hash(plan)))
+  return _plan_cache[plan_path][1]
+
+
+def plan_status(plan_path=None, progress_path=PROGRESS_PATH):
+  """{ok, error, plan summary...} for UIs: never raises."""
+  from openpilot.tools.lateral_maneuvers.characterization.plan import PLAN_PATH
+  plan_path = plan_path or PLAN_PATH
+  try:
+    loaded = _load_plan_cached(plan_path)
+  except Exception as e:
     return {"ok": False, "error": f"plan invalid: {e}", "planPath": plan_path}
-  if plan is None:
+  if loaded is None:
     return {"ok": False, "error": f"no plan at {plan_path}", "planPath": plan_path}
-  s = summary(plan, progress_path)
+  plan, key = loaded
+  s = summary(plan, progress_path, key)
   s.update({"ok": True, "error": "", "planPath": plan_path, "text": summary_text(s),
             "estimatedMinutes": plan["estimated_minutes"]})
   return s

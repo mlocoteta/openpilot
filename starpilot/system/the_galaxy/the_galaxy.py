@@ -5287,6 +5287,14 @@ def _append_lateral_maneuver_history(status, line):
   return status
 
 
+def _lateral_characterization_status():
+  try:
+    from openpilot.tools.lateral_maneuvers.characterization.progress import plan_status
+    return plan_status()
+  except Exception as e:
+    return {"ok": False, "error": f"characterization tool unavailable: {e}"}
+
+
 def _serialize_lateral_maneuver_status(status):
   updated_at = _safe_float(status.get("updatedAtSec"), 0.0)
   age_seconds = max(0.0, time.monotonic() - updated_at) if updated_at > 0 else None
@@ -5296,6 +5304,7 @@ def _serialize_lateral_maneuver_status(status):
     "isOnroad": params.get_bool("IsOnroad"),
     "isEngaged": params.get_bool("IsEngaged"),
     "updatedAgeSec": age_seconds,
+    "characterization": _lateral_characterization_status(),
   }
 
 
@@ -8503,6 +8512,18 @@ def setup(app):
     status = _set_lateral_maneuver_mode(False)
     return jsonify({
       "message": "Lateral maneuver mode disabled.",
+      **_serialize_lateral_maneuver_status(status),
+    }), 200
+
+  @app.route("/api/lateral_maneuvers/reset_progress", methods=["POST"])
+  def reset_lateral_characterization_progress():
+    from openpilot.tools.lateral_maneuvers.characterization.progress import reset_progress
+    removed = reset_progress()
+    status = _load_lateral_maneuver_status()
+    _append_lateral_maneuver_history(status, "Characterization progress reset from The Galaxy (next run starts at block 1).")
+    status = _save_lateral_maneuver_status(status)
+    return jsonify({
+      "message": "Characterization progress reset." if removed else "No characterization progress to reset.",
       **_serialize_lateral_maneuver_status(status),
     }), 200
 
