@@ -29,6 +29,7 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.controls.lib.latcontrol_torque import KP
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.starpilot.common.lateral_delay import full_lateral_delay
 from openpilot.starpilot.common.lateral_only_experimental import lateral_only_experimental_available
 from openpilot.starpilot.common.longitudinal_mode import read_mode_values
@@ -784,9 +785,9 @@ class StarPilotVariables:
     toggle.force_auto_tune_off = self.get_value("ForceAutoTuneOff", condition=advanced_lateral_tuning and is_torque_car and not is_angle_car)
     toggle.flm_active_profile_id = self.params.get("FLMActiveProfileId", encoding="utf-8") or ""
     toggle.flm_trial_applied = self.params.get_bool("FLMTrialApplied")
-    flm_overrides_raw = self.params.get("FLMActiveOverrides", encoding="utf-8") or ""
+    # JSON-typed param: Params.get returns the decoded dict (json.loads on it used to raise -> {} always)
     try:
-      toggle.flm_active_overrides = json.loads(flm_overrides_raw) if flm_overrides_raw else {}
+      toggle.flm_active_overrides = load_json_param(self.params.get("FLMActiveOverrides", encoding="utf-8"), {})
     except Exception:
       toggle.flm_active_overrides = {}
     toggle.use_auto_steer_delay = self.get_value("UseAutoSteerDelay", condition=advanced_lateral_tuning, default=True)

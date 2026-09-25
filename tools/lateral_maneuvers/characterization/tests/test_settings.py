@@ -319,3 +319,27 @@ def test_real_params_round_trip(tmp_path):
   after = {k: store.read_raw(k) for k in S.BASE_KEYS}
   assert all(S.same_raw(k, before[k], after[k]) for k in S.BASE_KEYS), (before, after)
   assert params.get_float("SteerDelay") == 0.01
+
+
+def test_applied_friction_table_reaches_toggles_and_verifies(env):
+  """End to end: tool writes FLM params -> StarPilotVariables reads the JSON-typed key (Params.get returns
+  a dict) -> toggle broadcast -> parse_toggles -> FrictionTableCheck. Before the load_json_param fix the
+  broadcast carried flm_active_overrides={} and this check could never pass."""
+  from openpilot.starpilot.common.json_param import load_json_param
+  params, _, store, snap = env
+  mgr = S.SettingsManager(store, snap)
+  mgr.take_snapshot()
+  table = FRICTION_TABLES["lowspeed"]
+  mgr.apply({"friction_table": table})
+
+  decoded = json.loads(params.raw("FLMActiveOverrides"))  # what Params.get("FLMActiveOverrides") returns
+  broadcast = json.dumps({"flm_trial_applied": params.raw("FLMTrialApplied") == "1",
+                          "flm_active_profile_id": params.raw("FLMActiveProfileId"),
+                          "flm_active_overrides": load_json_param(decoded, {})})
+  toggles = S.parse_toggles(broadcast)
+  assert toggles["flm_active_overrides"]["vehicleKnobs"] == {"torque_universal.ff_gain_left": 0.1}
+  v = S.SettingsVerifier({"friction_table": table}, t_apply=0.0)
+  v.update(_obs(0.1, toggles=toggles))
+  for i in range(10):
+    v.update(_obs(0.2 + i * 0.05, v_ego=5.0, friction_threshold=1.2))
+  assert v.ok

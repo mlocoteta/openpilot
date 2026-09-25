@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # PFEIFER - SLC - Modified by FrogAi
 import calendar
-import json
 import requests
 
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +10,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
 
 from cereal import custom
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.starpilot.common.starpilot_utilities import calculate_bearing_offset, calculate_distance_to_point, is_url_pingable
 
 FREE_MAPBOX_REQUESTS = 100_000
@@ -73,10 +73,7 @@ class SpeedLimitController:
     self._slc_adopt_counter = 0
 
     mapbox_requests_raw = self.starpilot_planner.params.get("MapBoxRequests", encoding="utf-8")
-    try:
-      self.mapbox_requests = json.loads(mapbox_requests_raw or "{}")
-    except (TypeError, ValueError):
-      self.mapbox_requests = {}
+    self.mapbox_requests = load_json_param(mapbox_requests_raw, {})
     self.mapbox_requests.setdefault("total_requests", 0)
     self.mapbox_requests.setdefault("max_requests", FREE_MAPBOX_REQUESTS - (28 * 100))
 
@@ -184,7 +181,7 @@ class SpeedLimitController:
             })
 
         self.mapbox_requests["total_requests"] += 1
-        self.starpilot_planner.params.put_nonblocking("MapBoxRequests", json.dumps(self.mapbox_requests))
+        self.starpilot_planner.params.put_nonblocking("MapBoxRequests", dict(self.mapbox_requests))
 
         current_bearing = self.starpilot_planner.gps_position.get("bearing")
         current_latitude = self.starpilot_planner.gps_position.get("latitude")

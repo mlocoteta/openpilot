@@ -10,6 +10,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.selfdrive.controls.lib.drive_helpers import MIN_SPEED
 from openpilot.tools.longitudinal_maneuvers.maneuversd import Action, Maneuver as _Maneuver
 
@@ -44,14 +45,7 @@ def _default_status():
 
 def _load_status(params: Params):
   status = _default_status()
-  raw = params.get(STATUS_PARAM, encoding="utf-8") or ""
-  if raw:
-    try:
-      payload = json.loads(raw)
-      if isinstance(payload, dict):
-        status.update(payload)
-    except Exception:
-      pass
+  status.update(load_json_param(params.get(STATUS_PARAM, encoding="utf-8"), {}))
 
   history = status.get("history")
   if not isinstance(history, list):

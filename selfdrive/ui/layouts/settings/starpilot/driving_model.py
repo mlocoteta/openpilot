@@ -25,6 +25,7 @@ from openpilot.starpilot.assets.model_manager import (
   model_key_aliases,
   set_model_profile,
 )
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.starpilot.common.starpilot_variables import MODELS_PATH, update_starpilot_toggles
 from openpilot.system.ui.lib.application import FontWeight, MouseEvent, MousePos, gui_app
 from openpilot.system.ui.lib.multilang import tr
@@ -1239,7 +1240,7 @@ class StarPilotDrivingModelLayout(_SettingsPage):
       gui_app.push_widget(alert_dialog(tr("No model ratings found.")))
       return
     try:
-      scores = json.loads(scores_raw)
+      scores = load_json_param(scores_raw, {})
       lines = [f"{key}: {value.get('Score', 0)}% ({value.get('Drives', 0)} drives)" for key, value in scores.items()]
       gui_app.push_widget(ConfirmDialog("\n".join(lines), tr("Close"), rich=True))
     except Exception:
