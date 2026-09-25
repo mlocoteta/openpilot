@@ -143,6 +143,10 @@ class LatControlTorque(LatControl):
     self.is_tucson_4th_gen = CP.carFingerprint in TUCSON_4TH_GEN_CARS
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA_CAR.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
     self.is_honda_accord = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD
+    # The TI damping policies were written for the 9G Accord Torque Interceptor, but were
+    # gated on the 10G fingerprint above, so they could never activate on the car they target.
+    # controlsd only feeds them on a 9G with the TI enabled; the 10G gains/ff stay 10G-only.
+    self.is_honda_accord_9g = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_9G
     self.is_silverado = CP.carFingerprint in SILVERADO_CARS
     self.is_gmc_yukon_cc = CP.carFingerprint in GMC_YUKON_CC_CARS
     self.is_ram_1500 = CP.carFingerprint in RAM_1500_CARS
@@ -205,9 +209,9 @@ class LatControlTorque(LatControl):
 
   def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False,
                                             continuous_center_max_reduction=0.62):
-    self.honda_accord_low_speed_damping_enabled = bool(enabled) and self.is_honda_accord
+    self.honda_accord_low_speed_damping_enabled = bool(enabled) and (self.is_honda_accord or self.is_honda_accord_9g)
     self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
-    self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and self.is_honda_accord
+    self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and (self.is_honda_accord or self.is_honda_accord_9g)
     self.honda_accord_continuous_center_damping_max_reduction = float(np.clip(continuous_center_max_reduction, 0.0, 0.75))
     # The two experimental policies are A/B alternatives. The continuous policy
     # intentionally takes priority when selected, so they can never stack.

@@ -164,3 +164,37 @@ class TestTIController:
       assert request == 0
     request, _ = run_frame(CI, toggles, packer, TI_DISCOVERY_FRAMES, None)
     assert request == TI_LIMITS.TI_STEER_DELTA_UP
+
+
+class TestTIReportedOutput:
+  """carOutput must report the TI command, not the stock LKAS limiter's output.
+
+  controlsd freezes the lateral integrator whenever requested and reported torque differ,
+  and torqued learns from the reported torque, so both need what the TI actually sent.
+  """
+  @staticmethod
+  def apply(CI, toggles, packer, frame, feedback, torque):
+    addr, dat, bus = packer.make_can_msg("TI_FEEDBACK", 0, feedback)
+    CI.update([(frame * DT_NS, [CanData(addr, dat, bus)])], toggles)
+    CC = structs.CarControl()
+    CC.enabled = CC.latActive = True
+    CC.actuators.torque = torque
+    actuators, sends = CI.apply(CC.as_reader(), frame * DT_NS, toggles)
+    dat = next(dat for addr, dat, bus in sends if addr == TI_STEERING_CONTROL)
+    return actuators, ((dat[0] & 0x0F) << 8 | dat[1]) - 2048
+
+  def test_reports_ti_command(self, ti_interface):
+    CI, toggles, packer = ti_interface
+    for frame in range(30):
+      actuators, request = self.apply(CI, toggles, packer, frame, ti_feedback(TI_STATE.RUN), 0.5)
+      assert actuators.torqueOutputCan == request
+      assert actuators.torque == pytest.approx(request / TI_LIMITS.TI_STEER_MAX)
+    # The TI reaches the request well before the stock limiter would, so the
+    # integrator must not be treated as limited once it has.
+    assert abs(0.5 - actuators.torque) < 1e-2
+
+  def test_reports_zero_while_board_not_running(self, ti_interface):
+    CI, toggles, packer = ti_interface
+    for frame in range(50):
+      actuators, request = self.apply(CI, toggles, packer, frame, ti_feedback(TI_STATE.OFF), 0.5)
+      assert request == 0 and actuators.torque == 0.0 and actuators.torqueOutputCan == 0

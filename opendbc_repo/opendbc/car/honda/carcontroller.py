@@ -637,8 +637,16 @@ class CarController(CarControllerBase):
     new_actuators.accel = self.accel
     new_actuators.gas = self.gas
     new_actuators.brake = self.brake
-    new_actuators.torque = self.last_torque
-    new_actuators.torqueOutputCan = apply_torque
+    if self.has_ti:
+      # With the TI the stock LKAS command is not what steers the car, so report the TI
+      # command instead. controlsd compares this against the requested torque to decide
+      # whether the lateral integrator is being limited; the stock limiter's much slower
+      # rate froze the integrator whenever the TI itself was keeping up.
+      new_actuators.torque = ti_apply_steer / TI_LIMITS.TI_STEER_MAX
+      new_actuators.torqueOutputCan = ti_apply_steer
+    else:
+      new_actuators.torque = self.last_torque
+      new_actuators.torqueOutputCan = apply_torque
 
     self.frame += 1
     return new_actuators, can_sends

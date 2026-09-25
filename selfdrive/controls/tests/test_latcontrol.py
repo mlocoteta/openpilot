@@ -2039,6 +2039,19 @@ class TestLatControl:
     assert controller.pid._k_p[1][-1] == pytest.approx(HONDA_ACCORD_TORQUE_KP)
     assert controller.pid._k_i[1] == pytest.approx([HONDA_ACCORD_TORQUE_KI] * len(controller.pid._k_i[1]))
 
+  def test_honda_accord_9g_ti_damping_toggles_apply(self):
+    controller, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+
+    # The damping policies target the 9G TI, but the 10G gains/ff must stay 10G-only.
+    assert not controller.is_honda_accord
+    controller.update_honda_accord_low_speed_damping(True, 0.12)
+    assert controller.honda_accord_low_speed_damping_enabled
+    controller.update_honda_accord_low_speed_damping(False, 0.12, continuous_center_enabled=True)
+    assert controller.honda_accord_continuous_center_damping_enabled
+    controller.update_honda_accord_low_speed_damping(False, 0.12)
+    assert not controller.honda_accord_low_speed_damping_enabled
+    assert not controller.honda_accord_continuous_center_damping_enabled
+
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33
     assert get_honda_accord_steer_ratio_scale(0.0) == pytest.approx(expected_scale)
