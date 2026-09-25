@@ -249,7 +249,7 @@ def test_multi_route_newest_partial_used_when_never_completed(run):
   assert len(_by(report, "k0.5", "hold")) == 1
 
 
-def test_multi_route_ignores_other_plans(run):
+def test_multi_route_ignores_same_id_with_different_content(run):
   _, plan = run
   other = P.normalize_plan({"version": 1, "name": "other", "blocks": [
     {"id": "k0.5", "speed_mph": 20, "settings": {"ti_steer_kp": 0.5}, "maneuvers": "quick"}]})
@@ -257,8 +257,22 @@ def test_multi_route_ignores_other_plans(run):
   b = _synth_run(plan, {"k0.8"}, "00000002--b", 200.0)
   report = A.analyze_runs([a, b])
   assert report["routes"] == ["00000002--b"]
-  assert [i["route"] for i in report["ignored_sidecars"]] == ["00000001--a"]
+  assert [(i["route"], i["block"]) for i in report["ignored_blocks"]] == [("00000001--a", "k0.5")]
   assert set(report["block_sources"]) == {"k0.8"}
+
+
+def test_multi_route_merges_identical_blocks_across_plan_files(run):
+  # e.g. a reduced plan driven first, then the full plan: identical blocks (same id + content) merge
+  _, plan = run
+  reduced = P.normalize_plan({"version": 1, "name": "reduced", "blocks": [
+    {"id": "k0.5", "speed_mph": 15, "settings": {"steer_delay": 0.01, "friction_table": "flat", "ti_steer_kp": 0.5},
+     "maneuvers": [{"type": "hold", "duration_s": 10.0}, {"type": "step", "amplitude": 0.3, "hold_s": 3.0},
+                   {"type": "sine", "freq_hz": 0.4, "amplitude": 0.3, "cycles": 3}]}]})
+  a = _synth_run(reduced, {"k0.5"}, "00000001--a", 100.0)
+  b = _synth_run(plan, {"k0.8"}, "00000002--b", 200.0)
+  report = A.analyze_runs([a, b])
+  assert report["block_sources"] == {"k0.5": "00000001--a", "k0.8": "00000002--b"}
+  assert report["ignored_blocks"] == [] and report["plan"] == "synthetic"
 
 
 def test_cli_accepts_multiple_sidecars_one_rlog_dir(run, tmp_path, monkeypatch, capsys):

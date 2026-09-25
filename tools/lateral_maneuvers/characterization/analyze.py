@@ -25,8 +25,10 @@ friction-threshold table and TISteerKp, each with the evidence it came from.
 A plan driven over several drives (resume) gives one sidecar per route: pass them all
 (--sidecar/--rlogs or --route are repeatable; one --rlogs dir may hold every route). Results
 are merged per block id: a block's data comes from the newest run in which it completed (else
-the newest run with any completed maneuver of it). Sidecars of a different plan (hash) than the
-newest one are ignored and listed in the report.
+the newest run with any completed maneuver of it). Sidecars may come from different plan files
+(e.g. a reduced plan, then the full one): a block is merged when its content (speed, settings,
+maneuvers) matches the newest sidecar that has that block id; mismatching blocks are ignored and
+listed in the report.
 """
 import argparse
 import json
@@ -358,13 +360,14 @@ def analyze_maneuver(series, win, sign=None):
   return res
 
 
-def sidecar_plan_hash(sidecar):
-  if sidecar.get("planHash"):
-    return sidecar["planHash"]
-  if isinstance(sidecar.get("plan"), dict):
-    from openpilot.tools.lateral_maneuvers.characterization.progress import plan_hash
-    return plan_hash(sidecar["plan"])
-  return None
+def block_signatures(sidecar):
+  """{block id: content hash} from the sidecar's plan (position in the plan is ignored)."""
+  import hashlib
+  out = {}
+  for block in (sidecar.get("plan") or {}).get("blocks", []):
+    content = {k: v for k, v in block.items() if k != "index"}
+    out[block["id"]] = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()[:16]
+  return out
 
 
 def completed_block_ids(sidecar):
@@ -390,21 +393,27 @@ def analyze_runs(runs):
   """runs: [(series, sidecar)] of one plan, one entry per route/sidecar."""
   runs = sorted(enumerate(runs), key=lambda r: _run_key(r[1][1], r[0]))
   newest = runs[-1][1][1]
-  ref_hash = sidecar_plan_hash(newest)
-  used, ignored = [], []
-  for order, (series, sidecar) in runs:
-    h = sidecar_plan_hash(sidecar)
-    if ref_hash is not None and h is not None and h != ref_hash:
-      ignored.append({"route": sidecar.get("route"), "planHash": h, "reason": "different plan than the newest sidecar"})
-      continue
-    used.append((order, series, sidecar))
+  # canonical content per block id: the newest sidecar that has the block
+  canonical = {}
+  for _, (_, sidecar) in reversed(runs):
+    for block_id, sig in block_signatures(sidecar).items():
+      canonical.setdefault(block_id, sig)
 
   # newest wins per block: prefer runs that completed the block, then any run with data for it
-  per_block = defaultdict(list)
-  for order, series, sidecar in used:
+  per_block, ignored, used_orders = defaultdict(list), [], set()
+  for order, (series, sidecar) in runs:
     complete = completed_block_ids(sidecar)
+    sigs = block_signatures(sidecar)
     for w in maneuver_windows(sidecar):
-      per_block[w["start"].get("block")].append((order, series, sidecar, w, w["start"].get("block") in complete))
+      block_id = w["start"].get("block")
+      if block_id in sigs and sigs[block_id] != canonical.get(block_id):
+        if not any(i["route"] == sidecar.get("route") and i["block"] == block_id for i in ignored):
+          ignored.append({"route": sidecar.get("route"), "block": block_id,
+                          "reason": "block content differs from the newest plan with this block id"})
+        continue
+      used_orders.add(order)
+      per_block[block_id].append((order, series, sidecar, w, block_id in complete))
+  used = [(order, series, sidecar) for order, (series, sidecar) in runs if order in used_orders or sidecar is newest]
   chosen, results = {}, []
   for block, entries in per_block.items():
     best = max(entries, key=lambda e: (e[4], _run_key(e[2], e[0])))
@@ -423,9 +432,9 @@ def analyze_runs(runs):
       r["cmd_delay_s"], r["cmd_corr"] = delay_from_curve(lags, corr, sign)
   incident_types = ("maneuver_aborted", "maneuver_skipped", "block_skipped", "paused", "settings_retry")
   report = {"route": newest.get("route"), "routes": [sc.get("route") for _, _, sc in used],
-            "plan": (newest.get("plan") or {}).get("name"), "planHash": ref_hash,
+            "plan": (newest.get("plan") or {}).get("name"),
             "git": {"commit": newest.get("gitCommit"), "branch": newest.get("gitBranch")},
-            "cmd_accel_sign": sign, "maneuvers": results, "block_sources": chosen, "ignored_sidecars": ignored,
+            "cmd_accel_sign": sign, "maneuvers": results, "block_sources": chosen, "ignored_blocks": ignored,
             "incidents": [{**e, "route": sc.get("route")} for _, _, sc in used for e in sc.get("events", [])
                           if e["type"] in incident_types],
             "run_end": next((e for e in reversed(newest.get("events", [])) if e["type"] == "run_end"), None)}
@@ -607,10 +616,10 @@ def render_markdown(report):
       lines.append(f"- {name} {v}: RMS dyn {_f(m.get('tracking_rms_dynamic'))}, RMS hold {_f(m.get('tracking_rms_hold'))}, " +
                    f"overshoot {_f(m.get('overshoot_pct'), '.0f')}%, cmd flips/s {_f(m.get('cmd_flips_per_s'), '.2f')}, " +
                    f"speeds {m.get('speeds_mph')}")
-  if len(routes) > 1 or report.get("ignored_sidecars"):
+  if len(routes) > 1 or report.get("ignored_blocks"):
     lines += ["", "## Runs merged (newest completed run wins per block)", ""]
     lines += [f"- {b}: {r}" for b, r in sorted((report.get("block_sources") or {}).items(), key=lambda x: str(x[0]))]
-    lines += [f"- ignored {i['route']}: {i['reason']} ({i['planHash']})" for i in report.get("ignored_sidecars") or []]
+    lines += [f"- ignored {i['block']} from {i['route']}: {i['reason']}" for i in report.get("ignored_blocks") or []]
   lines += ["", "## Incidents", ""]
   for e in report["incidents"] or []:
     lines.append(f"- {e['type']} {e.get('block', '')} {e.get('maneuver', '')}: {e.get('reason', e.get('pending', ''))}")

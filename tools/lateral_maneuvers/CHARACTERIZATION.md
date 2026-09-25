@@ -163,7 +163,9 @@ PYTHONPATH=$PWD python tools/lateral_maneuvers/characterization/analyze.py \
 
 With several sidecars the results are merged per block id: a block's data comes from the newest
 drive that completed it (or, if none did, the newest drive with any completed maneuver of it).
-Sidecars from a different plan than the newest one are ignored and listed in the report.
+Sidecars may come from different plan files (for example a reduced plan first, then the full
+plan): a block is merged when its id and content (speed, settings, maneuvers) match the newest
+sidecar with that id. Blocks with the same id but different content are ignored and listed.
 
 `report.md` and `report.json` include:
 - the 0x249→lat-accel delay (cross-correlation over 0–800 ms, sign checked) and the des→act delay
