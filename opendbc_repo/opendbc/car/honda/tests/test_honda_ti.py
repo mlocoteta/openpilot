@@ -198,3 +198,26 @@ class TestTIReportedOutput:
     for frame in range(50):
       actuators, request = self.apply(CI, toggles, packer, frame, ti_feedback(TI_STATE.OFF), 0.5)
       assert request == 0 and actuators.torque == 0.0 and actuators.torqueOutputCan == 0
+
+
+class TestNidecWindBrake:
+  def test_other_nidec_cars_keep_stock_curve(self):
+    for v, expected in ((0.0, 0.001), (2.3, 0.002), (35.0, 0.15)):
+      assert carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_CIVIC) == pytest.approx(expected)
+
+  def test_accord_9g_brakes_for_mild_decel_at_highway_speed(self):
+    v = 22.4  # 50 mph
+    stock = carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_CIVIC)
+    wind_brake = carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_ACCORD_9G)
+    assert wind_brake == pytest.approx(0.136 / 4.8)
+    assert wind_brake < stock / 3
+    # brakes engage (hysteresis on at 0.02) for requests below ~-0.23 m/s^2 instead of ~-0.55
+    assert (wind_brake + 0.02) * 4.8 < 0.25
+
+  def test_accord_9g_keeps_low_speed_floor_and_is_monotonic(self):
+    assert carcontroller.get_honda_nidec_wind_brake(0.0, CAR.HONDA_ACCORD_9G) == pytest.approx(0.001)
+    assert carcontroller.get_honda_nidec_wind_brake(2.3, CAR.HONDA_ACCORD_9G) == pytest.approx(0.002)
+    speeds = [0.0, 1.0, 2.3, 5.0, 13.4, 22.4, 31.3, 40.2, 50.0]
+    values = [carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_ACCORD_9G) for v in speeds]
+    assert values == sorted(values)
+    assert all(0.0 < w <= 0.15 for w in values)

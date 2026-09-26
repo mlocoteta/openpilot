@@ -112,6 +112,18 @@ def get_honda_bosch_wind_brake_mps2(v_ego: float) -> float:
   return float(np.interp(v_ego, [0.0, 13.4, 22.4, 31.3, 40.2], [0.000, 0.049, 0.136, 0.267, 0.441]))
 
 
+def get_honda_nidec_wind_brake(v_ego: float, car_fingerprint) -> float:
+  # Brake units (accel / 4.8) of decel the car is assumed to get for free from drag. Brake requests
+  # below this are left to the PCM speed target and the applied brake is reduced by it.
+  wind_brake = float(np.interp(v_ego, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))
+  if car_fingerprint == CAR.HONDA_ACCORD_9G:
+    # The stock curve assumes ~0.45 m/s^2 of free decel at 50 mph. On the 9G (2026-09-25 rlogs, ~50 mph)
+    # requests of -0.1..-0.5 m/s^2 got only 0.01-0.07 m/s^2 and the brakes waited until ~-0.56 m/s^2.
+    # Use the aero drag estimate instead, keeping the stock low-speed floor.
+    wind_brake = max(float(np.interp(v_ego, [0.0, 2.3], [0.001, 0.002])), get_honda_bosch_wind_brake_mps2(v_ego) / 4.8)
+  return wind_brake
+
+
 def update_honda_bosch_live_learning(
   gas_factor: float,
   wind_factor: float,
@@ -421,7 +433,7 @@ class CarController(CarControllerBase):
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
 
     # wind brake from air resistance decel at high speed
-    wind_brake = float(np.interp(CS.out.vEgo, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))
+    wind_brake = get_honda_nidec_wind_brake(CS.out.vEgo, self.CP.carFingerprint)
     wind_brake_mps2 = get_honda_bosch_wind_brake_mps2(CS.out.vEgo)
     # all of this is only relevant for HONDA NIDEC
     max_accel = np.interp(CS.out.vEgo, self.params.NIDEC_MAX_ACCEL_BP, self.params.NIDEC_MAX_ACCEL_V)
