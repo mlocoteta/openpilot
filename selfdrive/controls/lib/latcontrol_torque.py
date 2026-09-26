@@ -71,6 +71,23 @@ def get_center_chatter_friction_jerk_deadzone(v_ego, setpoint, vehicle_deadzone=
 FF_ROLL_OFFSET_FADE_BP = [0.5, 2.5]  # m/s
 FF_ROLL_OFFSET_FADE_V = [0.0, 1.0]
 
+# Honda 9G Accord + Torque Interceptor: low-speed loop-gain schedule.
+# The low-speed factor makes the controller's gain in steering-angle terms roughly
+# constant below ~20 mph (~23 TI counts/deg proportional, plus a +-129 count friction
+# relay that switches inside +-3 deg of error). The TI-driven EPS is 2-3x more responsive
+# at ~2 Hz below 18 mph than at highway speed, so the loop there sits at |L| ~0.7 with
+# ~20-40 deg phase margin once the 15 count/frame TI slew adds its lag: a ~2 Hz
+# "ping-pong" (2026-09-26 logs, reports/2026-09-26-lowspeed-pingpong.md). Scaling the
+# low-speed factor (proportional + friction window + integrator rate) and the friction
+# amplitude by 0.5 roughly halves the oscillatory demand; above ~22 mph nothing changes.
+TI_9G_LOW_SPEED_GAIN_BP = [7.0, 10.0]  # m/s (15.7 mph -> 22.4 mph)
+TI_9G_LOW_SPEED_GAIN_V = [0.5, 1.0]
+
+
+def get_ti_9g_low_speed_gain_scale(v_ego):
+  return float(np.interp(v_ego, TI_9G_LOW_SPEED_GAIN_BP, TI_9G_LOW_SPEED_GAIN_V))
+
+
 class LatControlTorque(LatControl):
   def __init__(self, CP, CI, dt):
     super().__init__(CP, CI, dt)
@@ -106,6 +123,8 @@ class LatControlTorque(LatControl):
     self.honda_accord_damping_prev_error = 0.0
     self.honda_accord_damping_prev_setpoint = 0.0
     self.honda_accord_damping_hold_frames = 0
+    # Enabled by controlsd only on a 9G Accord with the Torque Interceptor active.
+    self.ti_low_speed_gain_schedule_enabled = False
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -223,6 +242,9 @@ class LatControlTorque(LatControl):
       self.honda_accord_damping_prev_setpoint = 0.0
       self.honda_accord_damping_hold_frames = 0
 
+  def set_ti_low_speed_gain_schedule(self, enabled):
+    self.ti_low_speed_gain_schedule_enabled = bool(enabled) and self.is_honda_accord_9g
+
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     if self.is_palisade:
       latAccelFactor *= PALISADE_BASE_LAT_ACCEL_FACTOR_MULT
@@ -327,6 +349,8 @@ class LatControlTorque(LatControl):
       self.previous_measurement = measurement
 
       low_speed_factor = (np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y) / max(CS.vEgo, MIN_SPEED)) ** 2
+      ti_low_speed_gain_scale = get_ti_9g_low_speed_gain_scale(CS.vEgo) if self.ti_low_speed_gain_schedule_enabled else 1.0
+      low_speed_factor *= ti_low_speed_gain_scale
       current_kp = np.interp(CS.vEgo, self.pid._k_p[0], self.pid._k_p[1])
       error = setpoint - measurement
       error_with_lsf = error * (1 + low_speed_factor / max(current_kp, 1e-3))
@@ -583,6 +607,7 @@ class LatControlTorque(LatControl):
       )
       friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0),
                                     desired_lateral_jerk)
+      friction_scale *= ti_low_speed_gain_scale
       ff += friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, self.torque_params)
       deadzone_boost_active = False
       if self.torque_deadzone_boost > 0.0 and abs(gravity_adjusted_future_lateral_accel) < DEADZONE_BOOST_LAT_ACCEL:

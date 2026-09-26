@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+from collections import deque
 from numbers import Number
 import os
 import time
@@ -52,6 +53,9 @@ LateralControlMode = car.CarControl.Actuators.LateralControlMode
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 REPLAY = "REPLAY" in os.environ
+
+# Honda 9G TI: carOutput answers the request of 1-3 frames earlier (2 on the 2026-09-26 logs).
+TI_OUTPUT_PIPELINE_FRAMES = 3
 
 # After a smoothed lane change ends, ramp the curvature limits back to stock over this
 # time so the final recenter correction is shaped instead of stepping through unclamped.
@@ -443,8 +447,11 @@ class Controls:
     self._ti_sigmoid_hash = getattr(self.CI.__class__, "_sigmoid_params", None)
     self._ti_kp = None
     self._ti_error_logged_time = 0.0
+    self._ti_torque_requests = deque([0.0] * TI_OUTPUT_PIPELINE_FRAMES, maxlen=TI_OUTPUT_PIPELINE_FRAMES)
     if self.has_ti_sigmoid:
       self._update_ti_live_params()
+      if hasattr(self.LaC, "set_ti_low_speed_gain_schedule"):
+        self.LaC.set_ti_low_speed_gain_schedule(True)
 
   def _lateral_kp(self):
     # On the TI car TISteerKp replaces StarPilot's SteerKP. It used to be applied
@@ -454,6 +461,28 @@ class Controls:
   def _read_ti_kp(self):
     ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
     return [[0], [ti_kp]] if ti_kp > 0 else None
+
+  def _update_ti_steer_limited(self, CC):
+    """Honda 9G TI: was the lateral request limited on its way to the TI?
+
+    Two differences from the generic check below, both measured on the 2026-09-26 drives:
+    - It runs whenever lateral is active, not only while selfdriveState is active. In
+      always-on-lateral the generic check is skipped, so steer_limited_by_safety kept the
+      value from the last engaged frame: either the integrator never froze, or (when that
+      value was True) it stayed frozen at zero for the rest of the drive (~21 min on
+      000002f1/000002f2).
+    - carOutput reaches controlsd one to three frames after the request it answers
+      (usually two), so comparing it with *this* frame's request flags every request change
+      > 6 counts as "limited" (54% of frames flagged, half of them false). Compare with the
+      recent requests instead: limited only if the TI output matches none of them.
+    """
+    if not CC.latActive:
+      self.steer_limited_by_safety = False
+      self._ti_torque_requests.extend([0.0] * TI_OUTPUT_PIPELINE_FRAMES)
+      return
+    ti_output = self.sm['carOutput'].actuatorsOutput.torque
+    self.steer_limited_by_safety = all(abs(req - ti_output) > 1e-2 for req in self._ti_torque_requests)
+    self._ti_torque_requests.append(float(CC.actuators.torque))
 
   def _update_ti_live_params(self):
     """Honda 9G TI: live sigmoid params, Kp and damping policy (~1 s cadence)."""
@@ -929,7 +958,9 @@ class Controls:
       hudControl.leftLaneDepart = self.sm['driverAssistance'].leftLaneDeparture
       hudControl.rightLaneDepart = self.sm['driverAssistance'].rightLaneDeparture
 
-    if self.sm['selfdriveState'].active:
+    if getattr(self, "has_ti_sigmoid", False):
+      self._update_ti_steer_limited(CC)
+    elif self.sm['selfdriveState'].active:
       CO = self.sm['carOutput']
       if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
         output_healthy = (

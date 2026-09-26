@@ -188,6 +188,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_volt_plexy_friction_scale,
   get_volt_plexy_friction_threshold,
 )
+from openpilot.selfdrive.controls.lib.latcontrol_torque import get_ti_9g_low_speed_gain_scale
 
 
 class TestLatControl:
@@ -2051,6 +2052,54 @@ class TestLatControl:
     controller.update_honda_accord_low_speed_damping(False, 0.12)
     assert not controller.honda_accord_low_speed_damping_enabled
     assert not controller.honda_accord_continuous_center_damping_enabled
+
+  def test_ti_9g_low_speed_gain_schedule_curve(self):
+    assert get_ti_9g_low_speed_gain_scale(0.0) == pytest.approx(0.5)
+    assert get_ti_9g_low_speed_gain_scale(7.0) == pytest.approx(0.5)
+    assert get_ti_9g_low_speed_gain_scale(8.5) == pytest.approx(0.75)
+    assert get_ti_9g_low_speed_gain_scale(10.0) == pytest.approx(1.0)
+    assert get_ti_9g_low_speed_gain_scale(30.0) == pytest.approx(1.0)
+    speeds = [0.5 * i for i in range(60)]
+    scales = [get_ti_9g_low_speed_gain_scale(v) for v in speeds]
+    assert all(b >= a for a, b in zip(scales, scales[1:], strict=False))
+
+  def test_ti_9g_low_speed_gain_schedule_is_9g_only(self):
+    controller_9g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller_10g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD, force_torque=True)
+    assert not controller_9g.ti_low_speed_gain_schedule_enabled
+    controller_9g.set_ti_low_speed_gain_schedule(True)
+    controller_10g.set_ti_low_speed_gain_schedule(True)
+    assert controller_9g.ti_low_speed_gain_schedule_enabled
+    assert not controller_10g.ti_low_speed_gain_schedule_enabled
+    controller_9g.set_ti_low_speed_gain_schedule(False)
+    assert not controller_9g.ti_low_speed_gain_schedule_enabled
+
+  @parameterized.expand([(4.5, 0.5), (8.5, 0.75), (12.0, 1.0), (25.0, 1.0)])
+  def test_ti_9g_low_speed_gain_schedule_scales_feedback_only(self, v_ego, expected_scale):
+    outputs = {}
+    for enabled in (False, True):
+      controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+      controller.set_ti_low_speed_gain_schedule(enabled)
+      CS.vEgo = v_ego
+      CS.steeringAngleDeg = -3.0
+      desired_curvature = 0.004
+      for _ in range(5):
+        torque, _, lac_log = controller.update(True, CS, VM, params, False, desired_curvature, False, 0.4, None, None,
+                                               starpilot_toggles)
+      state = controller.starpilot_lateral_state
+      outputs[enabled] = (torque, lac_log.error, lac_log.p, lac_log.f, state.lowSpeedFactor, state.frictionScale,
+                          state.feedforward)
+    off, on = outputs[False], outputs[True]
+    assert on[4] == pytest.approx(off[4] * expected_scale)
+    assert on[5] == pytest.approx(off[5] * expected_scale)
+    if expected_scale == 1.0:
+      assert on == pytest.approx(off)
+    else:
+      # Same direction, smaller feedback: the error term and the command both shrink.
+      assert abs(on[1]) < abs(off[1])
+      assert abs(on[2]) < abs(off[2])
+      assert on[0] * off[0] > 0.0
+      assert abs(on[0]) < abs(off[0])
 
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33
