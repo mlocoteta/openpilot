@@ -18,11 +18,14 @@ import argparse
 import copy
 import json
 import math
+import os
 import sys
 
 import numpy as np
 
 PLAN_VERSION = 1
+# Lets a long-lived process tell whether this module is older than the file on disk.
+_SOURCE_MTIME = os.path.getmtime(__file__)
 PLAN_PATH = "/data/lateral_characterization_plan.json"
 
 DT = 0.05  # s, must equal openpilot.common.realtime.DT_MDL (lateral_maneuversd polls modelV2)

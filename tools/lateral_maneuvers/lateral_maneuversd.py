@@ -156,8 +156,32 @@ MANEUVERS = [
 ]
 
 
+def _refresh_characterization_modules():
+  """Re-read the characterization modules if the loaded plan module is older than its file.
+
+  The manager imports characterization.settings (and so .plan) at boot and forks this
+  process from itself, so a tool update installed while the car is running would otherwise
+  keep the limits loaded at boot. Reload plan first: the others import from it.
+  """
+  import importlib
+  import os
+  import sys
+  prefix = "openpilot.tools.lateral_maneuvers.characterization."
+  plan = sys.modules.get(prefix + "plan")
+  if plan is None:
+    return
+  loaded = getattr(plan, "_SOURCE_MTIME", None)
+  if loaded is not None and loaded >= os.path.getmtime(plan.__file__):
+    return
+  for name in ("plan", "settings", "progress", "sidecar", "runner"):
+    module = sys.modules.get(prefix + name)
+    if module is not None:
+      importlib.reload(module)
+
+
 def _characterization_plan():
   """Plan from /data/lateral_characterization_plan.json, None when absent, or a PlanError."""
+  _refresh_characterization_modules()
   from openpilot.tools.lateral_maneuvers.characterization.plan import PLAN_PATH, PlanError, load_plan
   from openpilot.tools.lateral_maneuvers.characterization.settings import restore_stale_snapshot
   try:
