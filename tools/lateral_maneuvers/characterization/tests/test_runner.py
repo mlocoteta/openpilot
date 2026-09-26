@@ -411,3 +411,29 @@ def test_daemon_restores_params_on_sigint(tmp_path):
   events = [e["type"] for e in json.loads(sidecar_file.read_text())["events"]]
   assert events[0] == "run_start" and "paused" in events and events[-1] == "run_end"
   assert json.loads(sidecar_file.read_text())["events"][-1]["reason"] == "process_exit"
+
+
+class TestRoadCurvatureGates:
+  """Highway blocks: starts need a straight road at speed, and a bend mid-maneuver aborts."""
+
+  def _frame(self, v, curv, road):
+    from openpilot.tools.lateral_maneuvers.characterization.runner import Frame
+    return Frame(t=0.0, mono_ns=0, v_ego=v, lat_active=True, curvature=curv, road_curvature=road)
+
+  def test_start_gate_scales_with_speed(self):
+    from openpilot.tools.lateral_maneuvers.characterization.runner import straight_road
+    v = 70 * 0.44704  # 31.3 m/s
+    assert straight_road(self._frame(v, 0.0001, 0.0001))       # 0.10 m/s^2: fine
+    assert not straight_road(self._frame(v, 0.0004, 0.0004))   # 0.39 m/s^2: a highway bend
+    assert straight_road(self._frame(13.4, 0.0004, 0.0004))    # same radius at 30 mph is fine
+
+  def test_bend_mid_maneuver_is_measured_from_baseline(self):
+    from openpilot.tools.lateral_maneuvers.characterization.runner import road_bend_lat_accel, ROAD_BEND_ABORT_LAT_ACCEL
+    v = 31.3
+    assert road_bend_lat_accel(self._frame(v, 0.0, 0.0001), 0.0) < ROAD_BEND_ABORT_LAT_ACCEL
+    assert road_bend_lat_accel(self._frame(v, 0.0, 0.0006), 0.0) > ROAD_BEND_ABORT_LAT_ACCEL
+    assert road_bend_lat_accel(self._frame(v, 0.0, None), 0.0) == 0.0
+
+  def test_plan_accepts_highway_speeds(self):
+    from openpilot.tools.lateral_maneuvers.characterization.plan import SPEED_MPH_MAX
+    assert SPEED_MPH_MAX >= 75

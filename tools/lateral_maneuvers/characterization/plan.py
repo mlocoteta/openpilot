@@ -35,7 +35,7 @@ LOW_SPEED_LAT_ACCEL_MAX = 0.6  # m/s^2 at <= 12 mph
 SINE_FREQ_MAX = 0.8  # Hz
 SINE_FREQ_MIN = 0.05  # Hz
 SPEED_MPH_MIN = 5.0
-SPEED_MPH_MAX = 45.0
+SPEED_MPH_MAX = 77.0  # highway blocks up to 75 mph allowed; the runner gates starts/aborts on road curvature
 STEP_HOLD_MIN, STEP_HOLD_MAX = 0.5, 5.0  # s
 HOLD_MIN, HOLD_MAX = 2.0, 30.0  # s
 SINE_CYCLES_MIN, SINE_CYCLES_MAX = 2, 6

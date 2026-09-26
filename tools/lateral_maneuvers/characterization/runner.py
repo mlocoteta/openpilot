@@ -29,6 +29,11 @@ from openpilot.tools.lateral_maneuvers.characterization.settings import Settings
 MAX_CURV = 0.002
 MAX_ROLL = 0.08
 TIMER = 2.0
+# A maneuver replaces the model's path with the curvature frozen at its start, so the car
+# stops following the road. At highway speed a small bend quickly becomes a large lateral
+# error, so gate on the lateral acceleration the road asks for, not on curvature alone.
+START_ROAD_LAT_ACCEL_MAX = 0.25  # m/s^2: |road curvature| * v^2 to start (and to apply settings)
+ROAD_BEND_ABORT_LAT_ACCEL = 0.4  # m/s^2: abort when the model's road curvature leaves the frozen baseline
 
 APPLY_STABLE_S = 1.0  # straight + engaged + hands off before settings are written
 VERIFY_TIMEOUT_S = 20.0  # lat-active seconds allowed for the controller to show the new settings
@@ -42,6 +47,20 @@ SETTINGS_FRAMES = 3  # alertDebug frames carrying the block JSON (rlog-recoverab
 MIN_SPEED = 1.0  # drive_helpers.MIN_SPEED
 
 
+def straight_road(f) -> bool:
+  """Near-straight at the current speed: the old radius test plus a speed-scaled lat-accel test."""
+  road = f.road_curvature if f.road_curvature is not None else f.curvature
+  return abs(f.curvature) < MAX_CURV and abs(road) < MAX_CURV and \
+    abs(road) * f.v_ego ** 2 < START_ROAD_LAT_ACCEL_MAX
+
+
+def road_bend_lat_accel(f, baseline_curvature: float) -> float:
+  """Lateral acceleration the road demands beyond the frozen maneuver baseline."""
+  if f.road_curvature is None:
+    return 0.0
+  return abs(f.road_curvature - baseline_curvature) * f.v_ego ** 2
+
+
 @dataclass
 class Frame:
   t: float  # s, log clock
@@ -51,6 +70,7 @@ class Frame:
   lat_active: bool = False
   enabled: bool = False
   curvature: float = 0.0  # controlsState.desiredCurvature
+  road_curvature: float | None = None  # modelV2.action.desiredCurvature (the road, even mid-maneuver)
   roll: float = 0.0
   pitch: float = 0.0
   live_delay: float | None = None
@@ -96,7 +116,7 @@ class ManeuverPlayer:
 
   def conditions(self, f):
     return {"speed": abs(f.v_ego - self.target) < self.tol, "lateral": f.lat_active,
-            "straight": abs(f.curvature) < MAX_CURV, "flat": abs(f.roll) < MAX_ROLL}
+            "straight": straight_road(f), "flat": abs(f.roll) < MAX_ROLL}
 
   def update(self, f):
     self.just_started = False
@@ -364,7 +384,7 @@ class CharacterizationRunner:
 
   def _step_apply(self, f, out):
     block = self.block
-    stable = f.lat_active and not f.steering_pressed and abs(f.curvature) < MAX_CURV and abs(f.roll) < MAX_ROLL
+    stable = f.lat_active and not f.steering_pressed and straight_road(f) and abs(f.roll) < MAX_ROLL
     self.stable_s = self.stable_s + DT if stable else 0.0
     out.state, out.phase = "setup", "apply_settings"
     out.text1 = "Hold straight: applying settings" if f.lat_active else "Engage lateral to apply settings"
@@ -426,6 +446,8 @@ class CharacterizationRunner:
       return "lateral inactive"
     if abs(f.v_ego - self.player.target) > self.player.tol:
       return "speed out of range"
+    if self.player.active and road_bend_lat_accel(f, self.player.baseline_curvature) > ROAD_BEND_ABORT_LAT_ACCEL:
+      return "road curving"
     if self.drift_s >= DRIFT_ABORT_S:
       return "settings drift"
     return None
@@ -592,6 +614,7 @@ def build_frame(sm, mono_ns, toggles):
     lat_active=bool(cc.latActive),
     enabled=bool(sm['selfdriveState'].enabled),
     curvature=float(cs.desiredCurvature),
+    road_curvature=float(sm['modelV2'].action.desiredCurvature) if sm.recv_frame['modelV2'] > 0 else None,
     roll=float(cc.orientationNED[0]) if len(cc.orientationNED) == 3 else 0.0,
     pitch=float(cc.orientationNED[1]) if len(cc.orientationNED) == 3 else 0.0,
     live_delay=float(sm['liveDelay'].lateralDelay) if sm.recv_frame['liveDelay'] > 0 else None,
