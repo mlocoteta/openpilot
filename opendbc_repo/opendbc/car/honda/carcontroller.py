@@ -113,14 +113,15 @@ def get_honda_bosch_wind_brake_mps2(v_ego: float) -> float:
 
 
 def get_honda_nidec_wind_brake(v_ego: float, car_fingerprint) -> float:
-  # Brake units (accel / 4.8) of decel the car is assumed to get for free from drag. Brake requests
+  # Brake units (accel / brake accel per unit) of decel the car is assumed to get for free from drag. Brake requests
   # below this are left to the PCM speed target and the applied brake is reduced by it.
   wind_brake = float(np.interp(v_ego, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))
   if car_fingerprint == CAR.HONDA_ACCORD_9G:
     # The stock curve assumes ~0.45 m/s^2 of free decel at 50 mph. On the 9G (2026-09-25 rlogs, ~50 mph)
     # requests of -0.1..-0.5 m/s^2 got only 0.01-0.07 m/s^2 and the brakes waited until ~-0.56 m/s^2.
     # Use the aero drag estimate instead, keeping the stock low-speed floor.
-    wind_brake = max(float(np.interp(v_ego, [0.0, 2.3], [0.001, 0.002])), get_honda_bosch_wind_brake_mps2(v_ego) / 4.8)
+    wind_brake = max(float(np.interp(v_ego, [0.0, 2.3], [0.001, 0.002])),
+                     get_honda_bosch_wind_brake_mps2(v_ego) / ACCORD_9G_BRAKE_ACCEL_PER_UNIT)
   return wind_brake
 
 
@@ -160,21 +161,32 @@ def compute_gb_honda_bosch(accel, speed):
   return 0.0, 0.0
 
 
-def compute_gb_honda_nidec(accel, speed):
+# m/s^2 of decel per unit of Nidec brake command. The 9G measured 2.8-3.8 (2026-09-25/26 rlogs, 0-35 m/s),
+# so the stock 4.8 left it at ~70% of the requested braking.
+NIDEC_BRAKE_ACCEL_PER_UNIT = 4.8
+ACCORD_9G_BRAKE_ACCEL_PER_UNIT = 3.6
+
+
+def get_nidec_brake_accel_per_unit(car_fingerprint) -> float:
+  return ACCORD_9G_BRAKE_ACCEL_PER_UNIT if car_fingerprint == CAR.HONDA_ACCORD_9G else NIDEC_BRAKE_ACCEL_PER_UNIT
+
+
+def compute_gb_honda_nidec(accel, speed, brake_accel_per_unit=NIDEC_BRAKE_ACCEL_PER_UNIT):
   creep_brake = 0.0
   creep_speed = 2.3
   creep_brake_value = 0.15
   if speed < creep_speed:
     creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
   gb = float(accel) / 4.8 - creep_brake
-  return np.clip(gb, 0.0, 1.0), np.clip(-gb, 0.0, 1.0)
+  gb_brake = float(accel) / brake_accel_per_unit - creep_brake
+  return np.clip(gb, 0.0, 1.0), np.clip(-gb_brake, 0.0, 1.0)
 
 
 def compute_gas_brake(accel, speed, fingerprint):
   if fingerprint in HONDA_BOSCH:
     return compute_gb_honda_bosch(accel, speed)
   else:
-    return compute_gb_honda_nidec(accel, speed)
+    return compute_gb_honda_nidec(accel, speed, get_nidec_brake_accel_per_unit(fingerprint))
 
 
 # TODO not clear this does anything useful
