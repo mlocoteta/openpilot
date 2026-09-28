@@ -452,6 +452,8 @@ class Controls:
       self._update_ti_live_params()
       if hasattr(self.LaC, "set_ti_low_speed_gain_schedule"):
         self.LaC.set_ti_low_speed_gain_schedule(True)
+      if hasattr(self.LaC, "set_ti_recapture"):
+        self.LaC.set_ti_recapture(True)
 
   def _lateral_kp(self):
     # On the TI car TISteerKp replaces StarPilot's SteerKP. It used to be applied

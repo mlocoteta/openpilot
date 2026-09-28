@@ -2101,6 +2101,71 @@ class TestLatControl:
       assert on[0] * off[0] > 0.0
       assert abs(on[0]) < abs(off[0])
 
+  def test_ti_9g_recapture_is_9g_only(self):
+    controller_9g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller_10g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD, force_torque=True)
+    assert not controller_9g.ti_recapture_enabled
+    controller_9g.set_ti_recapture(True)
+    controller_10g.set_ti_recapture(True)
+    assert controller_9g.ti_recapture_enabled
+    assert not controller_10g.ti_recapture_enabled
+
+  def _recapture_run(self, enabled, schedule):
+    """schedule: list of (frames, steeringPressed, steeringTorque, steer_limited). Returns per-frame logs."""
+    controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller.set_ti_recapture(enabled)
+    CS.vEgo = 14.0
+    CS.steeringAngleDeg = -2.0  # the car is wide of a left curve: large positive error
+    out = []
+    for frames, pressed, drv, limited in schedule:
+      for _ in range(frames):
+        CS.steeringPressed = pressed
+        CS.steeringTorque = drv
+        torque, _, lac_log = controller.update(True, CS, VM, params, limited, 0.012, False, 0.4, None, None, starpilot_toggles)
+        out.append((torque, lac_log.p, lac_log.f, lac_log.i, controller.ti_recapture_gain,
+                    controller.starpilot_lateral_state.feedforward))
+    return out
+
+  def test_ti_9g_recapture_holds_feedback_during_override_and_ramps_after(self):
+    # 50 frames hands-off, 50 frames of a sub-threshold hand (10 counts) with the TI limiter clipping,
+    # then release for 100 frames.
+    schedule = [(50, False, 0, False), (50, False, 10, True), (100, False, 0, False)]
+    off = self._recapture_run(False, schedule)
+    on = self._recapture_run(True, schedule)
+    # identical before any override
+    assert on[:50] == pytest.approx(off[:50])
+    # during the override the proportional term is held at zero (baseline keeps pushing)
+    assert all(abs(x[1]) < 1e-9 for x in on[60:100])
+    assert abs(off[99][1]) > 0.1
+    # the plan's feedforward (desired curvature * v^2, no roll here) is never scaled; only the
+    # error-driven friction relay on top of it is held (baseline adds +friction to it)
+    assert on[99][5] == pytest.approx(0.012 * 14.0 ** 2, abs=0.05)
+    assert off[99][5] > on[99][5]
+    # the hold keeps it latched ~0.2 s after the hand leaves, then a 0.6 s ramp back to full feedback
+    gains = [x[4] for x in on]
+    assert gains[100 + 15] == 0.0
+    assert 0.0 < gains[100 + 20 + 30] < 1.0
+    assert gains[100 + 20 + 61] == pytest.approx(1.0)
+    assert all(b >= a for a, b in zip(gains[100:], gains[101:], strict=False))
+    # the recaptured command approaches the baseline gradually instead of stepping
+    steps_on = max(abs(on[k + 1][0] - on[k][0]) for k in range(100, 199))
+    steps_off = max(abs(off[k + 1][0] - off[k][0]) for k in range(99, 199))
+    assert steps_on <= steps_off
+    assert on[199][0] == pytest.approx(off[199][0], abs=0.05)
+
+  def test_ti_9g_recapture_pressed_zeroes_feedback_immediately(self):
+    on = self._recapture_run(True, [(20, False, 0, False), (1, True, 20, False), (1, False, 0, False)])
+    assert on[20][4] == 0.0 and abs(on[20][1]) < 1e-9
+
+  def test_ti_9g_recapture_ignores_hands_resting_without_limit(self):
+    # a resting hand (sensor >= 6) with the TI following the request is not an override
+    off = self._recapture_run(False, [(80, False, 8, False)])
+    on = self._recapture_run(True, [(80, False, 8, False)])
+    assert on == pytest.approx(off)
+    # nor is a slew-limited frame with no hand
+    on2 = self._recapture_run(True, [(80, False, 2, True)])
+    assert all(x[4] == 1.0 for x in on2)
+
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33
     assert get_honda_accord_steer_ratio_scale(0.0) == pytest.approx(expected_scale)
