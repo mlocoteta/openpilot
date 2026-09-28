@@ -105,6 +105,26 @@ class CarState(CarStateBase):
     self.ti_feedback_seen = False
     self.ti_no_feedback_frames = 0
     self.ti_lkas_allowed = False
+    self.ti_last_torque = 0.0
+
+  def update_ti_driver_torque(self, ti, stock_torque, stock_threshold):
+    """Driver torque and steeringPressed on the TI car. Call before update_ti_gate().
+
+    TI_FEEDBACK is missing from ~0.1% of carState frames (2026-09-26..28 weekend rlogs). The old
+    fallback read the stock EPS torque sensor on those frames, but that sensor sees the TI's own
+    injected torque (median 64 at highway vs the 9G threshold of 30), so each gap produced a
+    1-2 frame fake steeringPressed: ~33/min at highway, each freezing the lateral integrator and
+    decaying it x0.8 on release. Within the same window the TI gate tolerates
+    (TI_FEEDBACK_TIMEOUT_FRAMES), hold the last TI sensor reading instead; after that, or before
+    any feedback has been seen, fall back to the stock sensor (the TI is not commanding then).
+    """
+    if ti is not None:
+      self.ti_last_torque = ti["TI_TORQUE_SENSOR"]
+      return self.ti_last_torque, abs(self.ti_last_torque) > TI_LIMITS.TI_STEER_THRESHOLD
+    # ti_no_feedback_frames still counts the *previous* consecutive gaps here
+    if self.ti_feedback_seen and self.ti_no_feedback_frames < TI_FEEDBACK_TIMEOUT_FRAMES:
+      return self.ti_last_torque, abs(self.ti_last_torque) > TI_LIMITS.TI_STEER_THRESHOLD
+    return stock_torque, abs(stock_torque) > stock_threshold
 
   def update_ti_gate(self, ti):
     """Decide whether the Torque Interceptor may be commanded this frame.
@@ -253,12 +273,8 @@ class CarState(CarStateBase):
       # registered optional (freq 0), so an absent message decodes as all-zero
       # (DISCOVER) and would also zero steeringTorque, killing driver-override detection.
       ti = cp.vl["TI_FEEDBACK"] if cp.vl_all.get("TI_FEEDBACK", {}).get("STATE", []) else None
-      if ti is not None:
-        ret.steeringTorque = ti["TI_TORQUE_SENSOR"]
-        ret.steeringPressed = abs(ret.steeringTorque) > TI_LIMITS.TI_STEER_THRESHOLD
-      else:
-        # no feedback: keep the stock EPS torque so steeringPressed still works
-        ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+      ret.steeringTorque, ret.steeringPressed = self.update_ti_driver_torque(
+        ti, ret.steeringTorque, STEER_THRESHOLD.get(self.CP.carFingerprint, 1200))
       self.update_ti_gate(ti)
     else:
       ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)

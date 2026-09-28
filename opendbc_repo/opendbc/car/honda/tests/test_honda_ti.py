@@ -91,6 +91,51 @@ class TestTIGate:
     assert cs.update_ti_gate(ti_feedback(TI_STATE.RUN))
 
 
+
+class TestTIDriverTorque:
+  """A missing TI_FEEDBACK frame must not read the stock EPS sensor (which sees the TI's own torque)."""
+  STOCK_THR = 30
+
+  def test_single_gap_holds_last_ti_torque(self):
+    cs = new_gate()
+    assert cs.update_ti_driver_torque(ti_feedback(TI_STATE.RUN, torque=2), 0, self.STOCK_THR) == (2, False)
+    cs.update_ti_gate(ti_feedback(TI_STATE.RUN, torque=2))
+    # gap frame: stock sensor reads 64 counts of TI-injected torque -> must not become a press
+    torque, pressed = cs.update_ti_driver_torque(None, 64, self.STOCK_THR)
+    assert (torque, pressed) == (2, False)
+    cs.update_ti_gate(None)
+
+  def test_hold_keeps_a_real_press(self):
+    cs = new_gate()
+    cs.update_ti_driver_torque(ti_feedback(TI_STATE.RUN, torque=-40), 0, self.STOCK_THR)
+    cs.update_ti_gate(ti_feedback(TI_STATE.RUN, torque=-40))
+    assert cs.update_ti_driver_torque(None, 0, self.STOCK_THR) == (-40, True)
+
+  def test_real_driver_torque_detected_on_next_feedback_frame(self):
+    cs = new_gate()
+    for tq in (1, 3):
+      cs.update_ti_driver_torque(ti_feedback(TI_STATE.RUN, torque=tq), 0, self.STOCK_THR)
+      cs.update_ti_gate(ti_feedback(TI_STATE.RUN, torque=tq))
+    cs.update_ti_driver_torque(None, 64, self.STOCK_THR); cs.update_ti_gate(None)
+    assert cs.update_ti_driver_torque(ti_feedback(TI_STATE.RUN, torque=20), 64, self.STOCK_THR) == (20, True)
+
+  def test_hold_is_bounded_by_feedback_timeout(self):
+    cs = new_gate()
+    cs.update_ti_driver_torque(ti_feedback(TI_STATE.RUN, torque=2), 0, self.STOCK_THR)
+    cs.update_ti_gate(ti_feedback(TI_STATE.RUN, torque=2))
+    for _ in range(TI_FEEDBACK_TIMEOUT_FRAMES):
+      assert cs.update_ti_driver_torque(None, 64, self.STOCK_THR) == (2, False)
+      assert cs.update_ti_gate(None)  # gate still open for exactly this window
+    # feedback lost for longer than the gate tolerates: gate closes and the stock sensor is used again
+    assert cs.update_ti_driver_torque(None, 64, self.STOCK_THR) == (64, True)
+    assert not cs.update_ti_gate(None)
+
+  def test_stock_sensor_before_any_feedback(self):
+    cs = new_gate()
+    assert cs.update_ti_driver_torque(None, 64, self.STOCK_THR) == (64, True)
+    assert cs.update_ti_driver_torque(None, 10, self.STOCK_THR) == (10, False)
+
+
 @pytest.fixture
 def ti_interface(monkeypatch):
   for module in (carstate, carcontroller, interface):
@@ -236,3 +281,19 @@ class TestNidecBrakeGain:
   def test_accord_9g_creep_brake_unchanged_at_standstill(self):
     assert carcontroller.compute_gas_brake(0.0, 0.0, CAR.HONDA_ACCORD_9G)[1] == pytest.approx(0.15)
     assert carcontroller.compute_gas_brake(-3.6, 30.0, CAR.HONDA_ACCORD_9G)[1] == pytest.approx(1.0)
+
+
+class TestTIDriverTorqueEndToEnd:
+  def test_missing_feedback_frame_is_not_a_press(self, ti_interface):
+    """Replays the weekend blip: stock STEER_TORQUE_SENSOR reads the TI's injected torque (64)."""
+    CI, toggles, packer = ti_interface
+    pressed = []
+    for frame in range(1, 40):
+      msgs = [CanData(*packer.make_can_msg("STEER_STATUS", 0, {"STEER_TORQUE_SENSOR": 64, "COUNTER": frame % 4}))]
+      if frame != 20:  # one frame without TI_FEEDBACK
+        msgs.append(CanData(*packer.make_can_msg("TI_FEEDBACK", 0, ti_feedback(TI_STATE.RUN, torque=1))))
+      CS = CI.update([(frame * DT_NS, msgs)], toggles)[0]
+      pressed.append(CS.steeringPressed)
+      if frame >= 5:
+        assert abs(CS.steeringTorque) <= 1
+    assert not any(pressed[5:])
