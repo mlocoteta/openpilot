@@ -570,6 +570,7 @@ class ModelRenderer(Widget):
     speed_string = f"{round(lead_speed * speed_conversion_metrics)}"
 
     text_lines = []
+    desired_follow_distance = 0.0
     if adjacent:
       text_lines.append(f"{distance_string} {lead_distance_unit}")
       text_lines.append(f"{speed_string}{lead_speed_unit}")
@@ -586,7 +587,13 @@ class ModelRenderer(Widget):
 
       v_ego = max(ui_state.sm["carState"].vEgo, 0.0)
       time_gap = lead_distance / max(v_ego, 1.0)
-      text_lines.append(f"{time_gap:.2f} seconds")
+      if self._longitudinal_control and desired_follow_distance > 0:
+        # Same basis as the actual gap: the planner's full target distance (follow time + stop
+        # distance + closing-speed margin) divided by our speed.
+        desired_time_gap = desired_follow_distance / max(v_ego, 1.0)
+        text_lines.append(f"{time_gap:.2f} s (Desired: {desired_time_gap:.2f} s)")
+      else:
+        text_lines.append(f"{time_gap:.2f} seconds")
 
     from openpilot.system.ui.lib.application import gui_app, FontWeight
     from openpilot.selfdrive.ui.onroad.starpilot.path import _draw_text_with_outline
