@@ -73,6 +73,7 @@ from openpilot.starpilot.common.model_lab import (
   model_lab_manifest_eligible,
 )
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
+from openpilot.selfdrive.controls.lib.longitudinal_delay import get_long_actuator_delay
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, MODELS_PATH, params_memory
 
 
@@ -1284,7 +1285,7 @@ def main(demo=False):
     sm.update(0)
 
     long_smooth_seconds = _model_smooth_seconds(params, "LongSmoothSeconds", LONG_SMOOTH_SECONDS)
-    long_delay = CP.longitudinalActuatorDelay + long_smooth_seconds
+    long_delay = get_long_actuator_delay(CP, starpilot_toggles) + long_smooth_seconds
     desire = DH.desire
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
