@@ -3,7 +3,8 @@ import numpy as np
 
 from opendbc.can import CANPacker
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_interceptor_command, rate_limit, make_tester_present_msg, structs, \
-                        apply_ti_steer_torque_limits
+                        apply_ti_steer_torque_limits, ti_output_headroom_limits
+from opendbc.car.carlog import carlog
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.values import (
   CAR,
@@ -16,8 +17,14 @@ from opendbc.car.honda.values import (
   HONDA_NIDEC_ALT_PCM_ACCEL,
   CarControllerParams,
   HondaFlags,
+  TI_FEEDBACK_TIMEOUT_FRAMES,
+  TI_GUARD_LOG_INTERVAL_FRAMES,
   TI_LIMITS,
+  TI_LOCK_ZERO_ANGLE,
+  TI_LOCK_ZERO_SPEED,
   TI_OPTION,
+  TI_STUCK_CMD_MAX,
+  TI_STUCK_FRAMES,
 )
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.common.pid import PIDController
@@ -279,6 +286,10 @@ class CarController(CarControllerBase):
     # Honda 9G Accord Torque Interceptor: gated to the 9G platform + toggle.
     self.has_ti = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and self.param_store.get_bool("TorqueInterceptorEnabled")
     self.ti_apply_steer_last = 0
+    self.ti_stuck_frames = 0
+    self.ti_guard_active = {"headroom": False, "lock": False, "stuck": False}
+    self.ti_guard_log_frame = {"headroom": -TI_GUARD_LOG_INTERVAL_FRAMES, "lock": -TI_GUARD_LOG_INTERVAL_FRAMES,
+                               "stuck": -TI_GUARD_LOG_INTERVAL_FRAMES}
     self.steering_pressed_filter_s = 0.0
     self.steering_pressed_robust_prev = False
     self.bosch_last_gas = 0.0
@@ -293,6 +304,43 @@ class CarController(CarControllerBase):
     # MVL Bosch low-speed extra-brake integrator. Active only for Accord 11G MVL mode.
     self.mvl_brake_pid = PIDController(k_p=0.0, k_i=1.0, pos_limit=0.0, neg_limit=-2.0, rate=50)
     self.mvl_brake_pid.reset()
+
+  def _ti_log_guard(self, name: str, active: bool, msg: str) -> None:
+    if active and not self.ti_guard_active[name] and self.frame - self.ti_guard_log_frame[name] >= TI_GUARD_LOG_INTERVAL_FRAMES:
+      self.ti_guard_log_frame[name] = self.frame
+      carlog.warning(msg)
+    self.ti_guard_active[name] = active
+
+  def _ti_apply_steer(self, CS, ti_new_steer: int) -> int:
+    """Limit a TI command; only called while the TI gate is open (lockout-prevention report, section 7)."""
+    # CS.out.steeringTorque is the TI sensor in TI counts (live or held) while feedback is within the gate
+    # timeout; before any feedback (feedbackless fallback) it is the stock sensor, so no output guard then.
+    driver_torque = CS.out.steeringTorque
+    output_guard = CS.ti_feedback_seen and CS.ti_no_feedback_frames <= TI_FEEDBACK_TIMEOUT_FRAMES
+    near_lock = CS.out.vEgo < TI_LOCK_ZERO_SPEED and abs(CS.out.steeringAngleDeg) > TI_LOCK_ZERO_ANGLE
+
+    ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, driver_torque, TI_LIMITS,
+                                                  output_guard=output_guard, force_zero=near_lock)
+
+    # VIOL_LKAS_STUK: a small non-zero request must not stay unchanged; drop to 0 for one frame
+    # (<= 19 counts toward zero), then the normal up-rate brings it back.
+    if 0 < abs(ti_apply_steer) < TI_STUCK_CMD_MAX and ti_apply_steer == self.ti_apply_steer_last:
+      self.ti_stuck_frames += 1
+    else:
+      self.ti_stuck_frames = 0
+    stuck = self.ti_stuck_frames >= TI_STUCK_FRAMES
+    if stuck:
+      ti_apply_steer = 0
+      self.ti_stuck_frames = 0
+
+    guard_min, guard_max = ti_output_headroom_limits(driver_torque, TI_LIMITS)
+    headroom = output_guard and not near_lock and not guard_min <= ti_new_steer <= guard_max
+    self._ti_log_guard("headroom", headroom,
+                       f"TI output guard: driver {driver_torque:.0f} cmd {ti_new_steer} capped to [{guard_min:.0f}, {guard_max:.0f}]")
+    self._ti_log_guard("lock", near_lock and ti_new_steer != 0,
+                       f"TI near-lock zero: v {CS.out.vEgo:.1f} angle {CS.out.steeringAngleDeg:.0f} cmd {ti_new_steer}")
+    self._ti_log_guard("stuck", stuck, f"TI stuck-command zero: held {self.ti_apply_steer_last}")
+    return ti_apply_steer
 
   def _modified_civic_standard_active(self) -> bool:
     return self.CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and bool(self.CP.flags & HondaFlags.EPS_MODIFIED)
@@ -380,7 +428,9 @@ class CarController(CarControllerBase):
       # Honda CAN one -- so no negation here, matching the gen1 TI reference in
       # opendbc/car/mazda/carcontroller.py. Verified on car: negating steers the wrong way.
       ti_new_steer = int(round(torque_cmd * TI_LIMITS.TI_STEER_MAX))
-      ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, CS.out.steeringTorque, TI_LIMITS)
+      ti_apply_steer = self._ti_apply_steer(CS, ti_new_steer)
+    else:
+      self.ti_stuck_frames = 0
     self.ti_apply_steer_last = ti_apply_steer
 
     # Send CAN commands

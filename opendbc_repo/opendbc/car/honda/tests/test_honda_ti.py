@@ -9,12 +9,14 @@ until it reports RUN, and the frame must keep being sent while the gate is close
 import pytest
 
 from opendbc.can import CANPacker
-from opendbc.car import Bus, structs
+from opendbc.car import Bus, apply_ti_steer_torque_limits, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.honda import carcontroller, carstate, hondacan, interface
 from opendbc.car.honda.values import CAR, DBC, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES, TI_LIMITS, TI_STATE, TI_OPTION, \
-                                     TI_RESET_HANDS_OFF_FRAMES, TI_RESET_BURST_FRAMES, TI_RESET_COOLDOWN_FRAMES, TI_RESET_MAX_ATTEMPTS
+                                     TI_RESET_HANDS_OFF_FRAMES, TI_RESET_BURST_FRAMES, TI_RESET_COOLDOWN_FRAMES, TI_RESET_MAX_ATTEMPTS, \
+                                     TI_RESET_HANDS_OFF_TORQUE, TI_FEEDBACK_LOCKOUT_FRAMES, TI_LOCK_ZERO_SPEED, TI_LOCK_ZERO_ANGLE, \
+                                     TI_STUCK_FRAMES
 from opendbc.car.tests.test_car_interfaces import get_test_starpilot_toggles
 
 TI_STEERING_CONTROL = 0x249
@@ -186,7 +188,7 @@ class TestTIAutoReset:
   def test_feedback_loss_after_run_alerts_but_never_resets(self):
     cs = new_gate()
     reset_step(cs, ti_feedback(TI_STATE.RUN))
-    for _ in range(TI_FEEDBACK_TIMEOUT_FRAMES):
+    for _ in range(TI_FEEDBACK_LOCKOUT_FRAMES - 1):
       reset_step(cs, None)
       assert not cs.ti_locked_out  # tolerated gap
     for _ in range(1000):
@@ -200,7 +202,7 @@ class TestTIAutoReset:
     # a short release interrupted by another grab restarts the debounce
     for _ in range(TI_RESET_HANDS_OFF_FRAMES - 5):
       assert reset_step(cs, LOCKED) == TI_OPTION.NORMAL
-    assert reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=-TI_LIMITS.TI_STEER_THRESHOLD - 1)) == TI_OPTION.NORMAL
+    assert reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=-TI_RESET_HANDS_OFF_TORQUE - 1)) == TI_OPTION.NORMAL
     for _ in range(TI_RESET_HANDS_OFF_FRAMES - 1):
       assert reset_step(cs, LOCKED) == TI_OPTION.NORMAL
     assert reset_step(cs, LOCKED) == TI_OPTION.COLD_RESET
@@ -208,7 +210,7 @@ class TestTIAutoReset:
 
   def test_light_touch_counts_as_hands_off(self):
     cs = locked_gate()
-    opts = [reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=TI_LIMITS.TI_STEER_THRESHOLD))
+    opts = [reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=TI_RESET_HANDS_OFF_TORQUE))
             for _ in range(TI_RESET_HANDS_OFF_FRAMES)]
     assert opts[-1] == TI_OPTION.COLD_RESET and TI_OPTION.COLD_RESET not in opts[:-1]
 
@@ -487,3 +489,184 @@ class TestTIAutoResetEndToEnd:
       assert not CS.steerFaultTemporary and option == TI_OPTION.NORMAL
       frame += 1
     assert request != 0
+
+
+def ti_limit(target, last, s, guard=True, zero=False):
+  return apply_ti_steer_torque_limits(target, last, s, TI_LIMITS, output_guard=guard, force_zero=zero)
+
+
+def ti_output(s, cmd):
+  return s + cmd / TI_LIMITS.TI_OUTPUT_TORQUE_DIV
+
+
+class TestTIOutputHeadroomGuard:
+  """lockout-prevention report 2026-09-29, section 7 #1: s + cmd/12 must stay inside +40/-35 when both agree."""
+  FAST = TI_LIMITS.TI_STEER_DELTA_DOWN_FAST
+
+  @pytest.mark.parametrize("s", (1, 10, 30, 39, 40, 60))
+  def test_caps_same_direction_positive(self, s):
+    last, out = TI_LIMITS.TI_STEER_MAX, []
+    for _ in range(20):
+      last = ti_limit(TI_LIMITS.TI_STEER_MAX, last, s)
+      out.append(last)
+    assert out[-1] == max((TI_LIMITS.TI_OUTPUT_GUARD_POS - s) * TI_LIMITS.TI_OUTPUT_TORQUE_DIV, 0)
+    assert ti_output(s, out[-1]) <= max(TI_LIMITS.TI_OUTPUT_GUARD_POS, s)
+
+  @pytest.mark.parametrize("s", (-1, -10, -20, -35, -60))
+  def test_caps_same_direction_negative(self, s):
+    last = -TI_LIMITS.TI_STEER_MAX
+    for _ in range(20):
+      last = ti_limit(-TI_LIMITS.TI_STEER_MAX, last, s)
+    assert last == min((-TI_LIMITS.TI_OUTPUT_GUARD_NEG - s) * TI_LIMITS.TI_OUTPUT_TORQUE_DIV, 0)
+
+  def test_fast_step_toward_zero_when_binding(self):
+    # trip #34 (route 310): s = 27, cmd 434 -> 49.6 counts, pushing 434 -> 156 at 60/frame
+    seq, last = [], 434
+    while True:
+      nxt = ti_limit(434, last, 27)
+      if nxt == last:
+        break
+      seq.append(last - nxt)
+      last = nxt
+    assert last == (40 - 27) * 12 and seq[:-1] == [self.FAST] * (len(seq) - 1) and seq[-1] <= self.FAST
+    # without the guard binding the normal down-rate applies
+    assert ti_limit(0, 300, 0) == 300 - TI_LIMITS.TI_STEER_DELTA_DOWN
+
+  def test_up_rate_unchanged(self):
+    assert ti_limit(TI_LIMITS.TI_STEER_MAX, 0, 10) == TI_LIMITS.TI_STEER_DELTA_UP
+    assert ti_limit(-TI_LIMITS.TI_STEER_MAX, 0, -10) == -TI_LIMITS.TI_STEER_DELTA_UP
+
+  @pytest.mark.parametrize("s", range(-80, 81, 8))
+  @pytest.mark.parametrize("target", (-599, -300, -40, -1, 0, 1, 40, 300, 599))
+  @pytest.mark.parametrize("last", (-599, -200, -10, 0, 10, 200, 599))
+  def test_never_alters_opposing_or_unaffected_commands(self, s, target, last):
+    guarded, stock = ti_limit(target, last, s), ti_limit(target, last, s, guard=False)
+    if s * target <= 0:  # opposing the driver, or no driver direction: the guard never touches it
+      assert guarded == stock
+    else:
+      # same direction: never more torque than without the guard, never the other way past zero
+      assert abs(guarded) <= abs(stock) or guarded * stock <= 0
+      assert abs(guarded - last) <= max(self.FAST, TI_LIMITS.TI_STEER_DELTA_UP)
+    assert abs(guarded) <= TI_LIMITS.TI_STEER_MAX
+
+  def test_force_zero_ramps_fast(self):
+    assert ti_limit(300, 300, 0, zero=True) == 300 - self.FAST
+    assert ti_limit(-300, -100, 0, zero=True) == -100 + self.FAST
+    assert ti_limit(300, 30, 0, zero=True) == 0
+    assert ti_limit(300, 0, 0, zero=True) == 0
+
+
+@pytest.fixture
+def ti_cc(ti_interface):
+  return ti_interface[0].CC
+
+
+def fake_cs(s=0.0, v=10.0, angle=0.0, feedback_seen=True, no_feedback_frames=0):
+  out = structs.CarState()
+  out.steeringTorque, out.vEgo, out.steeringAngleDeg = s, v, angle
+  cs = carstate.CarState.__new__(carstate.CarState)
+  cs.reset_ti_gate()
+  cs.out = out
+  cs.ti_feedback_seen, cs.ti_no_feedback_frames = feedback_seen, no_feedback_frames
+  return cs
+
+
+def cc_steps(cc, cs, target, n):
+  out = []
+  for _ in range(n):
+    cc.ti_apply_steer_last = cc._ti_apply_steer(cs, target)
+    cc.frame += 1
+    out.append(cc.ti_apply_steer_last)
+  return out
+
+
+class TestTIControllerGuards:
+  def test_guard_off_without_ti_feedback(self, ti_cc):
+    # feedbackless fallback: steeringTorque is the stock sensor, not TI counts -> no output guard
+    out = cc_steps(ti_cc, fake_cs(s=30, feedback_seen=False), 300, 40)
+    assert out[-1] == 300
+    ti_cc.ti_apply_steer_last = 0
+    out = cc_steps(ti_cc, fake_cs(s=30), 300, 40)
+    assert out[-1] == (40 - 30) * 12
+
+  def test_guard_uses_held_torque_within_gate_timeout(self, ti_cc):
+    out = cc_steps(ti_cc, fake_cs(s=30, no_feedback_frames=TI_FEEDBACK_TIMEOUT_FRAMES), 300, 40)
+    assert out[-1] == 120
+
+  def test_near_lock_low_speed_zeroes(self, ti_cc):
+    ti_cc.ti_apply_steer_last = 450
+    out = cc_steps(ti_cc, fake_cs(v=2.7, angle=454), 599, 20)
+    assert out[:3] == [390, 330, 270] and out[-1] == 0
+    out = cc_steps(ti_cc, fake_cs(v=2.7, angle=-TI_LOCK_ZERO_ANGLE - 1), -599, 5)
+    assert out == [0] * 5
+    # out of the region: normal ramp resumes
+    assert cc_steps(ti_cc, fake_cs(v=2.7, angle=TI_LOCK_ZERO_ANGLE - 1), 599, 3) == [15, 30, 45]
+    ti_cc.ti_apply_steer_last = 0
+    assert cc_steps(ti_cc, fake_cs(v=TI_LOCK_ZERO_SPEED + 0.1, angle=454), 599, 3) == [15, 30, 45]
+
+  @pytest.mark.parametrize("target", (-19, -5, 1, 10, 19))
+  def test_small_command_never_held(self, ti_cc, target):
+    out = cc_steps(ti_cc, fake_cs(), target, 400)
+    run, longest = 0, 0
+    for a, b in zip(out, out[1:], strict=False):
+      run = run + 1 if a == b and a != 0 else 0
+      longest = max(longest, run)
+      assert abs(b - a) < 20
+    assert longest < TI_STUCK_FRAMES
+    assert out.count(0) >= 400 // (TI_STUCK_FRAMES + 3) and out.count(target) > 300
+
+  @pytest.mark.parametrize("target", (0, 20, -20, 300))
+  def test_other_commands_held(self, ti_cc, target):
+    out = cc_steps(ti_cc, fake_cs(), target, 200)
+    assert out[-150:] == [target] * 150
+
+  def test_guard_carlog_rate_limited(self, ti_cc, monkeypatch):
+    logs = []
+    monkeypatch.setattr(carcontroller.carlog, "warning", logs.append)
+    for _ in range(5):  # guard toggling on/off every 10 frames
+      cc_steps(ti_cc, fake_cs(s=30), 300, 10)
+      cc_steps(ti_cc, fake_cs(s=0), 300, 10)
+    assert len(logs) == 1 and logs[0].startswith("TI output guard")
+    cc_steps(ti_cc, fake_cs(s=0), 0, 1000)
+    cc_steps(ti_cc, fake_cs(s=30), 300, 1)
+    assert len(logs) == 2
+
+
+class TestTIGuardsEndToEnd:
+  def test_same_direction_driver_torque_caps_command(self, ti_interface):
+    CI, toggles, packer = ti_interface
+    requests = [run_frame(CI, toggles, packer, f, ti_feedback(TI_STATE.RUN, torque=30), torque=0.5)[0] for f in range(60)]
+    assert max(requests) <= (40 - 30) * 12 and requests[-1] == 120
+
+  def test_short_feedback_gap_is_not_a_lockout(self, ti_interface):
+    CI, toggles, packer = ti_interface
+
+    def step(frame, fb):
+      msgs = [CanData(*packer.make_can_msg("TI_FEEDBACK", 0, fb))] if fb is not None else []
+      CS = CI.update([(frame * DT_NS, msgs)], toggles)[0]
+      CC = structs.CarControl()
+      CC.enabled = CC.latActive = True
+      CC.actuators.torque = 0.5
+      _, sends = CI.apply(CC.as_reader(), frame * DT_NS, toggles)
+      dat = next(dat for addr, dat, bus in sends if addr == TI_STEERING_CONTROL)
+      return CS, ((dat[0] & 0x0F) << 8 | dat[1]) - 2048
+
+    frame = 0
+    for _ in range(30):
+      step(frame, ti_feedback(TI_STATE.RUN))
+      frame += 1
+    # route 310: 0.15-0.23 s gaps with the TI in RUN + VIOL 0 -> no fault, torque gate closes at 0.2 s
+    for i in range(TI_FEEDBACK_LOCKOUT_FRAMES - 1):
+      CS, request = step(frame, None)
+      frame += 1
+      assert not CS.steerFaultTemporary
+      if i >= TI_FEEDBACK_TIMEOUT_FRAMES:
+        assert request == 0
+    CS, request = step(frame, ti_feedback(TI_STATE.RUN))
+    frame += 1
+    assert not CS.steerFaultTemporary and request == TI_LIMITS.TI_STEER_DELTA_UP
+    # >= 0.5 s: a lockout
+    for _ in range(TI_FEEDBACK_LOCKOUT_FRAMES):
+      CS, request = step(frame, None)
+      frame += 1
+    assert CS.steerFaultTemporary and CI.CS.ti_locked_out and request == 0

@@ -71,6 +71,15 @@ class TI_LIMITS:
   TI_STEER_DRIVER_MULTIPLIER = 40    # weight driver torque
   TI_STEER_DRIVER_FACTOR = 1         # from dbc
   TI_STEER_THRESHOLD = 15            # steeringPressed threshold on the TI torque sensor
+  # Output-headroom guard (reports/2026-09-29-ti-lockout-prevention.md, sections 3 and 7 #1). The TI
+  # trips VIOL_TORQUE_H/L (0x17/0x18) when its computed output s + cmd/12 (s = TI_TORQUE_SENSOR)
+  # leaves ~+62/-55 counts; our driver limiter only clips commands opposing the driver, so a
+  # command in the driver's direction adds up with them (13/32 trips). Cap only that part so the
+  # modelled output stays within +40/-35 (~20 counts margin for sub-10 ms spikes).
+  TI_OUTPUT_TORQUE_DIV = 12          # fitted D in s + cmd/D (11-13 fit about equally, 3.02 M RUN frames)
+  TI_OUTPUT_GUARD_POS = 40           # window edge +62 measured
+  TI_OUTPUT_GUARD_NEG = 35           # window edge -55.5 measured (asymmetric)
+  TI_STEER_DELTA_DOWN_FAST = 60      # step toward zero while a guard binds (panda checks magnitude only)
 
 
 class TI_STATE:
@@ -87,6 +96,24 @@ TI_DISCOVERY_FRAMES = 500
 # Once feedback has been seen, treat it as lost (gate closed) after this many
 # frames without a TI_FEEDBACK message (200 ms at 100 Hz).
 TI_FEEDBACK_TIMEOUT_FRAMES = 20
+# Only a longer gap counts as a lockout (steerFaultTemporary + carlog). Route 00000310 had 20
+# gaps of 0.15-0.23 s with the TI in RUN and VIOL 0 throughout; each flickered a fake lockout
+# (lockout-prevention report, section 6 side finding / section 7 #7). The gate above still closes at 0.2 s.
+TI_FEEDBACK_LOCKOUT_FRAMES = 50
+
+# Zero the TI command near full lock at low speed (lockout-prevention report, section 7 #2): trips
+# #1/#9/#22/#34 were 358-599 counts pushed into the rack stop at 450-454 deg, < 4 m/s. The rack is
+# already at the stop there, so the command only uses up output window.
+TI_LOCK_ZERO_SPEED = 4.0             # m/s, zero below this ...
+TI_LOCK_ZERO_ANGLE = 420.            # ... when |steeringAngleDeg| is above this
+
+# Never hold a small non-zero command steady (lockout-prevention report, section 7 #5): VIOL_LKAS_STUK
+# (0x11) = "request does not change when not 0 / +-600"; tripped after -5 was held for 0.72 s.
+TI_STUCK_CMD_MAX = 20                # 0 < |cmd| < this ...
+TI_STUCK_FRAMES = 30                 # ... unchanged for more than 0.3 s -> send 0 for a frame
+
+# At most one carlog line per guard per this many frames (10 s).
+TI_GUARD_LOG_INTERVAL_FRAMES = 1000
 
 # TI_STEERING_CONTROL bytes 4-7 = 24-bit discovery key + 8-bit OPTION (TI gen1 doc, Part 3).
 # The DBC keeps them as one 32-bit KEY signal; hondacan composes the value.
@@ -103,7 +130,11 @@ class TI_OPTION:
 # reached). Weekend 2026-09-26..28 rlogs: 30 lockouts from hard driver input, each OFF with
 # VIOL 23/24/17 for ~29.5 s, then OFF + VIOL 0 for 2.0 s, then RUN. The reset is only sent
 # while VIOL != 0, so it never interrupts that 2 s restart (or the ~1.6 s startup one).
-TI_RESET_HANDS_OFF_FRAMES = 10       # 0.1 s of |TI driver torque| <= TI_STEER_THRESHOLD
+TI_RESET_HANDS_OFF_FRAMES = 10       # 0.1 s of |TI driver torque| <= TI_RESET_HANDS_OFF_TORQUE
+# After 0x61 the board is in DISCOVER/OFF (bypass) until our zero-torque handshake, and with cmd 0 it
+# only re-trips at |s| >= 55-62. Lockout #33 waited 7.5 s at 20-52 counts for |s| <= 15
+# (lockout-prevention report, section 6 and 7 #6).
+TI_RESET_HANDS_OFF_TORQUE = 30
 TI_RESET_BURST_FRAMES = 5            # 0.05 s of OPTION 0x61 (zero torque)
 TI_RESET_COOLDOWN_FRAMES = 300       # 3 s from the end of a burst before another attempt
 TI_RESET_MAX_ATTEMPTS = 3            # without reaching RUN; then wait for RUN or next ignition

@@ -12,7 +12,7 @@ from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HON
                                                  HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
                                                  TI_LIMITS, TI_STATE, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES, TI_OPTION, \
                                                  TI_RESET_HANDS_OFF_FRAMES, TI_RESET_BURST_FRAMES, TI_RESET_COOLDOWN_FRAMES, \
-                                                 TI_RESET_MAX_ATTEMPTS
+                                                 TI_RESET_MAX_ATTEMPTS, TI_RESET_HANDS_OFF_TORQUE, TI_FEEDBACK_LOCKOUT_FRAMES
 from opendbc.car.interfaces import CarStateBase
 from openpilot.common.params import Params
 
@@ -167,7 +167,7 @@ class CarState(CarStateBase):
     """Detect a mid-drive TI lockout and pick this frame's OPTION byte. Call after update_ti_gate().
 
     Locked out = RUN was reached this ignition and the board has since left it for anything but a
-    clean driver override (OFF/DISCOVER, a violation, or lost feedback). The startup OFF phase is
+    clean driver override (OFF/DISCOVER, a violation, or feedback lost for TI_FEEDBACK_LOCKOUT_FRAMES). The startup OFF phase is
     never a lockout because RUN has not been seen yet. While locked out and VIOL != 0, a cold reset
     (OPTION 0x61) burst is sent once the driver has been hands-off for TI_RESET_HANDS_OFF_FRAMES,
     with a cooldown between bursts and at most TI_RESET_MAX_ATTEMPTS without reaching RUN.
@@ -176,7 +176,9 @@ class CarState(CarStateBase):
     """
     if ti is not None:
       self.ti_viol = ti["VIOL"]
-    feedback_lost = self.ti_no_feedback_frames > TI_FEEDBACK_TIMEOUT_FRAMES
+    # gaps shorter than TI_FEEDBACK_LOCKOUT_FRAMES close the gate but are not a lockout (no alert)
+    feedback_lost = self.ti_no_feedback_frames >= TI_FEEDBACK_LOCKOUT_FRAMES
+    feedback_timeout = self.ti_no_feedback_frames > TI_FEEDBACK_TIMEOUT_FRAMES
 
     if ti is not None and self.ti_state == TI_STATE.RUN:
       if self.ti_locked_out:
@@ -196,11 +198,11 @@ class CarState(CarStateBase):
       carlog.warning(f"TI lockout: STATE {self.ti_state} VIOL {self.ti_viol} feedback_lost {feedback_lost}")
     self.ti_locked_out = locked_out
 
-    resettable = locked_out and not feedback_lost and not self.ti_lkas_allowed and self.ti_viol != 0
+    resettable = locked_out and not feedback_timeout and not self.ti_lkas_allowed and self.ti_viol != 0
     if not resettable:
       self.ti_hands_off_frames = 0
     elif ti is not None:
-      hands_off = abs(ti["TI_TORQUE_SENSOR"]) <= TI_LIMITS.TI_STEER_THRESHOLD
+      hands_off = abs(ti["TI_TORQUE_SENSOR"]) <= TI_RESET_HANDS_OFF_TORQUE
       self.ti_hands_off_frames = self.ti_hands_off_frames + 1 if hands_off else 0
 
     self.ti_option = TI_OPTION.NORMAL
