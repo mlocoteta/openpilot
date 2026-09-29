@@ -103,8 +103,8 @@ class TI_OPTION:
 # reached). Weekend 2026-09-26..28 rlogs: 30 lockouts from hard driver input, each OFF with
 # VIOL 23/24/17 for ~29.5 s, then OFF + VIOL 0 for 2.0 s, then RUN. The reset is only sent
 # while VIOL != 0, so it never interrupts that 2 s restart (or the ~1.6 s startup one).
-TI_RESET_HANDS_OFF_FRAMES = 40       # 0.4 s of |TI driver torque| <= TI_STEER_THRESHOLD
-TI_RESET_BURST_FRAMES = 10           # 0.1 s of OPTION 0x61 (zero torque)
+TI_RESET_HANDS_OFF_FRAMES = 10       # 0.1 s of |TI driver torque| <= TI_STEER_THRESHOLD
+TI_RESET_BURST_FRAMES = 5            # 0.05 s of OPTION 0x61 (zero torque)
 TI_RESET_COOLDOWN_FRAMES = 300       # 3 s from the end of a burst before another attempt
 TI_RESET_MAX_ATTEMPTS = 3            # without reaching RUN; then wait for RUN or next ignition
 
