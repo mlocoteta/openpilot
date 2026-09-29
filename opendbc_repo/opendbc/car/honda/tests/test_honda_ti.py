@@ -12,8 +12,9 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.honda import carcontroller, carstate, interface
-from opendbc.car.honda.values import CAR, DBC, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES, TI_LIMITS, TI_STATE
+from opendbc.car.honda import carcontroller, carstate, hondacan, interface
+from opendbc.car.honda.values import CAR, DBC, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES, TI_LIMITS, TI_STATE, TI_OPTION, \
+                                     TI_RESET_HANDS_OFF_FRAMES, TI_RESET_BURST_FRAMES, TI_RESET_COOLDOWN_FRAMES, TI_RESET_MAX_ATTEMPTS
 from opendbc.car.tests.test_car_interfaces import get_test_starpilot_toggles
 
 TI_STEERING_CONTROL = 0x249
@@ -134,6 +135,151 @@ class TestTIDriverTorque:
     cs = new_gate()
     assert cs.update_ti_driver_torque(None, 64, self.STOCK_THR) == (64, True)
     assert cs.update_ti_driver_torque(None, 10, self.STOCK_THR) == (10, False)
+
+
+def reset_step(cs, fb):
+  """One carState frame of the TI path; returns the OPTION chosen for this frame."""
+  cs.update_ti_driver_torque(fb, 0, 30)
+  cs.update_ti_gate(fb)
+  return cs.update_ti_reset(fb)
+
+
+def locked_gate():
+  """A gate that reached RUN and then locked out (OFF, VIOL 23), as in the weekend rlogs."""
+  cs = new_gate()
+  for _ in range(10):
+    assert reset_step(cs, ti_feedback(TI_STATE.RUN)) == TI_OPTION.NORMAL
+  reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=60))
+  assert cs.ti_locked_out
+  return cs
+
+
+LOCKED = ti_feedback(TI_STATE.OFF, viol=23)
+
+
+class TestTIAutoReset:
+  def test_no_reset_or_alert_during_startup(self):
+    # startup replay (2026-09-11 rlog): long OFF + VIOL 23 before the first RUN, hands off
+    cs = new_gate()
+    for _ in range(1571):
+      assert reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23)) == TI_OPTION.NORMAL
+      assert not cs.ti_locked_out
+    for _ in range(200):
+      assert reset_step(cs, ti_feedback(TI_STATE.OFF)) == TI_OPTION.NORMAL
+      assert not cs.ti_locked_out
+    assert reset_step(cs, ti_feedback(TI_STATE.RUN)) == TI_OPTION.NORMAL
+    assert cs.ti_run_seen and not cs.ti_locked_out
+
+  def test_lockout_raises_alert(self):
+    cs = locked_gate()
+    assert cs.ti_locked_out and not cs.ti_lkas_allowed
+
+  def test_driver_override_is_not_a_lockout(self):
+    cs = new_gate()
+    reset_step(cs, ti_feedback(TI_STATE.RUN))
+    for _ in range(200):
+      assert reset_step(cs, ti_feedback(TI_STATE.DRIVER_OVER, torque=90)) == TI_OPTION.NORMAL
+      assert not cs.ti_locked_out
+    reset_step(cs, ti_feedback(TI_STATE.DRIVER_OVER, viol=17, torque=90))
+    assert cs.ti_locked_out
+
+  def test_feedback_loss_after_run_alerts_but_never_resets(self):
+    cs = new_gate()
+    reset_step(cs, ti_feedback(TI_STATE.RUN))
+    for _ in range(TI_FEEDBACK_TIMEOUT_FRAMES):
+      reset_step(cs, None)
+      assert not cs.ti_locked_out  # tolerated gap
+    for _ in range(1000):
+      assert reset_step(cs, None) == TI_OPTION.NORMAL
+      assert cs.ti_locked_out
+
+  def test_reset_only_after_hands_off_debounce(self):
+    cs = locked_gate()
+    for _ in range(1000):  # driver still holding the wheel hard
+      assert reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=60)) == TI_OPTION.NORMAL
+    # a short release interrupted by another grab restarts the debounce
+    for _ in range(TI_RESET_HANDS_OFF_FRAMES - 5):
+      assert reset_step(cs, LOCKED) == TI_OPTION.NORMAL
+    assert reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=-TI_LIMITS.TI_STEER_THRESHOLD - 1)) == TI_OPTION.NORMAL
+    for _ in range(TI_RESET_HANDS_OFF_FRAMES - 1):
+      assert reset_step(cs, LOCKED) == TI_OPTION.NORMAL
+    assert reset_step(cs, LOCKED) == TI_OPTION.COLD_RESET
+    assert cs.ti_reset_attempts == 1
+
+  def test_light_touch_counts_as_hands_off(self):
+    cs = locked_gate()
+    opts = [reset_step(cs, ti_feedback(TI_STATE.OFF, viol=23, torque=TI_LIMITS.TI_STEER_THRESHOLD))
+            for _ in range(TI_RESET_HANDS_OFF_FRAMES)]
+    assert opts[-1] == TI_OPTION.COLD_RESET and TI_OPTION.COLD_RESET not in opts[:-1]
+
+  def test_burst_length(self):
+    cs = locked_gate()
+    opts = [reset_step(cs, LOCKED) for _ in range(TI_RESET_HANDS_OFF_FRAMES + 50)]
+    first = opts.index(TI_OPTION.COLD_RESET)
+    assert first == TI_RESET_HANDS_OFF_FRAMES - 1
+    assert opts[first:first + TI_RESET_BURST_FRAMES] == [TI_OPTION.COLD_RESET] * TI_RESET_BURST_FRAMES
+    assert TI_OPTION.COLD_RESET not in opts[first + TI_RESET_BURST_FRAMES:]
+
+  def test_no_reset_while_board_restarting(self):
+    # VIOL cleared (the ~2 s OFF + VIOL 0 restart delay, or DISCOVER after a reset): alert stays, no reset
+    cs = locked_gate()
+    for state in (TI_STATE.OFF, TI_STATE.DISCOVER):
+      for _ in range(1000):
+        assert reset_step(cs, ti_feedback(state)) == TI_OPTION.NORMAL
+        assert cs.ti_locked_out
+    assert cs.ti_reset_attempts == 0
+
+  def test_cooldown_and_retry_cap(self):
+    cs = locked_gate()
+    opts = [reset_step(cs, LOCKED) for _ in range(5000)]
+    starts = [i for i, o in enumerate(opts) if o == TI_OPTION.COLD_RESET and (i == 0 or opts[i - 1] != o)]
+    assert len(starts) == TI_RESET_MAX_ATTEMPTS
+    assert all(b - a == TI_RESET_BURST_FRAMES + TI_RESET_COOLDOWN_FRAMES for a, b in zip(starts, starts[1:], strict=False))
+    assert opts.count(TI_OPTION.COLD_RESET) == TI_RESET_MAX_ATTEMPTS * TI_RESET_BURST_FRAMES
+    assert cs.ti_locked_out  # capped: alert remains until the board recovers by itself
+
+  def test_recovery_clears_alert_and_counters(self):
+    cs = locked_gate()
+    for _ in range(5000):
+      reset_step(cs, LOCKED)
+    assert cs.ti_reset_attempts == TI_RESET_MAX_ATTEMPTS
+    assert reset_step(cs, ti_feedback(TI_STATE.RUN)) == TI_OPTION.NORMAL
+    assert not cs.ti_locked_out and cs.ti_lkas_allowed
+    assert (cs.ti_reset_attempts, cs.ti_reset_cooldown, cs.ti_reset_burst_left, cs.ti_hands_off_frames) == (0, 0, 0, 0)
+    # a later lockout gets a fresh set of attempts
+    opts = [reset_step(cs, LOCKED) for _ in range(TI_RESET_HANDS_OFF_FRAMES)]
+    assert opts[-1] == TI_OPTION.COLD_RESET
+
+  def test_run_mid_burst_stops_burst(self):
+    cs = locked_gate()
+    for _ in range(TI_RESET_HANDS_OFF_FRAMES + 2):
+      reset_step(cs, LOCKED)
+    assert cs.ti_reset_burst_left > 0
+    assert reset_step(cs, ti_feedback(TI_STATE.RUN)) == TI_OPTION.NORMAL
+    assert reset_step(cs, ti_feedback(TI_STATE.RUN)) == TI_OPTION.NORMAL
+
+
+class TestTIOptionPacking:
+  @staticmethod
+  def pack(steer, option=TI_OPTION.NORMAL):
+    packer = CANPacker(DBC[CAR.HONDA_ACCORD_9G][Bus.pt])
+    addr, dat, bus = hondacan.create_ti_steering_control(packer, steer, option)
+    assert (addr, bus) == (TI_STEERING_CONTROL, 0)
+    return dat
+
+  def test_normal_frame_unchanged(self):
+    # same bytes as the old hard-coded KEY = 3294744160 (0xC461CE60)
+    assert self.pack(0)[4:] == bytes([0xC4, 0x61, 0xCE, 0x60])
+    assert self.pack(-123)[4:] == bytes([0xC4, 0x61, 0xCE, 0x60])
+
+  def test_cold_reset_option_byte(self):
+    dat = self.pack(0, TI_OPTION.COLD_RESET)
+    assert dat[4:] == bytes([0xC4, 0x61, 0xCE, 0x61])
+    assert dat[:4] == self.pack(0)[:4]  # torque bytes (the only ones panda checks) are unchanged
+
+  @pytest.mark.parametrize("steer", (1, -1, 150, -599))
+  def test_never_reset_with_torque(self, steer):
+    assert self.pack(steer, TI_OPTION.COLD_RESET)[7] == TI_OPTION.NORMAL
 
 
 @pytest.fixture
@@ -297,3 +443,47 @@ class TestTIDriverTorqueEndToEnd:
       if frame >= 5:
         assert abs(CS.steeringTorque) <= 1
     assert not any(pressed[5:])
+
+
+class TestTIAutoResetEndToEnd:
+  def test_lockout_alert_and_reset_on_the_wire(self, ti_interface):
+    CI, toggles, packer = ti_interface
+
+    def frame_(frame, fb):
+      msgs = [CanData(*packer.make_can_msg("TI_FEEDBACK", 0, fb))]
+      CS = CI.update([(frame * DT_NS, msgs)], toggles)[0]
+      CC = structs.CarControl()
+      CC.enabled = CC.latActive = True
+      CC.actuators.torque = 0.5
+      _, sends = CI.apply(CC.as_reader(), frame * DT_NS, toggles)
+      dat = next(dat for addr, dat, bus in sends if addr == TI_STEERING_CONTROL)
+      return CS, ((dat[0] & 0x0F) << 8 | dat[1]) - 2048, dat[7]
+
+    frame = 0
+    for _ in range(200):  # startup, then RUN with torque
+      CS, request, option = frame_(frame, ti_feedback(TI_STATE.OFF, viol=23))
+      assert not CS.steerFaultTemporary and request == 0 and option == TI_OPTION.NORMAL
+      frame += 1
+    for _ in range(50):
+      CS, request, option = frame_(frame, ti_feedback(TI_STATE.RUN))
+      assert not CS.steerFaultTemporary and option == TI_OPTION.NORMAL
+      frame += 1
+    assert request != 0
+    # driver yanks the wheel -> lockout, then lets go
+    options = []
+    for i in range(1000):
+      torque = 80 if i < 100 else 0
+      CS, request, option = frame_(frame, ti_feedback(TI_STATE.OFF, viol=23, torque=torque))
+      assert CS.steerFaultTemporary and request == 0
+      options.append(option)
+      frame += 1
+    assert TI_OPTION.COLD_RESET not in options[:100 + TI_RESET_HANDS_OFF_FRAMES - 1]
+    # bursts at 139, 449, 759: capped at TI_RESET_MAX_ATTEMPTS
+    assert options.count(TI_OPTION.COLD_RESET) == TI_RESET_MAX_ATTEMPTS * TI_RESET_BURST_FRAMES
+    assert set(options) == {TI_OPTION.NORMAL, TI_OPTION.COLD_RESET}
+    # board recovers
+    for _ in range(20):
+      CS, request, option = frame_(frame, ti_feedback(TI_STATE.RUN))
+      assert not CS.steerFaultTemporary and option == TI_OPTION.NORMAL
+      frame += 1
+    assert request != 0

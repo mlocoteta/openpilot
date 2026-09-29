@@ -17,6 +17,7 @@ from opendbc.car.honda.values import (
   CarControllerParams,
   HondaFlags,
   TI_LIMITS,
+  TI_OPTION,
 )
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.common.pid import PIDController
@@ -440,7 +441,9 @@ class CarController(CarControllerBase):
     # TI device instead.
     if self.has_ti:
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))
-      can_sends.append(hondacan.create_ti_steering_control(self.packer, ti_apply_steer))
+      # CS.ti_option is COLD_RESET only during a lockout (gate closed -> zero torque); never with torque.
+      ti_option = CS.ti_option if ti_apply_steer == 0 else TI_OPTION.NORMAL
+      can_sends.append(hondacan.create_ti_steering_control(self.packer, ti_apply_steer, ti_option))
     else:
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
 

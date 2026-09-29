@@ -2,7 +2,7 @@ from opendbc.car import CanBusBase
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.values import (HondaFlags, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_RADARLESS,
                                       HONDA_BOSCH_CANFD, CarControllerParams)
-from opendbc.car.honda.values import CAR
+from opendbc.car.honda.values import CAR, TI_DISCOVERY_KEY, TI_OPTION
 
 # CAN bus layout with relay
 # 0 = ACC-CAN - radar side
@@ -131,15 +131,18 @@ def create_steering_control(packer, CAN, apply_torque, lkas_active, tja_control)
   return packer.make_can_msg("STEERING_CONTROL", CAN.lkas, values)
 
 
-def create_ti_steering_control(packer, apply_steer):
+def create_ti_steering_control(packer, apply_steer, option=TI_OPTION.NORMAL):
   # Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
   # CHKSUM/KEY are sent verbatim (DBC signals are named CHKSUM with no COUNTER,
   # so the packer/parser perform no checksum/counter validation -> no canError).
-  key = 3294744160
+  # KEY is the 24-bit discovery key followed by the 8-bit OPTION byte (byte 7).
+  # A non-normal option is only ever sent with zero torque.
+  if apply_steer != 0:
+    option = TI_OPTION.NORMAL
   values = {
     "LKAS_REQUEST": apply_steer,
     "CHKSUM": apply_steer,
-    "KEY": key,
+    "KEY": (TI_DISCOVERY_KEY << 8) | option,
   }
   return packer.make_can_msg("TI_STEERING_CONTROL", 0, values)
 

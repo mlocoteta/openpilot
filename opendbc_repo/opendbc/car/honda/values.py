@@ -88,6 +88,26 @@ TI_DISCOVERY_FRAMES = 500
 # frames without a TI_FEEDBACK message (200 ms at 100 Hz).
 TI_FEEDBACK_TIMEOUT_FRAMES = 20
 
+# TI_STEERING_CONTROL bytes 4-7 = 24-bit discovery key + 8-bit OPTION (TI gen1 doc, Part 3).
+# The DBC keeps them as one 32-bit KEY signal; hondacan composes the value.
+TI_DISCOVERY_KEY = 0xC461CE
+
+
+class TI_OPTION:
+  NORMAL = 0x60
+  COLD_RESET = 0x61  # clears all violations; the board restarts in DISCOVER
+  BYPASS = 0x62
+
+
+# Automatic cold reset after a mid-drive violation lockout (OFF + VIOL != 0 after RUN was
+# reached). Weekend 2026-09-26..28 rlogs: 30 lockouts from hard driver input, each OFF with
+# VIOL 23/24/17 for ~29.5 s, then OFF + VIOL 0 for 2.0 s, then RUN. The reset is only sent
+# while VIOL != 0, so it never interrupts that 2 s restart (or the ~1.6 s startup one).
+TI_RESET_HANDS_OFF_FRAMES = 40       # 0.4 s of |TI driver torque| <= TI_STEER_THRESHOLD
+TI_RESET_BURST_FRAMES = 10           # 0.1 s of OPTION 0x61 (zero torque)
+TI_RESET_COOLDOWN_FRAMES = 300       # 3 s from the end of a burst before another attempt
+TI_RESET_MAX_ATTEMPTS = 3            # without reaching RUN; then wait for RUN or next ignition
+
 
 class HondaFlags(IntFlag):
   # Detected flags

@@ -4,12 +4,15 @@ from collections import defaultdict
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
+from opendbc.car.carlog import carlog
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
                                                  HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
-                                                 TI_LIMITS, TI_STATE, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES
+                                                 TI_LIMITS, TI_STATE, TI_DISCOVERY_FRAMES, TI_FEEDBACK_TIMEOUT_FRAMES, TI_OPTION, \
+                                                 TI_RESET_HANDS_OFF_FRAMES, TI_RESET_BURST_FRAMES, TI_RESET_COOLDOWN_FRAMES, \
+                                                 TI_RESET_MAX_ATTEMPTS
 from opendbc.car.interfaces import CarStateBase
 from openpilot.common.params import Params
 
@@ -106,6 +109,15 @@ class CarState(CarStateBase):
     self.ti_no_feedback_frames = 0
     self.ti_lkas_allowed = False
     self.ti_last_torque = 0.0
+    # lockout / automatic cold reset (update_ti_reset)
+    self.ti_viol = 0
+    self.ti_run_seen = False
+    self.ti_locked_out = False
+    self.ti_option = TI_OPTION.NORMAL
+    self.ti_hands_off_frames = 0
+    self.ti_reset_burst_left = 0
+    self.ti_reset_cooldown = 0
+    self.ti_reset_attempts = 0
 
   def update_ti_driver_torque(self, ti, stock_torque, stock_threshold):
     """Driver torque and steeringPressed on the TI car. Call before update_ti_gate().
@@ -150,6 +162,65 @@ class CarState(CarStateBase):
     else:
       self.ti_lkas_allowed = self.ti_no_feedback_frames >= TI_DISCOVERY_FRAMES
     return self.ti_lkas_allowed
+
+  def update_ti_reset(self, ti):
+    """Detect a mid-drive TI lockout and pick this frame's OPTION byte. Call after update_ti_gate().
+
+    Locked out = RUN was reached this ignition and the board has since left it for anything but a
+    clean driver override (OFF/DISCOVER, a violation, or lost feedback). The startup OFF phase is
+    never a lockout because RUN has not been seen yet. While locked out and VIOL != 0, a cold reset
+    (OPTION 0x61) burst is sent once the driver has been hands-off for TI_RESET_HANDS_OFF_FRAMES,
+    with a cooldown between bursts and at most TI_RESET_MAX_ATTEMPTS without reaching RUN.
+    The gate is closed whenever this can fire, so the controller is commanding zero torque.
+    Returns the OPTION for this frame's TI_STEERING_CONTROL.
+    """
+    if ti is not None:
+      self.ti_viol = ti["VIOL"]
+    feedback_lost = self.ti_no_feedback_frames > TI_FEEDBACK_TIMEOUT_FRAMES
+
+    if ti is not None and self.ti_state == TI_STATE.RUN:
+      if self.ti_locked_out:
+        carlog.warning(f"TI lockout cleared: RUN after {self.ti_reset_attempts} cold reset attempt(s)")
+      self.ti_run_seen = True
+      self.ti_locked_out = False
+      self.ti_hands_off_frames = 0
+      self.ti_reset_burst_left = 0
+      self.ti_reset_cooldown = 0
+      self.ti_reset_attempts = 0
+      self.ti_option = TI_OPTION.NORMAL
+      return self.ti_option
+
+    locked_out = self.ti_run_seen and (feedback_lost or (self.ti_state != TI_STATE.RUN and
+                                                         (self.ti_state != TI_STATE.DRIVER_OVER or self.ti_viol != 0)))
+    if locked_out and not self.ti_locked_out:
+      carlog.warning(f"TI lockout: STATE {self.ti_state} VIOL {self.ti_viol} feedback_lost {feedback_lost}")
+    self.ti_locked_out = locked_out
+
+    resettable = locked_out and not feedback_lost and not self.ti_lkas_allowed and self.ti_viol != 0
+    if not resettable:
+      self.ti_hands_off_frames = 0
+    elif ti is not None:
+      hands_off = abs(ti["TI_TORQUE_SENSOR"]) <= TI_LIMITS.TI_STEER_THRESHOLD
+      self.ti_hands_off_frames = self.ti_hands_off_frames + 1 if hands_off else 0
+
+    self.ti_option = TI_OPTION.NORMAL
+    if self.ti_reset_burst_left > 0:
+      self.ti_option = TI_OPTION.COLD_RESET
+      self.ti_reset_burst_left -= 1
+      if self.ti_reset_burst_left == 0:
+        self.ti_reset_cooldown = TI_RESET_COOLDOWN_FRAMES
+    elif self.ti_reset_cooldown > 0:
+      self.ti_reset_cooldown -= 1
+    elif (resettable and self.ti_hands_off_frames >= TI_RESET_HANDS_OFF_FRAMES and
+          self.ti_reset_attempts < TI_RESET_MAX_ATTEMPTS):
+      self.ti_reset_attempts += 1
+      self.ti_hands_off_frames = 0
+      self.ti_option = TI_OPTION.COLD_RESET
+      self.ti_reset_burst_left = TI_RESET_BURST_FRAMES - 1
+      carlog.warning(f"TI cold reset attempt {self.ti_reset_attempts}/{TI_RESET_MAX_ATTEMPTS}: STATE {self.ti_state} VIOL {self.ti_viol}")
+      if self.ti_reset_attempts == TI_RESET_MAX_ATTEMPTS:
+        carlog.warning("TI cold reset: last attempt, waiting for RUN or next ignition after this")
+    return self.ti_option
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -276,6 +347,10 @@ class CarState(CarStateBase):
       ret.steeringTorque, ret.steeringPressed = self.update_ti_driver_torque(
         ti, ret.steeringTorque, STEER_THRESHOLD.get(self.CP.carFingerprint, 1200))
       self.update_ti_gate(ti)
+      self.update_ti_reset(ti)
+      # TI dropped out of RUN mid-drive: openpilot is not steering -> "Steering Temporarily Unavailable"
+      if self.ti_locked_out:
+        ret.steerFaultTemporary = True
     else:
       ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
