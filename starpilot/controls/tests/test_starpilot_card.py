@@ -352,6 +352,53 @@ def test_honda_lkas_button_can_toggle_always_on_lateral(monkeypatch, tmp_path):
   assert ret.pauseLateral is False
 
 
+def test_honda_lkas_aol_follows_panda_cruise_main_requirement(monkeypatch, tmp_path):
+  # Honda panda safety: aol_allowed = acc_main_on && ALT_EXP_ALWAYS_ON_LATERAL (no lkas_on), so an
+  # LKAS-button AOL with cruise main off was rejected frame by frame (drives 305/310/313).
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="honda"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True, lkas_allowed_for_aol=True)
+
+  lkas = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  ret = card.update(make_car_state(available=True, button_events=lkas), starpilot_car_state, make_sm(), toggles)
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+
+  # MAIN off: AOL goes off with the panda, but the LKAS latch is kept
+  ret = card.update(make_car_state(available=False), starpilot_car_state, make_sm(), toggles)
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is False
+
+  # MAIN back on: AOL resumes without another LKAS press, as the panda does
+  ret = card.update(make_car_state(available=True), starpilot_car_state, make_sm(), toggles)
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+
+
+def test_hyundai_lkas_aol_does_not_need_cruise_main(monkeypatch, tmp_path):
+  # Hyundai safety sets lkas_on from the LKAS button, so its panda allows AOL with main off.
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="hyundai", flags=spc.HyundaiFlags.CANFD),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  card.always_on_lateral_allowed = True
+  card.hyundai_aol_ready = True
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True, lkas_allowed_for_aol=True)
+
+  ret = card.update(make_car_state(available=False), SimpleNamespace(distancePressed=False), make_sm(), toggles)
+
+  assert ret.alwaysOnLateralEnabled is True
+
+
 def test_controller_actions_match_vehicle_button_behaviors(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
@@ -881,6 +928,12 @@ def test_honda_mapped_main_cruise_button_keeps_immediate_toggle(monkeypatch, tmp
   toggles = make_toggles(always_on_lateral=True, main_cruise_aol_toggle=True, lkas_allowed_for_aol=True)
 
   ret = card.update(car_state, SimpleNamespace(distancePressed=False), make_sm(), toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  # the Honda panda allows AOL only once it sees cruise main on
+  assert ret.alwaysOnLateralEnabled is False
+
+  ret = card.update(make_car_state(available=True), SimpleNamespace(distancePressed=False), make_sm(), toggles)
 
   assert ret.alwaysOnLateralAllowed is True
   assert ret.alwaysOnLateralEnabled is True

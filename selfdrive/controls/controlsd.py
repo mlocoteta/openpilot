@@ -20,6 +20,7 @@ from opendbc.car.honda.values import CAR as HONDA_CAR, TI_LIMITS
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.nissan.values import CAR as NISSAN_CAR
 from opendbc.car.vehicle_model import VehicleModel
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.selfdrive.controls.lib.drive_helpers import (
   MAX_LATERAL_JERK,
   clip_curvature,
@@ -60,6 +61,9 @@ TI_OUTPUT_PIPELINE_FRAMES = 3
 # Honda 9G TI: a TI output that is not a driver override (rate limit, output headroom guard,
 # near-lock / stuck zeroing) freezes the lateral integrator only once it has lasted this long.
 TI_SUSTAINED_LIMIT_FRAMES = 10
+# Honda 9G TI: at most one panda-lateral-block / panda-TX-blocked log line per this many seconds each.
+TI_PANDA_LOG_INTERVAL = 10.0
+HONDA_SAFETY_MODELS = (car.CarParams.SafetyModel.hondaNidec, car.CarParams.SafetyModel.hondaBosch)
 
 # After a smoothed lane change ends, ramp the curvature limits back to stock over this
 # time so the final recenter correction is shaped instead of stepping through unclamped.
@@ -362,6 +366,26 @@ def get_gm_hud_set_speed(set_speed_ms: float, starpilot_toggles) -> float:
   return spoofed_speed
 
 
+def honda_panda_lateral_allowed(cruise_available: bool, engaged: bool, panda_states) -> bool:
+  """Would the Honda panda safety (opendbc/safety/modes/honda.h) pass a non-zero steer frame now?
+
+  honda.h clears controls_allowed while ACC main (SCM MAIN_ON) is off, and its always-on-lateral
+  permission is aol_allowed = acc_main_on && ALT_EXP_ALWAYS_ON_LATERAL (Honda never sets lkas_on).
+  carState.cruiseState.available decodes the same MAIN_ON bit from the same frames, so it tracks
+  acc_main_on without the 10 Hz pandaStates delay. While engaged, controls_allowed is already
+  checked by selfdrived (controlsMismatch).
+  """
+  if not cruise_available:
+    return False
+  if engaged:
+    return True
+  honda_states = [ps for ps in panda_states if ps.safetyModel in HONDA_SAFETY_MODELS]
+  if not honda_states:
+    return True  # no panda health yet: nothing to contradict the cruise-main check
+  return any(ps.controlsAllowed or ps.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL
+             for ps in honda_states)
+
+
 def get_torque_control_params(CP, torque_params, starpilot_toggles, use_live_params: bool) -> tuple[float, float, float]:
   torque_tune = CP.lateralTuning.torque
   lat_accel_factor = torque_tune.latAccelFactor
@@ -455,7 +479,12 @@ class Controls:
     self._ti_driver_bound = deque([False] * TI_OUTPUT_PIPELINE_FRAMES, maxlen=TI_OUTPUT_PIPELINE_FRAMES)
     self._ti_limited_frames = 0
     self.ti_driver_override = False
+    self._ti_panda_blocking = False
+    self._ti_panda_block_log_time = -TI_PANDA_LOG_INTERVAL
+    self._ti_tx_blocked_last = None
+    self._ti_tx_blocked_log_time = -TI_PANDA_LOG_INTERVAL
     if self.has_ti_sigmoid:
+      self.sm = self.sm.extend(['pandaStates'])
       self._update_ti_live_params()
       if hasattr(self.LaC, "set_ti_low_speed_gain_schedule"):
         self.LaC.set_ti_low_speed_gain_schedule(True)
@@ -512,6 +541,34 @@ class Controls:
     self.ti_driver_override = limited and any(self._ti_driver_bound)
     self.steer_limited_by_safety = self.ti_driver_override or self._ti_limited_frames >= TI_SUSTAINED_LIMIT_FRAMES
     self._ti_torque_requests.append(float(CC.actuators.torque))
+
+  def _ti_panda_lateral_gate(self, lat_active: bool, CS, engaged: bool) -> bool:
+    """Honda 9G TI: lateral is active only while the panda would pass a non-zero 0x249.
+
+    Otherwise (always-on lateral with ACC main off, drives 305/310/313) the panda drops every
+    TI frame for up to ~10 s while latActive stays 1: the steering silently goes slack. Held off,
+    the TI gets zero torque and the lateral controller resets, as for any other lateral stop.
+    """
+    allowed = honda_panda_lateral_allowed(CS.cruiseState.available, engaged, self.sm['pandaStates'])
+    blocking = lat_active and not allowed
+    if blocking and not self._ti_panda_blocking:
+      now = time.monotonic()
+      if now - self._ti_panda_block_log_time >= TI_PANDA_LOG_INTERVAL:
+        self._ti_panda_block_log_time = now
+        cloudlog.warning(f"TI lateral held off: panda would reject 0x249 (ACC main {int(CS.cruiseState.available)}, engaged {int(engaged)})")
+    self._ti_panda_blocking = blocking
+    return lat_active and allowed
+
+  def _log_ti_panda_tx_blocked(self, lat_active: bool) -> None:
+    """Honda 9G TI: diagnostics, log (rate-limited) when the panda blocks TX while lateral is active."""
+    tx_blocked = sum(ps.safetyTxBlocked for ps in self.sm['pandaStates'])
+    last, self._ti_tx_blocked_last = self._ti_tx_blocked_last, tx_blocked
+    if last is None or tx_blocked <= last or not lat_active:
+      return  # first sample, no new blocks, or a counter reset (panda reboot)
+    now = time.monotonic()
+    if now - self._ti_tx_blocked_log_time >= TI_PANDA_LOG_INTERVAL:
+      self._ti_tx_blocked_log_time = now
+      cloudlog.warning(f"TI panda blocked {tx_blocked - last} TX while lateral active (total {tx_blocked})")
 
   def _update_ti_live_params(self):
     """Honda 9G TI: live sigmoid params, Kp and damping policy (~1 s cadence)."""
@@ -654,6 +711,9 @@ class Controls:
                                         CS.steerFaultTemporary, CS.steerFaultPermanent,
                                         standstill, self.CP.steerAtStandstill,
                                         self.sm['starpilotPlan'].lateralCheck)
+    if getattr(self, "has_ti_sigmoid", False):
+      CC.latActive = self._ti_panda_lateral_gate(CC.latActive, CS, CC.enabled and self.sm['selfdriveState'].active)
+      self._log_ti_panda_tx_blocked(CC.latActive)
     # EcuDisableFailed is set when car started in READY mode (ECU disable was rejected)
     # Disable longitudinal so stock ACC works instead
     self.update_ecu_disable_failed()

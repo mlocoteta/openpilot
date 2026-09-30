@@ -34,6 +34,15 @@ HYUNDAI_MAIN_CRUISE_AOL_CONFIRM_TIMEOUT_FRAMES = 100
 AOL_NON_BLOCKING_IMMEDIATE_DISABLE_ALERTS = {
   f"speedTooLow/{ET.IMMEDIATE_DISABLE}",
 }
+# Brands whose panda safety allows always-on lateral only while cruise main is on: the panda sets
+# aol_allowed = (acc_main_on || lkas_on) && ALT_EXP_ALWAYS_ON_LATERAL, and only the Hyundai safety
+# modes ever set lkas_on. On Honda an LKAS-button AOL with main off is rejected by the panda frame
+# by frame (0x249 on the 9G TI, 0xE4/0x194 otherwise) while lateral looks active.
+AOL_REQUIRES_CRUISE_MAIN_BRANDS = frozenset({"honda"})
+
+
+def aol_blocked_by_panda_cruise_main(brand, cruise_available: bool) -> bool:
+  return brand in AOL_REQUIRES_CRUISE_MAIN_BRANDS and not cruise_available
 
 
 def aol_blocked_by_immediate_disable(*alert_types) -> bool:
@@ -359,6 +368,10 @@ class StarPilotCard:
     )
     self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
     self.always_on_lateral_enabled &= not self.error_log.is_file()
+    # Keep the AOL latch (always_on_lateral_allowed) so AOL comes back with cruise main, as the panda's does.
+    self.always_on_lateral_enabled &= not aol_blocked_by_panda_cruise_main(
+      getattr(self.CP, "brand", None), carState.cruiseState.available,
+    )
 
     if sm.updated["starpilotPlan"] or any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types):
       self.accel_pressed = any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types)
