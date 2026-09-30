@@ -1,4 +1,5 @@
 import math
+from collections import deque
 import numpy as np
 
 from opendbc.can import CANPacker
@@ -286,6 +287,7 @@ class CarController(CarControllerBase):
     # Honda 9G Accord Torque Interceptor: gated to the 9G platform + toggle.
     self.has_ti = (CP.carFingerprint == CAR.HONDA_ACCORD_9G) and self.param_store.get_bool("TorqueInterceptorEnabled")
     self.ti_apply_steer_last = 0
+    self.ti_driver_torque_hold = deque(maxlen=TI_LIMITS.TI_OUTPUT_GUARD_HOLD_FRAMES)
     self.ti_stuck_frames = 0
     self.ti_guard_active = {"headroom": False, "lock": False, "stuck": False}
     self.ti_guard_log_frame = {"headroom": -TI_GUARD_LOG_INTERVAL_FRAMES, "lock": -TI_GUARD_LOG_INTERVAL_FRAMES,
@@ -318,9 +320,12 @@ class CarController(CarControllerBase):
     driver_torque = CS.out.steeringTorque
     output_guard = CS.ti_feedback_seen and CS.ti_no_feedback_frames <= TI_FEEDBACK_TIMEOUT_FRAMES
     near_lock = CS.out.vEgo < TI_LOCK_ZERO_SPEED and abs(CS.out.steeringAngleDeg) > TI_LOCK_ZERO_ANGLE
+    # the headroom guard uses the 0.2 s peak of s on each side (update() fills the hold every frame)
+    guard_torque = (min(self.ti_driver_torque_hold), max(self.ti_driver_torque_hold))
 
     ti_apply_steer = apply_ti_steer_torque_limits(ti_new_steer, self.ti_apply_steer_last, driver_torque, TI_LIMITS,
-                                                  output_guard=output_guard, force_zero=near_lock)
+                                                  output_guard=output_guard, force_zero=near_lock,
+                                                  guard_driver_torque=guard_torque)
 
     # VIOL_LKAS_STUK: a small non-zero request must not stay unchanged; drop to 0 for one frame
     # (<= 19 counts toward zero), then the normal up-rate brings it back.
@@ -333,10 +338,11 @@ class CarController(CarControllerBase):
       ti_apply_steer = 0
       self.ti_stuck_frames = 0
 
-    guard_min, guard_max = ti_output_headroom_limits(driver_torque, TI_LIMITS)
+    guard_min, guard_max = ti_output_headroom_limits(*guard_torque, TI_LIMITS)
     headroom = output_guard and not near_lock and not guard_min <= ti_new_steer <= guard_max
+    held = f"{guard_torque[0]:.0f}..{guard_torque[1]:.0f}"
     self._ti_log_guard("headroom", headroom,
-                       f"TI output guard: driver {driver_torque:.0f} cmd {ti_new_steer} capped to [{guard_min:.0f}, {guard_max:.0f}]")
+                       f"TI output guard: driver {driver_torque:.0f} (0.2 s {held}) cmd {ti_new_steer} capped to [{guard_min:.0f}, {guard_max:.0f}]")
     self._ti_log_guard("lock", near_lock and ti_new_steer != 0,
                        f"TI near-lock zero: v {CS.out.vEgo:.1f} angle {CS.out.steeringAngleDeg:.0f} cmd {ti_new_steer}")
     self._ti_log_guard("stuck", stuck, f"TI stuck-command zero: held {self.ti_apply_steer_last}")
@@ -419,6 +425,8 @@ class CarController(CarControllerBase):
     # non-zero torque while controls are not allowed, and sending torque when
     # lateral is inactive is wrong regardless.
     ti_apply_steer = 0
+    if self.has_ti:
+      self.ti_driver_torque_hold.append(CS.out.steeringTorque)
     # The gen1 board only leaves OFF after a run of zero-torque frames, and latches a
     # violation if torque ramps before it reports RUN. So torque is gated on the board's
     # own state (CS.ti_lkas_allowed); while closed, the TI frame below is still sent

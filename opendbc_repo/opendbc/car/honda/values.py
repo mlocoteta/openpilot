@@ -74,11 +74,14 @@ class TI_LIMITS:
   # Output-headroom guard (reports/2026-09-29-ti-lockout-prevention.md, sections 3 and 7 #1). The TI
   # trips VIOL_TORQUE_H/L (0x17/0x18) when its computed output s + cmd/12 (s = TI_TORQUE_SENSOR)
   # leaves ~+62/-55 counts; our driver limiter only clips commands opposing the driver, so a
-  # command in the driver's direction adds up with them (13/32 trips). Cap only that part so the
-  # modelled output stays within +40/-35 (~20 counts margin for sub-10 ms spikes).
+  # command in the driver's direction adds up with them (13/32 trips). The cap is continuous in s
+  # and uses a 0.2 s peak-hold of s ("G2", reports/2026-09-30-drives-312-313.md section 3): the
+  # first version (+40/-35, only on the driver's side) switched on and off with sensor noise
+  # around s = 0 and chattered hands-off (95 of 108 fast steps re-grew within 50 ms).
   TI_OUTPUT_TORQUE_DIV = 12          # fitted D in s + cmd/D (11-13 fit about equally, 3.02 M RUN frames)
-  TI_OUTPUT_GUARD_POS = 40           # window edge +62 measured
-  TI_OUTPUT_GUARD_NEG = 35           # window edge -55.5 measured (asymmetric)
+  TI_OUTPUT_GUARD_POS = 50           # window edge +62 measured; hands-off cap +599
+  TI_OUTPUT_GUARD_NEG = 45           # window edge -55.5 measured (asymmetric); hands-off cap -540
+  TI_OUTPUT_GUARD_HOLD_FRAMES = 20   # peak-hold of s for the guard (0.2 s at 100 Hz)
   TI_STEER_DELTA_DOWN_FAST = 60      # step toward zero while a guard binds (panda checks magnitude only)
 
 

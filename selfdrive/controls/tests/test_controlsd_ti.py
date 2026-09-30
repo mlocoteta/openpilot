@@ -122,15 +122,20 @@ def test_ti_steer_limited_clears_when_lateral_inactive():
 
 def run_ti_pipeline(frames, output_guard=False, near_lock=False):
   """frames: list of (request counts, TI driver torque). Runs the TI limiter as the carcontroller does
-  (previous frame's request with this frame's carState) and controlsd on the result.
-  Starts settled on the first request. Returns per-frame (sent, ti_driver_override, steer_limited_by_safety)."""
+  (previous frame's request with this frame's carState, guard on the 0.2 s peak-hold of s) and controlsd
+  on the result. Starts settled on the first request. Returns per-frame (sent, ti_driver_override,
+  steer_limited_by_safety)."""
+  from collections import deque
   controls = make_limit_controls()
   last_request = last_sent = 0 if near_lock else frames[0][0]
   controls._ti_torque_requests.extend([last_request / TI_LIMITS.TI_STEER_MAX] * len(controls._ti_torque_requests))
+  hold = deque(maxlen=TI_LIMITS.TI_OUTPUT_GUARD_HOLD_FRAMES)
   out = []
   for request, driver_torque in frames:
+    hold.append(driver_torque)
     sent = apply_ti_steer_torque_limits(last_request, last_sent, driver_torque, TI_LIMITS,
-                                        output_guard=output_guard, force_zero=near_lock)
+                                        output_guard=output_guard, force_zero=near_lock,
+                                        guard_driver_torque=(min(hold), max(hold)))
     set_ti_output(controls, sent / TI_LIMITS.TI_STEER_MAX)
     controls.sm['carState'].steeringTorque = driver_torque
     controls._update_ti_steer_limited(lat_cc(request / TI_LIMITS.TI_STEER_MAX))
@@ -151,7 +156,7 @@ def test_ti_rate_limit_with_light_same_side_hand_is_not_an_override():
 
 
 def test_ti_output_guard_clamp_is_not_an_override():
-  # aa7e4b70a headroom guard: a same-direction hand (+30) caps a 599 request at (40 - 30) * 12.
+  # headroom guard: a same-direction hand (+30) caps a 599 request at (50 - 30) * 12.
   # Not an override (no recapture), but a clamp that holds freezes the integrator after
   # TI_SUSTAINED_LIMIT_FRAMES so it cannot wind up behind it.
   frames = [(0, 0)] + [(599, 30)] * 80
@@ -162,6 +167,19 @@ def test_ti_output_guard_clamp_is_not_an_override():
   first = limited.index(True)
   assert first >= TI_SUSTAINED_LIMIT_FRAMES
   assert all(limited[first:])
+
+
+def test_ti_hands_off_guard_cap_is_steady_and_not_an_override():
+  # G2: hands-off at a -599 request with +-3 sensor noise the cap sits at (-45 + 3) * 12 without
+  # chattering (the sign-cased guard toggled -599 <-> -408). Not an override; the held cap freezes
+  # the integrator after TI_SUSTAINED_LIMIT_FRAMES like any sustained limit.
+  noise = (-3, 1, 3, -2, 0, 2)
+  frames = [(-400, 0)] + [(-599, noise[n % 6]) for n in range(150)]
+  out = run_ti_pipeline(frames, output_guard=True)
+  sent = [x for x, _, _ in out]
+  assert sent[-100:] == [(-TI_LIMITS.TI_OUTPUT_GUARD_NEG + 3) * TI_LIMITS.TI_OUTPUT_TORQUE_DIV] * 100
+  assert not any(override for _, override, _ in out)
+  assert all(limited for _, _, limited in out[-100:])
 
 
 def test_ti_near_lock_zero_freezes_integrator_once_sustained():
