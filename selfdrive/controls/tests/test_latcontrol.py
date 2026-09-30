@@ -2111,17 +2111,22 @@ class TestLatControl:
     assert not controller_10g.ti_recapture_enabled
 
   def _recapture_run(self, enabled, schedule):
-    """schedule: list of (frames, steeringPressed, steeringTorque, steer_limited). Returns per-frame logs."""
+    """schedule: list of (frames, steeringPressed, steeringTorque, limited) where limited is a bool (TI driver
+    override from controlsd: freezes the integrator too) or a (ti_driver_override, steer_limited_by_safety)
+    pair. Returns per-frame logs."""
     controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
     controller.set_ti_recapture(enabled)
     CS.vEgo = 14.0
     CS.steeringAngleDeg = -2.0  # the car is wide of a left curve: large positive error
     out = []
     for frames, pressed, drv, limited in schedule:
+      override, steer_limited = limited if isinstance(limited, tuple) else (limited, limited)
       for _ in range(frames):
         CS.steeringPressed = pressed
         CS.steeringTorque = drv
-        torque, _, lac_log = controller.update(True, CS, VM, params, limited, 0.012, False, 0.4, None, None, starpilot_toggles)
+        controller.set_ti_driver_override(override)
+        torque, _, lac_log = controller.update(True, CS, VM, params, steer_limited, 0.012, False, 0.4, None, None,
+                                               starpilot_toggles)
         out.append((torque, lac_log.p, lac_log.f, lac_log.i, controller.ti_recapture_gain,
                     controller.starpilot_lateral_state.feedforward))
     return out
@@ -2165,6 +2170,39 @@ class TestLatControl:
     # nor is a slew-limited frame with no hand
     on2 = self._recapture_run(True, [(80, False, 2, True)])
     assert all(x[4] == 1.0 for x in on2)
+
+  def test_ti_9g_recapture_ignores_rate_and_guard_limits(self):
+    # 2026-09-30 turn exits: a hand of 6-14 counts on the helping side while DELTA_DOWN or the output
+    # guard holds the TI output back. controlsd reports no driver override, so P stays live.
+    for steer_limited in (False, True):  # 1-3 frame rate mismatch / sustained guard clamp
+      on = self._recapture_run(True, [(20, False, 0, False), (60, False, 10, (False, steer_limited))])
+      assert all(x[4] == 1.0 for x in on)
+      assert abs(on[-1][1]) > 0.1
+
+  def test_ti_9g_integrator_freezes_on_override_only(self):
+    # The integrator keeps integrating through a short rate-limit mismatch (steer_limited_by_safety stays
+    # False from controlsd) and freezes during a real hold against the wheel (no windup behind the driver).
+    def run(drv, override, steer_limited):
+      controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+      controller.set_ti_recapture(True)
+      CS.vEgo = 14.0
+      CS.steeringAngleDeg = 0.0  # small, unsaturated error toward a gentle left curve
+      out = []
+      for k in range(100):
+        CS.steeringTorque = drv if k >= 50 else 0
+        controller.set_ti_driver_override(override and k >= 50)
+        _, _, lac_log = controller.update(True, CS, VM, params, steer_limited and k >= 50, 0.001, False, 0.4, None, None,
+                                          starpilot_toggles)
+        out.append((lac_log.i, controller.ti_recapture_gain))
+      return out
+
+    free = run(10, False, False)
+    held = run(-20, True, True)
+    i_at_hold = held[49][0]
+    assert free[49][0] == pytest.approx(i_at_hold)
+    assert abs(free[-1][0] - i_at_hold) > 1e-3  # still integrating
+    assert all(x[0] == pytest.approx(i_at_hold) for x in held[50:])
+    assert all(x[1] == 1.0 for x in free) and all(x[1] == 0.0 for x in held[50:])
 
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33

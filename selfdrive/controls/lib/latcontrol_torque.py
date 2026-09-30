@@ -97,9 +97,11 @@ def get_ti_9g_low_speed_gain_scale(v_ego):
 # releases over the weekend: post-release excess median +0.30, p90 +0.73 m/s^2).
 # During an override the error-driven terms are held at zero (feedforward from the plan and the
 # frozen integrator stay live), then ramped back in over TI_RECAPTURE_TIME. The plan's feedforward
-# is never delayed. An override is steeringPressed, or the TI output not following the request
-# (steer_limited_by_safety) while the TI sensor reads a hand (>= TI_RECAPTURE_DRIVER_TORQUE counts;
-# the 15-count steeringPressed threshold missed 27 of 91 curve overrides).
+# is never delayed. An override is steeringPressed, or the TI driver-torque limiter holding the output
+# back (ti_driver_override from controlsd: the hand opposes the request) while the TI sensor reads a hand
+# (>= TI_RECAPTURE_DRIVER_TORQUE counts; the 15-count steeringPressed threshold missed 27 of 91 curve
+# overrides). Rate-limit and guard mismatches are not overrides: counted as such they re-armed recapture
+# every ~10 s of driving and dropped P mid turn exit (2026-09-30 turn-recovery report).
 TI_RECAPTURE_TIME = 0.6              # s, ramp of the error-driven terms after release
 TI_RECAPTURE_DRIVER_TORQUE = 6       # TI torque sensor counts
 TI_RECAPTURE_HOLD_TIME = 0.2         # s, keeps a limiter-detected override latched across short gaps
@@ -145,6 +147,7 @@ class LatControlTorque(LatControl):
     self.ti_recapture_enabled = False
     self.ti_recapture_gain = 1.0
     self.ti_override_hold = 0.0
+    self.ti_driver_override = False
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -270,12 +273,16 @@ class LatControlTorque(LatControl):
     self.ti_recapture_gain = 1.0
     self.ti_override_hold = 0.0
 
-  def update_ti_recapture(self, CS, steer_limited_by_safety):
+  def set_ti_driver_override(self, override):
+    """controlsd: the TI driver-torque limiter is holding the output back this frame."""
+    self.ti_driver_override = bool(override)
+
+  def update_ti_recapture(self, CS):
     """Scale for the error-driven terms: 0 during a driver override, ramping to 1 after release."""
     if not self.ti_recapture_enabled:
       return 1.0
     hand_on = abs(float(CS.steeringTorque)) >= TI_RECAPTURE_DRIVER_TORQUE
-    if CS.steeringPressed or (steer_limited_by_safety and hand_on):
+    if CS.steeringPressed or (self.ti_driver_override and hand_on):
       self.ti_override_hold = TI_RECAPTURE_HOLD_TIME
     else:
       self.ti_override_hold = max(self.ti_override_hold - self.dt, 0.0)
@@ -396,7 +403,7 @@ class LatControlTorque(LatControl):
       current_kp = np.interp(CS.vEgo, self.pid._k_p[0], self.pid._k_p[1])
       error = setpoint - measurement
       error_with_lsf = error * (1 + low_speed_factor / max(current_kp, 1e-3))
-      error_with_lsf *= self.update_ti_recapture(CS, steer_limited_by_safety)
+      error_with_lsf *= self.update_ti_recapture(CS)
       if self.is_ioniq_6_2025:
         error_with_lsf *= get_ioniq_6_2025_low_speed_center_error_scale(
           setpoint, desired_lateral_jerk, CS.vEgo,

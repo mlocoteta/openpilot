@@ -9,7 +9,7 @@ until it reports RUN, and the frame must keep being sent while the gate is close
 import pytest
 
 from opendbc.can import CANPacker
-from opendbc.car import Bus, apply_ti_steer_torque_limits, structs
+from opendbc.car import Bus, apply_ti_steer_torque_limits, structs, ti_driver_limiter_binds, ti_driver_torque_limits
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.honda import carcontroller, carstate, hondacan, interface
@@ -548,6 +548,16 @@ class TestTIOutputHeadroomGuard:
       assert abs(guarded) <= abs(stock) or guarded * stock <= 0
       assert abs(guarded - last) <= max(self.FAST, TI_LIMITS.TI_STEER_DELTA_UP)
     assert abs(guarded) <= TI_LIMITS.TI_STEER_MAX
+
+  @pytest.mark.parametrize("s", range(-60, 61, 5))
+  def test_driver_limiter_binds_only_against_an_opposing_hand(self, s):
+    lo, hi = ti_driver_torque_limits(s, TI_LIMITS)
+    for target in (-599, -300, -40, 0, 40, 300, 599):
+      binds = ti_driver_limiter_binds(target, s, TI_LIMITS)
+      assert binds == (ti_limit(target, target, s, guard=False) != target)
+      assert binds == (not lo <= target <= hi)
+      if binds:
+        assert s * target < 0 and abs(s) > TI_LIMITS.TI_STEER_DRIVER_ALLOWANCE
 
   def test_force_zero_ramps_fast(self):
     assert ti_limit(300, 300, 0, zero=True) == 300 - self.FAST

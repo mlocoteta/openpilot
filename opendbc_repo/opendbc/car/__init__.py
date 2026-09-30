@@ -109,17 +109,29 @@ def ti_output_headroom_limits(driver_torque, LIMITS):
   return min_allowed, max_allowed
 
 
-def apply_ti_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS, output_guard=False, force_zero=False):
-  # Honda 9G Accord Torque Interceptor limiting (mirrors apply_driver_steer_torque_limits
-  # but with the TI_* constants and the TI's own driver-torque units).
-  # output_guard: also apply ti_output_headroom_limits (driver_torque must be the TI sensor, in TI counts).
-  # force_zero: ramp to zero. Either one binding allows TI_STEER_DELTA_DOWN_FAST toward zero.
+def ti_driver_torque_limits(driver_torque, LIMITS):
+  # Honda 9G Accord TI: (min, max) command allowed by the driver-torque limiter.
   driver_max_torque = LIMITS.TI_STEER_MAX + (LIMITS.TI_STEER_DRIVER_ALLOWANCE +
                                              driver_torque * LIMITS.TI_STEER_DRIVER_FACTOR) * LIMITS.TI_STEER_DRIVER_MULTIPLIER
   driver_min_torque = -LIMITS.TI_STEER_MAX + (-LIMITS.TI_STEER_DRIVER_ALLOWANCE +
                                               driver_torque * LIMITS.TI_STEER_DRIVER_FACTOR) * LIMITS.TI_STEER_DRIVER_MULTIPLIER
   max_steer_allowed = max(min(LIMITS.TI_STEER_MAX, driver_max_torque), 0)
   min_steer_allowed = min(max(-LIMITS.TI_STEER_MAX, driver_min_torque), 0)
+  return min_steer_allowed, max_steer_allowed
+
+
+def ti_driver_limiter_binds(apply_torque, driver_torque, LIMITS):
+  # True when the driver-torque limiter cuts this command, i.e. the driver holds the wheel against it.
+  min_steer_allowed, max_steer_allowed = ti_driver_torque_limits(driver_torque, LIMITS)
+  return not min_steer_allowed <= apply_torque <= max_steer_allowed
+
+
+def apply_ti_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS, output_guard=False, force_zero=False):
+  # Honda 9G Accord Torque Interceptor limiting (mirrors apply_driver_steer_torque_limits
+  # but with the TI_* constants and the TI's own driver-torque units).
+  # output_guard: also apply ti_output_headroom_limits (driver_torque must be the TI sensor, in TI counts).
+  # force_zero: ramp to zero. Either one binding allows TI_STEER_DELTA_DOWN_FAST toward zero.
+  min_steer_allowed, max_steer_allowed = ti_driver_torque_limits(driver_torque, LIMITS)
   apply_torque = np.clip(apply_torque, min_steer_allowed, max_steer_allowed)
 
   delta_down = LIMITS.TI_STEER_DELTA_DOWN
