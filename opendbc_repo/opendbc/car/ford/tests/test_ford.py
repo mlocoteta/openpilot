@@ -9,12 +9,13 @@ import pytest
 from opendbc.car import Bus, gen_empty_fingerprint
 from opendbc.can import CANPacker
 from opendbc.car.ford import fordcan
-from opendbc.car.ford.carcontroller import FordStockCruiseButton
+from opendbc.car.ford.carcontroller import FordStockCruiseButton, apply_creep_compensation
+from opendbc.car.ford.carstate import CarState
 from opendbc.car.gps import FORD_MACH_E_GPS_MESSAGES, get_car_gps_config, parse_ford_can_gps
-from opendbc.car.structs import CarParams
+from opendbc.car.structs import CarParams, CarState as CarStateStruct
 from opendbc.car.fw_versions import build_fw_dict
 from opendbc.car.ford.interface import CarInterface
-from opendbc.car.ford.values import CAR, FW_QUERY_CONFIG, FW_PATTERN, FordSafetyFlags, get_platform_codes, match_vin_to_car
+from opendbc.car.ford.values import CAR, DBC, FW_QUERY_CONFIG, FW_PATTERN, FordSafetyFlags, get_platform_codes, match_vin_to_car
 from opendbc.car.ford.fingerprints import FW_VERSIONS
 
 Ecu = CarParams.Ecu
@@ -36,6 +37,57 @@ def test_stock_cruise_button_ignores_press_with_cruise_master_off():
   button = FordStockCruiseButton()
 
   assert button.update(True, cruise_available=False, cruise_enabled=False) == (False, False)
+
+
+@pytest.mark.parametrize("op_long", (False, True))
+@pytest.mark.parametrize("standstill", (False, True))
+@pytest.mark.parametrize("cruise_status", (4, 5))
+@pytest.mark.parametrize("switch", ("CcAslButtnCnclResPress", "CcAslButtnCnclPress"))
+def test_ford_cancel_event_does_not_require_pcm_disengagement(op_long, standstill, cruise_status, switch):
+  CP = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, gen_empty_fingerprint(), [], op_long, False, False, None)
+  state = CarState(CP, None)
+  parsers = state.get_can_parsers(CP)
+  packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+  for frame, (pressed, status) in enumerate(((True, cruise_status), (True, 3), (False, 3)), start=1):
+    messages = [
+      packer.make_can_msg("Steering_Data_FD1", fordcan.CanBus(CP).main, {switch: int(pressed)}),
+      packer.make_can_msg("EngBrakeData", fordcan.CanBus(CP).main, {"CcStat_D_Actl": status}),
+      packer.make_can_msg("DesiredTorqBrk", fordcan.CanBus(CP).main, {"VehStop_D_Stat": int(standstill)}),
+    ]
+    parsers[Bus.pt].update([(frame * 100_000_000, messages)])
+    ret, _ = state.update(parsers, None)
+    assert ret.standstill == standstill
+    expected = [(CarStateStruct.ButtonEvent.Type.cancel, pressed)] if op_long and frame != 2 else []
+    assert [(event.type, event.pressed) for event in ret.buttonEvents] == expected
+
+
+@pytest.mark.parametrize("initial_status", (0, 3))
+def test_ford_resume_does_not_become_cancel_when_pcm_engages(initial_status):
+  CP = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, gen_empty_fingerprint(), [], True, False, False, None)
+  state = CarState(CP, None)
+  parsers = state.get_can_parsers(CP)
+  packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+  for frame, (pressed, status) in enumerate(((True, initial_status), (True, 4), (False, 4)), start=1):
+    messages = [
+      packer.make_can_msg("Steering_Data_FD1", fordcan.CanBus(CP).main, {"CcAslButtnCnclResPress": int(pressed)}),
+      packer.make_can_msg("EngBrakeData", fordcan.CanBus(CP).main, {"CcStat_D_Actl": status}),
+    ]
+    parsers[Bus.pt].update([(frame * 100_000_000, messages)])
+    ret, _ = state.update(parsers, None)
+    assert not ret.buttonEvents
+
+
+def test_mach_e_does_not_apply_engine_creep_compensation():
+  for accel in (-1.0, -0.1, 0.0, 0.1):
+    assert apply_creep_compensation(accel, 0.5, CAR.FORD_MUSTANG_MACH_E_MK1,
+                                     standstill=False, stopping=False) == accel
+
+  assert apply_creep_compensation(0.0, 0.0, CAR.FORD_MUSTANG_MACH_E_MK1,
+                                   standstill=True, stopping=True) == -0.6
+  assert apply_creep_compensation(0.0, 0.5, CAR.FORD_F_150_MK14,
+                                   standstill=False, stopping=False) == -0.6
 
 
 ECU_ADDRESSES = {
@@ -192,10 +244,12 @@ def test_mach_e_longitudinal_toggle_controls_stock_acc_selection():
   assert not stock.openpilotLongitudinalControl
   assert stock.pcmCruise
   assert not (stock.safetyConfigs[-1].safetyParam & FordSafetyFlags.LONG_CONTROL)
+  assert stock.safetyConfigs[-1].safetyParam & FordSafetyFlags.MACH_E_CURVATURE
 
   assert enhanced.alphaLongitudinalAvailable
   assert enhanced.openpilotLongitudinalControl
   assert enhanced.safetyConfigs[-1].safetyParam & FordSafetyFlags.LONG_CONTROL
+  assert enhanced.safetyConfigs[-1].safetyParam & FordSafetyFlags.MACH_E_CURVATURE
 
 
 def test_mach_e_can_gps_decode():

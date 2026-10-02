@@ -67,6 +67,8 @@ class StarPilotCard:
 
     self.accel_pressed = False
     self.always_on_lateral_allowed = False
+    self.controller_aol_override = None
+    self.pacifica_aol_set_seen = False
     hyundai_flags = getattr(self.CP, "flags", 0)
     self.kia_forte_non_scc = (
       getattr(self.CP, "carFingerprint", None) in (HYUNDAI_CAR.KIA_FORTE_2019_NON_SCC, HYUNDAI_CAR.KIA_FORTE_2021_NON_SCC) and
@@ -82,7 +84,9 @@ class StarPilotCard:
     self.g70_main_cruise_aol_pending_frames = 0
     self.prev_cruise_available = None
     self.prev_active = False
+    self.prev_brake_pressed = False
     self.prev_cruise_enabled = False
+    self.tesla_aol_brake_disengaged = False
     self.decel_pressed = False
     self.cancelPressed_previously = False
     self.cancel_pulse_glide_suppressed = False
@@ -167,17 +171,35 @@ class StarPilotCard:
     self._controller_action_counters[key] = current
     return max(0, current - previous)
 
-  def _toggle_controller_aol(self, carState, starpilot_toggles):
+  def _toggle_controller_aol(self, carState, starpilot_toggles, main_cruise_aol=False):
     if not self.always_on_lateral_supported or not getattr(starpilot_toggles, "always_on_lateral", False):
+      return False
+    tesla_disengage_on_brake = (
+      self.CP.brand == "tesla" and
+      getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False)
+    )
+    if tesla_disengage_on_brake and not self.always_on_lateral_allowed and carState.brakePressed:
+      return False
+    pacifica_requires_set = pacifica_hybrid_aol_requires_set_press(
+      getattr(self.CP, "carFingerprint", None), getattr(self.CP, "pcmCruise", False),
+    )
+    if main_cruise_aol and (
+      not carState.cruiseState.available or
+      (pacifica_requires_set and not self.pacifica_aol_set_seen)
+    ):
       return False
     if self.hyundai_aol_needs_engagement:
       self.hyundai_aol_ready = True
     self.always_on_lateral_allowed = not self.always_on_lateral_allowed
+    if main_cruise_aol:
+      self.controller_aol_override = self.always_on_lateral_allowed
+    if tesla_disengage_on_brake and self.always_on_lateral_allowed:
+      self.tesla_aol_brake_disengaged = False
     if carState.cruiseState.enabled or self.pause_lateral:
       self.pause_lateral = not self.always_on_lateral_allowed
     return True
 
-  def _handle_controller_actions(self, carState, sm, starpilot_toggles):
+  def _handle_controller_actions(self, carState, sm, starpilot_toggles, main_cruise_aol=False):
     force_coast_count = self._pending_controller_action_count(
       CONTROLLER_ACTION_FORCE_COAST
     )
@@ -195,7 +217,7 @@ class StarPilotCard:
       CONTROLLER_ACTION_TOGGLE_AOL
     )
     if aol_count % 2:
-      self._toggle_controller_aol(carState, starpilot_toggles)
+      self._toggle_controller_aol(carState, starpilot_toggles, main_cruise_aol)
 
   def _handle_favorite_traffic_mode_action(self, sm):
     counter = self.params_memory.get_int(FAVORITE_ACTION_TRAFFIC_MODE_COUNTER)
@@ -269,6 +291,12 @@ class StarPilotCard:
       and starpilot_toggles.main_cruise_aol_toggle
     )
     forte_main_cruise_aol_managed = self.kia_forte_non_scc and starpilot_toggles.main_cruise_aol_toggle
+    tesla_disengage_on_brake = (
+      self.CP.brand == "tesla" and
+      getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False)
+    )
+    if not tesla_disengage_on_brake:
+      self.tesla_aol_brake_disengaged = False
 
     if carState.gearShifter in NON_DRIVING_GEARS or not g70_main_cruise_aol_managed:
       self.g70_main_cruise_aol_pending = False
@@ -329,49 +357,49 @@ class StarPilotCard:
     if forte_main_cruise_aol_managed:
       self.always_on_lateral_allowed = carState.cruiseState.available
 
-    if starpilot_toggles.always_on_lateral_main and not button_managed_aol:
+    main_cruise_aol = starpilot_toggles.always_on_lateral_main and not button_managed_aol
+    if main_cruise_aol:
       car_fingerprint = getattr(self.CP, "carFingerprint", None)
       pcm_cruise = getattr(self.CP, "pcmCruise", False)
       if pacifica_hybrid_aol_requires_set_press(car_fingerprint, pcm_cruise):
         # Chrysler Pacifica Hybrid stock ACC can fall back to plain cruise if AOL
         # starts steering before the driver presses SET.
         if not carState.cruiseState.available:
+          self.pacifica_aol_set_seen = False
           self.always_on_lateral_allowed = False
         elif carState.cruiseState.enabled and not self.prev_cruise_enabled:
+          self.pacifica_aol_set_seen = True
           self.always_on_lateral_allowed = True
+        if self.controller_aol_override is not None:
+          self.always_on_lateral_allowed = self.pacifica_aol_set_seen and self.controller_aol_override
       else:
-        self.always_on_lateral_allowed = carState.cruiseState.available
+        self.always_on_lateral_allowed = carState.cruiseState.available and self.controller_aol_override is not False
 
     # On rising edge of engagement (SET press enabling lat+long), auto-enable AOL
     # so that lateral persists when braking disengages longitudinal
-    if sm["selfdriveState"].active and not self.prev_active and self.always_on_lateral_set and starpilot_toggles.always_on_lateral_lkas:
+    engagement_started = sm["selfdriveState"].active and not self.prev_active
+    if (engagement_started and self.always_on_lateral_set and
+        (starpilot_toggles.always_on_lateral_lkas or tesla_disengage_on_brake) and
+        (not main_cruise_aol or self.controller_aol_override is not False)):
       if hyundai_aol_needs_engagement:
         self.hyundai_aol_ready = True
+      self.tesla_aol_brake_disengaged = False
       self.always_on_lateral_allowed = True
 
+    if (tesla_disengage_on_brake and carState.brakePressed and not self.prev_brake_pressed and
+        self.always_on_lateral_set):
+      self.tesla_aol_brake_disengaged = True
+
+    if self.tesla_aol_brake_disengaged:
+      self.always_on_lateral_allowed = False
+
     self.prev_active = sm["selfdriveState"].active
+    self.prev_brake_pressed = carState.brakePressed
     self.prev_cruise_enabled = carState.cruiseState.enabled
     self.prev_cruise_available = carState.cruiseState.available
 
     if not self.always_on_lateral_supported:
       self.always_on_lateral_allowed = False
-
-    self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
-    if getattr(self.CP, "carFingerprint", None) == "TESLA_MODEL_S_PREAP":
-      self.always_on_lateral_enabled &= preap_authorized
-    self.always_on_lateral_enabled &= carState.gearShifter not in NON_DRIVING_GEARS
-    self.always_on_lateral_enabled &= not hyundai_aol_needs_engagement or self.hyundai_aol_ready
-    self.always_on_lateral_enabled &= sm["starpilotPlan"].lateralCheck
-    self.always_on_lateral_enabled &= sm["liveCalibration"].calPerc >= 1
-    self.always_on_lateral_enabled &= not aol_blocked_by_immediate_disable(
-      sm["selfdriveState"].alertType, sm["starpilotSelfdriveState"].alertType,
-    )
-    self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
-    self.always_on_lateral_enabled &= not self.error_log.is_file()
-    # Keep the AOL latch (always_on_lateral_allowed) so AOL comes back with cruise main, as the panda's does.
-    self.always_on_lateral_enabled &= not aol_blocked_by_panda_cruise_main(
-      getattr(self.CP, "brand", None), carState.cruiseState.available,
-    )
 
     if sm.updated["starpilotPlan"] or any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types):
       self.accel_pressed = any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types)
@@ -444,7 +472,24 @@ class StarPilotCard:
         else:
           self.handle_button_event("lkas", sm, starpilot_toggles)
 
-    self._handle_controller_actions(carState, sm, starpilot_toggles)
+    self._handle_controller_actions(carState, sm, starpilot_toggles, main_cruise_aol)
+
+    self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
+    if getattr(self.CP, "carFingerprint", None) == "TESLA_MODEL_S_PREAP":
+      self.always_on_lateral_enabled &= preap_authorized
+    self.always_on_lateral_enabled &= carState.gearShifter not in NON_DRIVING_GEARS
+    self.always_on_lateral_enabled &= not hyundai_aol_needs_engagement or self.hyundai_aol_ready
+    self.always_on_lateral_enabled &= sm["starpilotPlan"].lateralCheck
+    self.always_on_lateral_enabled &= sm["liveCalibration"].calPerc >= 1
+    self.always_on_lateral_enabled &= not aol_blocked_by_immediate_disable(
+      sm["selfdriveState"].alertType, sm["starpilotSelfdriveState"].alertType,
+    )
+    self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
+    self.always_on_lateral_enabled &= not self.error_log.is_file()
+    # Keep the AOL latch (always_on_lateral_allowed) so AOL comes back with cruise main, as the panda's does.
+    self.always_on_lateral_enabled &= not aol_blocked_by_panda_cruise_main(
+      getattr(self.CP, "brand", None), carState.cruiseState.available,
+    )
 
     if getattr(starpilot_toggles, "has_canfd_media_buttons", False):
       if starpilotCarState.modePressed:

@@ -870,6 +870,9 @@ class StarPilotVariables:
     )
     toggle.always_on_lateral_main = toggle.always_on_lateral and not prohibited_main_aol
     toggle.always_on_lateral_pause_speed = self.get_value("PauseAOLOnBrake", cast=float, condition=toggle.always_on_lateral)
+    toggle.tesla_aol_disengage_on_brake = self.get_value(
+      "TeslaAOLDisengageOnBrake", condition=toggle.always_on_lateral and toggle.car_make == "tesla"
+    )
 
     main_cruise_button_control = self.get_button_function("MainCruiseButtonControl")
     toggle.main_cruise_aol_toggle = _main_cruise_aol_allowed(main_cruise_button_control)
@@ -1502,8 +1505,6 @@ class StarPilotVariables:
     toggle.startup_alert_bottom = self.get_value("StartupMessageBottom", cast=str, default="")
 
     if toggle.simple_mode:
-      toggle.alert_volume_controller = False
-
       toggle.color_scheme = "stock"
       toggle.current_holiday_theme = "stock"
       toggle.holiday_themes = False

@@ -25,6 +25,7 @@ from opendbc.car.toyota.radar_interface import RadarInterface, TSSP_RADAR_EGO_SP
 from opendbc.car.toyota.values import CAR, DBC, MIN_ACC_SPEED, TSS2_CAR, ANGLE_CONTROL_CAR, RADAR_ACC_CAR, SECOC_CAR, \
                                                   FW_QUERY_CONFIG, PLATFORM_CODE_ECUS, FUZZY_EXCLUDED_PLATFORMS, \
                                                   ToyotaFlags, ToyotaSafetyFlags, ToyotaStarPilotFlags, TOYOTA_AUTO_HOLD_CARS, \
+                                                  TOYOTA_AUTO_HOLD_AEB_CARS, \
                                                   get_platform_codes
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
@@ -211,13 +212,17 @@ class TestToyotaInterfaces:
       params.remove("ToyotaAutoHold")
 
     assert car_params.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value
-    assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
-    assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+    if candidate in TOYOTA_AUTO_HOLD_AEB_CARS:
+      assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+      assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
+    else:
+      assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
+      assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
 
     can_parsers = CarState.get_can_parsers(car_params)
     car_state = CarState(car_params, SimpleNamespace(flags=0))
     car_state.update(can_parsers, SimpleNamespace(cluster_offset=1.0))
-    assert "PRE_COLLISION_2" not in can_parsers[Bus.cam].vl
+    assert (0x344 in can_parsers[Bus.cam].vl) == (candidate in TOYOTA_AUTO_HOLD_AEB_CARS)
 
   @pytest.mark.parametrize("candidate", [CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H])
   def test_auto_hold_is_disabled_by_default(self, candidate):
@@ -888,6 +893,31 @@ class TestToyotaCarController:
 
     controller.update_auto_hold_state(cs, activation_frames=0)
     assert not controller.brake_hold_active
+
+  def test_camry_auto_hold_uses_legacy_aeb_brake_path(self):
+    controller = self._make_controller()
+    controller.CP.carFingerprint = CAR.TOYOTA_CAMRY_TSS2
+    controller.packer = CANPacker(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt])
+    controller.frame = 0
+
+    cs = SimpleNamespace(
+      out=SimpleNamespace(
+        standstill=True,
+        cruiseState=SimpleNamespace(available=True, enabled=False),
+        gasPressed=False,
+        brakePressed=True,
+        gearShifter=structs.CarState.GearShifter.drive,
+      ),
+      pre_collision_2={},
+    )
+
+    can_sends = controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    parser = CANParser(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt], [("PRE_COLLISION_2", 0)], 0)
+    parser.update([(1, can_sends)])
+
+    assert controller.brake_hold_active
+    assert parser.vl["PRE_COLLISION_2"]["DSS1GDRV"] == -1.0
+    assert parser.vl["PRE_COLLISION_2"]["PBRTRGR"] == 1
 
   def test_prius_resume_request_releases_standstill_latch(self):
     controller = self._make_controller(standstill_req=True, last_standstill=True)

@@ -857,6 +857,65 @@ def test_santa_fe_force_stop_holds_through_low_speed_detector_dropout():
   assert result == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize("fingerprint", ("FORD_MUSTANG_MACH_E_MK1", "FORD_F_150_LIGHTNING_MK1", "OTHER_CAR"))
+def test_mach_e_force_stop_completion_is_vehicle_scoped(fingerprint):
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  planner.model_length = 60.0
+  vcruise.force_stop_entry_speed = 12.0
+  vcruise.tracked_model_length = 4.6
+  vcruise.force_stop_distance_cap = 4.6
+  sm = make_sm(standstill=False, car_fingerprint=fingerprint)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=0.7)
+  planner.starpilot_cem.stop_light_detected = False
+  update_vcruise(vcruise, sm, toggles, now=0.25, v_ego=0.7)
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=0.7)
+
+  if fingerprint == "FORD_MUSTANG_MACH_E_MK1":
+    assert get_force_stop_low_speed_hold(sm["carParams"]) == pytest.approx(1.0)
+    assert vcruise.forcing_stop
+    assert result == pytest.approx(0.0)
+    assert vcruise.tracked_model_length <= 4.6
+  else:
+    assert get_force_stop_low_speed_hold(sm["carParams"]) is None
+    assert not vcruise.forcing_stop
+    assert result == pytest.approx(20.0)
+
+
+def test_mach_e_force_stop_still_releases_green_above_final_handoff():
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  vcruise.force_stop_entry_speed = 12.0
+  sm = make_sm(standstill=False, car_fingerprint="FORD_MUSTANG_MACH_E_MK1")
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=3.0)
+  planner.starpilot_cem.stop_light_detected = False
+  update_vcruise(vcruise, sm, toggles, now=0.25, v_ego=3.0)
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=3.0)
+
+  assert not vcruise.forcing_stop
+  assert result == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("override", ("gas", "standstill"))
+def test_mach_e_force_stop_completion_does_not_block_departure(override):
+  planner, vcruise = make_vcruise(red_light=True, forcing_stop=True)
+  vcruise.force_stop_entry_speed = 12.0
+  sm = make_sm(standstill=False, car_fingerprint="FORD_MUSTANG_MACH_E_MK1")
+  toggles = make_toggles()
+
+  update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=0.7)
+  planner.starpilot_cem.stop_light_detected = False
+  sm["carState"].gasPressed = override == "gas"
+  sm["carState"].standstill = override == "standstill"
+  result = update_vcruise(vcruise, sm, toggles, now=0.8, v_ego=0.0 if override == "standstill" else 0.7)
+
+  assert not vcruise.forcing_stop
+  assert result == pytest.approx(20.0)
+
+
 def test_force_stop_does_not_reanchor_inside_reanchor_floor():
   planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
   planner.model_length = 90.0

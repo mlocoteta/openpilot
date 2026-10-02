@@ -10,8 +10,8 @@ from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CAR, MIN_ACC_SPEED, NO_STOP_TIMER_CAR, PEDAL_TRANSITION, TSS2_CAR, \
-                                        CarControllerParams, ToyotaFlags, \
-                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS
+                                        CarControllerParams, ToyotaFlags, ToyotaSafetyFlags, \
+                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
 from opendbc.can import CANPacker
 
 Ecu = structs.CarParams.Ecu
@@ -68,6 +68,11 @@ def is_ths_hybrid(CP) -> bool:
   return CP.carFingerprint in LEGACY_PRIUS_CAR or is_camry_hybrid(CP)
 
 
+def uses_rav4_hybrid_sdsu_longitudinal(CP) -> bool:
+  return bool(CP.carFingerprint == CAR.TOYOTA_RAV4H and CP.openpilotLongitudinalControl and
+              CP.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.LONG_FILTER.value)
+
+
 def should_bypass_toyota_long_pid(CP, starpilot_toggles=None) -> bool:
   highlander_sdsu = (
     CP.carFingerprint == CAR.TOYOTA_HIGHLANDER and
@@ -107,7 +112,7 @@ def get_long_tune(CP, params):
   kiV = [0.5, 0.25]
   k_f = 1.0
 
-  if is_ths_hybrid(CP):
+  if is_ths_hybrid(CP) or uses_rav4_hybrid_sdsu_longitudinal(CP):
     k_f = 0.8 if CP.carFingerprint in LEGACY_PRIUS_CAR else 1.0
   elif CP.carFingerprint not in TSS2_CAR:
     kiBP = [0., 5., 35.]
@@ -336,6 +341,22 @@ class CarController(CarControllerBase):
 
     return self.brake_hold_active
 
+  def create_auto_brake_hold_messages(self, CS: structs.CarState, brake_hold_allowed_timer: int = 100):
+    brake_hold_allowed = (CS.out.standstill and CS.out.cruiseState.available and
+                          not CS.out.gasPressed and not CS.out.cruiseState.enabled and
+                          CS.out.gearShifter not in (PARK, REVERSE))
+
+    if brake_hold_allowed and not self.brake_hold_active and CS.out.brakePressed:
+      self._brake_hold_counter += 1
+      self.brake_hold_active = self._brake_hold_counter > brake_hold_allowed_timer
+    elif not brake_hold_allowed:
+      self._brake_hold_counter = 0
+      self.brake_hold_active = False
+
+    if self.frame % 2 == 0:
+      return [toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active)]
+    return []
+
   def reset_auto_hold_state(self):
     self._brake_hold_counter = 0
     self.brake_hold_active = False
@@ -436,7 +457,10 @@ class CarController(CarControllerBase):
 
     self._update_standstill_request(CC, CS, actuators, starpilot_toggles)
     if supports_toyota_auto_hold(self.CP, getattr(starpilot_toggles, "toyota_auto_hold", False)):
-      self.update_auto_hold_state(CS, pcm_cancel_cmd)
+      if self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+        can_sends.extend(self.create_auto_brake_hold_messages(CS))
+      else:
+        self.update_auto_hold_state(CS, pcm_cancel_cmd)
     else:
       self.reset_auto_hold_state()
 
@@ -546,7 +570,7 @@ class CarController(CarControllerBase):
 
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
-        if self.brake_hold_active:
+        if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
           pcm_accel_cmd = TOYOTA_AUTO_HOLD_ACCEL
           self.permit_braking = True
           self.standstill_req = True

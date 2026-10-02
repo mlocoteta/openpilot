@@ -122,6 +122,13 @@ class StarPilotLateralLayout(_SettingsPage):
     # ── 1. Steering Behavior ──
     self._behavior_rows = [
       SettingRow(
+        "TeslaAOLDisengageOnBrake", "toggle", tr_noop("Disengage AOL on Brake"),
+        subtitle=tr_noop("Keep steering off after pressing the brake until openpilot is engaged again."),
+        get_state=lambda: p.get_bool("TeslaAOLDisengageOnBrake"),
+        set_state=lambda s: p.put_bool("TeslaAOLDisengageOnBrake", s),
+        visible=lambda: aol_on() and cs.isTesla,
+      ),
+      SettingRow(
         "PauseAOLOnBrake", "value", tr_noop("Pause AOL On Brake"),
         subtitle=tr_noop("Pause AOL below this speed while brake is pressed."),
         get_value=lambda: f"{p.get_int('PauseAOLOnBrake')} mph",
@@ -201,8 +208,7 @@ class StarPilotLateralLayout(_SettingsPage):
       ),
       SettingRow(
         "LaneChangeCloseGap", "toggle", tr_noop("Close Gap On Lane Change"),
-        subtitle=tr_noop("Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly " +
-                         "out of current lane, it will allow car to accelerate as it changes lanes."),
+        subtitle=tr_noop("Temporarily shorten the following gap and allow acceleration while changing lanes."),
         get_state=lambda: p.get_bool("LaneChangeCloseGap"),
         set_state=lambda s: p.put_bool("LaneChangeCloseGap", s),
         visible=lc_on,

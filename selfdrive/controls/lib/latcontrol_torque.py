@@ -767,6 +767,9 @@ class LatControlTorque(LatControl):
         output_torque *= tucson_4th_gen_center_taper
       elif genesis_g70_active:
         output_torque *= genesis_g70_center_output_taper
+        output_torque *= get_genesis_g70_highway_turn_in_output_scale(
+          output_torque, setpoint, measurement, desired_lateral_jerk, CS.vEgo,
+        )
         output_torque *= get_genesis_g70_high_speed_error_scale(
           setpoint, measurement, desired_lateral_jerk, CS.vEgo,
         )

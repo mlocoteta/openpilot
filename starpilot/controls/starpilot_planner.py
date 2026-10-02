@@ -166,11 +166,9 @@ class StarPilotPlanner:
 
     CS = sm["carState"]
     blinker_on = CS.leftBlinker or CS.rightBlinker
-    signal_pause = blinker_on and starpilot_toggles.pause_lateral_below_signal
 
     self.lateral_check = v_ego >= starpilot_toggles.pause_lateral_below_speed
     self.lateral_check |= not blinker_on and starpilot_toggles.pause_lateral_below_signal
-    self.lateral_check |= CS.standstill and not signal_pause
     self.lateral_check &= not sm["starpilotCarState"].pauseLateral
 
     # Blinker-based lateral resume delay: after blinker turns off, delay lateral

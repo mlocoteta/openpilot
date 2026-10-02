@@ -36,11 +36,14 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   is_gm_silverado_early_follow_lead,
   is_toyota_rav4_tss2_post_departure_tune,
   get_toyota_rav4_tss2_early_lead_cap,
+  get_toyota_corolla_braking_lead_cap,
+  is_toyota_corolla_early_radar_follow_lead,
+  use_stopped_lead_position,
+  use_model_lead_filter_sync,
   is_toyota_rav4_tss2_radar_follow_lead,
   get_toyota_sienna_post_departure_restop_cap,
   get_untracked_slow_lead_decel_scale,
-  get_toyota_prius_stopped_lead_obstacle_bias,
-  get_honda_crv_5g_stopped_lead_obstacle_bias,
+  get_stopped_lead_obstacle_bias,
   get_honda_crv_5g_low_speed_stopped_lead_cap,
   allow_honda_crv_5g_vision_gap_settle,
   get_honda_crv_5g_early_radar_follow_cap,
@@ -582,7 +585,8 @@ class LongitudinalPlanner:
   def __init__(self, CP, init_v=0.0, init_a=0.0, dt=DT_MDL):
     self.CP = CP
     self.long_actuator_delay = get_long_actuator_delay(CP)
-    self.mpc = LongitudinalMpc(dt=dt)
+    self.mpc = LongitudinalMpc(dt=dt, hold_stopped_lead_position=use_stopped_lead_position(CP),
+                               sync_model_lead_filters=use_model_lead_filter_sync(CP))
     self.fcw = False
     self.dt = dt
     self.model_allow_throttle = True
@@ -2149,7 +2153,9 @@ class LongitudinalPlanner:
     # safety path so ACC/chill does not ignore a visible lead during that debounce.
     lead_control_active = (
       tracking_lead or raw_close_lead_control or early_truck_follow or rav4_radar_follow or
-      lightning_stopped_radar_follow
+      lightning_stopped_radar_follow or
+      any(is_toyota_corolla_early_radar_follow_lead(self.CP, lead, scene_v_ego)
+          for lead in (self.lead_one, self.lead_two))
     )
     lead_one_active = bool(self.lead_one.status and lead_control_active)
     effective_t_follow = self.get_dynamic_t_follow(sm['starpilotPlan'].tFollow, self.lead_one if lead_one_active else None, v_ego)
@@ -2367,17 +2373,13 @@ class LongitudinalPlanner:
 
     stopped_lead_obstacle_bias = (0.0, 0.0)
     if (
-      self.mode == 'acc' and
       not bool(getattr(sm['modelV2'].action, 'shouldStop', False)) and
       not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
       not bool(getattr(sm['carState'], 'standstill', False))
     ):
       stopped_lead_obstacle_bias = tuple(
-        max(
-          get_toyota_prius_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego),
-          get_honda_crv_5g_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego),
-        )
+        get_stopped_lead_obstacle_bias(self.CP, lead, scene_v_ego, self.mode)
         for lead in (self.lead_one, self.lead_two)
       )
 
@@ -2590,6 +2592,16 @@ class LongitudinalPlanner:
     vision_low_speed_stop_active = False
     vision_brake_cap_active = False
     if lead_control_active:
+      if (not experimental_mode and
+          not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
+          not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
+          not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False))):
+        corolla_cap = get_toyota_corolla_braking_lead_cap(
+          self.CP, self.lead_one, v_ego,
+          desired_follow_distance(v_ego, self.lead_one.vLead, effective_t_follow), output_accel_min,
+        )
+        if corolla_cap is not None:
+          close_lead_caps.append(corolla_cap)
       for lead in (self.lead_one, self.lead_two):
         rav4_early_lead_cap = get_toyota_rav4_tss2_early_lead_cap(
           self.CP, lead, v_ego, output_accel_min,

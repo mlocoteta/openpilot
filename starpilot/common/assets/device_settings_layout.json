@@ -151,6 +151,17 @@
         "settings_tier": "simple"
       },
       {
+        "key": "TeslaAOLDisengageOnBrake",
+        "label": "Disengage AOL on Brake",
+        "description": "Pressing the brake fully turns off Always On Lateral. Steering stays off after the brake is released until openpilot is engaged again or AOL is manually toggled back on.",
+        "picker_description": "Keep steering off after pressing the brake until you deliberately re-engage it.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AlwaysOnLateral",
+        "vehicle_makes": ["Tesla"],
+        "settings_tier": "simple"
+      },
+      {
         "key": "LaneChanges",
         "label": "Lane Changes",
         "description": "Allow openpilot to change lanes.",
@@ -4969,6 +4980,18 @@
         "ui_type": "toggle",
         "is_parent_toggle": true,
         "settings_tier": "simple"
+      },
+      {
+        "key": "StingerObjectShadow",
+        "label": "Stinger Object Logging Beta",
+        "description": "Collect candidate object data on the 2022-2023 Kia Stinger for validation. Logging only: this does not enable radar-based braking or change steering. Default off. Keep driving normally, stay attentive, and upload full rlogs with bookmarked observations.",
+        "picker_description": "Read-only Stinger object validation; no braking or steering changes.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
+        "vehicle_makes": ["Kia"],
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
       },
       {
         "key": "ClusterOffset",

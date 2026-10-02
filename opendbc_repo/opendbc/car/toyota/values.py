@@ -629,6 +629,10 @@ TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
   CAR.TOYOTA_RAV4H,
 }
 
+# The Camry uses the legacy camera AEB replacement for Auto Hold. Other
+# supported Toyota models use the ACC_CONTROL hold request.
+TOYOTA_AUTO_HOLD_AEB_CARS = {CAR.TOYOTA_CAMRY_TSS2}
+
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 

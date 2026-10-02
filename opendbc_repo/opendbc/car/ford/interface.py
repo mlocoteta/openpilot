@@ -8,7 +8,7 @@ from opendbc.car.ford.carcontroller import CarController
 from opendbc.car.ford.carstate import CarState
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.radar_interface import RadarInterface
-from opendbc.car.ford.values import CarControllerParams, DBC, Ecu, FordFlags, RADAR, FordSafetyFlags
+from opendbc.car.ford.values import CAR, CarControllerParams, DBC, Ecu, FordFlags, RADAR, FordSafetyFlags
 from opendbc.car.interfaces import CarInterfaceBase
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -63,6 +63,8 @@ class CarInterface(CarInterfaceBase):
 
     if ret.flags & FordFlags.CANFD:
       ret.safetyConfigs[-1].safetyParam |= FordSafetyFlags.CANFD.value
+      if candidate == CAR.FORD_MUSTANG_MACH_E_MK1:
+        ret.safetyConfigs[-1].safetyParam |= FordSafetyFlags.MACH_E_CURVATURE.value
 
       # TRON (SecOC) platforms are not supported
       # LateralMotionControl2, ACCDATA are 16 bytes on these platforms

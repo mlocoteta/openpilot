@@ -525,9 +525,6 @@ class StarPilotVCruise:
       v_ego <= force_stop_low_speed_hold and
       v_ego < self.force_stop_entry_speed - 0.25
     )
-    # The Santa Fe's model stop signal can blink off after the car has already
-    # committed to the stop. Do not turn that late dropout into a throttle
-    # release while the vehicle is still rolling through the sign.
     light_stop_cleared &= not low_speed_stop_commit
     if light_stop_cleared:
       if self.force_stop_light_clear_since is None:

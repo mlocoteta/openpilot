@@ -52,6 +52,7 @@ class StarPilotOnroadView(AugmentedRoadView):
       ui_state.ui_params,
       ui_state.params_memory,
       self._favorite_slot_options,
+      cache_render_texture=gui_app.cached_render_texture,
     )
     self._favorite_input_consumed = False
 
@@ -206,8 +207,8 @@ class StarPilotOnroadView(AugmentedRoadView):
     mr = self.model_renderer
 
     if mr._path.projected_points.size:
-      # Path edges (always rendered if track_edge_vertices exist)
-      if mr._track_edge_vertices.size >= 4:
+      # The default path-edge width is zero, which produces no visible strip.
+      if mr._path_edge_width > 0.0 and mr._track_edge_vertices.size >= 4:
         render_path_edges(mr)
 
       # Render adjacent lanes (incorporates both adjacent path and blind spot warnings)
