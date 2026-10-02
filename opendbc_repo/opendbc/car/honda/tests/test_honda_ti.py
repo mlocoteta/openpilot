@@ -735,3 +735,56 @@ class TestTIGuardsEndToEnd:
       CS, request = step(frame, None)
       frame += 1
     assert CS.steerFaultTemporary and CI.CS.ti_locked_out and request == 0
+
+
+class LearnerParams(FakeParams):
+  STORE = {"HondaGasFactorParams": 1.13, "HondaWindFactorParams": 5.0}
+
+  def get_float(self, key, *args, default=0.0, **kwargs):
+    return self.STORE.get(key, default)
+
+  def put_float(self, key, value):
+    pass
+
+
+def pedal_interface(monkeypatch, pedal):
+  for module in (carstate, carcontroller, interface):
+    monkeypatch.setattr(module, "Params", LearnerParams, raising=False)
+  toggles = get_test_starpilot_toggles()
+  fingerprint = {bus: {} for bus in range(8)}
+  if pedal:
+    fingerprint[0] = {0x201: 6}  # pedal interceptor
+  CarInterface = interfaces[CAR.HONDA_ACCORD_9G]
+  CP = CarInterface.get_params(CAR.HONDA_ACCORD_9G, fingerprint, [], alpha_long=True, is_release=False, docs=False,
+                               starpilot_toggles=toggles)
+  assert CP.enableGasInterceptorDEPRECATED == pedal
+  return CarInterface(CP, CarInterface.get_starpilot_params(CAR.HONDA_ACCORD_9G, fingerprint, [], CP, toggles)), toggles
+
+
+class TestPedalLearnerLog:
+  def test_logged_at_start_and_every_60_s(self, monkeypatch):
+    cc = pedal_interface(monkeypatch, True)[0].CC
+    assert cc.log_pedal_learner
+    lines = []
+    monkeypatch.setattr(carcontroller.carlog, "warning", lambda msg, *a: lines.append(msg))
+    cc._log_pedal_learner()
+    assert "(drive start)" in lines[0] and "gas factor 1.130" in lines[0] and "wind factor 5.000" in lines[0]
+    cc.frame = carcontroller.PEDAL_LEARNER_LOG_INTERVAL_FRAMES
+    cc.bosch_gas_factor = 1.66
+    cc._log_pedal_learner()
+    assert "drive start" not in lines[1] and "t 60 s" in lines[1] and "gas factor 1.660 (start 1.130, +0.530)" in lines[1]
+    assert cc.bosch_gas_factor == 1.66 and cc.bosch_wind_factor == 5.0  # logging never touches the learner
+
+  def test_update_logs_at_start_and_every_60_s(self, monkeypatch):
+    CI, toggles = pedal_interface(monkeypatch, True)
+    lines = []
+    monkeypatch.setattr(carcontroller.carlog, "warning", lambda msg, *a: lines.append(msg))
+    CC = structs.CarControl().as_reader()
+    for frame in range(2 * carcontroller.PEDAL_LEARNER_LOG_INTERVAL_FRAMES + 1):
+      CI.update([(frame * DT_NS, [])], toggles)
+      CI.apply(CC, frame * DT_NS, toggles)
+    learner = [m for m in lines if m.startswith("Honda pedal learner")]
+    assert len(learner) == 3 and "(drive start)" in learner[0] and "t 60 s" in learner[1] and "t 120 s" in learner[2]
+
+  def test_not_logged_without_pedal(self, monkeypatch):
+    assert not pedal_interface(monkeypatch, False)[0].CC.log_pedal_learner

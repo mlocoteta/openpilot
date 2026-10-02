@@ -36,6 +36,10 @@ LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 BOSCH_BRAKE_FORCE_ON = -0.12
 BOSCH_BRAKE_FORCE_RELEASE = -0.02
+# Nidec + pedal interceptor: log the learned gas/wind factors at drive start and then this often,
+# so per-drive drift is visible in the carlog (HondaWindFactorParams sat at its 5.0 clip and
+# HondaGasFactorParams swung 1.17 -> 1.66 -> 1.13 on drives 312-318). Logging only.
+PEDAL_LEARNER_LOG_INTERVAL_FRAMES = 6000
 
 
 def update_honda_bosch_braking(braking: bool, gas_pedal_force: float, stopping: bool, long_active: bool) -> bool:
@@ -301,6 +305,8 @@ class CarController(CarControllerBase):
     self.bosch_wind_factor_before_brake = self.bosch_wind_factor
     self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
     self.bosch_wind_factor_before_gasmax = self.bosch_wind_factor
+    self.log_pedal_learner = bool(CP.enableGasInterceptorDEPRECATED and CP.carFingerprint not in HONDA_BOSCH)
+    self.pedal_learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
     self.pitch = 0.0
     self.mvl_accord_mode = CP.carFingerprint == CAR.HONDA_ACCORD_11G
     # MVL Bosch low-speed extra-brake integrator. Active only for Accord 11G MVL mode.
@@ -361,6 +367,17 @@ class CarController(CarControllerBase):
     )
     self.steering_pressed_robust_prev = steering_pressed
     return steering_pressed
+
+  def _log_pedal_learner(self):
+    gas0, wind0 = self.pedal_learner_start
+    gas, wind = self.bosch_gas_factor, self.bosch_wind_factor
+    start = " (drive start)" if self.frame == 0 else ""
+    carlog.warning(" ".join((
+      f"Honda pedal learner{start}: t {self.frame * DT_CTRL:.0f} s",
+      f"gas factor {gas:.3f} (start {gas0:.3f}, {gas - gas0:+.3f})",
+      f"wind factor {wind:.3f} (start {wind0:.3f}, {wind - wind0:+.3f}; before brake {self.bosch_wind_factor_before_brake:.3f};",
+      "clips gas 0.1-3.0 wind 0.1-5.0)",
+    )))
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     actuators = CC.actuators
@@ -716,6 +733,8 @@ class CarController(CarControllerBase):
     if self.frame > 0 and self.frame % 6000 == 0:
       self.param_store.put_float("HondaGasFactorParams", self.bosch_gas_factor)
       self.param_store.put_float("HondaWindFactorParams", self.bosch_wind_factor)
+    if self.log_pedal_learner and self.frame % PEDAL_LEARNER_LOG_INTERVAL_FRAMES == 0:
+      self._log_pedal_learner()
 
     new_actuators = actuators.as_builder()
     new_actuators.speed = self.speed
