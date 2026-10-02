@@ -21,6 +21,7 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_NUDGE,
   CSC_NUDGE_WEIGHT,
   CSC_OVERRIDE_WATCH_TIME,
+  CSC_TARGET_DOWN_RATE,
   CSC_TARGET_UP_RATE,
   CSC_TRAINING_SETTLE_TIME,
   CurveSpeedController,
@@ -154,6 +155,24 @@ def test_upward_jitter_in_the_envelope_is_rate_limited():
     controller.update_target(30.0, 32.0)
     assert controller.target - peak <= CSC_TARGET_UP_RATE * DT_MDL + 1e-6
     peak = controller.target
+
+
+def test_target_drop_is_rate_limited_to_down_rate():
+  # A sharp curve appearing ahead must not step the target (and aTarget) down faster than
+  # CSC_TARGET_DOWN_RATE: 2.5 m/s per s stepped aTarget -0.64 -> -1.80 in 0.5 s behind a lead.
+  assert CSC_TARGET_DOWN_RATE == pytest.approx(1.5)
+  planner, controller = make_controller()
+  assert converge(controller, 25.0, 25.0) == pytest.approx(25.0)
+
+  planner.curve_profile = single_apex_profile(0.03, 30.0)
+  previous = controller.target
+  drops = []
+  for _ in range(int(2.0 / DT_MDL)):
+    controller.update_target(25.0, 25.0)
+    drops.append(previous - controller.target)
+    previous = controller.target
+  assert max(drops) == pytest.approx(CSC_TARGET_DOWN_RATE * DT_MDL)
+  assert 25.0 - controller.target == pytest.approx(CSC_TARGET_DOWN_RATE * 2.0, abs=1e-6)
 
 
 def test_firm_distant_curvature_is_corrected_for_the_model_under_read():
