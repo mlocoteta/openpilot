@@ -29,6 +29,20 @@ NAV_KEEP_DISTANCE_SPEED_BREAKPOINTS = [0.0, 15.0, 30.0]
 NAV_KEEP_DISTANCE_BREAKPOINTS = [25.0, 90.0, 160.0]
 NAV_KEEP_AMBIGUOUS_SPLIT_DISTANCE_SCALE = 0.6
 NAV_KEEP_SMALL_SPLIT_MAX_OTHER_LANES = 2
+# Highway exit/fork assist: with the driver's matching blinker and a routed
+# off ramp/fork close ahead, start the lane change without the nudgeless wait,
+# then keep pulsing keepLeft/keepRight so the model commits to the ramp.
+NAV_EXIT_MANEUVER_TYPES = ("off ramp", "fork")
+NAV_EXIT_LEFT_MODIFIERS = ("slightLeft", "left", "sharpLeft")
+NAV_EXIT_RIGHT_MODIFIERS = ("slightRight", "right", "sharpRight")
+NAV_EXIT_PREVIEW_SECONDS = 10.0
+NAV_EXIT_MIN_DISTANCE = 150.0
+NAV_EXIT_MAX_DISTANCE = 400.0
+# Once an exit episode is underway, keep holding while the car slows on the ramp approach.
+NAV_EXIT_HOLD_MIN_SPEED = 11.0
+NAV_EXIT_DISTANCE_RESET_JUMP = 50.0
+# modeld only feeds desire rising edges to the model, so re-pulse the keep desire.
+NAV_EXIT_KEEP_PULSE_PERIOD = 1.0
 
 DESIRES = {
   LaneChangeDirection.none: {
@@ -80,6 +94,17 @@ class DesireHelper:
     self.nav_lane_positioning_allowed = False
     self._nav_instruction_state_raw: object = None
     self._nav_instruction_state: dict[str, object] = {}
+
+    self.nav_exit_direction = LaneChangeDirection.none
+    self._reset_nav_exit_episode()
+
+  def _reset_nav_exit_episode(self):
+    self.nav_exit_key: tuple | None = None
+    self.nav_exit_last_distance: float | None = None
+    self.nav_exit_started = False
+    self.nav_exit_lane_change_done = False
+    self.nav_exit_cancelled = False
+    self.nav_exit_keep_timer = 0.0
 
   def _update_nav_params(self):
     raw = self.params_memory.get("NavInstructionState") or {}
@@ -295,6 +320,57 @@ class DesireHelper:
 
     return log.Desire.none
 
+  def _update_nav_exit_assist(self, carstate, lateral_active):
+    """Return the routed exit side the driver is signaling for, or none."""
+    state = self._nav_instruction_state
+    direction = LaneChangeDirection.none
+    maneuver_type = str(state.get("maneuverType", "")).strip().lower()
+    modifier = str(state.get("maneuverModifier", "")).strip()
+    try:
+      distance = float(state.get("maneuverDistance", -1.0))
+    except (TypeError, ValueError):
+      distance = -1.0
+
+    if self.nav_desires_allowed and lateral_active and bool(state.get("valid", False)) and self._nav_instruction_is_fresh() \
+        and maneuver_type in NAV_EXIT_MANEUVER_TYPES:
+      if modifier in NAV_EXIT_RIGHT_MODIFIERS:
+        direction = LaneChangeDirection.right
+      elif modifier in NAV_EXIT_LEFT_MODIFIERS:
+        direction = LaneChangeDirection.left
+
+    blinker_matches = (
+      (direction == LaneChangeDirection.right and carstate.rightBlinker and not carstate.leftBlinker) or
+      (direction == LaneChangeDirection.left and carstate.leftBlinker and not carstate.rightBlinker)
+    )
+
+    key = (maneuver_type, modifier, str(state.get("maneuverPrimaryText", "")))
+    distance_jumped = self.nav_exit_last_distance is not None and distance > self.nav_exit_last_distance + NAV_EXIT_DISTANCE_RESET_JUMP
+    if not blinker_matches or key != self.nav_exit_key or distance_jumped:
+      self._reset_nav_exit_episode()
+    self.nav_exit_key = key
+    self.nav_exit_last_distance = distance
+
+    if not blinker_matches:
+      return LaneChangeDirection.none
+
+    episode_underway = self.nav_exit_started or self.nav_exit_lane_change_done
+    min_speed = NAV_EXIT_HOLD_MIN_SPEED if episode_underway else NAV_TURN_MAX_SPEED
+    preview_distance = float(np.clip(max(float(carstate.vEgo), 0.0) * NAV_EXIT_PREVIEW_SECONDS,
+                                     NAV_EXIT_MIN_DISTANCE, NAV_EXIT_MAX_DISTANCE))
+    if carstate.vEgo < min_speed or not 0.0 <= distance <= preview_distance:
+      return LaneChangeDirection.none
+
+    # Driver steering away from the exit cancels the assist until the blinker or instruction resets.
+    if carstate.steeringPressed and (
+      (direction == LaneChangeDirection.right and carstate.steeringTorque > 0) or
+      (direction == LaneChangeDirection.left and carstate.steeringTorque < 0)
+    ):
+      self.nav_exit_cancelled = True
+    if self.nav_exit_cancelled:
+      return LaneChangeDirection.none
+
+    return direction
+
   @staticmethod
   def get_lane_change_direction(CS):
     return LaneChangeDirection.left if CS.leftBlinker else LaneChangeDirection.right
@@ -307,6 +383,7 @@ class DesireHelper:
     self._update_nav_params()
     self.nav_desires_allowed = bool(getattr(starpilot_toggles, "nav_desires_allowed", self.nav_desires_allowed))
     nav_turn_signal = self.nav_desires_allowed and self._nav_instruction_is_fresh() and self._nav_turn_signal_matches(carstate, self._nav_instruction_state)
+    self.nav_exit_direction = self._update_nav_exit_assist(carstate, lateral_active)
 
     stop_imminent = (bool(getattr(starpilotPlan, "redLight", False))
                      or bool(getattr(starpilotPlan, "forcingStop", False))
@@ -351,11 +428,20 @@ class DesireHelper:
         blindspot_detected = ((carstate.leftBlindspot and self.lane_change_direction == LaneChangeDirection.left) or
                               (carstate.rightBlindspot and self.lane_change_direction == LaneChangeDirection.right))
 
+        # The first lane change toward a signaled, routed exit skips the nudgeless wait.
+        nav_exit_skip_wait = self.nav_exit_direction == self.lane_change_direction and not self.nav_exit_started
+        # While holding toward the ramp, a still-on blinker must not trigger another automatic lane change
+        # (it would steer into the gore); the driver can still nudge for one.
+        nav_exit_holding = self.nav_exit_direction == self.lane_change_direction and self.nav_exit_lane_change_done
+
         if torque_applied:
           self.lane_change_wait_timer = starpilot_toggles.lane_change_delay
         else:
-          torque_applied |= nudgeless_enabled
-          torque_applied &= self.lane_change_wait_timer >= starpilot_toggles.lane_change_delay
+          torque_applied |= nudgeless_enabled and not nav_exit_holding
+          if nav_exit_holding:
+            # Restart the full nudgeless wait once the hold ends (e.g. instruction advances past the exit).
+            self.lane_change_wait_timer = 0.0
+          torque_applied &= self.lane_change_wait_timer >= starpilot_toggles.lane_change_delay or nav_exit_skip_wait
 
           desired_lane_width = starpilotPlan.laneWidthLeft if self.lane_change_direction == LaneChangeDirection.left else starpilotPlan.laneWidthRight
           torque_applied &= desired_lane_width >= starpilot_toggles.lane_detection_width
@@ -365,6 +451,8 @@ class DesireHelper:
           self.lane_change_direction = LaneChangeDirection.none
         elif torque_applied and not blindspot_detected:
           self.lane_change_state = LaneChangeState.laneChangeStarting
+          if self.nav_exit_direction == self.lane_change_direction:
+            self.nav_exit_started = True
 
           self.lane_change_completed = starpilot_toggles.one_lane_change
 
@@ -387,6 +475,8 @@ class DesireHelper:
         self.lane_change_ll_prob = min(self.lane_change_ll_prob + DT_MDL, 1.0)
 
         if self.lane_change_ll_prob > 0.99:
+          if self.nav_exit_direction == self.lane_change_direction:
+            self.nav_exit_lane_change_done = True
           self.lane_change_direction = LaneChangeDirection.none
           if one_blinker:
             self.lane_change_state = LaneChangeState.preLaneChange
@@ -428,3 +518,18 @@ class DesireHelper:
       self.desire = nav_desire
       if nav_desire in (log.Desire.turnLeft, log.Desire.turnRight):
         self.turn_direction = nav_desire
+
+    # After the lane change toward the exit, keep pulsing keepLeft/keepRight so the model takes the ramp.
+    nav_exit_hold = (self.nav_exit_lane_change_done and self.nav_exit_direction != LaneChangeDirection.none and
+                     self.lane_change_state in (LaneChangeState.off, LaneChangeState.preLaneChange) and
+                     self.desire == log.Desire.none and
+                     self._nav_keep_direction_is_clear(carstate, self.nav_exit_direction))
+    if nav_exit_hold:
+      self.nav_exit_keep_timer += DT_MDL
+      if self.nav_exit_keep_timer >= NAV_EXIT_KEEP_PULSE_PERIOD:
+        # Drop one frame so the next keep request is a fresh rising edge for the model.
+        self.nav_exit_keep_timer = 0.0
+      else:
+        self.desire = log.Desire.keepLeft if self.nav_exit_direction == LaneChangeDirection.left else log.Desire.keepRight
+    else:
+      self.nav_exit_keep_timer = 0.0
