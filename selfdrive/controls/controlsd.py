@@ -63,6 +63,10 @@ TI_OUTPUT_PIPELINE_FRAMES = 3
 TI_SUSTAINED_LIMIT_FRAMES = 10
 # Honda 9G TI: at most one panda-lateral-block / panda-TX-blocked log line per this many seconds each.
 TI_PANDA_LOG_INTERVAL = 10.0
+# Honda 9G TI: safetyTxBlocked counts every address. On drives 314-318 every increase was a
+# 0x200 gas / 0x1FA brake frame at a gas/brake pedal edge, so increases within this many frames
+# of a pedal edge (pandaStates is 10 Hz) are not reported.
+TI_PANDA_TX_PEDAL_EDGE_FRAMES = 20
 HONDA_SAFETY_MODELS = (car.CarParams.SafetyModel.hondaNidec, car.CarParams.SafetyModel.hondaBosch)
 
 # After a smoothed lane change ends, ramp the curvature limits back to stock over this
@@ -483,6 +487,8 @@ class Controls:
     self._ti_panda_block_log_time = -TI_PANDA_LOG_INTERVAL
     self._ti_tx_blocked_last = None
     self._ti_tx_blocked_log_time = -TI_PANDA_LOG_INTERVAL
+    self._ti_pedals_last = None
+    self._ti_pedal_edge_frames = TI_PANDA_TX_PEDAL_EDGE_FRAMES
     if self.has_ti_sigmoid:
       self.sm = self.sm.extend(['pandaStates'])
       self._update_ti_live_params()
@@ -559,16 +565,29 @@ class Controls:
     self._ti_panda_blocking = blocking
     return lat_active and allowed
 
-  def _log_ti_panda_tx_blocked(self, lat_active: bool) -> None:
-    """Honda 9G TI: diagnostics, log (rate-limited) when the panda blocks TX while lateral is active."""
+  def _log_ti_panda_tx_blocked(self, lat_active: bool, CS) -> None:
+    """Honda 9G TI: diagnostics, log (rate-limited) when the panda blocks TX while lateral is active.
+
+    safetyTxBlocked has no per-address breakdown, so increases right after a gas/brake pedal edge
+    (the panda dropping a gas/brake frame, not 0x249) are not reported.
+    """
+    pedals = (bool(CS.gasPressed), bool(CS.brakePressed))
+    if self._ti_pedals_last is not None and pedals != self._ti_pedals_last:
+      self._ti_pedal_edge_frames = 0
+    else:
+      self._ti_pedal_edge_frames = min(self._ti_pedal_edge_frames + 1, TI_PANDA_TX_PEDAL_EDGE_FRAMES)
+    self._ti_pedals_last = pedals
+
     tx_blocked = sum(ps.safetyTxBlocked for ps in self.sm['pandaStates'])
     last, self._ti_tx_blocked_last = self._ti_tx_blocked_last, tx_blocked
     if last is None or tx_blocked <= last or not lat_active:
       return  # first sample, no new blocks, or a counter reset (panda reboot)
+    if self._ti_pedal_edge_frames < TI_PANDA_TX_PEDAL_EDGE_FRAMES:
+      return  # explained by a gas/brake pedal edge
     now = time.monotonic()
     if now - self._ti_tx_blocked_log_time >= TI_PANDA_LOG_INTERVAL:
       self._ti_tx_blocked_log_time = now
-      cloudlog.warning(f"TI panda blocked {tx_blocked - last} TX while lateral active (total {tx_blocked})")
+      cloudlog.warning(f"TI panda blocked {tx_blocked - last} TX (any address) while lateral active, no pedal edge (total {tx_blocked})")
 
   def _update_ti_live_params(self):
     """Honda 9G TI: live sigmoid params, Kp and damping policy (~1 s cadence)."""
@@ -713,7 +732,7 @@ class Controls:
                                         self.sm['starpilotPlan'].lateralCheck)
     if getattr(self, "has_ti_sigmoid", False):
       CC.latActive = self._ti_panda_lateral_gate(CC.latActive, CS, CC.enabled and self.sm['selfdriveState'].active)
-      self._log_ti_panda_tx_blocked(CC.latActive)
+      self._log_ti_panda_tx_blocked(CC.latActive, CS)
     # EcuDisableFailed is set when car started in READY mode (ECU disable was rejected)
     # Disable longitudinal so stock ACC works instead
     self.update_ecu_disable_failed()
