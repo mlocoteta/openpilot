@@ -15,6 +15,8 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import TICI
 from openpilot.common.gpio import gpio_init, gpio_set
 from openpilot.system.hardware.tici.pins import GPIO
+from openpilot.system.ubloxd.gnss_aiding import LAST_POSITION_ACC_CM, LateAiding, get_aiding_time, has_gnss_fix, last_gps_position, \
+                                                query_modem_time, ubx_mga_ini_pos_llh, ubx_mga_ini_time_utc
 
 UBLOX_TTY = "/dev/ttyHS0"
 
@@ -65,6 +67,7 @@ def get_assistnow_messages(token: str) -> list[bytes]:
 class TTYPigeon:
   def __init__(self):
     self.tty = serial.VTIMESerial(UBLOX_TTY, baudrate=9600, timeout=0)
+    self.time_aided = False
 
   def send(self, dat: bytes) -> None:
     self.tty.write(dat)
@@ -229,6 +232,10 @@ def init_pigeon(pigeon: TTYPigeon) -> bool:
           0
         ))
         pigeon.send_with_ack(msg, ack=UBLOX_ASSIST_ACK)
+        pigeon.time_aided = True
+      else:
+        # StarPilot: no valid clock (dead RTC), aid with the modem's network time and the last known position
+        pigeon.time_aided = send_aiding_without_valid_time(pigeon)
 
       # try getting AssistNow if we have a token
       token = Params().get('AssistNowToken')
@@ -248,6 +255,77 @@ def init_pigeon(pigeon: TTYPigeon) -> bool:
     cloudlog.warning("Failed to initialize pigeon")
     return False
   return True
+
+# StarPilot variables
+def last_position_from_params():
+  try:
+    return last_gps_position(Params().get("LastGPSPosition"))
+  except Exception:
+    cloudlog.exception("gnss aiding: failed to read LastGPSPosition")
+    return None
+
+def send_position_aiding(pigeon: TTYPigeon, last_pos, wait_ack: bool = True) -> None:
+  if last_pos is None:
+    return
+  msg = ubx_mga_ini_pos_llh(last_pos[0], last_pos[1], 0, LAST_POSITION_ACC_CM)
+  cloudlog.warning("Sending last known position to ublox")
+  if wait_ack:
+    pigeon.send_with_ack(msg, ack=UBLOX_ASSIST_ACK)
+  else:
+    pigeon.send(msg)
+
+def send_aiding_without_valid_time(pigeon: TTYPigeon) -> bool:
+  """Inject modem time + last known position while the system clock is invalid. True if time was sent.
+  Bounded to ~1 s and never fails init: aiding is best effort."""
+  last_pos = last_position_from_params()
+  time_sent = False
+  try:
+    res = get_aiding_time(lambda: query_modem_time(timeout=0.5), last_pos[2] if last_pos else None)
+    if res is not None:
+      t, acc, source = res
+      cloudlog.warning(f"Sending {source} time to ublox (acc {acc} s): {t}")
+      pigeon.send_with_ack(ubx_mga_ini_time_utc(t, acc), ack=UBLOX_ASSIST_ACK)
+      time_sent = True
+    else:
+      cloudlog.warning("No valid time for ublox yet, will retry while running")
+    send_position_aiding(pigeon, last_pos)
+  except TimeoutError:
+    cloudlog.warning("gnss aiding: no ack from ublox")
+  except Exception:
+    cloudlog.exception("gnss aiding: failed")
+  return time_sent
+
+def start_late_aiding(pigeon: TTYPigeon) -> LateAiding | None:
+  if pigeon.time_aided:
+    return None
+  last_pos = last_position_from_params()
+  late = LateAiding(last_pos[2] if last_pos else None)
+  late.start()
+  return late
+
+def update_late_aiding(pigeon: TTYPigeon, late: LateAiding | None, dat: bytes) -> LateAiding | None:
+  """Inject time from the background poll once it has one. Fire and forget: the MGA-ACK goes out
+  with ubloxRaw, so no received data is dropped. Returns None once late aiding is finished."""
+  if late is None:
+    return None
+  if has_gnss_fix(dat):
+    cloudlog.warning("gnss aiding: fix before a time source, stopping late aiding")
+    late.stop()
+    return None
+  # read done before take(): the thread sets the result before done
+  finished = late.done.is_set()
+  res = late.take()
+  if res is None:
+    if finished:
+      cloudlog.warning("gnss aiding: no time source found, giving up")
+      return None
+    return late
+  t, acc, source = res
+  cloudlog.warning(f"Sending late {source} time to ublox (acc {acc} s): {t}")
+  pigeon.send(ubx_mga_ini_time_utc(t, acc))
+  send_position_aiding(pigeon, last_position_from_params(), wait_ack=False)
+  pigeon.time_aided = True
+  return None
 
 def deinitialize_and_exit(pigeon: TTYPigeon | None):
   if pigeon is not None:
@@ -276,15 +354,20 @@ def run_receiving(duration: int = 0):
 
   pigeon = TTYPigeon()
   init(pigeon)
+  late_aiding = start_late_aiding(pigeon)
 
   start_time = time.monotonic()
   last_almanac_save = time.monotonic()
   while (duration == 0) or (time.monotonic() - start_time < duration):
     dat = pigeon.receive()
+    late_aiding = update_late_aiding(pigeon, late_aiding, dat)
     if len(dat) > 0:
       if dat[0] == 0x00:
         cloudlog.warning("received invalid data from ublox, re-initing!")
+        if late_aiding is not None:
+          late_aiding.stop()
         init(pigeon)
+        late_aiding = start_late_aiding(pigeon)
         continue
 
       # send out to socket
