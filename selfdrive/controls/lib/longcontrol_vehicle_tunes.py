@@ -1,6 +1,7 @@
 import numpy as np
 
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car.honda.values import CAR as HONDA_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
@@ -70,6 +71,21 @@ VOLKSWAGEN_TAOS_COMFORT_STOP_MIN_TTC = 4.0
 VOLKSWAGEN_TAOS_COMFORT_STOP_MAX_CLOSING_SPEED = 1.5
 VOLKSWAGEN_TAOS_COMFORT_STOP_CAP_BP = [0.0, 0.5, 1.0, 2.0, 3.5, VOLKSWAGEN_TAOS_COMFORT_STOP_MAX_SPEED]
 VOLKSWAGEN_TAOS_COMFORT_STOP_CAP_V = [-0.45, -0.55, -0.65, -0.80, -0.95, -1.10]
+# Honda Accord 9G (Nidec + pedal) brake onset: the brake reaches the wheels ~0.35 s after the
+# command, so during the first (LongitudinalActuatorDelay + 0.15) s of a braking request the
+# aEgo error is lag, not a model error. Integrating it wound I down to -0.85 (p10) and over-braked
+# after gas releases (drives 314-318).
+HONDA_BRAKE_ONSET_TARGET = -0.3
+HONDA_BRAKE_ONSET_MIN_ERROR = 0.3
+HONDA_BRAKE_ONSET_I_FLOOR = -0.4
+HONDA_BRAKE_ONSET_EXTRA_TIME = 0.15
+HONDA_BRAKE_ONSET_DEFAULT_DELAY = 0.30
+# The held-back I takes ~2 s to catch up once the hold ends, so the exclusions look ahead: a lead
+# within TTC 3 s + 2 s, and low speed, where a stop (shouldStop) or a close lead follows quickly.
+# With TTC 3 s and no speed gate the hold carried 0.78 m/s^2 less braking into TTC < 3 s frames and
+# 0.56 into shouldStop frames on slow lead approaches (replay of 25 routes 0x2eb-0x318).
+HONDA_BRAKE_ONSET_MIN_LEAD_TTC = 5.0
+HONDA_BRAKE_ONSET_MIN_SPEED = 8.0
 
 
 def get_bolt_acc_pedal_friction_bias(output_accel, a_target, v_ego):
@@ -169,6 +185,17 @@ class LongControlVehicleTuning:
       getattr(CP, "carFingerprint", None) == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and
       (CP.flags & GMFlags.PEDAL_LONG.value)
     )
+    self.is_honda_accord_9g_pedal_long = bool(
+      CP.brand == "honda" and
+      CP.enableGasInterceptorDEPRECATED and
+      getattr(CP, "carFingerprint", None) == HONDA_CAR.HONDA_ACCORD_9G
+    )
+    # Brake-onset event tracking survives reset(): controlsd resets LongControl every frame
+    # while long is inactive, and the longActive rising edge is one of the events.
+    self.honda_brake_onset_frames = 1 << 30
+    self.honda_prev_long_active = False
+    self.honda_prev_gas_pressed = False
+    self.honda_prev_a_target = 0.0
     self.reset()
 
   def reset(self):
@@ -182,6 +209,61 @@ class LongControlVehicleTuning:
     self.toyota_corolla_target_filter_initialized = False
     self.bolt_start_handoff_frames = 0
     self.subaru_stop_release_frames = 0
+
+  def track_honda_brake_onset(self, active, gas_pressed, a_target):
+    """Count frames since the last longActive rising edge, gasPressed falling edge or a_target
+    crossing below HONDA_BRAKE_ONSET_TARGET. Call once per LongControl.update."""
+    if not self.is_honda_accord_9g_pedal_long:
+      return
+    active = bool(active)
+    gas_pressed = bool(gas_pressed)
+    a_target = float(a_target)
+    event = (
+      (active and not self.honda_prev_long_active) or
+      (self.honda_prev_gas_pressed and not gas_pressed) or
+      (a_target < HONDA_BRAKE_ONSET_TARGET <= self.honda_prev_a_target)
+    )
+    self.honda_brake_onset_frames = 0 if event else min(self.honda_brake_onset_frames + 1, 1 << 30)
+    self.honda_prev_long_active = active
+    self.honda_prev_gas_pressed = gas_pressed
+    self.honda_prev_a_target = a_target
+
+  @staticmethod
+  def _honda_brake_onset_window_frames(starpilot_toggles):
+    try:
+      delay = float(getattr(starpilot_toggles, "longitudinalActuatorDelay", HONDA_BRAKE_ONSET_DEFAULT_DELAY))
+    except (TypeError, ValueError):
+      delay = HONDA_BRAKE_ONSET_DEFAULT_DELAY
+    if not np.isfinite(delay) or delay <= 0.0:
+      delay = HONDA_BRAKE_ONSET_DEFAULT_DELAY
+    return int(round((min(delay, 1.0) + HONDA_BRAKE_ONSET_EXTRA_TIME) / DT_CTRL))
+
+  @staticmethod
+  def _has_close_lead(v_ego, leads):
+    for lead in leads or ():
+      if lead is None or not bool(getattr(lead, "status", False)):
+        continue
+      v_rel = getattr(lead, "vRel", None)
+      closing = -float(v_rel) if v_rel is not None else float(v_ego) - float(getattr(lead, "vLead", v_ego))
+      d_rel = float(getattr(lead, "dRel", float("inf")))
+      if closing > 1e-3 and d_rel / closing < HONDA_BRAKE_ONSET_MIN_LEAD_TTC:
+        return True
+    return False
+
+  def hold_honda_brake_onset_integrator(self, pid, a_target, CS, should_stop, leads, starpilot_toggles):
+    """Honda Accord 9G pedal long: during the brake-lag window after a brake onset, freeze I
+    and keep it >= HONDA_BRAKE_ONSET_I_FLOOR (negative-side mirror of the positive-overshoot
+    trim). Stops, low speed and closing leads (TTC < 5 s) are left alone. Returns True to freeze I."""
+    if not self.is_honda_accord_9g_pedal_long or should_stop or CS.vEgo < HONDA_BRAKE_ONSET_MIN_SPEED:
+      return False
+    if self.honda_brake_onset_frames >= self._honda_brake_onset_window_frames(starpilot_toggles):
+      return False
+    if a_target >= HONDA_BRAKE_ONSET_TARGET or CS.aEgo - a_target <= HONDA_BRAKE_ONSET_MIN_ERROR:
+      return False
+    if self._has_close_lead(CS.vEgo, leads):
+      return False
+    pid.i = max(pid.i, HONDA_BRAKE_ONSET_I_FLOOR)
+    return True
 
   def shape_stopping_accel(self, output_accel, a_target, should_stop, v_ego, has_lead, stop_accel, leads=None):
     """Shape low-speed stop braking without overriding urgent targets."""
