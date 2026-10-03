@@ -8,6 +8,7 @@ from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_in
 from opendbc.car.carlog import carlog
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.pedal_learner import PedalGasFactorGuard, applied_gas_factor
+from opendbc.car.honda.pedal_plant_ff import PedalPlantFeedforward, ff_disabled_by_file
 from opendbc.car.honda.values import (
   CAR,
   CruiseButtons,
@@ -314,6 +315,14 @@ class CarController(CarControllerBase):
       self.pedal_guard = PedalGasFactorGuard(self.bosch_gas_factor)
       self.bosch_gas_factor = self.pedal_guard.start
       self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
+    # Accord 9G pedal: model-based feedforward on top of the guarded map (pedal_plant_ff.py); the guard stays the
+    # fallback and the envelope centre. /data/pedal_plant_ff_disabled (read here) turns it off.
+    self.pedal_ff = None
+    self.pedal_ff_disabled = False
+    if self.pedal_guard is not None:
+      self.pedal_ff_disabled = ff_disabled_by_file()
+      if not self.pedal_ff_disabled:
+        self.pedal_ff = PedalPlantFeedforward(DT_CTRL * 2)
     self.pedal_learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
     self.pitch = 0.0
     self.mvl_accord_mode = CP.carFingerprint == CAR.HONDA_ACCORD_11G
@@ -387,6 +396,10 @@ class CarController(CarControllerBase):
                "learned " + " ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.items() if k != "inactive" and v))
     else:
       guard = "clips gas 0.1-3.0"
+    if self.pedal_ff is not None:
+      guard += f"; plant ff active {100 * self.pedal_ff.active_steps / max(1, self.pedal_ff.total_steps):.0f}%"
+    elif self.pedal_ff_disabled:
+      guard += "; plant ff disabled by file"
     carlog.warning(" ".join((
       f"Honda pedal learner{start}: t {self.frame * DT_CTRL:.0f} s",
       f"gas factor {gas:.3f} (start {gas0:.3f}, {gas - gas0:+.3f})",
@@ -689,6 +702,10 @@ class CarController(CarControllerBase):
                 0.0,
                 1.0,
               ))
+            if self.pedal_ff is not None:
+              ff_use = (CC.longActive and actuators.longControlState == LongCtrlState.pid and apply_brake == 0 and
+                        brake == 0.0 and not CS.out.brakePressed and not CS.out.gasPressed)
+              gas_interceptor_command = self.pedal_ff.update(actuators.accel, CS.out.vEgo, gas_interceptor_command, ff_use)
             idx = (self.frame // 2) % 0x10
             can_sends.append(create_gas_interceptor_command(self.packer, gas_interceptor_command, idx))
 
