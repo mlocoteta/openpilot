@@ -768,12 +768,14 @@ class TestPedalLearnerLog:
     lines = []
     monkeypatch.setattr(carcontroller.carlog, "warning", lambda msg, *a: lines.append(msg))
     cc._log_pedal_learner()
-    assert "(drive start)" in lines[0] and "gas factor 1.130" in lines[0] and "wind factor 5.000" in lines[0]
+    # The stored 1.13 is below the guard band and starts at 1.2.
+    assert "(drive start)" in lines[0] and "gas factor 1.200" in lines[0] and "wind factor 5.000" in lines[0]
+    assert "stored 1.130" in lines[0]
     cc.frame = carcontroller.PEDAL_LEARNER_LOG_INTERVAL_FRAMES
-    cc.bosch_gas_factor = 1.66
+    cc.bosch_gas_factor = 1.3
     cc._log_pedal_learner()
-    assert "drive start" not in lines[1] and "t 60 s" in lines[1] and "gas factor 1.660 (start 1.130, +0.530)" in lines[1]
-    assert cc.bosch_gas_factor == 1.66 and cc.bosch_wind_factor == 5.0  # logging never touches the learner
+    assert "drive start" not in lines[1] and "t 60 s" in lines[1] and "gas factor 1.300 (start 1.200, +0.100)" in lines[1]
+    assert cc.bosch_gas_factor == 1.3 and cc.bosch_wind_factor == 5.0  # logging never touches the learner
 
   def test_update_logs_at_start_and_every_60_s(self, monkeypatch):
     CI, toggles = pedal_interface(monkeypatch, True)
@@ -788,3 +790,31 @@ class TestPedalLearnerLog:
 
   def test_not_logged_without_pedal(self, monkeypatch):
     assert not pedal_interface(monkeypatch, False)[0].CC.log_pedal_learner
+
+
+class TestPedalGasFactorGuard:
+  def _cc(self, accel, long_active=True):
+    CC = structs.CarControl()
+    CC.enabled = long_active
+    CC.longActive = long_active
+    CC.actuators.accel = accel
+    CC.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+    return CC.as_reader()
+
+  def test_guard_only_on_9g_pedal(self, monkeypatch):
+    cc = pedal_interface(monkeypatch, True)[0].CC
+    assert cc.pedal_guard is not None and cc.bosch_gas_factor == 1.2 and cc.gas_factor_stored == 1.13
+    assert pedal_interface(monkeypatch, False)[0].CC.pedal_guard is None
+
+  def test_launch_uses_capped_factor_and_does_not_learn(self, monkeypatch):
+    CI, toggles = pedal_interface(monkeypatch, True)
+    CC = self._cc(1.6)
+    for frame in range(400):  # standstill (vEgo 0), +1.6 requested, aEgo 0: stock would raise the factor
+      CI.update([(frame * DT_NS, [])], toggles)
+      CI.apply(CC, frame * DT_NS, toggles)
+    cc = CI.CC
+    assert cc.bosch_gas_factor == 1.2   # below MIN_SPEED: no learning
+    gas = 1.6 / 4.8 - 0.15               # compute_gb_honda_nidec at v=0 (creep brake)
+    wind = carcontroller.get_honda_nidec_wind_brake(0.0, CAR.HONDA_ACCORD_9G)
+    expected = 0.4 * (gas * 1.0 + wind * cc.bosch_wind_factor * 0.75)  # applied factor capped at 1.0
+    assert cc.gas == pytest.approx(expected, abs=1e-6)
