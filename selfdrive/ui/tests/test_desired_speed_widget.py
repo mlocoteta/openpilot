@@ -15,14 +15,14 @@ class FakeParams:
 
 
 class FakeSM:
-  def __init__(self, speeds, valid=True):
-    self.valid = {"longitudinalPlan": valid}
+  def __init__(self, speeds, valid=True, lead=False):
+    self.valid = {"longitudinalPlan": valid, "radarState": True}
     self.recv_frame = {"longitudinalPlan": 10}
-    self._plan = SimpleNamespace(speeds=speeds)
+    self._data = {"longitudinalPlan": SimpleNamespace(speeds=speeds),
+                  "radarState": SimpleNamespace(leadOne=SimpleNamespace(status=lead))}
 
   def __getitem__(self, k):
-    assert k == "longitudinalPlan"
-    return self._plan
+    return self._data[k]
 
 
 @pytest.fixture
@@ -84,3 +84,8 @@ def test_hidden_without_plan_or_cruise(widget, monkeypatch):
 
 def test_does_not_block_background_taps(widget):
   assert widget.blocks_pointer is False
+
+
+def test_hidden_with_lead_because_it_is_inline_in_lead_metrics(widget, monkeypatch):
+  monkeypatch.setattr(ds.ui_state, "sm", FakeSM([20.0] * 17, lead=True))
+  assert not widget.is_visible
