@@ -46,6 +46,22 @@ NO_THROTTLE_COLORS = [
   rl.Color(242, 242, 242, 0),   # HSLF(112/360, 0.0, 0.95, 0.0)
 ]
 
+def get_planner_desired_speed(sm) -> float | None:
+  """Speed the longitudinal planner is aiming for, in m/s, or None when there is no live plan.
+
+  longitudinalPlan.speeds is the MPC speed trajectory over the control horizon (0-2.5 s). Its first
+  point is the current state; the last point is where the plan wants to be in 2.5 s, which already
+  folds in lead following, the effective cruise target (CSC/SLC/vCruise) and the experimental-mode
+  stop/slow behaviour. A phantom brake shows up there as a drop well below the set speed.
+  """
+  if not sm.valid.get("longitudinalPlan", False) or sm.recv_frame["longitudinalPlan"] < ui_state.started_frame:
+    return None
+  speeds = sm["longitudinalPlan"].speeds
+  if len(speeds) == 0:
+    return None
+  return max(float(speeds[-1]), 0.0)
+
+
 @dataclass
 class ModelPoints:
   raw_points: np.ndarray = field(default_factory=lambda: np.empty((0, 3), dtype=np.float32))
@@ -592,7 +608,11 @@ class ModelRenderer(Widget):
       else:
         text_lines.append(f"{distance_string} {lead_distance_unit}")
 
-      text_lines.append(f"{speed_string}{lead_speed_unit}")
+      v_desired = get_planner_desired_speed(ui_state.sm) if self._longitudinal_control else None
+      if v_desired is not None:
+        text_lines.append(f"{speed_string}{lead_speed_unit} (Desired: {round(v_desired * speed_conversion_metrics)})")
+      else:
+        text_lines.append(f"{speed_string}{lead_speed_unit}")
 
       v_ego = max(ui_state.sm["carState"].vEgo, 0.0)
       time_gap = lead_distance / max(v_ego, 1.0)

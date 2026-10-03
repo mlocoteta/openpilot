@@ -246,3 +246,35 @@ def test_lead_metrics_text_includes_desired_distance_and_time(monkeypatch):
   r._lead_text_rects = []
   r._draw_lead_metrics(False, chevron, lead)
   assert drawn == ["98 ft", "45 mph", "1.50 seconds"]
+
+
+def test_lead_metrics_speed_line_includes_planner_desired_speed(monkeypatch):
+  import openpilot.selfdrive.ui.onroad.model_renderer as mr
+  import openpilot.selfdrive.ui.onroad.starpilot.path as path_mod
+  from openpilot.selfdrive.ui.ui_state import ui_state
+
+  class MockSM:
+    valid = {"radarState": True, "longitudinalPlan": True}
+    recv_frame = {"longitudinalPlan": 10}
+    def __getitem__(self, k):
+      return {"starpilotPlan": SimpleNamespace(desiredFollowDistance=35.0),
+              "carState": SimpleNamespace(vEgo=20.0),
+              "longitudinalPlan": SimpleNamespace(speeds=[20.0] * 16 + [23.25])}[k]
+
+  monkeypatch.setattr(ui_state, "sm", MockSM())
+  monkeypatch.setattr(ui_state, "is_metric", False)
+  monkeypatch.setattr(ui_state, "starpilot_toggles", {})
+  monkeypatch.setattr(ui_state, "started_frame", 0, raising=False)
+  monkeypatch.setattr(mr.gui_app, "font", lambda *a, **k: object())
+  monkeypatch.setattr(mr, "measure_text_cached", lambda font, text, size: SimpleNamespace(x=10.0 * len(text), y=size))
+  drawn = []
+  monkeypatch.setattr(path_mod, "_draw_text_with_outline", lambda text, *a, **k: drawn.append(text))
+
+  r = object.__new__(ModelRenderer)
+  r._longitudinal_control = True
+  r._lead_text_rects = []
+  r._adjacent_lead_text_rects = []
+  chevron = [(1135.0, 692.0), (1080.0, 648.0), (1025.0, 692.0)]
+  r._draw_lead_metrics(False, chevron, SimpleNamespace(dRel=30.0, yRel=0.0, vLead=20.0))
+  # Shown with a lead even at/above set speed (no quiet rule inline).
+  assert drawn[1] == "45 mph (Desired: 52)"

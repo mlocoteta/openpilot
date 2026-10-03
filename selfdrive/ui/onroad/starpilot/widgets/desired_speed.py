@@ -4,28 +4,13 @@ from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
+from openpilot.selfdrive.ui.onroad.model_renderer import get_planner_desired_speed
 
 # Same look as the lead metrics under the chevron (model_renderer._draw_lead_metrics).
 FONT_SIZE = 36
 LINE_HEIGHT = FONT_SIZE + 2
 # Hide when within this many display units of the set speed, so steady cruising stays quiet.
 QUIET_BAND = 1.0
-
-
-def get_planner_desired_speed(sm) -> float | None:
-  """Speed the longitudinal planner is aiming for, in m/s, or None when there is no live plan.
-
-  longitudinalPlan.speeds is the MPC speed trajectory over the control horizon (0-2.5 s). Its first
-  point is the current state; the last point is where the plan wants to be in 2.5 s, which already
-  folds in lead following, the effective cruise target (CSC/SLC/vCruise) and the experimental-mode
-  stop/slow behaviour. A phantom brake shows up there as a drop well below the set speed.
-  """
-  if not sm.valid.get("longitudinalPlan", False) or sm.recv_frame["longitudinalPlan"] < ui_state.started_frame:
-    return None
-  speeds = sm["longitudinalPlan"].speeds
-  if len(speeds) == 0:
-    return None
-  return max(float(speeds[-1]), 0.0)
 
 
 def speed_units() -> tuple[float, str]:
@@ -37,7 +22,7 @@ def speed_units() -> tuple[float, str]:
 
 
 class DesiredSpeedWidget(LayoutWidget):
-  """Planner target speed under the MAX / speed-limit cards. Hidden when it matches the set speed."""
+  """No-lead planner target speed under the MAX / speed-limit cards. Hidden when it matches the set speed."""
 
   def __init__(self, hud_renderer):
     super().__init__("desired_speed", priority=2)
@@ -53,7 +38,12 @@ class DesiredSpeedWidget(LayoutWidget):
     if not self.hud_renderer.is_cruise_set:
       return []
 
-    v_desired = get_planner_desired_speed(ui_state.sm)
+    # With a lead the value is inline in the lead metrics ("53 mph (Desired: 52)").
+    sm = ui_state.sm
+    if sm.valid.get("radarState", False) and sm["radarState"].leadOne.status:
+      return []
+
+    v_desired = get_planner_desired_speed(sm)
     if v_desired is None:
       return []
 
