@@ -10,7 +10,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager import Widget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets import (
   SetSpeedWidget, SpeedLimitWidget, PedalIconsWidget,
   AetherGaugeWidget, PersonalityButtonWidget, DriverMonitorWidget,
-  SteeringWheelWidget, StoppedTimerWidget, ModelSourceWidget
+  SteeringWheelWidget, StoppedTimerWidget, ModelSourceWidget, DesiredSpeedWidget
 )
 from openpilot.selfdrive.ui.onroad.starpilot.stopping_point import render_stopping_point
 from openpilot.selfdrive.ui.onroad.starpilot.pause_indicators import render_lateral_paused, render_longitudinal_paused
@@ -66,6 +66,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Initialize layout widgets
     self._set_speed_widget = SetSpeedWidget(self._hud_renderer)
     self._speed_limit_widget = SpeedLimitWidget()
+    self._desired_speed_widget = DesiredSpeedWidget(self._hud_renderer)
     self._aethergauge_widget = AetherGaugeWidget(self._hud_renderer)
     self._steering_wheel_widget = SteeringWheelWidget(self._hud_renderer._exp_button)
     self._pedals_widget = PedalIconsWidget()
@@ -77,6 +78,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Register to layout zones
     self.layout_manager.register_widget("left", self._set_speed_widget)
     self.layout_manager.register_widget("left", self._speed_limit_widget)
+    self.layout_manager.register_widget("left", self._desired_speed_widget)
     self.layout_manager.register_widget("left", self._aethergauge_widget)
     self.layout_manager.register_widget("right", self._steering_wheel_widget)
     self.layout_manager.register_widget("right", self._pedals_widget)
@@ -87,6 +89,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Register as child widgets for click propagation
     self._child(self._set_speed_widget)
     self._child(self._speed_limit_widget)
+    self._child(self._desired_speed_widget)
     self._child(self._aethergauge_widget)
     self._child(self._steering_wheel_widget)
     self._child(self._pedals_widget)
