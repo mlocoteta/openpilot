@@ -54,6 +54,8 @@ from openpilot.selfdrive.modeld.compile_modeld import (
 )
 from openpilot.selfdrive.modeld.helpers import get_tg_input_devices, load_oob, tinygrad_dev_config, usbgpu_present
 from openpilot.selfdrive.modeld.usbgpu_link import wait_usbgpu_link
+from openpilot.selfdrive.modeld.egpu_recovery import CHECK_INTERVAL_SECONDS as EGPU_RECOVERY_CHECK_INTERVAL, CarInputs, \
+  EgpuRecovery, recovery_enabled
 from openpilot.system.hardware.usb import CHESTNUT_USB_IDS
 from openpilot.starpilot.assets.model_manager import (
   ModelManager,
@@ -74,7 +76,7 @@ from openpilot.starpilot.common.model_lab import (
 )
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
 from openpilot.selfdrive.controls.lib.longitudinal_delay import get_long_actuator_delay
-from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, MODELS_PATH, params_memory
+from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles, MODELS_PATH, params_memory
 
 
 PROCESS_NAME = "selfdrive.modeld.modeld"
@@ -224,6 +226,8 @@ class ChestnutState:
     self.sends = 0
     self.metrics = {}
     self._asm_usb = None
+    self.last_supply_mv: int | None = None
+    self.last_supply_t = 0.0
 
   def _close_asm_usb(self) -> None:
     if self._asm_usb is not None:
@@ -299,6 +303,7 @@ class ChestnutState:
     try:
       state.supplyVoltage, state.supplyCurrent, state.supplyFault = self._read_ina()
       asm_valid = True
+      self.last_supply_mv, self.last_supply_t = int(state.supplyVoltage), time.monotonic()
     except Exception:
       pass
     if "AMD" in Device._opened_devices:
@@ -309,6 +314,37 @@ class ChestnutState:
 
     msg.valid = asm_valid and (not self.big or self.valid)
     self.pm.send("chestnutState", msg)
+
+  def supply_mv(self, now: float) -> int | None:
+    """Chestnut 12 V input in mV: the value published within the last 2 s, else a direct INA read."""
+    if self.last_supply_mv is not None and now - self.last_supply_t < 2.0:
+      return self.last_supply_mv
+    try:
+      self.last_supply_mv, self.last_supply_t = int(self._read_ina()[0]), now
+      return self.last_supply_mv
+    except Exception:
+      return None
+
+
+def _refresh_starpilot_toggles() -> None:
+  try:
+    update_starpilot_toggles()
+  except Exception:
+    cloudlog.exception("failed to refresh StarPilot toggles after a model change")
+
+
+def _egpu_recovery_car_inputs(sm: SubMaster) -> CarInputs:
+  CS, CC = sm["carState"], sm["carControl"]
+  return CarInputs(
+    v_ego=CS.vEgo,
+    standstill=CS.standstill,
+    brake_pressed=CS.brakePressed,
+    in_park=CS.gearShifter == car.CarState.GearShifter.park,
+    enabled=CC.enabled,
+    lat_active=CC.latActive,
+    long_active=CC.longActive,
+    valid=all(sm.seen[s] and sm.alive[s] for s in ("carState", "carControl")),
+  )
 
 
 def _get_param_str(params: Params, key: str, default: str = "") -> str:
@@ -1193,7 +1229,13 @@ def main(demo=False):
     )
 
   if not model_lab_active:
+    toggles_model = _get_param_str(params, "Model")
     set_runtime_model_params(params, model.model_id, model.policy_generation)
+    if _get_param_str(params, "Model") != toggles_model:
+      # Plannerd and the UI read the model name/version from the toggles, which were built from the
+      # selected model before this load. Refresh them so they show the model that actually runs.
+      cloudlog.warning(f"running model {model.model_id} differs from selected {toggles_model}; refreshing toggles")
+      _refresh_starpilot_toggles()
 
   external_gpu_active = model_lab_active or model.uses_external_gpu
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
@@ -1217,6 +1259,20 @@ def main(demo=False):
 
   publish_state = PublishState()
   chestnut_state = ChestnutState(pm, external_gpu_active) if external_gpu_requested else None
+
+  # Runtime recovery to the big model after a start (or runtime fallback) on the small one.
+  egpu_recovery = None
+  egpu_supply = None
+  if not demo and not model_lab_requested and external_artifact_ready:
+    try:
+      egpu_recovery = EgpuRecovery(external_gpu_active, time.monotonic(), enabled=recovery_enabled())
+      # Read-only INA access when Chestnut was not present at start (nothing publishes chestnutState then).
+      egpu_supply = chestnut_state if chestnut_state is not None else ChestnutState(pm, False)
+      cloudlog.warning(f"external GPU auto-recover armed: stage {egpu_recovery.state.stage}, " +
+                       f"attempts {egpu_recovery.state.attempts}")
+    except Exception:
+      cloudlog.exception("external GPU auto-recover init failed; disabled for this drive")
+      egpu_recovery = None
   # setup filter to track dropped frames
   frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_FREQ)
   frame_id = 0
@@ -1451,6 +1507,7 @@ def main(demo=False):
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
       set_runtime_model_params(params, model.model_id, model.policy_generation)
+      _refresh_starpilot_toggles()
       params.put_bool("UsbGpuLoading", False)
       if chestnut_state is not None:
         chestnut_state.big = False
@@ -1459,6 +1516,25 @@ def main(demo=False):
 
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
+
+    if egpu_recovery is not None:
+      now = time.monotonic()
+      if now - egpu_recovery.last_check >= EGPU_RECOVERY_CHECK_INTERVAL:
+        try:
+          request = egpu_recovery.update(
+            now,
+            external_gpu_active,
+            egpu_supply.supply_mv(now) if not external_gpu_active else None,
+            usbgpu_present() if not external_gpu_active else True,
+            _egpu_recovery_car_inputs(sm),
+          )
+          if request:
+            cloudlog.warning("external GPU auto-recover: Chestnut power stable, requesting onroad cycle " +
+                             f"(attempt {egpu_recovery.state.attempts}, {egpu_recovery.state.detail})")
+            params.put_bool("OnroadCycleRequested", True)
+        except Exception:
+          cloudlog.exception("external GPU auto-recover failed; disabled for this drive")
+          egpu_recovery = None
     if model_lab_active and model_lab_longitudinal is not None:
       model_lab_timings.append(model_execution_time * 1000)
       if run_count % (ModelConstants.MODEL_FREQ * 10) == 0:

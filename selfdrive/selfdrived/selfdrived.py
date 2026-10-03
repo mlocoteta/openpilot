@@ -23,7 +23,9 @@ from openpilot.common.gps import get_gps_location_service
 from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.car.cruise_state import should_flag_cruise_mismatch
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
-from openpilot.selfdrive.selfdrived.events import Events, ET
+from openpilot.selfdrive.selfdrived.events import Events, ET, GPU_MODEL_BACKUP_TEXT
+from openpilot.selfdrive.selfdrived.egpu_alert import GpuBackupAlert
+from openpilot.selfdrive.modeld.egpu_recovery import read_status as read_egpu_recovery_status
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
@@ -256,6 +258,8 @@ class SelfdriveD:
     self.big_model_active = False
     self.big_model_failed = False
     self.big_model_ready_t = 0.
+    self.gpu_backup_alert = GpuBackupAlert()
+    self.egpu_recovery_status = None
     self.experimental_mode = False
     self.ecu_disable_failed = False
     self.ecu_disable_failed_checked = not (
@@ -406,6 +410,13 @@ class SelfdriveD:
     if big_failed and not self.big_model_failed:
       self.events.add(EventName.bigModelFailed)
     self.big_model_failed = big_failed
+
+    if self.sm.frame % int(1. / DT_CTRL) == 0:
+      self.egpu_recovery_status = read_egpu_recovery_status()
+    gpu_backup_text = self.gpu_backup_alert.update(time.monotonic(), self.egpu_recovery_status)
+    if gpu_backup_text is not None:
+      GPU_MODEL_BACKUP_TEXT["text1"], GPU_MODEL_BACKUP_TEXT["text2"] = gpu_backup_text
+      self.starpilot_events.add(StarPilotEventName.gpuModelBackup)
 
     if big_active:
       self.big_model_active = True
