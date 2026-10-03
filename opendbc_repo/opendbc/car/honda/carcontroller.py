@@ -7,6 +7,7 @@ from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_in
                         apply_ti_steer_torque_limits, ti_output_headroom_limits
 from opendbc.car.carlog import carlog
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.pedal_learner import PedalGasFactorGuard, applied_gas_factor
 from opendbc.car.honda.values import (
   CAR,
   CruiseButtons,
@@ -306,6 +307,13 @@ class CarController(CarControllerBase):
     self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
     self.bosch_wind_factor_before_gasmax = self.bosch_wind_factor
     self.log_pedal_learner = bool(CP.enableGasInterceptorDEPRECATED and CP.carFingerprint not in HONDA_BOSCH)
+    # Accord 9G pedal: bounded, gated, slow gas-factor learner and a launch-speed cap (pedal_learner.py).
+    self.pedal_guard = None
+    self.gas_factor_stored = self.bosch_gas_factor
+    if CP.enableGasInterceptorDEPRECATED and CP.carFingerprint == CAR.HONDA_ACCORD_9G:
+      self.pedal_guard = PedalGasFactorGuard(self.bosch_gas_factor)
+      self.bosch_gas_factor = self.pedal_guard.start
+      self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
     self.pedal_learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
     self.pitch = 0.0
     self.mvl_accord_mode = CP.carFingerprint == CAR.HONDA_ACCORD_11G
@@ -372,11 +380,18 @@ class CarController(CarControllerBase):
     gas0, wind0 = self.pedal_learner_start
     gas, wind = self.bosch_gas_factor, self.bosch_wind_factor
     start = " (drive start)" if self.frame == 0 else ""
+    if self.pedal_guard is not None:
+      counts = self.pedal_guard.counts
+      total = max(1, sum(counts.values()) - counts["inactive"])
+      guard = (f"guard: stored {self.gas_factor_stored:.3f}, band {self.pedal_guard.start:.3f}+-0.10 in 1.2-1.6, " +
+               "learned " + " ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.items() if k != "inactive" and v))
+    else:
+      guard = "clips gas 0.1-3.0"
     carlog.warning(" ".join((
       f"Honda pedal learner{start}: t {self.frame * DT_CTRL:.0f} s",
       f"gas factor {gas:.3f} (start {gas0:.3f}, {gas - gas0:+.3f})",
       f"wind factor {wind:.3f} (start {wind0:.3f}, {wind - wind0:+.3f}; before brake {self.bosch_wind_factor_before_brake:.3f};",
-      "clips gas 0.1-3.0 wind 0.1-5.0)",
+      f"{guard}; wind clip 0.1-5.0)",
     )))
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
@@ -646,9 +661,14 @@ class CarController(CarControllerBase):
 
           if self.CP.enableGasInterceptorDEPRECATED:
             gas_error = actuators.accel - CS.out.aEgo
+            learn_allowed = not CS.out.gasPressed and actuators.longControlState == LongCtrlState.pid
+            if self.pedal_guard is not None:
+              braking = apply_brake > 0 or CS.out.brakePressed or actuators.longControlState == LongCtrlState.stopping
+              self.bosch_gas_factor = self.pedal_guard.update(self.bosch_gas_factor, actuators.accel, CS.out.aEgo, CS.out.vEgo,
+                                                              gas, braking, hill_brake, learn_allowed)
 
-            if not CS.out.gasPressed and actuators.longControlState == LongCtrlState.pid:
-              if gas_error != 0.0 and gas > 0.0:
+            if learn_allowed:
+              if self.pedal_guard is None and gas_error != 0.0 and gas > 0.0:
                 self.bosch_gas_factor = float(np.clip(self.bosch_gas_factor + gas_error / 150.0 * (gas * 4.8), 0.1, 3.0))
               if gas_error != 0.0 and not CS.out.brakePressed and CS.out.vEgo > 0.0:
                 wind_adjust = 1.0 + (wind_brake * 4.8) / 1000.0
@@ -662,9 +682,10 @@ class CarController(CarControllerBase):
                 self.bosch_wind_factor_before_brake = self.bosch_wind_factor
 
             gas_mult = float(np.interp(CS.out.vEgo, [0.0, 10.0], [0.4, 1.0]))
+            gas_factor = self.bosch_gas_factor if self.pedal_guard is None else applied_gas_factor(self.bosch_gas_factor, CS.out.vEgo)
             if CC.longActive:
               gas_interceptor_command = float(np.clip(
-                gas_mult * ((gas * self.bosch_gas_factor) - brake + (wind_brake * self.bosch_wind_factor * 3.0 / 4.0)),
+                gas_mult * ((gas * gas_factor) - brake + (wind_brake * self.bosch_wind_factor * 3.0 / 4.0)),
                 0.0,
                 1.0,
               ))
