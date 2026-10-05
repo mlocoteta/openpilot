@@ -4,8 +4,9 @@ from types import SimpleNamespace
 import pytest
 
 from opendbc.can import CANPacker
+from opendbc.car import structs
 from opendbc.car.ford.fordcan import CanBus
-from opendbc.car.ford.values import CAR, FordFlags
+from opendbc.car.ford.values import CAR, FordFlags, FordSafetyFlags
 from .. import fordcan
 from ..lateral import FordLateralController, HumanTurnDetector, STEER_DT
 
@@ -14,9 +15,17 @@ class FakeSubMaster(dict):
   def __init__(self, services):
     super().__init__({"liveDelay": SimpleNamespace(lateralDelay=0.12)})
     self.updated = dict.fromkeys(services, False)
+    self.alive = dict.fromkeys(services, True)
+    self.valid = dict.fromkeys(services, True)
+    self.freq_ok = dict.fromkeys(services, True)
+    if "pandaStates" in services:
+      self["pandaStates"] = []
 
   def update(self, timeout):
     pass
+
+  def all_checks(self, services):
+    return all(self.alive[s] and self.valid[s] and self.freq_ok[s] for s in services)
 
 
 @pytest.fixture
@@ -33,7 +42,8 @@ def controller(monkeypatch):
 
 
 def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, steering_angle=0.0,
-              steering_torque=0.0, left_blinker=False, right_blinker=False, gas_pressed=False, brake_pressed=False):
+              steering_torque=0.0, left_blinker=False, right_blinker=False, gas_pressed=False, brake_pressed=False,
+              cruise_enabled=False):
   return SimpleNamespace(out=SimpleNamespace(
     vEgoRaw=speed,
     aEgo=accel,
@@ -45,6 +55,7 @@ def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, stee
     rightBlinker=right_blinker,
     gasPressed=gas_pressed,
     brakePressed=brake_pressed,
+    cruiseState=SimpleNamespace(enabled=cruise_enabled),
   ))
 
 
@@ -369,6 +380,97 @@ def test_mach_e_assist_falls_back_to_curvature_when_not_permitted(
   assert result.curvature == pytest.approx(sign * 0.02)
   assert result.path_angle == pytest.approx(sign * 0.055)
 
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("blocked", ("disengaged", "cruise", "brake", "denied", "stale", "invalid",
+                                   "frequency", "empty", "wrong_model", "second_ford", "missing_sm",
+                                   "no_canfd", "no_mach_e", "angle_mode"))
+def test_mach_e_accelerator_assist_requires_live_full_permission(controller, monkeypatch, sign, blocked):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.sm = FakeSubMaster(["modelV2", "liveDelay", "pandaStates"])
+  panda = SimpleNamespace(safetyModel=structs.CarParams.SafetyModel.ford, controlsAllowed=True,
+                         safetyParam=FordSafetyFlags.CANFD | FordSafetyFlags.MACH_E_CURVATURE)
+  controller.sm["pandaStates"] = [panda]
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.04)
+  controller.curvature_last = sign * 0.02
+  state = car_state(speed=7.0, curvature=sign * 0.007, gas_pressed=True, cruise_enabled=True)
+  CC = SimpleNamespace(latActive=True, enabled=True)
+  actuators = SimpleNamespace(curvature=sign * 0.03)
+  result = controller.update(CC, state, actuators)
+  assert result.curvature == pytest.approx(sign * 0.02)
+  assert result.path_angle == pytest.approx(sign * 0.055)
+
+  if blocked == "disengaged":
+    CC.enabled = False
+  elif blocked == "cruise":
+    state.out.cruiseState.enabled = False
+  elif blocked == "brake":
+    state.out.brakePressed = True
+  elif blocked == "denied":
+    panda.controlsAllowed = False
+  elif blocked in ("stale", "invalid", "frequency"):
+    getattr(controller.sm, {"stale": "alive", "invalid": "valid", "frequency": "freq_ok"}[blocked])["pandaStates"] = False
+  elif blocked == "empty":
+    controller.sm["pandaStates"] = []
+  elif blocked == "wrong_model":
+    panda.safetyModel = structs.CarParams.SafetyModel.toyota
+  elif blocked == "second_ford":
+    controller.sm["pandaStates"].append(SimpleNamespace(
+      safetyModel=structs.CarParams.SafetyModel.ford, controlsAllowed=False, safetyParam=panda.safetyParam))
+  elif blocked == "missing_sm":
+    controller.sm = None
+  elif blocked == "no_canfd":
+    panda.safetyParam &= ~FordSafetyFlags.CANFD
+  elif blocked == "no_mach_e":
+    panda.safetyParam &= ~FordSafetyFlags.MACH_E_CURVATURE
+  elif blocked == "angle_mode":
+    panda.safetyParam |= FordSafetyFlags.LKA_STEERING
+  for _ in range(5):
+    result = controller.update(CC, state, actuators)
+    assert result.active
+    assert result.curvature == pytest.approx(sign * 0.02)
+    assert result.path_angle == controller.path_angle_last == 0.0
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_accelerator_does_not_interrupt_permitted_assist(controller, monkeypatch, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.sm = FakeSubMaster(["modelV2", "liveDelay", "pandaStates"])
+  panda = SimpleNamespace(safetyModel=structs.CarParams.SafetyModel.ford, controlsAllowed=True,
+                         safetyParam=FordSafetyFlags.CANFD | FordSafetyFlags.MACH_E_CURVATURE)
+  controller.sm["pandaStates"] = [SimpleNamespace(safetyModel=structs.CarParams.SafetyModel.silent,
+                                                 controlsAllowed=False), panda]
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.04)
+  controller.curvature_last = sign * 0.02
+  state = car_state(speed=7.0, curvature=sign * 0.007, cruise_enabled=True)
+  CC = SimpleNamespace(latActive=True, enabled=True)
+  actuators = SimpleNamespace(curvature=sign * 0.03)
+  for i in range(10):
+    state.out.gasPressed = i % 2 == 0
+    result = controller.update(CC, state, actuators)
+    assert sign * result.path_angle > 0.0
+    assert abs(result.path_angle) <= 0.16
+    assert result.curvature == pytest.approx(sign * 0.02)
+  panda.controlsAllowed = False
+  state.out.gasPressed = True
+  assert controller.update(CC, state, actuators).path_angle == 0.0
+  panda.controlsAllowed = True
+  assert controller.update(CC, state, actuators).path_angle == pytest.approx(sign * 0.055)
+  assert controller.update(SimpleNamespace(latActive=False), state, actuators).path_angle == 0.0
+  assert controller.path_angle_last == 0.0
+
+
+@pytest.mark.parametrize("fingerprint,flags,subscribed", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, True),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, False),
+  (CAR.FORD_EDGE_MK2, FordFlags.CANFD, False),
+  (CAR.FORD_F_150_MK14, FordFlags.CANFD, False),
+))
+def test_pedal_assist_permission_subscription_is_mach_e_canfd_only(controller, fingerprint, flags, subscribed):
+  instance = FordLateralController(SimpleNamespace(carFingerprint=fingerprint, flags=flags))
+  assert ("pandaStates" in instance.sm.updated) is subscribed
 
 @pytest.mark.parametrize("sign", (-1, 1))
 @pytest.mark.parametrize("speed,expected", ((1.9, False), (2.0, True), (3.0, True), (7.0, True),
