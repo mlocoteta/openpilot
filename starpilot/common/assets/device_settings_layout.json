@@ -162,6 +162,18 @@
         "settings_tier": "simple"
       },
       {
+        "key": "TeslaAOLScreenTap",
+        "label": "Three-Finger AOL Tap",
+        "description": "Toggle Always On Lateral by touching the Tesla screen with three fingers. Requires the Model 3/Y Vehicle CAN add-on cable, which is detected automatically. Does not engage or cancel cruise control. Restart the device after changing this setting or the AOL brake behavior when screen taps are enabled.",
+        "picker_description": "Toggle steering with a three-finger screen touch using the Vehicle CAN add-on cable.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AlwaysOnLateral",
+        "vehicle_makes": ["Tesla"],
+        "requires_offroad": true,
+        "settings_tier": "simple"
+      },
+      {
         "key": "LaneChanges",
         "label": "Lane Changes",
         "description": "Allow openpilot to change lanes.",

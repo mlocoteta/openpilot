@@ -21,7 +21,7 @@ from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, EV_CAR as HYUNDAI_EV_
 from opendbc.car.interfaces import TORQUE_SUBSTITUTE_PATH, CarInterfaceBase, GearShifter
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.subaru.values import SUBARU_REDNECK_CRUISE_CARS, SUBARU_STOP_START_CARS, SubaruFlags
-from opendbc.car.tesla.values import CAR as TESLA_CAR
+from opendbc.car.tesla.values import CAR as TESLA_CAR, TeslaFlags
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR, ToyotaStarPilotFlags
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.constants import CV
@@ -634,6 +634,8 @@ class StarPilotVariables:
       clear_update_flag = False
     # CarParams uses this value to select the matching Panda safety configuration.
     toggle.tesla_cooperative_steering = self.params.get_bool("TeslaCoopSteering")
+    toggle.tesla_aol_screen_tap_requested = self.params.get_bool("TeslaAOLScreenTap") and self.params.get_bool("AlwaysOnLateral")
+    toggle.tesla_aol_screen_brake_disengage_requested = self.params.get_bool("TeslaAOLDisengageOnBrake")
     toggle.rivian_angle_control = self.params.get_bool("RivianAngleControl")
 
     fallback_platform = GM_CAR.CHEVROLET_BOLT_ACC_2022_2023 if HARDWARE.get_device_type() == "pc" else MOCK.MOCK
@@ -864,6 +866,10 @@ class StarPilotVariables:
     toggle.always_on_lateral_pause_speed = self.get_value("PauseAOLOnBrake", cast=float, condition=toggle.always_on_lateral)
     toggle.tesla_aol_disengage_on_brake = self.get_value(
       "TeslaAOLDisengageOnBrake", condition=toggle.always_on_lateral and toggle.car_make == "tesla"
+    )
+    toggle.tesla_aol_screen_tap = self.get_value(
+      "TeslaAOLScreenTap", condition=toggle.always_on_lateral and toggle.car_make == "tesla" and
+      toggle.car_model in (TESLA_CAR.TESLA_MODEL_3, TESLA_CAR.TESLA_MODEL_Y) and bool(CP.flags & TeslaFlags.AOL_SCREEN_BUTTON),
     )
 
     main_cruise_button_control = self.get_button_function("MainCruiseButtonControl")

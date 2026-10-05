@@ -24,8 +24,8 @@ HONDA_ACCORD_STANDSTILL_GUARD_MAX_EGO_SPEED = 0.25
 HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE = 1.25
 GENESIS_GV70_ELECTRIFIED_LEAD_FOLLOW_JERK_SCALE = 1.75
 KIA_NIRO_EV_LEAD_FOLLOW_JERK_SCALE = 1.5
-KIA_NIRO_EV_FAR_FOLLOW_BRAKE_SLEW_RATE = 2.5
-KIA_NIRO_EV_FAR_FOLLOW_RELEASE_SLEW_RATE = 1.75
+KIA_NIRO_EV_FAR_FOLLOW_BRAKE_SLEW_RATE = 2.0
+KIA_NIRO_EV_FAR_FOLLOW_RELEASE_SLEW_RATE = 1.25
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_UPPER = 1.5
 GENESIS_GV70_ELECTRIFIED_SCC_JERK_LOWER = 2.0
 GENESIS_GV70_ELECTRIFIED_SCC_URGENT_JERK_LOWER = 5.0
@@ -586,6 +586,23 @@ def allow_radar_standstill_gap_settle(CP):
     getattr(CP, "brand", "") == "toyota" and
     str(getattr(CP, "carFingerprint", "")) == "TOYOTA_RAV4_TSS2"
   )
+
+
+def is_kia_niro_ev_follow_lead(CP, lead, v_ego):
+  if (
+    getattr(CP, "brand", "") != "hyundai" or str(getattr(CP, "carFingerprint", "")) != "KIA_NIRO_EV" or
+    lead is None or not bool(getattr(lead, "status", False)) or bool(getattr(lead, "radar", False)) or
+    float(getattr(lead, "modelProb", 0.0)) < 0.95 or
+    abs(float(getattr(lead, "yRel", 0.0))) > 1.5 or float(v_ego) < 5.0
+  ):
+    return False
+  return 10.0 <= float(lead.dRel) <= max(40.0, 2.5 * float(v_ego))
+
+
+def get_far_follow_output_slew_min_speed(CP, default_min_speed):
+  if getattr(CP, "brand", "") == "hyundai" and str(getattr(CP, "carFingerprint", "")) == "KIA_NIRO_EV":
+    return 5.0
+  return default_min_speed
 
 
 def get_far_follow_output_slew_rates(CP):
