@@ -33,7 +33,7 @@ def controller(monkeypatch):
 
 
 def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, steering_angle=0.0,
-              steering_torque=0.0, left_blinker=False, right_blinker=False):
+              steering_torque=0.0, left_blinker=False, right_blinker=False, gas_pressed=False, brake_pressed=False):
   return SimpleNamespace(out=SimpleNamespace(
     vEgoRaw=speed,
     aEgo=accel,
@@ -43,6 +43,8 @@ def car_state(speed=15.0, accel=0.0, curvature=0.0, steering_pressed=False, stee
     steeringTorque=steering_torque,
     leftBlinker=left_blinker,
     rightBlinker=right_blinker,
+    gasPressed=gas_pressed,
+    brakePressed=brake_pressed,
   ))
 
 
@@ -338,6 +340,37 @@ def test_mach_e_path_angle_assist_is_encoded_with_curvature(controller):
 
 
 @pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("enabled,gas_pressed,brake_pressed", (
+  (False, False, False),
+  (False, True, False),
+  (True, True, False),
+  (True, False, True),
+))
+def test_mach_e_assist_falls_back_to_curvature_when_not_permitted(
+    controller, monkeypatch, sign, enabled, gas_pressed, brake_pressed):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.curvature_last = sign * 0.02
+  controller.path_angle_last = sign * 0.16
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.04)
+  state = car_state(speed=7.0, curvature=sign * 0.007,
+                    gas_pressed=gas_pressed, brake_pressed=brake_pressed)
+  actuators = SimpleNamespace(curvature=sign * 0.03)
+  CC = SimpleNamespace(latActive=True, enabled=enabled)
+  for _ in range(10):
+    result = controller.update(CC, state, actuators)
+    assert result.active
+    assert result.curvature == pytest.approx(sign * 0.02)
+    assert result.path_angle == controller.path_angle_last == 0.0
+
+  CC.enabled = True
+  state.out.gasPressed = state.out.brakePressed = False
+  result = controller.update(CC, state, actuators)
+  assert result.curvature == pytest.approx(sign * 0.02)
+  assert result.path_angle == pytest.approx(sign * 0.055)
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
 @pytest.mark.parametrize("speed,expected", ((1.9, False), (2.0, True), (3.0, True), (7.0, True),
                                           (11.0, True), (14.9, True), (15.0, False)))
 def test_mach_e_driver_curve_assistance_scope(controller, monkeypatch, sign, speed, expected):
@@ -387,7 +420,7 @@ def test_mach_e_driver_assistance_handoff_and_takeover(controller, monkeypatch, 
   controller.CP.flags = FordFlags.CANFD
   controller.curvature_last = sign * 0.020
   monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.030)
-  CC = SimpleNamespace(latActive=True)
+  CC = SimpleNamespace(latActive=True, enabled=True)
   actuators = SimpleNamespace(curvature=sign * 0.022)
   helping = car_state(speed=7.0, curvature=sign * 0.008, steering_pressed=True,
                       steering_angle=-sign * 50.0, steering_torque=-sign * 2.0,
@@ -441,7 +474,7 @@ def test_mach_e_driver_help_at_early_curve_entry(controller, monkeypatch, sign):
   state = car_state(speed=2.7, curvature=sign * 0.003, steering_pressed=True,
                     steering_torque=-sign * 2.0, steering_angle=-sign * 15.0,
                     left_blinker=sign < 0, right_blinker=sign > 0)
-  CC = SimpleNamespace(latActive=True)
+  CC = SimpleNamespace(latActive=True, enabled=True)
   assert controller.update(CC, state, SimpleNamespace(curvature=sign * 0.004)).active
   state.out.vEgoRaw = 3.5
   state.out.yawRate = -sign * 0.004 * state.out.vEgoRaw
@@ -683,10 +716,11 @@ def test_mach_e_turn_in_preview_is_not_carried_into_unwind(controller):
   (9.0, 1.60),
   (10.5, 1.60),
   (11.0, 1.60),
-  (12.0, 4.0 / 3.0),
-  (13.0, 16.0 / 15.0),
-  (14.0, 0.80),
+  (12.0, 1.60),
+  (13.0, 4.0 / 3.0),
+  (14.0, 16.0 / 15.0),
   (15.0, 0.80),
+  (16.0, 0.80),
 ))
 def test_mach_e_turn_in_lookahead_extra_fades_by_speed(controller, speed, expected):
   assert controller._turn_in_lookahead_extra(speed) == pytest.approx(expected)
@@ -1332,6 +1366,90 @@ def test_mach_e_manual_turn_releases_for_opposite_path_request(controller):
   for _ in range(4):
     assert not controller.update(CC, car_state(curvature=-0.001), CC.actuators).active
   assert controller.update(CC, car_state(curvature=-0.001), CC.actuators).active
+
+
+@pytest.mark.parametrize("sign", (-1.0, 1.0))
+@pytest.mark.parametrize("speed", (9.0, 9.5, 14.99))
+def test_mach_e_manual_turn_hands_off_to_driver_assisted_opposite_curve(controller, monkeypatch, sign, speed):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  CC = SimpleNamespace(latActive=True, enabled=True)
+  actuators = SimpleNamespace(curvature=sign * 0.006)
+  turning = car_state(speed=speed, curvature=sign * 0.004, steering_pressed=True,
+                      steering_angle=-sign * 30.0, steering_torque=-sign * 2.0,
+                      left_blinker=sign < 0.0, right_blinker=sign > 0.0)
+  assert not controller.update(CC, turning, actuators).active
+  assert controller.manual_turn_direction == sign
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: -sign * 0.010)
+  actuators.curvature = -sign * 0.006
+  following = car_state(speed=speed, curvature=-sign * 0.004, steering_pressed=True,
+                        steering_angle=sign * 20.0, steering_torque=sign * 2.0)
+  for _ in range(4):
+    assert not controller.update(CC, following, actuators).active
+  result = controller.update(CC, following, actuators)
+  assert result.active
+  assert -sign * result.curvature > 0.0
+  assert abs(result.curvature) <= 0.0025
+  assert result.path_angle == 0.0
+  assert not controller.manual_turn_latched
+  assert controller.manual_turn_direction == 0.0
+  assert controller.manual_turn_recovery_timer == 0.0
+
+
+@pytest.mark.parametrize("sign", (-1.0, 1.0))
+@pytest.mark.parametrize("speed,current,torque,preview,left,right,lane_change", (
+  (4.5, -0.004, 2.0, -0.010, False, False, False),
+  (8.99, -0.004, 2.0, -0.010, False, False, False),
+  (15.0, -0.004, 2.0, -0.010, False, False, False),
+  (9.5, 0.004, 2.0, -0.010, False, False, False),
+  (9.5, -0.009, 2.0, -0.010, False, False, False),
+  (9.5, -0.004, -2.0, -0.010, False, False, False),
+  (9.5, -0.004, 3.6, -0.010, False, False, False),
+  (9.5, -0.004, 2.0, 0.010, False, False, False),
+  (9.5, -0.004, 2.0, -0.007, False, False, False),
+  (9.5, -0.004, 2.0, -0.010, True, False, False),
+  (9.5, -0.004, 2.0, -0.010, False, True, False),
+  (9.5, -0.004, 2.0, -0.010, True, True, False),
+  (9.5, -0.004, 2.0, -0.010, False, False, True),
+))
+def test_mach_e_opposite_curve_handoff_preserves_manual_override(
+    controller, monkeypatch, sign, speed, current, torque, preview, left, right, lane_change):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.manual_turn_latched = True
+  controller.manual_turn_direction = sign
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * preview)
+  monkeypatch.setattr(controller, "_lane_change", lambda: (lane_change, 0))
+  state = car_state(speed=speed, curvature=sign * current, steering_pressed=True,
+                    steering_angle=sign * 25.0, steering_torque=sign * torque,
+                    left_blinker=left, right_blinker=right)
+  for _ in range(8):
+    result = controller.update(SimpleNamespace(latActive=True, enabled=True), state,
+                               SimpleNamespace(curvature=-sign * 0.006))
+    assert not result.active
+    assert result.curvature == result.path_angle == 0.0
+    assert controller.manual_turn_recovery_timer == 0.0
+
+
+def test_mach_e_opposite_curve_handoff_requires_uninterrupted_agreement(controller, monkeypatch):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.manual_turn_latched = True
+  controller.manual_turn_direction = 1.0
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: -0.010)
+  CC = SimpleNamespace(latActive=True, enabled=True)
+  actuators = SimpleNamespace(curvature=-0.006)
+  state = car_state(speed=9.5, curvature=-0.004, steering_pressed=True,
+                    steering_angle=20.0, steering_torque=2.0)
+  for _ in range(4):
+    assert not controller.update(CC, state, actuators).active
+  state.out.steeringTorque = -2.0
+  assert not controller.update(CC, state, actuators).active
+  assert controller.manual_turn_recovery_timer == 0.0
+  state.out.steeringTorque = 2.0
+  for _ in range(4):
+    assert not controller.update(CC, state, actuators).active
+  assert controller.update(CC, state, actuators).active
 
 
 def test_non_mach_e_signaled_turn_does_not_latch(controller):

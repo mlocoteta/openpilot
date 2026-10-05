@@ -295,6 +295,77 @@ def make_wrapped_button_event(button_type, pressed):
   return SimpleNamespace(type=SimpleNamespace(raw=int(button_type)), pressed=pressed)
 
 
+@pytest.mark.parametrize("fingerprint", tuple(spc.HYUNDAI_CAR))
+@pytest.mark.parametrize("openpilot_long, pcm_cruise", ((True, False), (False, True), (True, True)))
+def test_ev6_arming_gate_is_limited_to_ev6_openpilot_long(monkeypatch, tmp_path, fingerprint, openpilot_long, pcm_cruise):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="hyundai", carFingerprint=fingerprint, flags=spc.HyundaiFlags.CANFD,
+                    openpilotLongitudinalControl=openpilot_long, pcmCruise=pcm_cruise),
+    SimpleNamespace(alternativeExperience=32),
+  )
+  needs_arming = fingerprint == spc.HYUNDAI_CAR.KIA_EV6 and openpilot_long and not pcm_cruise
+  assert card.ev6_aol_needs_arming == needs_arming
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True)
+  ret = card.update(make_car_state(available=True), SimpleNamespace(distancePressed=False), make_sm(), toggles)
+  assert ret.alwaysOnLateralEnabled == (card.always_on_lateral_supported and not needs_arming)
+
+
+@pytest.mark.parametrize("lkas_mapping", (False, True))
+def test_ev6_aol_requires_physical_authorization_even_for_controller_actions(monkeypatch, tmp_path, lkas_mapping):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="hyundai", carFingerprint=spc.HYUNDAI_CAR.KIA_EV6, flags=spc.HyundaiFlags.CANFD,
+                    openpilotLongitudinalControl=True, pcmCruise=False),
+    SimpleNamespace(alternativeExperience=32),
+  )
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=not lkas_mapping,
+                         always_on_lateral_lkas=lkas_mapping)
+  sm = make_sm()
+  output = SimpleNamespace(distancePressed=False)
+  cs = make_car_state(available=True)
+  ret = card.update(cs, output, sm, toggles)
+  assert not ret.alwaysOnLateralAllowed
+  assert not ret.alwaysOnLateralEnabled
+
+  counter = spc.CONTROLLER_ACTION_COUNTERS[spc.CONTROLLER_ACTION_TOGGLE_AOL]
+  card.params_memory.put_int(counter, 1)
+  ret = card.update(cs, output, sm, toggles)
+  assert not ret.alwaysOnLateralAllowed
+  assert not ret.alwaysOnLateralEnabled
+
+  cs.buttonEvents = [make_wrapped_button_event(spc.ButtonType.lkas, True)]
+  ret = card.update(cs, output, sm, toggles, ev6_aol_authorized=True)
+  assert ret.alwaysOnLateralEnabled
+  cs.buttonEvents = []
+  ret = card.update(cs, output, sm, toggles, ev6_aol_authorized=True)
+  assert ret.alwaysOnLateralEnabled
+
+  ret = card.update(cs, output, sm, toggles, ev6_aol_authorized=False)
+  assert not ret.alwaysOnLateralAllowed
+  assert not ret.alwaysOnLateralEnabled
+
+
+def test_ev6_lkas_experimental_mapping_still_runs_when_armed(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="hyundai", carFingerprint=spc.HYUNDAI_CAR.KIA_EV6, flags=spc.HyundaiFlags.CANFD,
+                    openpilotLongitudinalControl=True, pcmCruise=False),
+    SimpleNamespace(alternativeExperience=32),
+  )
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_main=True, experimental_mode_via_lkas=True,
+                         experimental_mode_available=True)
+  sm = make_sm()
+  sm["carControl"].latActive = True
+  cs = make_car_state(available=True, button_events=[make_wrapped_button_event(spc.ButtonType.lkas, True)])
+  ret = card.update(cs, SimpleNamespace(distancePressed=False), sm, toggles, ev6_aol_authorized=True)
+  assert ret.alwaysOnLateralEnabled
+  assert card.params.get_bool("ExperimentalMode")
+
+
 @pytest.mark.parametrize("pending_before_press", [False, True])
 def test_slc_confirmation_release_does_not_republish_accel(monkeypatch, tmp_path, pending_before_press):
   monkeypatch.setattr(spc, "Params", FakeParams)

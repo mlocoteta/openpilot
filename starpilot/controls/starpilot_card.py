@@ -73,6 +73,11 @@ class StarPilotCard:
       self.CP.brand == "hyundai" and not (hyundai_flags & HyundaiFlags.CANFD) and not hyundai_aol_before_engagement
     )
     self.hyundai_aol_ready = False
+    self.ev6_aol_needs_arming = (
+      getattr(self.CP, "carFingerprint", None) == HYUNDAI_CAR.KIA_EV6 and
+      getattr(self.CP, "openpilotLongitudinalControl", False) and not getattr(self.CP, "pcmCruise", False)
+    )
+    self.ev6_aol_authorized = False
     self.g70_main_cruise_aol_pending = False
     self.g70_main_cruise_aol_pending_frames = 0
     self.prev_cruise_available = None
@@ -167,6 +172,8 @@ class StarPilotCard:
   def _toggle_controller_aol(self, carState, starpilot_toggles, main_cruise_aol=False):
     if not self.always_on_lateral_supported or not getattr(starpilot_toggles, "always_on_lateral", False):
       return False
+    if self.ev6_aol_needs_arming and not self.ev6_aol_authorized:
+      return False
     tesla_disengage_on_brake = (
       self.CP.brand == "tesla" and
       getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False)
@@ -237,7 +244,8 @@ class StarPilotCard:
     else:
       self.params.put_bool_nonblocking("ExperimentalMode", not sm["selfdriveState"].experimentalMode)
 
-  def update(self, carState, starpilotCarState, sm, starpilot_toggles, *, preap_authorized=False):
+  def update(self, carState, starpilotCarState, sm, starpilot_toggles, *, preap_authorized=False, ev6_aol_authorized=False):
+    self.ev6_aol_authorized = ev6_aol_authorized
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")
     self._handle_favorite_traffic_mode_action(sm)
 
@@ -486,6 +494,9 @@ class StarPilotCard:
           self.handle_button_event("lkas", sm, starpilot_toggles)
 
     self._handle_controller_actions(carState, sm, starpilot_toggles, main_cruise_aol)
+
+    if self.ev6_aol_needs_arming and not ev6_aol_authorized:
+      self.always_on_lateral_allowed = False
 
     self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
     if getattr(self.CP, "carFingerprint", None) == "TESLA_MODEL_S_PREAP":

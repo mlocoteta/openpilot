@@ -38,8 +38,8 @@ MACH_E_TURN_IN_LOOKAHEAD_EXTRA = 0.80
 MACH_E_LOW_SPEED_TURN_IN_LOOKAHEAD_EXTRA = 1.60
 MACH_E_LOW_SPEED_TURN_IN_START_SPEED = 2.0
 MACH_E_LOW_SPEED_TURN_IN_FULL_SPEED = 3.0
-MACH_E_LOW_SPEED_TURN_IN_MAX_SPEED = 11.0
-MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 14.0
+MACH_E_LOW_SPEED_TURN_IN_MAX_SPEED = 12.0
+MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 15.0
 MACH_E_TURN_IN_MIN_CURVATURE = 0.002
 MACH_E_TURN_IN_FULL_CURVATURE = 0.008
 MACH_E_TURN_IN_LAG_CURVATURE = 0.006
@@ -491,8 +491,12 @@ class FordLateralController:
       self.manual_turn_direction = 0.0
       return False
 
-    if (CS.out.steeringPressed or blinker_direction != 0.0 or
-        abs(CS.out.steeringAngleDeg) > MANUAL_TURN_RELEASE_ANGLE_DEG):
+    following_next_curve = (
+      driver_assisting and not CS.out.leftBlinker and not CS.out.rightBlinker and
+      CS.out.vEgoRaw >= MACH_E_DIRECTION_CHANGE_MIN_SPEED and self.manual_turn_direction * desired < 0.0
+    )
+    if not following_next_curve and (CS.out.steeringPressed or blinker_direction != 0.0 or
+                                    abs(CS.out.steeringAngleDeg) > MANUAL_TURN_RELEASE_ANGLE_DEG):
       self.manual_turn_recovery_timer = 0.0
     else:
       self.manual_turn_recovery_timer += STEER_DT
@@ -604,6 +608,9 @@ class FordLateralController:
       applied = float(np.clip(applied, -max_curvature, max_curvature))
     path_angle = self._path_angle_assist(
       requested, desired, applied, current, v_ego, driver_override, self._lane_change()[0])
+    if path_angle != 0.0 and (not CC.enabled or CS.out.gasPressed or CS.out.brakePressed):
+      self.path_angle_last = 0.0
+      path_angle = 0.0
 
     self.curvature_samples.append(predicted)
     curvature_rate = 0.0

@@ -794,6 +794,7 @@ class TestToyotaCarController:
     controller.accel = 0.0
     controller.brake_hold_active = False
     controller._brake_hold_counter = 0
+    controller._auto_hold_rearm_blocked = False
     return controller
 
   @staticmethod
@@ -1093,6 +1094,17 @@ class TestToyotaCarController:
 
     assert gas_cmd == 0.12
 
+  def test_interceptor_does_not_apply_gas_during_auto_hold(self):
+    controller = self._make_controller()
+    controller.CP.enableGasInterceptorDEPRECATED = True
+    controller.accel = 1.5
+    controller.brake_hold_active = True
+
+    assert controller._compute_interceptor_gas_cmd(
+      SimpleNamespace(longActive=True),
+      SimpleNamespace(out=SimpleNamespace(standstill=True, vEgo=0.0)),
+    ) == 0.0
+
   def test_interceptor_non_stop_and_go_scales_with_accel_request(self):
     controller = self._make_controller()
     controller.CP.enableGasInterceptorDEPRECATED = True
@@ -1223,6 +1235,181 @@ class TestToyotaCarController:
     assert CP.safetyConfigs[0].safetyParam & ToyotaSafetyFlags.GAS_INTERCEPTOR
     assert abs(CP.longitudinalActuatorDelay - 0.2) < 1e-6
     assert CP.stopAccel == -1.5
+
+
+class TestToyotaAutoHoldCruise:
+  @staticmethod
+  def _make_car(*, candidate=CAR.TOYOTA_RAV4_TSS2, enabled=True, capability=True):
+    cp = CarInterface.get_non_essential_params(candidate)
+    cp.flags &= ~ToyotaFlags.AUTO_BRAKE_HOLD.value
+    if capability:
+      cp.flags |= ToyotaFlags.AUTO_BRAKE_HOLD.value
+    controller = CarController(DBC[candidate], cp)
+    cc = structs.CarControl(enabled=True, longActive=True)
+    cc.actuators.accel = -0.7
+    cc.actuators.longControlState = structs.CarControl.Actuators.LongControlState.stopping
+    cc.hudControl.leadDistanceBars = 3
+    cs = SimpleNamespace(
+      out=structs.CarState(
+        standstill=True,
+        gearShifter=structs.CarState.GearShifter.drive,
+        cruiseState=structs.CarState.CruiseState(available=True, enabled=True, standstill=True),
+      ),
+      gvc=0.0,
+      acc_type=1,
+      pcm_acc_status=7,
+      pcm_follow_distance=1,
+      lkas_hud={},
+      pre_collision_2={},
+    )
+    toggles = SimpleNamespace(toyota_auto_hold=enabled, sng_hack=False, lock_doors=False, unlock_doors=False)
+    parser = CANParser(DBC[candidate][Bus.pt], [("ACC_CONTROL", 0)], 0)
+    return SimpleNamespace(controller=controller, cc=cc, cs=cs, toggles=toggles, parser=parser)
+
+  @staticmethod
+  def _tick(car):
+    # Run through a complete ACC_CONTROL send interval and decode the actual
+    # controller output, including the ordinary standstill and PID paths.
+    for _ in range(3):
+      now_nanos = car.controller.frame * 10_000_000
+      _, messages = car.controller.update(car.cc.as_reader(), car.cs, now_nanos, car.toggles)
+      car.parser.update([(now_nanos, messages)])
+    return car.parser.vl["ACC_CONTROL"]
+
+  @pytest.mark.parametrize("sng_hack", [False, True])
+  def test_cruise_stop_blocks_planner_resume_until_gas(self, sng_hack):
+    car = self._make_car()
+    command = self._tick(car)
+    assert car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == -1.0
+
+    # Reproduce the report: no brake-pedal input, then the planner changes
+    # from stopping to starting and asks to resume while still stationary.
+    car.cc.actuators.accel = 1.5
+    car.cc.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+    car.cc.cruiseControl.resume = True
+    car.toggles.sng_hack = sng_hack
+    for _ in range(10):
+      command = self._tick(car)
+      assert car.controller.brake_hold_active
+      assert command["ACCEL_CMD"] == -1.0
+      assert command["PERMIT_BRAKING"] == 1
+      assert command["RELEASE_STANDSTILL"] == 0
+
+    car.cs.out.gasPressed = True
+    car.cc.longActive = False
+    car.cc.actuators.accel = 0.0
+    command = self._tick(car)
+    assert not car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == 0.0
+    assert command["RELEASE_STANDSTILL"] == 1
+
+  def test_gas_tap_does_not_rehold_until_the_next_stop(self):
+    car = self._make_car()
+    self._tick(car)
+    assert car.controller.brake_hold_active
+
+    car.cs.out.gasPressed = True
+    car.cc.longActive = False
+    car.cc.actuators.accel = 0.0
+    self._tick(car)
+
+    car.cs.out.gasPressed = False
+    car.cc.longActive = True
+    car.cc.actuators.accel = -0.7
+    for _ in range(10):
+      command = self._tick(car)
+      assert not car.controller.brake_hold_active
+      assert command["RELEASE_STANDSTILL"] == 1
+
+    car.cs.out.standstill = False
+    car.cs.out.vEgo = car.cs.out.vEgoRaw = 1.0
+    car.cs.out.cruiseState.standstill = False
+    self._tick(car)
+
+    car.cs.out.standstill = True
+    car.cs.out.vEgo = car.cs.out.vEgoRaw = 0.0
+    car.cs.out.cruiseState.standstill = True
+    command = self._tick(car)
+    assert car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == -1.0
+    assert command["RELEASE_STANDSTILL"] == 0
+
+  def test_manual_stop_still_holds_with_only_aol_active(self):
+    car = self._make_car()
+    car.cc.enabled = False
+    car.cc.longActive = False
+    car.cc.latActive = True
+    car.cc.actuators.accel = 0.0
+    car.cs.out.cruiseState.enabled = False
+    car.cs.out.brakePressed = True
+    # Include the first ACC_CONTROL transmission after the one-second latch.
+    for _ in range(35):
+      command = self._tick(car)
+    assert car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == -1.0
+    assert command["RELEASE_STANDSTILL"] == 0
+
+    car.cs.out.brakePressed = False
+    command = self._tick(car)
+    assert car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == -1.0
+
+    car.cs.out.gasPressed = True
+    command = self._tick(car)
+    assert not car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] == 0.0
+    assert command["RELEASE_STANDSTILL"] == 1
+
+  @pytest.mark.parametrize("long_state", ["off", "pid", "starting"])
+  def test_stationary_cruise_does_not_latch_without_a_stopping_request(self, long_state):
+    car = self._make_car()
+    car.cc.actuators.longControlState = getattr(structs.CarControl.Actuators.LongControlState, long_state)
+    car.cc.actuators.accel = 1.5
+    self._tick(car)
+    assert not car.controller.brake_hold_active
+
+  @pytest.mark.parametrize("enabled,capability,candidate", [
+    (False, True, CAR.TOYOTA_RAV4_TSS2),
+    (True, False, CAR.TOYOTA_RAV4_TSS2),
+    (True, True, CAR.TOYOTA_CAMRY_TSS2),
+  ])
+  def test_cruise_hold_requires_toggle_capability_and_acc_hold_path(self, enabled, capability, candidate):
+    car = self._make_car(candidate=candidate, enabled=enabled, capability=capability)
+    self._tick(car)
+    assert not car.controller.brake_hold_active
+
+    car.cc.actuators.accel = 1.5
+    car.cc.actuators.longControlState = structs.CarControl.Actuators.LongControlState.starting
+    car.cc.cruiseControl.resume = True
+    # Allow the ordinary acceleration rate limiter to ramp through zero.
+    for _ in range(20):
+      command = self._tick(car)
+      assert not car.controller.brake_hold_active
+    assert command["ACCEL_CMD"] > 0
+    assert command["RELEASE_STANDSTILL"] == 1
+
+  @pytest.mark.parametrize("release", ["toggle", "cancel", "main", "park", "reverse", "moving", "long_inactive"])
+  def test_cruise_hold_releases_when_conditions_change(self, release):
+    car = self._make_car()
+    self._tick(car)
+    assert car.controller.brake_hold_active
+
+    if release == "toggle":
+      car.toggles.toyota_auto_hold = False
+    elif release == "cancel":
+      car.cc.cruiseControl.cancel = True
+    elif release == "main":
+      car.cs.out.cruiseState.available = False
+    elif release in ("park", "reverse"):
+      car.cs.out.gearShifter = getattr(structs.CarState.GearShifter, release)
+    elif release == "moving":
+      car.cs.out.standstill = False
+    else:
+      car.cc.longActive = False
+
+    self._tick(car)
+    assert not car.controller.brake_hold_active
 
 
 class TestToyotaCarState:
