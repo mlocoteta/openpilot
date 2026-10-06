@@ -77,6 +77,7 @@ def _load_starpilot_onroad_view(monkeypatch):
     SteeringWheelWidget=dummy_widget,
     StoppedTimerWidget=dummy_widget,
     ModelSourceWidget=dummy_widget,
+    DesiredSpeedWidget=dummy_widget,
   )
   stub_module(
     "openpilot.selfdrive.ui.onroad.starpilot.stopping_point",
