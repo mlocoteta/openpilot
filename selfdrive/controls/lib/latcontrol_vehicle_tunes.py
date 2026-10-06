@@ -296,6 +296,8 @@ GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE = 0.04
 GENESIS_GV70_OUTPUT_SMOOTHING_UNWIND_PHASE_WIDTH = 0.08
 GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_LAT = 0.55
 GENESIS_GV70_OUTPUT_SMOOTHING_DIRECTION_CHANGE_RC = 0.065
+GENESIS_GV70_MEASUREMENT_DAMPING_SPEED_BP = [10.0 * CV.MPH_TO_MS, 35.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+GENESIS_GV70_MEASUREMENT_DAMPING_V = [0.0, 0.08, 0.12]
 GENESIS_GV70_HIGHWAY_STABILIZER_SPEED_BP = [40.0 * CV.MPH_TO_MS, 50.0 * CV.MPH_TO_MS]
 GENESIS_GV70_HIGHWAY_STABILIZER_CENTER_LAT_BP = [0.75, 1.0]
 GENESIS_GV70_HIGHWAY_STABILIZER_BASELINE_RC = 0.85
@@ -1282,6 +1284,9 @@ HONDA_CRV_5G_PID_CENTER_ANGLE = 14.0
 HONDA_CRV_5G_PID_CENTER_ANGLE_WIDTH = 3.0
 HONDA_CRV_5G_PID_OUTPUT_SCALE_MIN = 0.62
 HONDA_CRV_5G_PID_OUTPUT_ALPHA_MIN = 0.28
+HONDA_CRV_5G_PID_CENTER_KP_SCALE_MIN = 0.50
+HONDA_CRV_5G_PID_CENTER_KP_SPEED_BP = [11.0 * CV.MPH_TO_MS, 18.0 * CV.MPH_TO_MS]
+HONDA_CRV_5G_PID_CENTER_KP_ANGLE_BP = [6.0, 18.0]
 
 RAV4_TSS2_CENTER_FRICTION_THRESHOLD_GAIN = 0.14
 RAV4_TSS2_CENTER_FRICTION_LAT = 0.30
@@ -1924,6 +1929,12 @@ def get_rav4_tss2_pid_output(output_torque: float, prev_output_torque: float,
   output_alpha = 1.0 - ((1.0 - RAV4_TSS2_PID_OUTPUT_ALPHA_MIN) * envelope)
   limited_output = output_torque * output_scale
   return float(prev_output_torque + output_alpha * (limited_output - prev_output_torque))
+
+
+def get_honda_crv_5g_pid_kp_scale(desired_angle_deg: float, v_ego: float) -> float:
+  speed_weight = np.interp(max(v_ego, 0.0), HONDA_CRV_5G_PID_CENTER_KP_SPEED_BP, [1.0, 0.0])
+  center_weight = np.interp(abs(desired_angle_deg), HONDA_CRV_5G_PID_CENTER_KP_ANGLE_BP, [1.0, 0.0])
+  return float(1.0 - (1.0 - HONDA_CRV_5G_PID_CENTER_KP_SCALE_MIN) * speed_weight * center_weight)
 
 
 def get_honda_crv_5g_pid_output(output_torque: float, prev_output_torque: float,

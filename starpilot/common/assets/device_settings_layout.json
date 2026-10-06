@@ -162,6 +162,18 @@
         "settings_tier": "simple"
       },
       {
+        "key": "TeslaAOLScreenTap",
+        "label": "Three-Finger AOL Tap",
+        "description": "Toggle Always On Lateral by touching the Tesla screen with three fingers. Requires the Model 3/Y Vehicle CAN add-on cable, which is detected automatically. Does not engage or cancel cruise control. Restart the device after changing this setting or the AOL brake behavior when screen taps are enabled.",
+        "picker_description": "Toggle steering with a three-finger screen touch using the Vehicle CAN add-on cable.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AlwaysOnLateral",
+        "vehicle_makes": ["Tesla"],
+        "requires_offroad": true,
+        "settings_tier": "simple"
+      },
+      {
         "key": "LaneChanges",
         "label": "Lane Changes",
         "description": "Allow openpilot to change lanes.",
@@ -2370,8 +2382,8 @@
       {
         "key": "ShowSLCOffset",
         "label": "Show Speed Limit Offset",
-        "description": "Show the current offset from the posted limit on the driving screen.",
-        "picker_description": "Shows the current offset from the posted limit.",
+        "description": "Show the current offset on the compact driving display. The unified Max Set / Speed Limit card always shows nonzero offsets.",
+        "picker_description": "Shows the offset on the compact display; the unified card always shows nonzero offsets.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "SpeedLimitController",
@@ -2990,8 +3002,8 @@
       {
         "key": "UseVienna",
         "label": "Use Vienna-Style Speed Signs",
-        "description": "Show Vienna-style (EU) speed-limit signs instead of MUTCD (US).",
-        "picker_description": "Uses Vienna-style speed-limit signs.",
+        "description": "Use Vienna-style (EU) speed-limit signs on the compact driving display. The unified Max Set / Speed Limit card uses its own layout.",
+        "picker_description": "Uses Vienna-style signs on the compact display.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "NavigationUI",
@@ -3652,8 +3664,8 @@
       {
         "key": "ToyotaAutoHold",
         "label": "Toyota Auto Hold",
-        "description": "Hold the brakes at a stop on supported Toyota/Lexus vehicles when cruise main is available and cruise is not active.",
-        "picker_description": "Holds supported Toyota/Lexus brakes at stops when cruise is available.",
+        "description": "Hold the brakes after a manual stop with cruise main on. Supported models can also hold after a cruise-controlled stop until you press the gas pedal.",
+        "picker_description": "Holds supported Toyota/Lexus brakes at stops until you press the gas pedal.",
         "data_type": "bool",
         "ui_type": "toggle",
         "galaxy_only": true,

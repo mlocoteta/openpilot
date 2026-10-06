@@ -383,12 +383,12 @@ def test_niro_ev_far_follow_slew_is_vehicle_specific_and_preserves_urgent_brakin
   planner.lead_one = make_lead(status=True, d_rel=45.0, v_lead=15.0, model_prob=0.99, y_rel=0.0)
   planner.lead_two = make_lead(status=False)
 
-  assert get_far_follow_output_slew_rates(CP) == pytest.approx((2.5, 1.75))
+  assert get_far_follow_output_slew_rates(CP) == pytest.approx((2.0, 1.25))
   assert get_far_follow_output_slew_rates(next_gen) == (0.0, 0.0)
   first = planner.get_vehicle_far_follow_slew_target(16.0, 0.0, -0.4, False, False)
   release = planner.get_vehicle_far_follow_slew_target(16.0, first, 0.3, False, False)
   assert first == pytest.approx(-0.4)
-  assert release == pytest.approx(first + 1.75 * planner.dt)
+  assert release == pytest.approx(first + 1.25 * planner.dt)
 
   planner.lead_one.dRel = 18.0
   assert planner.get_vehicle_far_follow_slew_target(16.0, release, -1.5, False, False) == pytest.approx(-1.5)

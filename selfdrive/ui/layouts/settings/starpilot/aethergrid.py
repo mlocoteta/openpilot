@@ -9,6 +9,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, M
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.lib.scroll_panel2 import GuiScrollPanel2
 from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.system.ui.lib.wrap_text import wrap_text as wrap_body_text
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.label import gui_label
 
@@ -214,7 +215,7 @@ def draw_text_fit_common(
     render_width = measure_text_cached(font, text, actual_font_size, spacing=spacing).x
   else:
     render_width = size.x
-  nudge_y = (font_size - actual_font_size) / 2
+  nudge_y = (font_size - actual_font_size) * FONT_SCALE / 2
   draw_x = pos.x
   if align_center:
     draw_x = pos.x + (max_width - render_width) / 2
@@ -763,7 +764,7 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
   PAGE_COMMIT_RATIO = 0.20
   PAGE_ANIM_DURATION = 0.28
   PAGE_SNAP_DURATION = 0.20
-  PAGE_INDICATOR_HEIGHT = 44
+  PAGE_INDICATOR_HEIGHT = 56
 
 
 
@@ -1008,13 +1009,16 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
     track_h = 10.0
     track_w = seg_w * n
     start_x = rect.x + (rect.width - track_w) / 2
-    track_y = rect.y + rect.height - 16
+    track_y = rect.y + rect.height - 12
 
     label = f"{self._current_page + 1} / {self._page_count}"
     lf = gui_app.font(FontWeight.MEDIUM)
-    ls = 16.0
-    lw = measure_text_cached(lf, label, int(ls)).x
-    rl.draw_text_ex(lf, label, rl.Vector2(int(rect.x + (rect.width - lw) / 2), int(track_y - ls - 6)), int(ls), 0, with_alpha(AetherListColors.MUTED, 200))
+    ls = 22.0
+    label_size = measure_text_cached(lf, label, int(ls))
+    rl.draw_text_ex(
+      lf, label, rl.Vector2(int(rect.x + (rect.width - label_size.x) / 2), int(track_y - label_size.y - 4)),
+      int(ls), 0, with_alpha(AetherListColors.MUTED, 200),
+    )
 
     track_col = with_alpha(AetherListColors.MUTED, 60)
     rl.draw_rectangle_rounded(rl.Rectangle(start_x, track_y, track_w, track_h), 0.5, 8, track_col)
@@ -1026,7 +1030,8 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
 
     if self._page_count > 8:
       more_x = int(start_x + track_w + 10)
-      rl.draw_text_ex(lf, "···", rl.Vector2(more_x, int(track_y - 2)), 14, 0, AetherListColors.MUTED)
+      more_h = measure_text_cached(lf, "···", 14).y
+      rl.draw_text_ex(lf, "···", rl.Vector2(more_x, int(track_y + track_h - more_h)), 14, 0, AetherListColors.MUTED)
 
   # ── lifecycle ──────────────────────────────────────────────
 
@@ -2028,12 +2033,12 @@ def draw_section_header(
 ):
   if title:
     trailing_reserved = min(320.0, rect.width * 0.38) if trailing_text else 0.0
-    title_rect = rl.Rectangle(rect.x, rect.y + (rect.height - title_size) / 2, max(1.0, rect.width - trailing_reserved), title_size + 4)
+    title_rect = rl.Rectangle(rect.x, rect.y, max(1.0, rect.width - trailing_reserved), rect.height)
     alignment = rl.GuiTextAlignment.TEXT_ALIGN_CENTER if align_center else rl.GuiTextAlignment.TEXT_ALIGN_LEFT
     gui_label(title_rect, title, title_size, title_color or style.subtitle_color, FontWeight.SEMI_BOLD, alignment=alignment)
 
   if trailing_text:
-    trailing_rect = rl.Rectangle(rect.x, rect.y + (rect.height - trailing_size) / 2, rect.width, trailing_size + 4)
+    trailing_rect = rect
     gui_label(
       trailing_rect,
       trailing_text,
@@ -2080,14 +2085,28 @@ def draw_empty_state_card(
     FontWeight.MEDIUM,
     alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
   )
-  gui_label(
-    rl.Rectangle(card_rect.x + inset_x, body_y, max(1.0, card_rect.width - inset_x * 2), resolved_body_h),
-    body,
-    body_size,
-    style.subtitle_color,
-    FontWeight.NORMAL,
-    alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
-  )
+  resolved_body_h = min(resolved_body_h, max(0.0, card_rect.y + card_rect.height - body_y))
+  font = gui_app.font(FontWeight.NORMAL)
+  line_height = body_size * FONT_SCALE
+  line_gap = 4.0
+  max_lines = int((resolved_body_h + line_gap) // (line_height + line_gap))
+  if not body or max_lines < 1:
+    return
+  body_width = max(1.0, card_rect.width - inset_x * 2)
+  if "\n" not in body and measure_text_cached(font, body, body_size).x <= body_width:
+    lines = [body]
+  else:
+    lines = wrap_body_text(font, body, body_size, int(body_width))
+  if len(lines) > max_lines:
+    lines = lines[:max_lines - 1] + [truncate_text_ellipsis(font, " ".join(lines[max_lines - 1:]), body_width, body_size)]
+  text_y = body_y + (resolved_body_h - len(lines) * line_height - (len(lines) - 1) * line_gap) / 2
+  for line in lines:
+    gui_label(
+      rl.Rectangle(card_rect.x + inset_x, text_y, body_width, line_height),
+      line, body_size, style.subtitle_color, FontWeight.NORMAL,
+      alignment=rl.GuiTextAlignment.TEXT_ALIGN_CENTER,
+    )
+    text_y += line_height + line_gap
 
 
 def draw_list_group_shell(
@@ -2338,7 +2357,7 @@ def draw_selectable_chip(rect: rl.Rectangle, text: str, *,
   draw_text_fit_common(
     resolved_font,
     text,
-    rl.Vector2(rect.x + padding_x, rect.y + (rect.height - font_size) / 2),
+    rl.Vector2(rect.x + padding_x, rect.y + (rect.height - font_size * FONT_SCALE) / 2),
     max(1.0, rect.width - padding_x * 2),
     font_size,
     align_center=True,
@@ -2569,7 +2588,7 @@ class AetherInlineRangeControl(Widget):
     draw_text_fit_common(
       self._font,
       label,
-      rl.Vector2(rect.x + 10, rect.y + (rect.height - 22) / 2),
+      rl.Vector2(rect.x + 10, rect.y + (rect.height - 22 * FONT_SCALE) / 2),
       max(1.0, rect.width - 20),
       22,  # font_size in draw_button
       align_center=True,
@@ -2861,7 +2880,7 @@ class AetherAdjustorRow(Widget):
       draw_rounded_fill(fill_rect, with_alpha(self._color, fill_alpha), radius_px=bar_h // 2)
 
     inset = 18
-    title_y = bar_rect.y + (bar_h - title_fs) / 2
+    title_y = bar_rect.y + (bar_h - title_fs * FONT_SCALE) / 2
     rl.draw_text_ex(self._font_title, self._title,
                     rl.Vector2(bar_rect.x + inset, title_y),
                     title_fs, 0, self._style.title_color)
@@ -2870,7 +2889,7 @@ class AetherAdjustorRow(Widget):
     value_w = measure_text_cached(self._font_value, value_str, value_fs).x
     rl.draw_text_ex(self._font_value, value_str,
                     rl.Vector2(bar_rect.x + bar_rect.width - inset - value_w,
-                               bar_rect.y + (bar_h - value_fs) / 2),
+                               bar_rect.y + (bar_h - value_fs * FONT_SCALE) / 2),
                     value_fs, 0, self._style.title_color)
 
     if self._subtitle:
@@ -2994,7 +3013,10 @@ def draw_selection_list_row(
   if action_text:
     if action_pill:
       available_w = max(96.0, action_rect.width - 28)
-      chip_w = min(available_w, action_pill_width) if action_pill_width is not None else min(available_w, max(96.0, 42 + len(action_text) * 9))
+      pill_width = action_pill_width
+      if pill_width is None:
+        pill_width = max(96.0, math.ceil(measure_text_cached(title_font, action_text, action_text_size).x) + 24)
+      chip_w = min(available_w, pill_width)
       chip_h = min(float(action_pill_height), max(36.0, action_rect.height - 28))
       chip_rect = rl.Rectangle(action_rect.x + action_rect.width - chip_w - 18, action_rect.y + (action_rect.height - chip_h) / 2, chip_w, chip_h)
       draw_action_pill(
@@ -3110,14 +3132,13 @@ class AetherButton(Widget):
       accent = self._accent_color or AetherListColors.PRIMARY
       bg = accent if enabled else rl.Color(accent.r, accent.g, accent.b, 80)
       border = with_alpha(accent, 190 if enabled else 70)
+      if hovered:
+        bg = rl.Color(min(bg.r + 10, 255), min(bg.g + 10, 255), min(bg.b + 10, 255), bg.a)
+      if pressed:
+        bg = rl.Color(max(bg.r - 8, 0), max(bg.g - 8, 0), max(bg.b - 8, 0), bg.a)
     else:
-      bg = rl.Color(255, 255, 255, 10 if enabled else 5)
+      bg = rl.Color(255, 255, 255, (20 if pressed else 14 if hovered else 10) if enabled else 5)
       border = rl.Color(255, 255, 255, 22 if enabled else 10)
-
-    if hovered:
-      bg = rl.Color(min(bg.r + 10, 255), min(bg.g + 10, 255), min(bg.b + 10, 255), bg.a)
-    if pressed:
-      bg = rl.Color(max(bg.r - 8, 0), max(bg.g - 8, 0), max(bg.b - 8, 0), bg.a)
 
     rl.draw_rectangle_rounded(rect, 0.18, 12, bg)
     rl.draw_rectangle_rounded_lines_ex(rect, 0.18, 12, 1, border)
@@ -3155,7 +3176,7 @@ class AetherChip:
     draw_text_fit_common(
       gui_app.font(FontWeight.MEDIUM),
       self.text,
-      rl.Vector2(rect.x + 12, rect.y + (rect.height - self._font_size) / 2),
+      rl.Vector2(rect.x + 12, rect.y + (rect.height - self._font_size * FONT_SCALE) / 2),
       max(1.0, rect.width - 24),
       self._font_size,
       align_center=True,
@@ -3889,8 +3910,8 @@ class AetherTile(Widget):
     
     title_color = rl.WHITE if (enabled and is_active) else rl.Color(236, 242, 250, 255)
     
-    title_y = ry + (rh / 2) - title_size - 2
-    status_y = ry + (rh / 2) + 6
+    title_y = ry + (rh - (title_size + status_size) * FONT_SCALE - 8) / 2
+    status_y = title_y + title_size * FONT_SCALE + 8
     
     max_text_width = rw - (content_pad * 2) - int(rh * 0.40) - 10
     font = getattr(self, "_font", gui_app.font(FontWeight.MEDIUM))
@@ -4005,7 +4026,7 @@ class HubTile(AetherTile):
       icon_scale = min(0.80, max(0.56, text_scale * 0.72))
       icon_h = CUSTOM_ICON_BASE_SIZE * CUSTOM_ICON_SCALE_MULT * icon_scale
 
-    total_h = icon_h + (gap if icon_h > 0 else 0) + title_size + (gap if desc_to_render else 0) + desc_size
+    total_h = icon_h + (gap if icon_h > 0 else 0) + (title_size + desc_size) * FONT_SCALE + (gap if desc_to_render else 0)
     content_top = ry + max(0, (rh - total_h) / 2)
 
     if self.custom_icon_key:
@@ -4019,7 +4040,7 @@ class HubTile(AetherTile):
     draw_text_fit_common(self._font_title, title_text,
                         rl.Vector2(rx + content_pad, content_top),
                         max_w, title_size, align_center=True, color=rl.WHITE)
-    content_top += title_size
+    content_top += title_size * FONT_SCALE
 
     if desc_to_render:
       content_top += gap
@@ -5412,7 +5433,7 @@ class AetherSegmentedControl(Widget):
         draw_text_fit_common(
           self._font,
           label,
-          rl.Vector2(face_rect.x + 16, face_rect.y + (face_rect.height - title_size) / 2),
+          rl.Vector2(face_rect.x + 16, face_rect.y + (face_rect.height - title_size * FONT_SCALE) / 2),
           face_rect.width - 32,
           title_size,
           align_center=True,
@@ -5601,4 +5622,3 @@ class TileGrid(Widget):
           tile.set_parent_rect(parent_rect)
         tile.render(snap_rect(rl.Rectangle(row_x + c * (row_tile_w + self._gap), rect.y + y_offset + r * (tile_h + self._gap), row_tile_w, tile_h)))
         tile_idx += 1
-

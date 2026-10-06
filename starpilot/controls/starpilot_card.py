@@ -2,9 +2,10 @@
 from opendbc.car import structs
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_requires_set_press
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, HyundaiFlags
+from opendbc.car.tesla.values import CAR as TESLA_CAR, TeslaFlags, TeslaSafetyFlags
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
-from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS, ButtonType
+from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS, ButtonType, is_speed_limit_confirmation_pending
 from openpilot.selfdrive.selfdrived.events import ET
 
 from openpilot.starpilot.common.experimental_state import (
@@ -66,6 +67,8 @@ class StarPilotCard:
     self.params_memory = Params(memory=True)
 
     self.accel_pressed = False
+    self.confirmation_button_suppressed = set()
+    self.pressed_accel_buttons = set()
     self.always_on_lateral_allowed = False
     self.controller_aol_override = None
     self.pacifica_aol_set_seen = False
@@ -80,6 +83,11 @@ class StarPilotCard:
       self.CP.brand == "hyundai" and not (hyundai_flags & HyundaiFlags.CANFD) and not hyundai_aol_before_engagement
     )
     self.hyundai_aol_ready = False
+    self.ev6_aol_needs_arming = (
+      getattr(self.CP, "carFingerprint", None) == HYUNDAI_CAR.KIA_EV6 and
+      getattr(self.CP, "openpilotLongitudinalControl", False) and not getattr(self.CP, "pcmCruise", False)
+    )
+    self.ev6_aol_authorized = False
     self.g70_main_cruise_aol_pending = False
     self.g70_main_cruise_aol_pending_frames = 0
     self.prev_cruise_available = None
@@ -87,6 +95,16 @@ class StarPilotCard:
     self.prev_brake_pressed = False
     self.prev_cruise_enabled = False
     self.tesla_aol_brake_disengaged = False
+    self.tesla_screen_button = (
+      self.CP.brand == "tesla" and
+      getattr(self.CP, "carFingerprint", None) in (TESLA_CAR.TESLA_MODEL_3, TESLA_CAR.TESLA_MODEL_Y) and
+      bool(getattr(self.CP, "flags", 0) & TeslaFlags.AOL_SCREEN_BUTTON)
+    )
+    self.tesla_screen_aol_override = None
+    self.tesla_screen_disengage_on_brake = any(
+      config.safetyParam & TeslaSafetyFlags.AOL_SCREEN_DISENGAGE_ON_BRAKE
+      for config in getattr(self.CP, "safetyConfigs", ())
+    )
     self.decel_pressed = False
     self.cancelPressed_previously = False
     self.cancel_pulse_glide_suppressed = False
@@ -174,9 +192,12 @@ class StarPilotCard:
   def _toggle_controller_aol(self, carState, starpilot_toggles, main_cruise_aol=False):
     if not self.always_on_lateral_supported or not getattr(starpilot_toggles, "always_on_lateral", False):
       return False
+    if self.ev6_aol_needs_arming and not self.ev6_aol_authorized:
+      return False
     tesla_disengage_on_brake = (
       self.CP.brand == "tesla" and
-      getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False)
+      (self.tesla_screen_disengage_on_brake if self.tesla_screen_button else
+       getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False))
     )
     if tesla_disengage_on_brake and not self.always_on_lateral_allowed and carState.brakePressed:
       return False
@@ -195,6 +216,8 @@ class StarPilotCard:
       self.controller_aol_override = self.always_on_lateral_allowed
     if tesla_disengage_on_brake and self.always_on_lateral_allowed:
       self.tesla_aol_brake_disengaged = False
+    if self.tesla_screen_button and getattr(starpilot_toggles, "tesla_aol_screen_tap", False):
+      self.tesla_screen_aol_override = self.always_on_lateral_allowed
     if carState.cruiseState.enabled or self.pause_lateral:
       self.pause_lateral = not self.always_on_lateral_allowed
     return True
@@ -244,7 +267,8 @@ class StarPilotCard:
     else:
       self.params.put_bool_nonblocking("ExperimentalMode", not sm["selfdriveState"].experimentalMode)
 
-  def update(self, carState, starpilotCarState, sm, starpilot_toggles, *, preap_authorized=False):
+  def update(self, carState, starpilotCarState, sm, starpilot_toggles, *, preap_authorized=False, ev6_aol_authorized=False):
+    self.ev6_aol_authorized = ev6_aol_authorized
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")
     self._handle_favorite_traffic_mode_action(sm)
 
@@ -270,6 +294,7 @@ class StarPilotCard:
       for be in carState.buttonEvents
     )
     pulse_glide_lkas_override = (
+      not self.tesla_screen_button and
       (bool(getattr(sm["carControl"], "longActive", False)) or self.pulse_and_glide) and
       getattr(starpilot_toggles, "pulse_and_glide_via_lkas", False)
     )
@@ -280,6 +305,23 @@ class StarPilotCard:
       ]
 
     button_event_types = [self._button_type_raw(be) for be in carState.buttonEvents]
+    accel_button_types = (int(ButtonType.accelCruise), int(ButtonType.resumeCruise))
+    confirmation_pending = is_speed_limit_confirmation_pending(sm["starpilotPlan"])
+    if confirmation_pending:
+      self.confirmation_button_suppressed.update(self.pressed_accel_buttons)
+    suppressed_releases = set()
+    for be, be_type in zip(carState.buttonEvents, button_event_types, strict=False):
+      if be_type not in accel_button_types:
+        continue
+      if be.pressed:
+        self.pressed_accel_buttons.add(be_type)
+        if confirmation_pending:
+          self.confirmation_button_suppressed.add(be_type)
+      else:
+        self.pressed_accel_buttons.discard(be_type)
+        if be_type in self.confirmation_button_suppressed:
+          self.confirmation_button_suppressed.remove(be_type)
+          suppressed_releases.add(be_type)
     button_aol_supported = self.always_on_lateral_supported and (
       self.CP.brand == "hyundai" or starpilot_toggles.lkas_allowed_for_aol
     )
@@ -293,7 +335,8 @@ class StarPilotCard:
     forte_main_cruise_aol_managed = self.kia_forte_non_scc and starpilot_toggles.main_cruise_aol_toggle
     tesla_disengage_on_brake = (
       self.CP.brand == "tesla" and
-      getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False)
+      (self.tesla_screen_disengage_on_brake if self.tesla_screen_button else
+       getattr(starpilot_toggles, "tesla_aol_disengage_on_brake", False))
     )
     if not tesla_disengage_on_brake:
       self.tesla_aol_brake_disengaged = False
@@ -386,6 +429,24 @@ class StarPilotCard:
       self.tesla_aol_brake_disengaged = False
       self.always_on_lateral_allowed = True
 
+    if self.tesla_screen_button and getattr(starpilot_toggles, "tesla_aol_screen_tap", False):
+      # Keep the existing cruise path until a gesture explicitly overrides it.
+      if engagement_started or (cruise_available_changed and not carState.cruiseState.available and not carState.brakePressed):
+        if self.tesla_screen_aol_override is not None:
+          self.pause_lateral = False
+        self.tesla_screen_aol_override = None
+      if self.tesla_screen_aol_override is not None:
+        self.always_on_lateral_allowed = self.tesla_screen_aol_override
+      if self.tesla_aol_brake_disengaged:
+        self.always_on_lateral_allowed = False
+      if cancel_pressed or getattr(carState, "steeringDisengage", False):
+        self.tesla_screen_aol_override = False
+        self.always_on_lateral_allowed = False
+      else:
+        for be in carState.buttonEvents:
+          if self._button_type_raw(be) == int(ButtonType.lkas) and be.pressed:
+            self._toggle_controller_aol(carState, starpilot_toggles)
+
     if (tesla_disengage_on_brake and carState.brakePressed and not self.prev_brake_pressed and
         self.always_on_lateral_set):
       self.tesla_aol_brake_disengaged = True
@@ -401,8 +462,11 @@ class StarPilotCard:
     if not self.always_on_lateral_supported:
       self.always_on_lateral_allowed = False
 
-    if sm.updated["starpilotPlan"] or any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types):
-      self.accel_pressed = any(be_type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be_type in button_event_types)
+    if sm.updated["starpilotPlan"] or any(be_type in accel_button_types for be_type in button_event_types):
+      self.accel_pressed = any(
+        be_type in accel_button_types and (be.pressed or be_type not in suppressed_releases)
+        for be, be_type in zip(carState.buttonEvents, button_event_types, strict=False)
+      )
 
     if sm.updated["starpilotPlan"] or any(be_type == ButtonType.decelCruise for be_type in button_event_types):
       self.decel_pressed = any(be_type == ButtonType.decelCruise for be_type in button_event_types)
@@ -465,7 +529,7 @@ class StarPilotCard:
     elif not cancel_pressed and self.cancel_pulse_glide_suppressed:
       self.cancel_pulse_glide_suppressed = False
 
-    if lkas_pressed:
+    if lkas_pressed and not self.tesla_screen_button:
       if self.CP.brand != "ford" or carState.cruiseState.available:
         if self.CP.brand == "ford" and getattr(starpilot_toggles, "ford_lkas_aol_toggle", False):
           self.pause_lateral = not self.pause_lateral
@@ -473,6 +537,9 @@ class StarPilotCard:
           self.handle_button_event("lkas", sm, starpilot_toggles)
 
     self._handle_controller_actions(carState, sm, starpilot_toggles, main_cruise_aol)
+
+    if self.ev6_aol_needs_arming and not ev6_aol_authorized:
+      self.always_on_lateral_allowed = False
 
     self.always_on_lateral_enabled = self.always_on_lateral_allowed and self.always_on_lateral_set
     if getattr(self.CP, "carFingerprint", None) == "TESLA_MODEL_S_PREAP":

@@ -21,7 +21,7 @@ from opendbc.car.hyundai.carcontroller import CarController, CANCEL_BUTTON_DELAY
                                              preserve_stock_canfd_lfa_status, \
                                              preserve_stock_canfd_lkas_status, \
                                              suppress_redundant_gv70_brake_cancel
-from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
+from opendbc.car.hyundai.carstate import CarState, Ev6AolArmingState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
                                              get_canfd_cruise_available
 from opendbc.car.hyundai.interface import CarInterface, KIA_EV9_ACCEL_MAX, get_communication_control_request
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
@@ -130,6 +130,73 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHyundaiFingerprint:
+  @pytest.mark.parametrize("candidate, alpha_long, needs_arming", (
+    (CAR.KIA_EV6, True, True), (CAR.KIA_EV6, False, False),
+    (CAR.KIA_EV6_2025, True, False), (CAR.KIA_EV9, True, False),
+    (CAR.HYUNDAI_IONIQ_5, True, False), (CAR.HYUNDAI_IONIQ_6, True, False),
+  ))
+  def test_ev6_aol_arming_is_vehicle_specific(self, candidate, alpha_long, needs_arming):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], alpha_long, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(candidate, gen_empty_fingerprint(), [], CP, toggles)
+    CS = CarState(CP, FPCP)
+    assert (CS.ev6_aol_arming is not None) == needs_arming
+    assert not CS.ev6_aol_authorized
+
+  @pytest.mark.parametrize("alt_buttons", (False, True))
+  @pytest.mark.parametrize("lkas_on_engage", (False, True))
+  def test_ev6_aol_uses_all_physical_button_samples(self, alt_buttons, lkas_on_engage):
+    toggles = get_test_toggles()
+    toggles.always_on_lateral_lkas = lkas_on_engage
+    fingerprint = gen_empty_fingerprint()
+    if not alt_buttons:
+      fingerprint[0][0x1CF] = 8
+    CP = CarInterface.get_params(CAR.KIA_EV6, fingerprint, [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV6, fingerprint, [], CP, toggles)
+    CS = CarState(CP, FPCP)
+    parsers = CS.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    buttons_msg = CS.cruise_btns_msg_canfd
+    frame = 0
+
+    def update(samples, acc_available=True):
+      nonlocal frame
+      frame += 1
+      msgs = [packer.make_can_msg(buttons_msg, CanBus(CP).ECAN, {
+        "ADAPTIVE_CRUISE_MAIN_BTN": main, "LDA_BTN": lkas, "CRUISE_BUTTONS": cruise,
+      }) for main, lkas, cruise in samples]
+      msgs.append(packer.make_can_msg("TCS", CanBus(CP).ECAN, {"ACCEnable": 0 if acc_available else 1}))
+      parsers[Bus.pt].update([(frame * 10_000_000, msgs)])
+      CS.update(parsers, toggles)
+      return CS.ev6_aol_authorized
+
+    assert not update([(0, 0, Buttons.NONE)])
+    assert update([(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([])
+    assert not update([(0, 1, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([(1, 0, Buttons.NONE), (1, 0, Buttons.NONE)])
+    assert update([(0, 0, Buttons.NONE)])
+    assert not update([(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert update([(1, 0, Buttons.NONE), (0, 0, Buttons.NONE)])
+    assert not update([], acc_available=False)
+    assert not update([])
+    assert not update([(0, 0, Buttons.SET_DECEL)])
+    assert update([(0, 0, Buttons.NONE)]) == lkas_on_engage
+    assert update([]) == lkas_on_engage
+
+  @pytest.mark.parametrize("button", (Buttons.SET_DECEL, Buttons.RES_ACCEL))
+  @pytest.mark.parametrize("lkas_on_engage", (False, True))
+  def test_ev6_aol_engagement_latch_matches_safety_flag(self, button, lkas_on_engage):
+    state = Ev6AolArmingState(lkas_on_engage)
+    state.update(False, False, button)
+    assert not state.authorized
+    state.update(False, False, Buttons.NONE)
+    assert state.authorized == lkas_on_engage
+    state.update(False, False, Buttons.CANCEL)
+    assert state.authorized == lkas_on_engage
+    state.update(False, True, Buttons.NONE)
+    assert state.authorized != lkas_on_engage
+
   def test_egmp_communication_control_paths(self):
     stock_request = bytes([0x28, 0x83, 0x01])
     radar_keepalive_request = bytes([0x28, 0x01, 0x01])

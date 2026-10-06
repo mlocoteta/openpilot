@@ -746,6 +746,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SubaruRedneckCruise", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"TacoTune", {PERSISTENT, BOOL, "0", "0", 2}},
     {"TeslaAOLDisengageOnBrake", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
+    {"TeslaAOLScreenTap", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
     {"TeslaCoopSteering", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"TestAlert", {CLEAR_ON_MANAGER_START, STRING, "", ""}},
     {"TetheringEnabled", {PERSISTENT, INT, "0", "0", 0}},

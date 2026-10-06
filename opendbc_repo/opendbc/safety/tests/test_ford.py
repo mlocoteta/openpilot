@@ -502,6 +502,45 @@ class TestFordMachEExtendedCurvatureSafety(TestFordCANFDStockSafety):
     self._reset_curvature_measurement(0.02, 9.0)
     self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, 0.055, 0.02, 0.0)))
 
+  def test_mach_e_aol_keeps_curvature_without_path_angle_assist(self):
+    self.safety.set_alternative_experience(32)
+    self._rx(self._toggle_aol(True))
+    self.assertTrue(self.safety.get_aol_allowed())
+    self.assertFalse(self.safety.get_controls_allowed())
+    self.assertTrue(self._tx(self._extended_lka_msg()))
+    for sign in (-1, 1):
+      self._reset_curvature_measurement(sign * 0.02, 7.5)
+      self._set_prev_desired_angle(sign * 0.02)
+      self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, sign * 0.055, sign * 0.02, 0.0)))
+      self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.0, sign * 0.02, 0.0)))
+
+  def test_mach_e_accelerator_assist_requires_retained_engagement(self):
+    for sign in (-1, 1):
+      self.setUp()
+      self.safety.set_alternative_experience(32)
+      self._rx(self._toggle_aol(True))
+      self._reset_curvature_measurement(sign * 0.02, 7.5)
+      self._set_prev_desired_angle(sign * 0.02)
+      self._rx(self._pcm_status_msg(False))
+      self._rx(self._pcm_status_msg(True))
+      self.assertTrue(self._tx(self._extended_lka_msg()))
+      for gas in (0.0, 25.0, 0.0):
+        self._rx(self._user_gas_msg(gas))
+        self.assertTrue(self.safety.get_controls_allowed())
+        self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, sign * 0.055, sign * 0.02, 0.0)))
+
+      self._rx(self._toggle_aol(True))
+      self.assertFalse(self.safety.get_controls_allowed())
+      self.assertTrue(self.safety.get_aol_allowed())
+      self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, sign * 0.055, sign * 0.02, 0.0)))
+      self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.0, sign * 0.02, 0.0)))
+
+      self._rx(self._pcm_status_msg(True))
+      self._rx(self._user_brake_msg(True))
+      self.assertFalse(self.safety.get_controls_allowed())
+      self.assertFalse(self._tx(self._lat_ctl_msg(True, 0.0, sign * 0.055, sign * 0.02, 0.0)))
+      self.assertTrue(self._tx(self._lat_ctl_msg(True, 0.0, 0.0, sign * 0.02, 0.0)))
+
   def test_other_canfd_fords_keep_original_error(self):
     self.safety.set_safety_hooks(CarParams.SafetyModel.ford, FordSafetyFlags.CANFD)
     self.safety.init_tests()

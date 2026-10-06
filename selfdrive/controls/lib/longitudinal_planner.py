@@ -22,6 +22,8 @@ from openpilot.selfdrive.controls.lib.lead_follow_policy import apply as apply_f
 from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_duplicate_vision_follow
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_far_follow_output_slew_rates,
+  get_far_follow_output_slew_min_speed,
+  is_kia_niro_ev_follow_lead,
   get_follow_prebrake_min_headway,
   get_honda_accord_lead_departure_tune,
   get_honda_accord_stop_go_accel_cap,
@@ -609,6 +611,7 @@ class LongitudinalPlanner:
     self.output_a_target = 0.0
     self.output_should_stop = False
     self.far_follow_brake_slew_rate, self.far_follow_release_slew_rate = get_far_follow_output_slew_rates(CP)
+    self.far_follow_slew_min_speed = get_far_follow_output_slew_min_speed(CP, VEHICLE_FAR_FOLLOW_SLEW_MIN_SPEED)
     self.untracked_slow_lead_decel_scale = get_untracked_slow_lead_decel_scale(CP)
     self.tracked_lead_catchup_headway_margins = get_tracked_lead_catchup_headway_margins(CP)
     self.far_follow_output_slew_active = False
@@ -1418,7 +1421,7 @@ class LongitudinalPlanner:
       if bool(getattr(lead, "status", False)) and
       abs(float(getattr(lead, "yRel", 0.0))) <= VEHICLE_FAR_FOLLOW_SLEW_MAX_LATERAL_OFFSET
     ]
-    safe_far_follow = bool(centered_leads and float(v_ego) >= VEHICLE_FAR_FOLLOW_SLEW_MIN_SPEED)
+    safe_far_follow = bool(centered_leads and float(v_ego) >= self.far_follow_slew_min_speed)
     for lead in centered_leads:
       distance = float(getattr(lead, "dRel", 0.0))
       closing_speed = max(0.0, float(v_ego) - float(getattr(lead, "vLead", v_ego)))
@@ -2141,6 +2144,13 @@ class LongitudinalPlanner:
       any(is_toyota_rav4_tss2_radar_follow_lead(self.CP, lead, scene_v_ego)
           for lead in (self.lead_one, self.lead_two))
     )
+    niro_follow = (
+      not experimental_mode and
+      not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False)) and
+      any(is_kia_niro_ev_follow_lead(self.CP, lead, scene_v_ego) for lead in (self.lead_one, self.lead_two))
+    )
     lightning_stopped_radar_follow = (
       experimental_mode and
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
@@ -2152,7 +2162,7 @@ class LongitudinalPlanner:
     # StarPilot trackingLead is debounce/model-length based. Keep a raw close-lead
     # safety path so ACC/chill does not ignore a visible lead during that debounce.
     lead_control_active = (
-      tracking_lead or raw_close_lead_control or early_truck_follow or rav4_radar_follow or
+      tracking_lead or raw_close_lead_control or early_truck_follow or rav4_radar_follow or niro_follow or
       lightning_stopped_radar_follow or
       any(is_toyota_corolla_early_radar_follow_lead(self.CP, lead, scene_v_ego)
           for lead in (self.lead_one, self.lead_two))

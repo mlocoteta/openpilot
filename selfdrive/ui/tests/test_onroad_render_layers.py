@@ -69,8 +69,7 @@ def _load_starpilot_onroad_view(monkeypatch):
   stub_module("openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager", WidgetLayoutManager=dummy_widget)
   stub_module(
     "openpilot.selfdrive.ui.onroad.starpilot.widgets",
-    SetSpeedWidget=dummy_widget,
-    SpeedLimitWidget=dummy_widget,
+    UnifiedSpeedWidget=dummy_widget,
     PedalIconsWidget=dummy_widget,
     AetherGaugeWidget=dummy_widget,
     PersonalityButtonWidget=dummy_widget,

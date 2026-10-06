@@ -15,8 +15,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, DT_CTRL
-from opendbc.car.ford.values import CAR, CarControllerParams, FordFlags
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, DT_CTRL, structs
+from opendbc.car.ford.values import CAR, CarControllerParams, FordFlags, FordSafetyFlags
 from opendbc.car.lateral import AngleSteeringLimits, ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.constants import ModelConstants
@@ -38,8 +38,8 @@ MACH_E_TURN_IN_LOOKAHEAD_EXTRA = 0.80
 MACH_E_LOW_SPEED_TURN_IN_LOOKAHEAD_EXTRA = 1.60
 MACH_E_LOW_SPEED_TURN_IN_START_SPEED = 2.0
 MACH_E_LOW_SPEED_TURN_IN_FULL_SPEED = 3.0
-MACH_E_LOW_SPEED_TURN_IN_MAX_SPEED = 11.0
-MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 14.0
+MACH_E_LOW_SPEED_TURN_IN_MAX_SPEED = 12.0
+MACH_E_LOW_SPEED_TURN_IN_FADE_SPEED = 15.0
 MACH_E_TURN_IN_MIN_CURVATURE = 0.002
 MACH_E_TURN_IN_FULL_CURVATURE = 0.008
 MACH_E_TURN_IN_LAG_CURVATURE = 0.006
@@ -157,7 +157,10 @@ class FordLateralController:
     self.params = Params(return_defaults=True)
     try:
       import cereal.messaging as messaging
-      self.sm = messaging.SubMaster(["modelV2", "liveDelay"])
+      services = ["modelV2", "liveDelay"]
+      if CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and CP.flags & FordFlags.CANFD:
+        services.append("pandaStates")
+      self.sm = messaging.SubMaster(services)
     except ImportError:
       # The host interface tests don't load the device messaging extension.
       self.sm = None
@@ -245,7 +248,7 @@ class FordLateralController:
     if (self.CP.carFingerprint != CAR.FORD_MUSTANG_MACH_E_MK1 or not self.CP.flags & FordFlags.CANFD or
         steering_pressed or lane_change):
       return base
-    speed_weight = float(np.interp(v_ego, [9.0, 10.0, 14.0, 16.0], [0.0, 1.0, 1.0, 0.0]))
+    speed_weight = float(np.interp(v_ego, [8.0, 9.0, 14.0, 16.0], [0.0, 1.0, 1.0, 0.0]))
     deficit_weight = 0.0
     planned_curve = abs(desired) >= 0.003 or (abs(requested) >= 0.003 and requested * predicted > 0.0)
     if requested * desired > 0.0 and planned_curve:
@@ -291,6 +294,21 @@ class FordLateralController:
       self.path_angle_last = float(np.clip(
         target, self.path_angle_last - MACH_E_PATH_ANGLE_STEP, self.path_angle_last + MACH_E_PATH_ANGLE_STEP))
     return self.path_angle_last
+
+  def _path_angle_assist_permitted(self, CC, CS) -> bool:
+    if not CC.enabled or CS.out.brakePressed:
+      return False
+    if not CS.out.gasPressed:
+      return True
+    if (not CS.out.cruiseState.enabled or self.sm is None or
+        not self.sm.all_checks(["pandaStates"])):
+      return False
+    ford_pandas = [p for p in self.sm["pandaStates"] if p.safetyModel == structs.CarParams.SafetyModel.ford]
+    assist_flags = FordSafetyFlags.CANFD | FordSafetyFlags.MACH_E_CURVATURE
+    return bool(ford_pandas) and all(
+      p.controlsAllowed and p.safetyParam & assist_flags == assist_flags and
+      not p.safetyParam & FordSafetyFlags.LKA_STEERING for p in ford_pandas
+    )
 
   def _blend_and_scale(self, desired: float, predicted: float, v_ego: float, current: float = 0.0,
                        allow_opposite_preview: bool = False) -> tuple[float, int]:
@@ -491,8 +509,12 @@ class FordLateralController:
       self.manual_turn_direction = 0.0
       return False
 
-    if (CS.out.steeringPressed or blinker_direction != 0.0 or
-        abs(CS.out.steeringAngleDeg) > MANUAL_TURN_RELEASE_ANGLE_DEG):
+    following_next_curve = (
+      driver_assisting and not CS.out.leftBlinker and not CS.out.rightBlinker and
+      CS.out.vEgoRaw >= MACH_E_DIRECTION_CHANGE_MIN_SPEED and self.manual_turn_direction * desired < 0.0
+    )
+    if not following_next_curve and (CS.out.steeringPressed or blinker_direction != 0.0 or
+                                    abs(CS.out.steeringAngleDeg) > MANUAL_TURN_RELEASE_ANGLE_DEG):
       self.manual_turn_recovery_timer = 0.0
     else:
       self.manual_turn_recovery_timer += STEER_DT
@@ -604,6 +626,9 @@ class FordLateralController:
       applied = float(np.clip(applied, -max_curvature, max_curvature))
     path_angle = self._path_angle_assist(
       requested, desired, applied, current, v_ego, driver_override, self._lane_change()[0])
+    if path_angle != 0.0 and not self._path_angle_assist_permitted(CC, CS):
+      self.path_angle_last = 0.0
+      path_angle = 0.0
 
     self.curvature_samples.append(predicted)
     curvature_rate = 0.0

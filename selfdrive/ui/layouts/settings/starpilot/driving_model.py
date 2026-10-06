@@ -141,7 +141,7 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
         enabled=lambda: self._controller.primary_header_button_state()[1],
         emphasized=True,
         font_size=SETTINGS_ROW_TITLE_FONT_SIZE,
-        accent_color=rl.Color(139, 92, 246, 92),
+        accent_color=with_alpha(AetherListColors.PRIMARY, 92),
       )
     )
     self._secondary_header_button = self._child(
@@ -479,7 +479,7 @@ class DrivingModelManagerView(AetherInteractiveMixin, Widget):
       body_size=26,
       body_inset_x=48,
       title_top_padding=32,
-      body_height=60,
+      body_height=80,
       style=PANEL_STYLE,
     )
 
