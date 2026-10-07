@@ -16,6 +16,17 @@ V_CRUISE_MAX = 145
 V_CRUISE_UNSET = 255
 V_CRUISE_INITIAL = 40
 V_CRUISE_INITIAL_EXPERIMENTAL_MODE = 105
+
+
+def imperial_grid_to_exact_kph(v_cruise_kph: float, is_metric: bool) -> float:
+  # Imperial set speeds step on a 1.6 kph grid, so "65 mph" is stored as 104.0 kph = 64.62 mph.
+  # Publish grid values as the exact mph the driver sees; off-grid values (exact SLC targets) pass through.
+  if is_metric or not (V_CRUISE_MIN <= v_cruise_kph <= V_CRUISE_MAX):
+    return v_cruise_kph
+  steps = v_cruise_kph / IMPERIAL_INCREMENT
+  if abs(steps - round(steps)) > 0.01:
+    return v_cruise_kph
+  return round(steps) * CV.MPH_TO_KPH
 IMPERIAL_INCREMENT = round(CV.MPH_TO_KPH, 1)  # round here to avoid rounding errors incrementing set speed
 
 ButtonEvent = car.CarState.ButtonEvent

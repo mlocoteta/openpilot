@@ -24,7 +24,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import (
   VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN,
-  is_speed_limit_confirmation_pending,
+  imperial_grid_to_exact_kph, is_speed_limit_confirmation_pending,
 )
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
@@ -355,8 +355,8 @@ class Car:
       )
 
     # TODO: mirror the carState.cruiseState struct?
-    CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
-    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
+    CS.vCruise = float(imperial_grid_to_exact_kph(self.v_cruise_helper.v_cruise_kph, self.is_metric))
+    CS.vCruiseCluster = float(imperial_grid_to_exact_kph(self.v_cruise_helper.v_cruise_cluster_kph, self.is_metric))
 
     if any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents):
       self.resume_prev_button = True
