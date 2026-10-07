@@ -46,6 +46,7 @@ from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS, get_car_lateral_smooth_seconds
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
+from openpilot.starpilot.common.distance_cycle import cycle_lead_distance_bars, distance_cycle_enabled
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 from openpilot.starpilot.controls.lib.neural_network_feedforward import LatControlNNFF
 
@@ -1071,7 +1072,11 @@ class Controls:
     hudControl.speedVisible = CC.enabled
     hudControl.lanesVisible = CC.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
-    hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
+    if distance_cycle_enabled(self.starpilot_toggles):
+      hudControl.leadDistanceBars = cycle_lead_distance_bars(self.sm['selfdriveState'].personality.raw,
+                                                             self.sm['starpilotCarState'].trafficModeEnabled)
+    else:
+      hudControl.leadDistanceBars = self.sm['selfdriveState'].personality.raw + 1
     hudControl.visualAlert = self.sm['selfdriveState'].alertHudVisual
 
     hudControl.rightLaneVisible = True

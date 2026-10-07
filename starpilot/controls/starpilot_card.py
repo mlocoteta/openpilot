@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import time
+
 from opendbc.car import structs
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_requires_set_press
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, HyundaiFlags
@@ -15,6 +17,13 @@ from openpilot.starpilot.common.experimental_state import (
   next_manual_ce_status,
   sync_manual_cc_state,
   sync_manual_ce_state,
+)
+from openpilot.starpilot.common.distance_cycle import (
+  distance_cycle_enabled,
+  distance_cycle_via,
+  load_traffic_state,
+  next_cycle_state,
+  save_traffic_state_nonblocking,
 )
 from openpilot.starpilot.common.favorite_slots import FAVORITE_ACTION_TRAFFIC_MODE_COUNTER, toggle_favorite_slot
 from openpilot.starpilot.common.starpilot_variables import (
@@ -124,6 +133,10 @@ class StarPilotCard:
     self.pause_longitudinal = False
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")
     self.traffic_mode_enabled = False
+    self._distance_cycle_restored = False
+    self._distance_cycle_saved_traffic = None
+    self._distance_cycle_personality = None
+    self._distance_cycle_personality_time = 0.0
     self._favorite_traffic_mode_counter = self.params_memory.get_int(FAVORITE_ACTION_TRAFFIC_MODE_COUNTER)
 
     self.gap_counter = 0
@@ -164,6 +177,8 @@ class StarPilotCard:
     elif getattr(starpilot_toggles, f"switchback_mode_via_{key}"):
       self.switchback_mode_enabled = not self.switchback_mode_enabled
       self.params_memory.put_bool("SwitchbackModeEnabled", self.switchback_mode_enabled)
+    elif distance_cycle_via(starpilot_toggles, key):
+      self.handle_distance_cycle(sm)
     elif sm["carControl"].longActive and getattr(starpilot_toggles, f"traffic_mode_via_{key}"):
       self.traffic_mode_enabled = not self.traffic_mode_enabled
     else:
@@ -171,6 +186,33 @@ class StarPilotCard:
         if getattr(starpilot_toggles, f"favorite_{slot_index + 1}_via_{key}", False):
           toggle_favorite_slot(slot_index, self.params, self.params_memory)
           break
+
+  def _current_personality(self, sm):
+    # Right after our own write, selfdrived may not have picked up the new value yet.
+    if self._distance_cycle_personality is not None and time.monotonic() - self._distance_cycle_personality_time < 1.0:
+      return self._distance_cycle_personality
+    personality = sm["selfdriveState"].personality
+    return int(getattr(personality, "raw", personality))
+
+  def handle_distance_cycle(self, sm):
+    if self.params.get_bool("SafeMode"):
+      return
+    personality, self.traffic_mode_enabled = next_cycle_state(self._current_personality(sm), self.traffic_mode_enabled)
+    # selfdrived re-reads LongitudinalPersonality every 0.1 s and raises the personality alert.
+    self.params.put_nonblocking("LongitudinalPersonality", personality)
+    self._distance_cycle_personality = personality
+    self._distance_cycle_personality_time = time.monotonic()
+
+  def _update_distance_cycle_persistence(self, starpilot_toggles):
+    if not distance_cycle_enabled(starpilot_toggles):
+      return
+    if not self._distance_cycle_restored:
+      self._distance_cycle_restored = True
+      self.traffic_mode_enabled = self.traffic_mode_enabled or load_traffic_state()
+      self._distance_cycle_saved_traffic = self.traffic_mode_enabled
+    elif self.traffic_mode_enabled != self._distance_cycle_saved_traffic:
+      self._distance_cycle_saved_traffic = self.traffic_mode_enabled
+      save_traffic_state_nonblocking(self.traffic_mode_enabled)
 
   def handle_bookmark(self):
     counter = self.params_memory.get_int("WheelButtonBookmarkCounter")
@@ -602,6 +644,7 @@ class StarPilotCard:
     starpilotCarState.isParked = carState.gearShifter == GearShifter.park
     starpilotCarState.pauseLateral = self.pause_lateral
     starpilotCarState.pauseLongitudinal = self.pause_longitudinal
+    self._update_distance_cycle_persistence(starpilot_toggles)
     starpilotCarState.trafficModeEnabled = self.traffic_mode_enabled
 
     return starpilotCarState

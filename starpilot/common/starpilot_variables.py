@@ -188,6 +188,7 @@ BUTTON_FUNCTIONS = {
   "FAVORITE_1": 11,
   "FAVORITE_2": 12,
   "FAVORITE_3": 13,
+  "PERSONALITY_TRAFFIC_CYCLE": 15,
 }
 
 CANCEL_BUTTON_MIGRATION_KEY = "CancelButtonControlsMigrated"
@@ -1085,6 +1086,7 @@ class StarPilotVariables:
     toggle.switchback_mode_via_distance = distance_button_control == BUTTON_FUNCTIONS["SWITCHBACK_MODE"]
     toggle.traffic_mode_via_distance = toggle.openpilot_longitudinal and distance_button_control == BUTTON_FUNCTIONS["TRAFFIC_MODE"]
     toggle.bookmark_via_distance = distance_button_control == BUTTON_FUNCTIONS["BOOKMARK"]
+    toggle.distance_cycle_via_distance = toggle.openpilot_longitudinal and distance_button_control == BUTTON_FUNCTIONS["PERSONALITY_TRAFFIC_CYCLE"]
     self.set_favorite_button_flags(toggle, "distance", distance_button_control)
 
     distance_button_control_long = self.get_button_function("LongDistanceButtonControl")
@@ -1100,6 +1102,7 @@ class StarPilotVariables:
     toggle.switchback_mode_via_distance_long = distance_button_control_long == BUTTON_FUNCTIONS["SWITCHBACK_MODE"]
     toggle.traffic_mode_via_distance_long = toggle.openpilot_longitudinal and distance_button_control_long == BUTTON_FUNCTIONS["TRAFFIC_MODE"]
     toggle.bookmark_via_distance_long = distance_button_control_long == BUTTON_FUNCTIONS["BOOKMARK"]
+    toggle.distance_cycle_via_distance_long = toggle.openpilot_longitudinal and distance_button_control_long == BUTTON_FUNCTIONS["PERSONALITY_TRAFFIC_CYCLE"]
     self.set_favorite_button_flags(toggle, "distance_long", distance_button_control_long)
 
     distance_button_control_very_long = self.get_button_function("VeryLongDistanceButtonControl")
@@ -1115,6 +1118,12 @@ class StarPilotVariables:
     toggle.switchback_mode_via_distance_very_long = distance_button_control_very_long == BUTTON_FUNCTIONS["SWITCHBACK_MODE"]
     toggle.traffic_mode_via_distance_very_long = toggle.openpilot_longitudinal and distance_button_control_very_long == BUTTON_FUNCTIONS["TRAFFIC_MODE"]
     toggle.bookmark_via_distance_very_long = distance_button_control_very_long == BUTTON_FUNCTIONS["BOOKMARK"]
+    toggle.distance_cycle_via_distance_very_long = (
+      toggle.openpilot_longitudinal and distance_button_control_very_long == BUTTON_FUNCTIONS["PERSONALITY_TRAFFIC_CYCLE"]
+    )
+    toggle.distance_traffic_cycle = (
+      toggle.distance_cycle_via_distance or toggle.distance_cycle_via_distance_long or toggle.distance_cycle_via_distance_very_long
+    )
     self.set_favorite_button_flags(toggle, "distance_very_long", distance_button_control_very_long)
 
     cancel_button_control = self.get_button_function("CancelButtonControl", condition=toggle.remap_cancel_to_distance)

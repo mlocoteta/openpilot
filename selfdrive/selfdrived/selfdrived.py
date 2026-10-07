@@ -35,6 +35,7 @@ from openpilot.system.version import get_build_metadata
 from openpilot.system.hardware import HARDWARE
 
 from openpilot.starpilot.common.starpilot_utilities import contains_event_type
+from openpilot.starpilot.common.distance_cycle import distance_cycle_enabled
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 from openpilot.starpilot.common.lateral_only_experimental import experimental_mode_available
 from openpilot.starpilot.common.longitudinal_mode import request_mode_refresh
@@ -305,6 +306,7 @@ class SelfdriveD:
 
     self.cancel_pressed_previously = False
     self.distance_pressed_previously = False
+    self.distance_cycle_personality_previous = None
     self.display_timer = 0
     self.last_below_steer_speed_alert_time = -float("inf")
     self.last_steer_saturated_alert_time = -float("inf")
@@ -853,6 +855,15 @@ class SelfdriveD:
 
       self.cancel_pressed_previously = cancel_pressed
       self.distance_pressed_previously = distance_pressed
+
+      # 4-step distance cycle: card writes LongitudinalPersonality, so announce the change here.
+      # Entering Traffic Mode gets its own alert instead.
+      if distance_cycle_enabled(self.starpilot_toggles):
+        if (self.distance_cycle_personality_previous is not None and
+            int(self.personality) != self.distance_cycle_personality_previous and
+            not self.sm['starpilotCarState'].trafficModeEnabled and not self.safe_mode):
+          self.events.add(EventName.personalityChanged)
+        self.distance_cycle_personality_previous = int(self.personality)
 
       self.display_timer -= 1
 

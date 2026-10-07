@@ -62,6 +62,7 @@ ACTION_OPTIONS = [
   {"id": 4, "name": tr_noop("Pause Accel/Brake"), "requires_longitudinal": True},
   {"id": 5, "name": tr_noop("Toggle Experimental"), "requires_longitudinal": True},
   {"id": 6, "name": tr_noop("Toggle Traffic"), "requires_longitudinal": True},
+  {"id": 15, "name": tr_noop("Personality + Traffic (4 bars)"), "requires_longitudinal": True},
   {"id": 7, "name": tr_noop("Toggle Switchback")},
   {"id": 8, "name": tr_noop("Create Bookmark")},
   {"id": 9, "name": tr_noop("Toggle Always On Lateral")},
@@ -842,6 +843,8 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       allowed_ids = set(range(9)) | {11, 12, 13, 14}
       if key == "LKASButtonControl":
         allowed_ids.add(9)
+      if key in ("DistanceButtonControl", "LongDistanceButtonControl", "VeryLongDistanceButtonControl"):
+        allowed_ids.add(15)
       developer_access = gui_app.big_ui() or self._params.get_bool("DeveloperUI") or self._params.get_bool("GalaxyDeveloperMode")
       options = [o for o in ACTION_OPTIONS
                  if o["id"] in allowed_ids and

@@ -3803,6 +3803,10 @@
             "label": "Toggle Traffic"
           },
           {
+            "value": 15,
+            "label": "Personality + Traffic (4 bars)"
+          },
+          {
             "value": 7,
             "label": "Toggle Switchback"
           },
@@ -3929,6 +3933,10 @@
             "label": "Toggle Traffic"
           },
           {
+            "value": 15,
+            "label": "Personality + Traffic (4 bars)"
+          },
+          {
             "value": 7,
             "label": "Toggle Switchback"
           },
@@ -4053,6 +4061,10 @@
           {
             "value": 6,
             "label": "Toggle Traffic"
+          },
+          {
+            "value": 15,
+            "label": "Personality + Traffic (4 bars)"
           },
           {
             "value": 7,
