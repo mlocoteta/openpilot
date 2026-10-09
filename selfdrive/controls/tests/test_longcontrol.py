@@ -1798,3 +1798,51 @@ def test_honda_9g_brake_onset_far_lead_still_holds():
          SimpleNamespace(status=True, dRel=30.0, vRel=1.0, vLead=21.0))   # pulling away
   out = run_honda_brake_onset(lc, 20, i0=-0.9, leads=far)
   assert out[0][1] == pytest.approx(vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR)
+
+
+V65 = 65 * 0.44704
+
+
+def run_honda_cruise_hold(lc, frames, a_target=0.0, a_ego=0.3, i0=-0.85, v_ego=V65, v_cruise=V65, should_stop=False,
+                          leads=None, plan_source="cruise"):
+  toggles = make_toggles(longitudinalActuatorDelay=0.30)
+  CS = car.CarState.new_message(vEgo=v_ego, aEgo=0.0)
+  lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles, v_cruise=v_cruise)
+  lc.pid.i = i0
+  lc.last_output_accel = i0
+  CS = car.CarState.new_message(vEgo=v_ego, aEgo=a_ego)  # downhill: accelerating although the command is negative
+  out = []
+  for _ in range(frames):
+    out.append(lc.update(True, CS, a_target, should_stop, (-3.5, 2.0), toggles, leads=leads, plan_source=plan_source,
+                         v_cruise=v_cruise))
+  return out
+
+
+def test_honda_9g_cruise_deadband_stops_i_at_pedal_close(monkeypatch, tmp_path):
+  from opendbc.car.honda import cruise_brake_deadband as cbd
+  monkeypatch.setattr(cbd, "KILL_FILE", str(tmp_path / "off"))
+  lc = make_honda_9g_pedal_lc()
+  floor = cbd.pedal_close_accel(V65)
+  out = run_honda_cruise_hold(lc, 200, i0=floor + 0.05)
+  assert out[-1] == pytest.approx(floor, abs=0.02)  # wound down to the pedal-closed point, no further
+  assert lc.pid.i >= floor - 0.02
+
+
+@pytest.mark.parametrize("kw", [dict(a_target=-0.6), dict(plan_source="lead0"),  # should_stop: stopping state resets I
+                                dict(v_cruise=None), dict(v_ego=V65, v_cruise=V65 - 3 * 0.44704),
+                                dict(leads=(SimpleNamespace(status=True, dRel=40.0, vRel=-8.0, vLead=21.0),))])
+def test_honda_9g_cruise_deadband_leaves_real_demand_alone(monkeypatch, tmp_path, kw):
+  from opendbc.car.honda import cruise_brake_deadband as cbd
+  monkeypatch.setattr(cbd, "KILL_FILE", str(tmp_path / "off"))
+  lc = make_honda_9g_pedal_lc()
+  floor = cbd.pedal_close_accel(V65)
+  run_honda_cruise_hold(lc, 200, i0=floor + 0.05, **kw)
+  assert lc.pid.i < floor - 0.2  # stock winding
+
+
+def test_honda_9g_cruise_deadband_not_on_other_cars():
+  from opendbc.car.honda.values import CAR as HONDA_CAR
+  for lc in (make_honda_9g_pedal_lc(pedal=False), make_honda_9g_pedal_lc(fingerprint=HONDA_CAR.HONDA_CIVIC)):
+    assert lc.vehicle_tuning.honda_cruise_deadband is None
+    run_honda_cruise_hold(lc, 200, i0=-0.8)
+    assert lc.pid.i < -1.0

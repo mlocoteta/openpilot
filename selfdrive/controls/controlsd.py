@@ -769,7 +769,10 @@ class Controls:
                                                 traffic_mode_enabled=self.sm['starpilotCarState'].trafficModeEnabled,
                                                 profile_max_accel=self.sm['starpilotPlan'].maxAcceleration,
                                                 pedal_override=tesla_pedal_override,
-                                                leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo)),
+                                                leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo),
+                                                plan_source=str(long_plan.longitudinalPlanSource),
+                                                v_cruise=self.sm['starpilotPlan'].vCruise if self.sm.valid['starpilotPlan'] else None,
+                                                csc_active=self.sm['starpilotPlan'].cscControllingSpeed),
                                 self.starpilot_toggles.max_desired_acceleration))
 
     # Steering PID loop and lateral MPC

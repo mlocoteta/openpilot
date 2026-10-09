@@ -17,6 +17,7 @@ from opendbc.car import DT_CTRL, ButtonType, structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
+from opendbc.car.honda import cruise_brake_deadband
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -478,6 +479,7 @@ class Car:
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self._update_redneck_cruise(CS, CC)
       self._update_openpilot_lead_state(CC)
+      self._update_cruise_brake_deadband(CS)
       if self.CP.brand == "rivian" and self.sm.all_checks(['liveParameters']) and hasattr(self.CI.CC, 'update_live_params'):
         live_params = self.sm['liveParameters']
         self.CI.CC.update_live_params(live_params.roll, live_params.angleOffsetDeg,
@@ -519,6 +521,21 @@ class Car:
     self.CI.CS.openpilot_lead_distance = lead_distance
     self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
     self.CI.CS.openpilot_longitudinal_adjustment_active = longitudinal_adjustment_active
+
+  def _update_cruise_brake_deadband(self, CS: car.CarState) -> None:
+    deadband = getattr(self.CI.CC, "cruise_brake_deadband", None)
+    if deadband is None:
+      return
+    valid = all(self.sm.seen[s] and self.sm.valid[s] for s in ('longitudinalPlan', 'starpilotPlan', 'radarState'))
+    if not valid:
+      deadband.set_plan(False)
+      return
+    plan, sp_plan, radar = self.sm['longitudinalPlan'], self.sm['starpilotPlan'], self.sm['radarState']
+    v_ego = float(CS.vEgo)
+    lead_brake = any(cruise_brake_deadband.lead_needs_brake(v_ego, bool(lead.status), float(lead.dRel), float(lead.vRel))
+                     for lead in (radar.leadOne, radar.leadTwo))
+    deadband.set_plan(True, float(sp_plan.vCruise), float(plan.aTarget), bool(plan.shouldStop),
+                      str(plan.longitudinalPlanSource), lead_brake, bool(sp_plan.cscControllingSpeed))
 
   def _update_redneck_cruise(self, CS: car.CarState, CC: car.CarControl) -> None:
     if self.redneck_cruise is None:

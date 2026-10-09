@@ -1,6 +1,7 @@
 import numpy as np
 
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car.honda import cruise_brake_deadband
 from opendbc.car.honda.values import CAR as HONDA_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
@@ -196,6 +197,7 @@ class LongControlVehicleTuning:
     # Brake-onset event tracking survives reset(): controlsd resets LongControl every frame
     # while long is inactive, and the longActive rising edge is one of the events.
     self.honda_brake_onset_frames = 1 << 30
+    self.honda_cruise_deadband = cruise_brake_deadband.CruiseBrakeDeadband() if self.is_honda_accord_9g_pedal_long else None
     self.honda_prev_long_active = False
     self.honda_prev_gas_pressed = False
     self.honda_prev_a_target = 0.0
@@ -212,6 +214,8 @@ class LongControlVehicleTuning:
     self.toyota_corolla_target_filter_initialized = False
     self.bolt_start_handoff_frames = 0
     self.subaru_stop_release_frames = 0
+    if self.honda_cruise_deadband is not None:
+      self.honda_cruise_deadband.reset()
 
   def track_honda_brake_onset(self, active, gas_pressed, a_target):
     """Count frames since the last longActive rising edge, gasPressed falling edge or a_target
@@ -267,6 +271,25 @@ class LongControlVehicleTuning:
       return False
     pid.i = max(pid.i, HONDA_BRAKE_ONSET_I_FLOOR)
     return True
+
+  def hold_honda_cruise_deadband_integrator(self, pid, a_target, feedforward, error, CS, should_stop, leads,
+                                            last_output_accel, plan_source="cruise", v_cruise=None, csc_active=False):
+    """Honda Accord 9G pedal long: while the cruise-hold brake deadband (card) holds the friction brake off,
+    the pedal is the only actuator and it closes at pedal_close_accel(). Don't let I wind the output below
+    that, or the brake would come on hard when the deadband releases. Runs a copy of card's gate on the same
+    plan inputs. Returns True to freeze I."""
+    if self.honda_cruise_deadband is None:
+      return False
+    lead_brake = any(cruise_brake_deadband.lead_needs_brake(CS.vEgo, bool(getattr(lead, "status", False)),
+                                                            float(getattr(lead, "dRel", float("inf"))),
+                                                            float(getattr(lead, "vRel", 0.0)))
+                     for lead in (leads or ()) if lead is not None)
+    gate = self.honda_cruise_deadband
+    gate.set_plan(v_cruise is not None, v_cruise if v_cruise is not None else 0.0, a_target, should_stop,
+                  plan_source, lead_brake, csc_active)
+    gate.update(True, CS.vEgo, last_output_accel,
+                cruise_brake_deadband.friction_request(last_output_accel, CS.vEgo), DT_CTRL)
+    return gate.suppressing and error < 0.0 and pid.i + feedforward <= cruise_brake_deadband.pedal_close_accel(CS.vEgo)
 
   def shape_stopping_accel(self, output_accel, a_target, should_stop, v_ego, has_lead, stop_accel, leads=None):
     """Shape low-speed stop braking without overriding urgent targets."""
