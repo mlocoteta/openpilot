@@ -21,6 +21,8 @@ def gate(**plan):
   kw = dict(v_cruise=V65, a_target=0.0, should_stop=False, plan_source="cruise", lead_brake=False, csc_active=False)
   kw.update(plan)
   g.set_plan(True, **kw)
+  for _ in range(int(cbd.DEMAND_HOLD_S / DT) + 1):  # past the post-demand hold
+    g.update(True, V65, 0.0, 0.0, DT)
   return g
 
 
@@ -31,7 +33,7 @@ class TestGate:
       assert g.update(True, v, -0.4, 0.05, DT) == 0.0
       assert g.suppressing
 
-  @pytest.mark.parametrize("plan", [dict(a_target=-0.6), dict(should_stop=True), dict(plan_source="lead0"),
+  @pytest.mark.parametrize("plan", [dict(a_target=-0.35), dict(should_stop=True), dict(plan_source="lead0"),
                                     dict(plan_source="e2e"), dict(lead_brake=True), dict(csc_active=True)])
   def test_real_demand_is_stock(self, plan):
     g = gate(**plan)
@@ -40,7 +42,8 @@ class TestGate:
 
   def test_hard_command_low_speed_invalid_or_not_pid_is_stock(self):
     assert gate().update(True, V65, cbd.ACCEL_CMD_MIN - 0.01, 0.3, DT) is None
-    assert gate().update(True, cbd.MIN_SPEED - 0.1, -0.4, 0.05, DT) is None
+    g = gate()
+    assert g.update(True, cbd.MIN_SPEED - 0.1, -0.4, 0.05, DT) is None
     assert gate().update(False, V65, -0.4, 0.05, DT) is None
     g = cbd.CruiseBrakeDeadband()
     g.set_plan(False)
@@ -48,11 +51,14 @@ class TestGate:
     g.set_plan(True, float("nan"), 0.0)
     assert g.update(True, V65, -0.4, 0.05, DT) is None
 
-  def test_brakes_return_immediately_when_demand_appears(self):
+  def test_brakes_return_immediately_when_demand_appears_and_stay_stock_after(self):
     g = gate()
     assert g.update(True, V65, -0.4, 0.05, DT) == 0.0
     g.set_plan(True, V65, -0.8)
     assert g.update(True, V65, -1.0, 0.2, DT) is None
+    g.set_plan(True, V65, 0.0)  # demand gone (or the plan source flickered back to cruise)
+    lims = [g.update(True, V65, -0.4, 0.05, DT) for _ in range(int(cbd.DEMAND_HOLD_S / DT) + 2)]
+    assert all(lim is None for lim in lims[:-3]) and lims[-1] == 0.0
 
   def test_overspeed_ramps_brake_in_and_stays_stock_until_request_clears(self):
     g = gate()
@@ -75,9 +81,13 @@ class TestGate:
   def test_leads(self):
     assert not cbd.lead_needs_brake(V65, False, 10.0, -10.0)
     assert not cbd.lead_needs_brake(V65, True, 100.0, 3.0)  # pulling away
-    assert not cbd.lead_needs_brake(V65, True, 60.0, -5.0)  # TTC 12 s
-    assert cbd.lead_needs_brake(V65, True, 60.0, -8.0)  # TTC 7.5 s
-    assert cbd.lead_needs_brake(V65, True, 25.0, 1.0)  # inside 1 s
+    assert not cbd.lead_needs_brake(V65, True, 40.0, 1.0)  # 1.4 s but pulling away (352 hunt)
+    assert not cbd.lead_needs_brake(V65, True, 130.0, -0.2)  # far, holding
+    assert not cbd.lead_needs_brake(V65, True, 105.0, -4.5)  # TTC 23 s
+    assert cbd.lead_needs_brake(V65, True, 85.0, -4.5)  # TTC 19 s (33d 11:20:35 gentle lead slowdown)
+    assert not cbd.lead_needs_brake(V65, True, 42.0, -0.05)  # 1.45 s, holding (352 hunt): planner isn't following it
+    assert cbd.lead_needs_brake(V65, True, 28.0, 0.0)  # inside 1 s
+    assert cbd.lead_needs_brake(V65, True, 25.0, 1.0)  # inside 1 s even if pulling away
 
   def test_pedal_close_accel(self):
     assert cbd.pedal_close_accel(V65) == pytest.approx(-0.75 * 5.0 * carcontroller.get_honda_bosch_wind_brake_mps2(V65))
@@ -115,13 +125,14 @@ class TestCarController:
     assert pedal_interface(monkeypatch, False)[0].CC.cruise_brake_deadband is None
 
   def test_cruise_hold_brake_held_off_pedal_still_follows(self, monkeypatch):
-    stock, stock_gas, _ = self._run(monkeypatch, -0.5, None)
-    held, held_gas, _ = self._run(monkeypatch, -0.5, dict(v_cruise=V65, a_target=0.0))
-    assert max(stock) > 0  # -0.5 at 65 mph is past the friction onset
-    assert max(held) == 0
+    stock, stock_gas, _ = self._run(monkeypatch, -0.5, None, frames=400)
+    held, held_gas, _ = self._run(monkeypatch, -0.5, dict(v_cruise=V65, a_target=0.0), frames=400)
+    assert min(stock[-50:]) > 0  # -0.5 at 65 mph is past the friction onset
+    assert held[:50] == stock[:50]  # stock for DEMAND_HOLD_S after engage
+    assert max(held[-50:]) == 0
     assert held_gas[-1] == pytest.approx(stock_gas[-1])  # pedal command unchanged
 
   def test_real_demand_brakes_like_stock(self, monkeypatch):
-    stock, _, _ = self._run(monkeypatch, -1.2, None)
-    demand, _, _ = self._run(monkeypatch, -1.2, dict(v_cruise=V65, a_target=-1.0))
+    stock, _, _ = self._run(monkeypatch, -1.2, None, frames=400)
+    demand, _, _ = self._run(monkeypatch, -1.2, dict(v_cruise=V65, a_target=-1.0), frames=400)
     assert demand == stock and max(demand) > 0

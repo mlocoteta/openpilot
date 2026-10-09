@@ -1809,7 +1809,8 @@ def run_honda_cruise_hold(lc, frames, a_target=0.0, a_ego=0.3, i0=-0.85, v_ego=V
   CS = car.CarState.new_message(vEgo=v_ego, aEgo=0.0)
   lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles, v_cruise=v_cruise)
   lc.pid.i = i0
-  lc.last_output_accel = i0
+  for _ in range(250):  # steady (zero error) past the gate's post-demand hold
+    lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles, v_cruise=v_cruise)
   CS = car.CarState.new_message(vEgo=v_ego, aEgo=a_ego)  # downhill: accelerating although the command is negative
   out = []
   for _ in range(frames):
