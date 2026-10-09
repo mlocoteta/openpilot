@@ -1,3 +1,5 @@
+import math
+
 from opendbc.car import CanBusBase
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.values import (HondaFlags, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_RADARLESS,
@@ -155,6 +157,15 @@ def create_bosch_supplemental_1(packer, CAN):
     "SET_ME_X10": 0x10,
   }
   return packer.make_can_msg("BOSCH_SUPPLEMENTAL_1", CAN.lkas, values)
+
+
+def imperial_cluster_cruise_kph(set_speed_ms: float) -> int:
+  # ACC_HUD CRUISE_SPEED is whole kph and the 9G Accord cluster shows ceil(kph / 1.609) mph,
+  # so the packer's round-to-nearest turns 70 mph (112.65 kph) into 113 kph = "71".
+  # Send the largest whole kph that still reads as the rounded mph: ceil(floor(N * 1.609) / 1.609) == N.
+  # Capped below 252 (stopped) / 255 (no speed); only reachable above 156 mph.
+  mph = round(set_speed_ms * CV.MS_TO_MPH)
+  return min(math.floor(mph * CV.MPH_TO_KPH + 1e-6), 250)
 
 
 def create_acc_hud(packer, bus, CP, enabled, pcm_speed, pcm_accel, hud_control, hud_v_cruise, is_metric, acc_hud):
