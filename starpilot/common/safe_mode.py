@@ -93,6 +93,7 @@ SAFE_MODE_MANAGED_KEYS = (
   "StartAccel",
   "StopAccel",
   "StoppingDecelRate",
+  "StandstillEngageMode",
   "VEgoStarting",
   "VEgoStopping",
   "AccelerationProfile",

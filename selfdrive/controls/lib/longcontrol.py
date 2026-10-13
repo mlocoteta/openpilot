@@ -235,7 +235,7 @@ class LongControl:
 
   def update(self, active, CS, a_target, should_stop, accel_limits, starpilot_toggles, has_lead=False,
              traffic_mode_enabled=False, profile_max_accel=0.0, pedal_override=False, leads=None,
-             plan_source="cruise", v_cruise=None, csc_active=False):
+             plan_source="cruise", v_cruise=None, csc_active=False, standstill_hold=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -251,6 +251,14 @@ class LongControl:
       self.pedal_override_release_frames = max(
         1, int(round(TESLA_PEDAL_RELEASE_GUARD_TIME / DT_CTRL)),
       )
+
+    if active and standstill_hold:
+      # Standstill engage hold (standstill_hold.py): full stop brake from the first frame, whatever the plan says,
+      # until the driver presses the gas. The normal stoppingDecelRate ramp from 0 lets the car creep after engage.
+      self.long_control_state = LongCtrlState.stopping
+      self.reset(preserve_stop_release=True)
+      self.last_output_accel = float(clip(starpilot_toggles.stopAccel, accel_limits[0], accel_limits[1]))
+      return self.last_output_accel
 
     previous_long_control_state = self.long_control_state
     allow_stopping_release = self._stop_release_ready(

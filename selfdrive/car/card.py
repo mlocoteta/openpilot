@@ -24,11 +24,12 @@ from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import (
-  VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN,
+  VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN, V_CRUISE_UNSET,
   imperial_grid_to_exact_kph, is_speed_limit_confirmation_pending,
 )
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
+from openpilot.selfdrive.controls.lib.standstill_hold import MODE_RESUME, read_mode as read_standstill_mode, resume_set_speed_kph
 
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_ACCEL_COUNTER,
@@ -347,6 +348,7 @@ class Car:
     if self.sm['carControl'].enabled and not self.CC_prev.enabled and not preap_software_cruise:
       # Use CarState w/ buttons from the step selfdrived enables on
       desired_speed_limit = self.sm['starpilotPlan'].slcSpeedLimit + self.sm['starpilotPlan'].slcSpeedLimitOffset
+      previous_v_cruise_kph = self.v_cruise_helper.v_cruise_kph
       self.v_cruise_helper.initialize_v_cruise(
         self.CS_prev,
         self.experimental_mode,
@@ -354,6 +356,16 @@ class Car:
         self.starpilot_toggles,
         desired_speed_limit=desired_speed_limit,
       )
+      # Standstill engage in Resume mode: SET at 0 mph would set the 7 mph floor; use the last set speed (else 25 mph)
+      # so the gas press that ends the hold drives on like stock stop-and-go ACC (standstill_hold.py)
+      resume_button = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in self.CS_prev.buttonEvents)
+      slc_set = desired_speed_limit > 0 and getattr(self.starpilot_toggles, "set_speed_limit", False)
+      if (self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and self.CS_prev.standstill and
+          not resume_button and not slc_set and read_standstill_mode(self.params) == MODE_RESUME):
+        previous = previous_v_cruise_kph if previous_v_cruise_kph not in (V_CRUISE_UNSET, -1) else 0.
+        self.v_cruise_helper.v_cruise_kph = resume_set_speed_kph(previous, max(V_CRUISE_MIN, 7.0 * CV.MPH_TO_KPH),
+                                                                 self.is_metric, V_CRUISE_MAX, IMPERIAL_INCREMENT)
+        self.v_cruise_helper.v_cruise_cluster_kph = self.v_cruise_helper.v_cruise_kph
 
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(imperial_grid_to_exact_kph(self.v_cruise_helper.v_cruise_kph, self.is_metric))

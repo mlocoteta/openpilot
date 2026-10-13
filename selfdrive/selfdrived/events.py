@@ -13,6 +13,7 @@ from openpilot.common.git import get_short_branch
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.desire_helper import LaneChangeDirection
+from openpilot.selfdrive.controls.lib.standstill_hold import REASON_TIMEOUT, brake_request_reason
 from openpilot.selfdrive.locationd.calibrationd import MIN_SPEED_FILTER
 from openpilot.system.micd import SAMPLE_RATE, SAMPLE_BUFFER
 from openpilot.selfdrive.ui.feedback.feedbackd import FEEDBACK_MAX_DURATION
@@ -460,6 +461,17 @@ def gpu_model_backup_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
 
 def custom_startup_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, starpilot_toggles: SimpleNamespace) -> Alert:
   return StartupAlert(starpilot_toggles.startup_alert_top, starpilot_toggles.startup_alert_bottom, alert_status=StarPilotAlertStatus.starpilot)
+
+
+def standstill_hold_brake_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality,
+                                starpilot_toggles: SimpleNamespace) -> Alert:
+  # openpilot keeps braking; it never lets go by itself, so the driver has to take over with the brake
+  reason = brake_request_reason(CS, 0.) or REASON_TIMEOUT
+  return Alert(
+    "Press Brake: openpilot Holding Car",
+    reason,
+    AlertStatus.userPrompt, AlertSize.mid,
+    Priority.HIGH, VisualAlert.brakePressed, AudibleAlert.promptRepeat, .1)
 
 
 def forcing_stop_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, starpilot_toggles: SimpleNamespace) -> Alert:
@@ -1192,6 +1204,26 @@ STARPILOT_EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   StarPilotEventName.forcingStop: {
     ET.WARNING: forcing_stop_alert,
+  },
+
+  StarPilotEventName.standstillHold: {
+    ET.WARNING: Alert(
+      "Holding at Stop",
+      "Press gas to go",
+      AlertStatus.normal, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+
+  StarPilotEventName.standstillHoldOnly: {
+    ET.WARNING: Alert(
+      "Holding at Stop",
+      "Press gas to release",
+      AlertStatus.normal, AlertSize.mid,
+      Priority.LOW, VisualAlert.none, AudibleAlert.none, .1),
+  },
+
+  StarPilotEventName.standstillHoldBrake: {
+    ET.WARNING: standstill_hold_brake_alert,
   },
 
   StarPilotEventName.goatSteerSaturated: {
