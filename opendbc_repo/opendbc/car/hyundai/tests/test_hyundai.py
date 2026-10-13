@@ -760,6 +760,107 @@ class TestHyundaiFingerprint:
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_CANFD_BLENDED
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CANCEL_BTN_ENABLE
 
+  @pytest.mark.parametrize("alpha_long", [False, True])
+  def test_palisade_hda2_front_radar_is_available_with_complete_native_bank(self, alpha_long):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    no_radar = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, alpha_long, False, False, None)
+    assert no_radar.radarUnavailable
+    config = get_radar_track_config(no_radar.carFingerprint, no_radar.flags)
+    assert config.radar_type == "palisade_210"
+    assert config.start_addr == 0x210
+    assert config.msg_count == 16
+    assert config.expected_length == 32
+    assert config.frequency == 20
+    assert config.bus == CanBus(no_radar).ACAN == 0
+    for addr in range(0x210, 0x220):
+      fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, alpha_long, False, False, None)
+    assert not CP.radarUnavailable
+    assert CP.openpilotLongitudinalControl == no_radar.openpilotLongitudinalControl
+    assert CP.flags == no_radar.flags
+    assert CP.safetyConfigs[-1].safetyParam == no_radar.safetyConfigs[-1].safetyParam
+    assert DBC[CP.carFingerprint][Bus.pt] == "hyundai_palisade_2023_generated"
+
+  @pytest.mark.parametrize("missing", [0x210, 0x218, 0x21f])
+  def test_palisade_hda2_incomplete_radar_bank_stays_unavailable(self, missing):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    for addr in range(0x210, 0x220):
+      if addr != missing:
+        fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert CP.radarUnavailable
+
+  @pytest.mark.parametrize("bus,length", [(0, 8), (0, 24), (1, 32), (2, 32), (128, 32), (130, 32)])
+  def test_palisade_hda2_wrong_radar_layout_or_forwarded_copy_stays_unavailable(self, bus, length):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    if bus < len(fingerprint):
+      for addr in range(0x210, 0x220):
+        fingerprint[bus][addr] = length
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert CP.radarUnavailable
+
+  def test_palisade_front_radar_configuration_does_not_enable_non_hda2(self):
+    fingerprint = gen_empty_fingerprint()
+    for addr in range(0x210, 0x220):
+      fingerprint[0][addr] = 32
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False, None)
+    assert not CP.flags & HyundaiFlags.CANFD_LKA_STEERING
+    assert get_radar_track_config(CP.carFingerprint, CP.flags) is None
+    assert CP.radarUnavailable
+    old_palisade = get_radar_track_config(CAR.HYUNDAI_PALISADE)
+    assert old_palisade.radar_type == "mando"
+    assert old_palisade.bus == 1
+
+  @pytest.mark.parametrize("data_hex,expected", [
+    ("0da6690a412630ff79e0fcba3f05c0f90000000b2420410671b101d3bf0080fc",
+     [(6.05, -2.5, -0.7, -1.25, 0.05), (18.45, 1.35, -0.45, -0.7, 0.0)]),
+    ("2cd9d10a381b30fe7c830195be00c0000000000a237830fa95c003f83e0f00fb",
+     [(44.6, 1.2, -3.63, 0.15, 0.0), (7.45, 3.0, -2.64, -1.0, 0.15)]),
+  ])
+  def test_palisade_front_radar_decoder_matches_detailed_reference_frame(self, data_hex, expected):
+    CP = CarParams(carFingerprint=CAR.HYUNDAI_PALISADE_2023,
+                   flags=int(HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.CANFD_LKA_STEERING), radarUnavailable=False)
+    radar = RadarInterface(CP)
+    data = bytes.fromhex(data_hex)
+    radar.rcp.update([(1, [(0x210, data, 0)])])
+    points = radar._update({0x210}).points
+    assert len(points) == 2
+    for point, values in zip(points, expected, strict=True):
+      assert point.measured
+      assert (point.dRel, point.yRel, point.vRel, point.aRel, point.yvRel) == pytest.approx(values)
+
+  def test_palisade_front_radar_emits_32_tracks_without_duplicate_camera_bus_copy(self):
+    CP = CarParams(carFingerprint=CAR.HYUNDAI_PALISADE_2023,
+                   flags=int(HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.CANFD_LKA_STEERING), radarUnavailable=False)
+    radar = RadarInterface(CP)
+    packer = CANPacker(radar.radar_config.dbc_name)
+    messages = []
+    for addr in range(0x210, 0x220):
+      msg = packer.make_can_msg(f"RADAR_TRACK_{addr:x}", 0, {
+        "1_STATE": 3, "1_LONG_DIST": 25.0, "1_LAT_DIST": 0.5, "1_REL_SPEED": -2.0,
+        "2_STATE": 4, "2_LONG_DIST": 35.0, "2_LAT_DIST": -1.0, "2_REL_SPEED": -3.0,
+      })
+      data = bytearray(msg[1])
+      checksum = hkg_can_fd_checksum(addr, None, data)
+      data[0] = checksum & 0xff
+      data[1] = checksum >> 8
+      messages.append((addr, bytes(data), 0))
+    copies = [(addr, data, 2) for addr, data, _ in messages]
+    assert radar.update([(1, copies)]) is None
+    result = radar.update([(2, messages + copies)])
+    assert result is not None
+    assert len(result.points) == 32
+    assert not result.errors.canError
+    assert len({point.trackId for point in result.points}) == 32
+    for addr, _ in radar.track_addrs:
+      radar.rcp.vl[addr]["1_STATE"] = 0
+      radar.rcp.vl[addr]["2_STATE"] = 0
+    assert not radar._update(set()).points
+
   def test_palisade_telluride_hda2_uses_mixed_can_layout(self):
     fingerprint = gen_empty_fingerprint()
     fingerprint[2][0x50] = 16
@@ -1862,6 +1963,37 @@ class TestHyundaiFingerprint:
     exact, matches = match_fw_to_car(car_fw, "", allow_exact=True, allow_fuzzy=False, log=False)
     assert exact
     assert matches == {candidate}
+
+  @pytest.mark.parametrize("alpha_long", (False, True))
+  @pytest.mark.parametrize("alt_buttons", (False, True))
+  @pytest.mark.parametrize("signal, value, button_type", (
+    ("LDA_BTN", 1, ButtonType.lkas),
+    ("ADAPTIVE_CRUISE_MAIN_BTN", 1, ButtonType.mainCruise),
+    ("CRUISE_BUTTONS", Buttons.RES_ACCEL, ButtonType.accelCruise),
+    ("CRUISE_BUTTONS", Buttons.SET_DECEL, ButtonType.decelCruise),
+    ("CRUISE_BUTTONS", Buttons.CANCEL, ButtonType.cancel),
+  ))
+  def test_k4_2025_2026_physical_button_events(self, alpha_long, alt_buttons, signal, value, button_type):
+    toggles = get_test_toggles()
+    fingerprint = gen_empty_fingerprint()
+    if not alt_buttons:
+      fingerprint[0][0x1CF] = 8
+    CP = CarInterface.get_params(CAR.KIA_K4_2025, fingerprint, [], alpha_long, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_K4_2025, fingerprint, [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+    parsers = car_state.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+    def update(button_value, frame):
+      msg = packer.make_can_msg(car_state.cruise_btns_msg_canfd, CanBus(CP).ECAN, {signal: button_value})
+      parsers[Bus.pt].update([(frame * 10_000_000, [msg])])
+      return car_state.update(parsers, toggles)[0].buttonEvents
+
+    assert not update(0, 1)
+    pressed = update(value, 2)
+    assert [(event.type, event.pressed) for event in pressed] == [(button_type, True)]
+    released = update(0, 3)
+    assert [(event.type, event.pressed) for event in released] == [(button_type, False)]
 
   @pytest.mark.parametrize("camera_fw", [
     b'\xf1\x00CL4 MFC  AT CAN LHD 1.00 1.02 99210-GG000 240708',

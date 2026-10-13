@@ -1051,6 +1051,10 @@ def manager_init() -> None:
       params_cache.put(k, current_value)
   last_timing = _log_boot_timing("manager_init", "params_defaults_cache_sync", manager_init_start, last_timing)
 
+  if params.get_bool("RandomEvents"):
+    params.put_bool("RandomEvents", False)
+    params_cache.put_bool("RandomEvents", False)
+
   # Create folders needed for msgq
   try:
     os.mkdir(Paths.shm_path())

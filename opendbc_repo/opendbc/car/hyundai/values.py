@@ -605,7 +605,8 @@ class CAR(Platforms):
   )
   KIA_K4_2025 = HyundaiCanFDPlatformConfig(
     [
-      HyundaiCarDocs("Kia K4 (without HDA II) 2025-26", car_parts=CarParts.common([CarHarness.hyundai_a])),
+      HyundaiCarDocs("Kia K4 (without HDA II) 2025", car_parts=CarParts.common([CarHarness.hyundai_a])),
+      HyundaiCarDocs("Kia K4 (without HDA II) 2026", car_parts=CarParts.common([CarHarness.hyundai_a])),
       HyundaiCarDocs("Kia K4 (with HDA II) 2025", car_parts=CarParts.common([CarHarness.hyundai_r])),
     ],
     CarSpecs(mass=2987 * CV.LB_TO_KG, wheelbase=2.72, steerRatio=13.4),
@@ -1228,6 +1229,7 @@ CANFD_RADAR_ECU_KEEPALIVE_CAR = {
   CAR.GENESIS_GV60_EV_1ST_GEN,
 }
 RADAR_LIVE_LONGITUDINAL_CAR = CANFD_RADAR_LIVE_LONGITUDINAL_CAR | {
+  CAR.HYUNDAI_PALISADE_2023,
   CAR.HYUNDAI_IONIQ,
   CAR.HYUNDAI_KONA_EV_2022,
   CAR.HYUNDAI_SANTA_FE_2022,

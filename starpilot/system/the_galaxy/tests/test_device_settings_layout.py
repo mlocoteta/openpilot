@@ -429,6 +429,18 @@ def test_toyota_auto_hold_is_galaxy_only():
   assert setting["data_type"] == "bool"
 
 
+def test_rav4_radar_is_galaxy_only_parked_only_and_default_off():
+  setting = _params_by_section(_layout())["Vehicle"]["ToyotaRadarMode"]
+  assert _declared_default("ToyotaRadarMode") == "0"
+  assert setting["vehicle_makes"] == ["Toyota"]
+  assert setting["galaxy_only"] is True
+  assert setting["requires_offroad"] is True
+  assert setting["settings_tier"] == "simple"
+  assert setting["options"] == [
+    {"value": 0, "label": "Off"}, {"value": 1, "label": "ACC Target"}, {"value": 2, "label": "Fused Tracks"},
+  ]
+
+
 def test_cluster_offset_is_in_galaxy_developer_section_only():
   sections = _params_by_section(_layout())
   assert "ClusterOffset" not in sections["Vehicle"]

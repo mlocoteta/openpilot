@@ -105,6 +105,97 @@ def test_mach_e_unwind_lag_ramps_continuously(controller, monkeypatch):
   assert controller._unwind_preview(0.010, -0.009, 0.011, 10.0) == -0.009
 
 
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_turn_in_preview_holds_one_repeated_sample(controller, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = sign * 0.003
+  assert not controller._turn_in_preview_plateau(sign * 0.004, sign * 0.001, 6.0, False, False)
+  controller.desired_curvature_last = sign * 0.004
+  assert controller._turn_in_preview_plateau(sign * 0.004, sign * 0.001, 6.0, False, False)
+  assert controller._turn_in_preview_weight(sign * 0.004, sign * 0.03, sign * 0.001, True) == 1.0
+  assert not controller._turn_in_preview_plateau(sign * 0.004, sign * 0.001, 6.0, False, False)
+  assert controller._turn_in_preview_weight(sign * 0.004, sign * 0.03, sign * 0.001) == 0.0
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("current", (0.0036, 0.004, 0.005))
+def test_mach_e_turn_in_plateau_requires_tracking_lag(controller, sign, current):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = sign * 0.004
+  controller.turn_in_preview_hold_timer = 0.1
+  assert not controller._turn_in_preview_plateau(sign * 0.004, sign * current, 6.0, False, False)
+
+
+@pytest.mark.parametrize("desired", (0.003, -0.004, 0.0))
+def test_mach_e_turn_in_plateau_resets_on_unwind_and_reversal(controller, desired):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = 0.004
+  controller.turn_in_preview_hold_timer = 0.1
+  assert not controller._turn_in_preview_plateau(desired, 0.001, 6.0, False, False)
+  assert controller.turn_in_preview_hold_timer == 0.0
+
+
+@pytest.mark.parametrize("fingerprint,flags,speed,driver,lane_change", (
+  (CAR.FORD_EDGE_MK2, FordFlags.CANFD, 6.0, False, False),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD, 6.0, False, False),
+  (CAR.FORD_F_150_MK14, FordFlags.CANFD, 6.0, False, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, 6.0, False, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, 1.99, False, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, 15.0, False, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, 6.0, True, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, 6.0, False, True),
+))
+def test_turn_in_plateau_preserves_other_fords_and_handoffs(controller, fingerprint, flags, speed, driver, lane_change):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  controller.desired_curvature_last = 0.004
+  controller.turn_in_preview_hold_timer = 0.1
+  assert not controller._turn_in_preview_plateau(0.004, 0.001, speed, driver, lane_change)
+  assert controller.turn_in_preview_hold_timer == 0.0
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_repeated_turn_in_sample_preserves_extended_preview(controller, monkeypatch, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.sm["liveDelay"].lateralDelay = 0.4
+  controller.desired_curvature_last = sign * 0.003
+  controller.curvature_last = sign * 0.012
+  monkeypatch.setattr(controller, "_predicted_curvature",
+                      lambda _v, t: sign * (0.002 if t < 1.0 else 0.01 if t < 1.5 else 0.03))
+  state = car_state(speed=6.0, curvature=sign * 0.001)
+  cc = SimpleNamespace(latActive=True, enabled=False)
+  actuators = SimpleNamespace(curvature=sign * 0.004)
+  first = controller.update(cc, state, actuators)
+  repeated = controller.update(cc, state, actuators)
+  assert sign * repeated.curvature >= sign * first.curvature
+  assert sign * repeated.curvature == pytest.approx(0.0144)
+  expired = controller.update(cc, state, actuators)
+  assert sign * expired.curvature < sign * repeated.curvature
+  assert repeated.path_angle == 0.0
+  controller.update(SimpleNamespace(latActive=False), state, actuators)
+  assert controller.turn_in_preview_hold_timer == 0.0
+  controller.update(cc, state, actuators)
+  assert controller.turn_in_preview_hold_timer > 0.0
+  controller.update(cc, car_state(speed=0.0), actuators)
+  assert controller.turn_in_preview_hold_timer == 0.0
+
+
+@pytest.mark.parametrize("speed,weight", ((1.99, 0.0), (2.0, 0.0), (2.5, 0.5), (3.0, 1.0),
+                                         (14.0, 1.0), (14.5, 0.5), (15.0, 0.0), (16.0, 0.0)))
+def test_mach_e_turn_in_plateau_speed_boundaries_are_continuous(controller, speed, weight):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = 0.004
+  controller.turn_in_preview_hold_timer = 0.1
+  actual_weight = controller._turn_in_preview_plateau(0.004, 0.001, speed, False, False)
+  assert actual_weight == pytest.approx(weight)
+  assert controller._turn_in_preview_weight(0.004, 0.03, 0.001, actual_weight) == pytest.approx(weight)
+
+
 @pytest.mark.parametrize("speed,desired,requested,current,driver,lane_change,expected", (
   (12.0, 0.012, 0.012, 0.004, False, False, 0.006),
   (12.0, -0.012, -0.012, 0.004, False, False, 0.006),
@@ -128,6 +219,75 @@ def test_mach_e_understeer_error_scope(controller, speed, desired, requested, cu
 def test_understeer_error_preserves_other_fords(controller):
   controller.CP.flags = FordFlags.CANFD
   assert controller._curvature_error_limit(0.012, 0.012, 0.004, 12.0, False, False) == 0.002
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("speed,expected", ((8.0, 0.002), (8.5, 0.004), (9.0, 0.006), (12.0, 0.006),
+                                          (14.0, 0.006), (15.0, 0.004), (16.0, 0.002)))
+def test_mach_e_unwind_error_tracks_opening_path_before_direction_changes(controller, sign, speed, expected):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.model = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.0] * 33))
+  assert controller._curvature_error_limit(
+    sign * 0.001, sign * 0.002, sign * 0.005, speed, False, False, sign * 0.001) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("requested,preview,expected", ((0.003, 0.001, 0.002), (0.002, 0.001, 0.004),
+                                                       (0.001, 0.001, 0.006), (0.001, 0.004, 0.002),
+                                                       (0.001, 0.003, 0.002), (0.001, 0.002, 0.004),
+                                                       (0.001, -0.0002, 0.006), (0.001, 0.0, 0.006),
+                                                       (0.0, 0.0, 0.006)))
+def test_mach_e_unwind_error_requires_measured_lag_and_opening_preview(controller, sign, requested, preview, expected):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.model = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.0] * 33))
+  assert controller._curvature_error_limit(
+    sign * requested, sign * 0.002, sign * 0.005, 12.0, False, False, sign * preview) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("fingerprint,flags,driver,lane_change", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, True, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, False, True),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, False, False),
+  (CAR.FORD_EDGE_MK2, FordFlags.CANFD, False, False),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD, False, False),
+  (CAR.FORD_F_150_MK14, FordFlags.CANFD, False, False),
+))
+def test_unwind_error_preserves_takeover_lane_changes_and_other_fords(controller, fingerprint, flags, driver, lane_change):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  controller.model = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.0] * 33))
+  assert controller._curvature_error_limit(0.001, 0.002, 0.005, 12.0, driver, lane_change, 0.001) == 0.002
+
+
+@pytest.mark.parametrize("model", (None, SimpleNamespace(orientationRate=SimpleNamespace(z=[0.0] * 16))))
+def test_mach_e_unwind_error_requires_model_preview(controller, model):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.model = model
+  assert controller._curvature_error_limit(0.001, 0.002, 0.005, 12.0, False, False, 0.001) == 0.002
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_curve_exit_releases_without_waiting_for_left_right_reversal(controller, monkeypatch, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.model = SimpleNamespace(orientationRate=SimpleNamespace(z=[0.0] * 33),
+                                     meta=SimpleNamespace(laneChangeState=0, laneChangeDirection=0))
+  controller.curvature_last = sign * 0.004
+  controller.desired_curvature_last = sign * 0.003
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.001)
+  commands = []
+  for _ in range(4):
+    result = controller.update(SimpleNamespace(latActive=True), car_state(speed=12.0, curvature=sign * 0.005),
+                               SimpleNamespace(curvature=sign * 0.002))
+    assert result.active
+    assert result.path_angle == 0.0
+    commands.append(sign * result.curvature)
+  assert commands[0] == pytest.approx(0.004 - 0.0018)
+  assert commands[-1] == pytest.approx(0.0016)
+  assert commands[-1] < 0.005 - 0.002
 
 
 @pytest.mark.parametrize("sign", (-1, 1))
@@ -292,7 +452,7 @@ def test_mach_e_reversal_does_not_reapply_old_direction_at_desired_zero_crossing
   result = controller.update(SimpleNamespace(latActive=True), car_state(speed=12.0, curvature=sign * 0.00462),
                              SimpleNamespace(curvature=-sign * 0.00034))
   assert result.active
-  assert result.curvature == pytest.approx(-sign * 0.00034)
+  assert result.curvature == pytest.approx(-sign * 0.00138)
   assert result.path_angle == 0.0
 
 
@@ -757,12 +917,167 @@ def test_curvature_strategy_uses_learned_lookahead(controller, monkeypatch):
   assert lookaheads == [pytest.approx(0.38)]
 
 
+@pytest.mark.parametrize("speed,expected", ((0.0, 0.0), (15.0, 0.0), (16.0, 0.0), (19.5, 0.2),
+                                         (23.0, 0.4), (30.0, 0.4), (40.0, 0.4)))
+def test_mach_e_high_speed_preview_ramps_continuously(controller, speed, expected):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  assert controller._high_speed_lookahead_extra(speed, False, False) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("fingerprint,flags,driver,lane_change", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, True, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, False, True),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, False, False),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD, False, False),
+  (CAR.FORD_F_150_MK14, FordFlags.CANFD, False, False),
+  (CAR.FORD_EDGE_MK2, 0, False, False),
+))
+def test_high_speed_preview_preserves_takeover_lane_changes_and_other_fords(controller, fingerprint, flags, driver, lane_change):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  assert controller._high_speed_lookahead_extra(30.0, driver, lane_change) == 0.0
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("speed", (16.0, 19.5, 23.0, 30.0))
+def test_mach_e_high_speed_preview_preserves_constant_curve_authority(controller, monkeypatch, sign, speed):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  curvature = sign * 0.001
+  controller.curvature_last = curvature
+  controller.desired_curvature_last = curvature
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: curvature)
+  result = controller.update(SimpleNamespace(latActive=True), car_state(speed=speed, curvature=curvature),
+                             SimpleNamespace(curvature=curvature))
+  assert result.curvature == pytest.approx(curvature)
+  assert result.curvature_rate == 0.0
+  assert result.path_angle == 0.0
+
+
+@pytest.mark.parametrize("driver,lane_change", ((False, False), (True, False), (False, True)))
+def test_mach_e_high_speed_preview_update_uses_bounded_horizon(controller, monkeypatch, driver, lane_change):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.sm["liveDelay"].lateralDelay = 0.38
+  monkeypatch.setattr(controller, "_lane_change", lambda: (lane_change, 0))
+  lookaheads = []
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda v, t: lookaheads.append(t) or 0.0)
+  controller.update(SimpleNamespace(latActive=True), car_state(speed=30.0, steering_pressed=driver),
+                    SimpleNamespace(curvature=0.0001))
+  assert lookaheads[0] == pytest.approx(0.38 if driver or lane_change else 0.78)
+  assert controller._curvature_lookahead() == pytest.approx(0.38)
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("conflicting_rate", (False, True))
+@pytest.mark.parametrize("fingerprint,flags,driver,lane_change", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, False, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, True, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, False, True),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, False, False),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD, False, False),
+  (CAR.FORD_EDGE_MK2, 0, False, False),
+))
+def test_mach_e_unwind_rate_does_not_fight_selected_release(controller, monkeypatch, sign, conflicting_rate,
+                                                          fingerprint, flags, driver, lane_change):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  controller.desired_curvature_last = sign * 0.013
+  controller.curvature_last = sign * 0.012
+  predicted = sign * 0.011
+  rate = sign * 0.0002 * (1 if conflicting_rate else -1)
+  controller.curvature_samples.append(predicted - rate * STEER_DT * 8.0)
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda v, t: predicted if t < 0.5 else sign * 0.006)
+  monkeypatch.setattr(controller, "_lane_change", lambda: (lane_change, 0))
+  result = controller.update(SimpleNamespace(latActive=True),
+                             car_state(speed=8.0, curvature=sign * 0.012, steering_pressed=driver),
+                             SimpleNamespace(curvature=sign * 0.012))
+  suppress = fingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and flags & FordFlags.CANFD and not driver and not lane_change
+  assert result.curvature_rate == pytest.approx(0.0 if lane_change or suppress and conflicting_rate else rate)
+  assert result.path_angle == 0.0
+
+
 def test_mach_e_preview_does_not_override_opposite_current_path(controller):
   controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
 
   requested, _ = controller._blend_and_scale(-0.0001, 0.002, 20.0)
 
   assert requested == pytest.approx(-0.0001)
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+@pytest.mark.parametrize("last,desired,current,preview,rate,suppress", (
+  (0.011, 0.012, 0.004, 0.014, -0.001023, True),
+  (0.012, 0.012, 0.004, 0.014, -0.001023, True),
+  (0.011, 0.012, -0.004, 0.014, -0.001023, True),
+  (0.013, 0.012, 0.004, 0.014, -0.001023, False),
+  (-0.011, 0.012, 0.004, 0.014, -0.001023, False),
+  (0.011, 0.012, 0.011, 0.014, -0.001023, False),
+  (0.011, 0.012, 0.004, 0.005, -0.001023, False),
+  (0.011, 0.012, 0.004, 0.010, -0.001023, False),
+  (0.011, 0.012, 0.004, -0.014, -0.001023, False),
+  (0.011, 0.012, 0.004, 0.000, -0.001023, False),
+  (0.011, 0.012, 0.004, 0.014, 0.001023, False),
+  (0.011, 0.012, 0.004, 0.014, 0.000000, False),
+))
+def test_mach_e_turn_in_rate_preserves_entry_and_opening_phases(controller, monkeypatch, sign,
+                                                             last, desired, current, preview, rate, suppress):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = sign * last
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * preview)
+  result = controller._turn_in_curvature_rate(sign * desired, sign * current, sign * rate, 8.0, 0.4, False, False)
+  assert result == pytest.approx(0.0 if suppress else sign * rate)
+
+
+@pytest.mark.parametrize("fingerprint,flags,driver,lane_change", (
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, True, False),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, FordFlags.CANFD, False, True),
+  (CAR.FORD_MUSTANG_MACH_E_MK1, 0, False, False),
+  (CAR.FORD_EXPLORER_MK6, FordFlags.CANFD, False, False),
+  (CAR.FORD_EDGE_MK2, 0, False, False),
+))
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_turn_in_rate_preserves_driver_lane_change_and_other_fords(controller, monkeypatch, sign,
+                                                                fingerprint, flags, driver, lane_change):
+  controller.CP.carFingerprint = fingerprint
+  controller.CP.flags = flags
+  controller.desired_curvature_last = sign * 0.011
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.014)
+  rate = -sign * 0.001023
+  assert controller._turn_in_curvature_rate(sign * 0.012, sign * 0.004, rate, 8.0, 0.4, driver, lane_change) == rate
+
+
+@pytest.mark.parametrize("speed,suppress", ((0.3, False), (2.9, False), (3.0, True), (14.9, True), (15.0, False), (25.0, False)))
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_turn_in_rate_does_not_use_near_zero_speed_yaw_or_change_highway_behavior(controller, monkeypatch,
+                                                                                     sign, speed, suppress):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = sign * 0.011
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.014)
+  rate = -sign * 0.001023
+  result = controller._turn_in_curvature_rate(sign * 0.012, sign * 0.004, rate, speed, 0.4, False, False)
+  assert result == pytest.approx(0.0 if suppress else rate)
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_mach_e_turn_in_rate_update_uses_previous_desired_and_preserves_unwind(controller, monkeypatch, sign):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.CP.flags = FordFlags.CANFD
+  controller.desired_curvature_last = sign * 0.011
+  controller.curvature_last = sign * 0.012
+  monkeypatch.setattr(controller, "_predicted_curvature", lambda *_: sign * 0.014)
+  rate = -sign * 0.0002
+  for desired in (0.012, 0.012, 0.011):
+    controller.curvature_samples.clear()
+    controller.curvature_samples.append(sign * 0.014 - rate * STEER_DT * 8.0)
+    result = controller.update(SimpleNamespace(latActive=True), car_state(speed=8.0, curvature=sign * 0.004),
+                               SimpleNamespace(curvature=sign * desired))
+    assert result.curvature_rate == pytest.approx(rate if desired == 0.011 else 0.0)
+    assert controller.desired_curvature_last == sign * desired
+    assert result.active and result.path_angle == 0.0
 
 
 def test_mach_e_preview_is_reduced_when_ahead_of_current_path(controller):

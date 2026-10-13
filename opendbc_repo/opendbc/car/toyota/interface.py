@@ -5,7 +5,7 @@ from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
                                                   MIN_ACC_SPEED, EPS_SCALE, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, \
                                                   ToyotaSafetyFlags, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, \
-                                                  TOYOTA_AUTO_HOLD_AEB_CARS
+                                                  uses_toyota_auto_hold_aeb, ARS510_RADAR_CAR
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -18,6 +18,17 @@ class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
   RadarInterface = RadarInterface
+
+  @classmethod
+  def get_params(cls, candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles):
+    ret = super().get_params(candidate, fingerprint, car_fw, alpha_long, is_release, docs, starpilot_toggles)
+    radar_mode = getattr(starpilot_toggles, "toyota_radar_mode_requested", 0)
+    if candidate in ARS510_RADAR_CAR and radar_mode in (1, 2):
+      ret.flags |= ToyotaFlags.ARS510_RADAR.value
+      if radar_mode == 2:
+        ret.flags |= ToyotaFlags.ARS510_FUSED.value
+      ret.radarUnavailable = False
+    return ret
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
@@ -102,7 +113,7 @@ class CarInterface(CarInterfaceBase):
       # https://engage.toyota.com/static/images/toyota_safety_sense/TSS_Applicability_Chart.pdf
       stop_and_go = candidate != CAR.TOYOTA_AVALON
 
-    elif candidate in (CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_RAV4_PRIME):
+    elif candidate in ANGLE_CONTROL_CAR:
       ret.lateralTuning.init('pid')
       ret.lateralTuning.pid.kiBP = [0.0]
       ret.lateralTuning.pid.kpBP = [0.0]
@@ -167,7 +178,7 @@ class CarInterface(CarInterfaceBase):
     toyota_auto_hold = Params(return_defaults=True).get_bool("ToyotaAutoHold")
     if toyota_auto_hold and ret.openpilotLongitudinalControl and candidate in TOYOTA_AUTO_HOLD_CARS:
       ret.alternativeExperience |= (ALTERNATIVE_EXPERIENCE.ALLOW_AEB
-                                    if candidate in TOYOTA_AUTO_HOLD_AEB_CARS
+                                    if uses_toyota_auto_hold_aeb(ret)
                                     else ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD)
       ret.flags |= ToyotaFlags.AUTO_BRAKE_HOLD.value
 

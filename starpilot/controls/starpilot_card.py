@@ -471,17 +471,21 @@ class StarPilotCard:
       self.tesla_aol_brake_disengaged = False
       self.always_on_lateral_allowed = True
 
-    if self.tesla_screen_button and getattr(starpilot_toggles, "tesla_aol_screen_tap", False):
-      # Keep the existing cruise path until a gesture explicitly overrides it.
-      if engagement_started or (cruise_available_changed and not carState.cruiseState.available and not carState.brakePressed):
-        if self.tesla_screen_aol_override is not None:
-          self.pause_lateral = False
-        self.tesla_screen_aol_override = None
-      if self.tesla_screen_aol_override is not None:
-        self.always_on_lateral_allowed = self.tesla_screen_aol_override
+    tesla_screen_tap_enabled = self.tesla_screen_button and getattr(starpilot_toggles, "tesla_aol_screen_tap", False)
+    if tesla_screen_tap_enabled:
+      # ACC availability is not a driver request and can flicker at low speed.
+      if carState.cruiseState.enabled and not self.prev_cruise_enabled:
+        self.pause_lateral = False
+        self.tesla_screen_aol_override = True
+        self.tesla_aol_brake_disengaged = False
+      if self.tesla_screen_disengage_on_brake and carState.brakePressed:
+        self.tesla_screen_aol_override = False
+        self.tesla_aol_brake_disengaged = True
+      self.always_on_lateral_allowed = self.tesla_screen_aol_override is True
       if self.tesla_aol_brake_disengaged:
         self.always_on_lateral_allowed = False
-      if cancel_pressed or getattr(carState, "steeringDisengage", False):
+      cruise_cancelled = self.prev_cruise_enabled and not carState.cruiseState.enabled and not carState.brakePressed
+      if cancel_pressed or cruise_cancelled or getattr(carState, "steeringDisengage", False):
         self.tesla_screen_aol_override = False
         self.always_on_lateral_allowed = False
       else:
@@ -593,7 +597,8 @@ class StarPilotCard:
     self.always_on_lateral_enabled &= not aol_blocked_by_immediate_disable(
       sm["selfdriveState"].alertType, sm["starpilotSelfdriveState"].alertType,
     )
-    self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
+    if not (tesla_screen_tap_enabled and starpilot_toggles.always_on_lateral_pause_speed <= 0.0):
+      self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
     self.always_on_lateral_enabled &= not self.error_log.is_file()
     # Keep the AOL latch (always_on_lateral_allowed) so AOL comes back with cruise main, as the panda's does.
     self.always_on_lateral_enabled &= not aol_blocked_by_panda_cruise_main(

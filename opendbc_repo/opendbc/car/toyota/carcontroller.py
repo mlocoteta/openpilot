@@ -11,7 +11,7 @@ from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CAR, MIN_ACC_SPEED, NO_STOP_TIMER_CAR, PEDAL_TRANSITION, TSS2_CAR, \
                                         CarControllerParams, ToyotaFlags, ToyotaSafetyFlags, \
-                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
+                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.can import CANPacker
 
 Ecu = structs.CarParams.Ecu
@@ -281,7 +281,6 @@ class CarController(CarControllerBase):
     self.doors_locked = False
     self.brake_hold_active = False
     self._brake_hold_counter = 0
-    self._auto_hold_rearm_blocked = False
 
   def _compute_interceptor_gas_cmd(self, CC, CS):
     if self.brake_hold_active or not (self.CP.enableGasInterceptorDEPRECATED and self.CP.openpilotLongitudinalControl and CC.longActive):
@@ -328,27 +327,15 @@ class CarController(CarControllerBase):
     self.last_standstill = CS.out.standstill
 
   def update_auto_hold_state(self, CS: structs.CarState, cancel_requested: bool = False,
-                             activation_frames: int = TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES, *,
-                             long_active: bool = False, stopping: bool = False):
+                             activation_frames: int = TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES):
     brake_hold_allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
-                          not CS.out.gasPressed and (not CS.out.cruiseState.enabled or long_active) and
+                          not CS.out.gasPressed and not CS.out.cruiseState.enabled and
                           CS.out.gearShifter not in (PARK, REVERSE))
 
     if not brake_hold_allowed:
-      # A gas tap releases this stop, even if the pedal is lifted before the
-      # wheels start moving. Re-arm once moving or after another brake press.
-      rearm_blocked = CS.out.standstill and (self._auto_hold_rearm_blocked or CS.out.gasPressed)
       self.reset_auto_hold_state()
-      self._auto_hold_rearm_blocked = rearm_blocked
     elif not self.brake_hold_active:
       if CS.out.brakePressed:
-        self._auto_hold_rearm_blocked = False
-      cruise_stop = long_active and stopping and CS.out.cruiseState.enabled and not self._auto_hold_rearm_blocked
-      if cruise_stop:
-        # Latch immediately at a cruise-controlled stop; planner resume requests
-        # must not release the brakes until the driver presses the gas.
-        self.brake_hold_active = True
-      elif CS.out.brakePressed and not CS.out.cruiseState.enabled:
         self._brake_hold_counter += 1
         self.brake_hold_active = self._brake_hold_counter > activation_frames
       else:
@@ -373,11 +360,10 @@ class CarController(CarControllerBase):
     return []
 
   def reset_auto_hold_state(self):
-    if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+    if self.brake_hold_active and not uses_toyota_auto_hold_aeb(self.CP):
       self.standstill_req = False
     self._brake_hold_counter = 0
     self.brake_hold_active = False
-    self._auto_hold_rearm_blocked = False
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     actuators = CC.actuators
@@ -475,12 +461,10 @@ class CarController(CarControllerBase):
 
     self._update_standstill_request(CC, CS, actuators, starpilot_toggles)
     if supports_toyota_auto_hold(self.CP, getattr(starpilot_toggles, "toyota_auto_hold", False)):
-      if self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+      if uses_toyota_auto_hold_aeb(self.CP):
         can_sends.extend(self.create_auto_brake_hold_messages(CS))
       else:
-        self.update_auto_hold_state(CS, pcm_cancel_cmd, long_active=CC.longActive, stopping=stopping)
-        if self._auto_hold_rearm_blocked:
-          self.standstill_req = False
+        self.update_auto_hold_state(CS, pcm_cancel_cmd)
     else:
       self.reset_auto_hold_state()
 
@@ -590,7 +574,7 @@ class CarController(CarControllerBase):
 
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
-        if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+        if self.brake_hold_active and not uses_toyota_auto_hold_aeb(self.CP):
           pcm_accel_cmd = TOYOTA_AUTO_HOLD_ACCEL
           self.permit_braking = True
           self.standstill_req = True

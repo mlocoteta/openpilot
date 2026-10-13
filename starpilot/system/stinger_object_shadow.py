@@ -5,7 +5,7 @@ import time
 from collections import deque
 from dataclasses import asdict
 
-from openpilot.tools.car_porting.stinger_object_tracks import MAX_EGO_AGE_NS, SLOT_COUNT, StingerObjectDecoder
+from openpilot.starpilot.system.stinger_object_tracks import MAX_EGO_AGE_NS, SLOT_COUNT, StingerObjectDecoder
 
 
 PLATFORM = "KIA_STINGER_2022"

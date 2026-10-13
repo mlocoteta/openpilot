@@ -39,6 +39,7 @@ GM_SILVERADO_EARLY_FOLLOW_MIN_MODEL_PROB = 0.85
 GM_SILVERADO_EARLY_FOLLOW_MAX_LATERAL_OFFSET = 1.2
 DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
 GM_SILVERADO_FOLLOW_PREBRAKE_MIN_HEADWAY = 1.25
+GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR = 1.25
 FORD_LIGHTNING_FOLLOW_PREBRAKE_MIN_HEADWAY = 0.75
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_MIN_HEADWAY_MARGIN = 0.10
 FORD_LIGHTNING_TRACKED_LEAD_CATCHUP_FULL_HEADWAY_MARGIN = 0.25
@@ -588,15 +589,32 @@ def allow_radar_standstill_gap_settle(CP):
   )
 
 
-def is_kia_niro_ev_follow_lead(CP, lead, v_ego):
+def is_kia_niro_ev_follow_lead(CP, lead, v_ego, model_position=None):
   if (
     getattr(CP, "brand", "") != "hyundai" or str(getattr(CP, "carFingerprint", "")) != "KIA_NIRO_EV" or
     lead is None or not bool(getattr(lead, "status", False)) or bool(getattr(lead, "radar", False)) or
-    float(getattr(lead, "modelProb", 0.0)) < 0.95 or
-    abs(float(getattr(lead, "yRel", 0.0))) > 1.5 or float(v_ego) < 5.0
+    not float(getattr(lead, "modelProb", 0.0)) >= 0.95 or float(v_ego) < 5.0
   ):
     return False
-  return 10.0 <= float(lead.dRel) <= max(40.0, 2.5 * float(v_ego))
+
+  distance = float(lead.dRel)
+  lateral_offset = float(getattr(lead, "yRel", 0.0))
+  if abs(lateral_offset) <= 1.5 and 10.0 <= distance <= max(40.0, 2.5 * float(v_ego)):
+    return True
+  if not (
+    model_position is not None and
+    10.0 <= distance <= max(40.0, 3.5 * float(v_ego)) and
+    float(v_ego) - float(getattr(lead, "vLead", v_ego)) >= 0.75 and
+    float(getattr(lead, "aLeadK", 0.0)) <= -0.15
+  ):
+    return False
+
+  path_x = np.asarray(getattr(model_position, "x", ()), dtype=float)
+  path_y = np.asarray(getattr(model_position, "y", ()), dtype=float)
+  if (len(path_x) < 2 or len(path_x) != len(path_y) or distance > path_x[-1] or
+      not np.all(np.isfinite(path_x)) or not np.all(np.isfinite(path_y)) or not np.all(np.diff(path_x) > 0.0)):
+    return False
+  return abs(lateral_offset + float(np.interp(distance, path_x, path_y))) <= 1.5
 
 
 def get_far_follow_output_slew_min_speed(CP, default_min_speed):
@@ -764,6 +782,16 @@ def get_follow_prebrake_min_headway(CP, t_follow):
   if CP.brand == "ford" and str(CP.carFingerprint) == "FORD_F_150_LIGHTNING_MK1":
     return max(float(t_follow), FORD_LIGHTNING_FOLLOW_PREBRAKE_MIN_HEADWAY)
   return max(float(t_follow), DEFAULT_FOLLOW_PREBRAKE_MIN_HEADWAY)
+
+
+def get_far_lead_coast_headway_floor(CP):
+  if (
+    getattr(CP, "brand", "") == "gm" and
+    str(getattr(CP, "carFingerprint", "")) in ("CHEVROLET_SILVERADO", "CHEVROLET_SILVERADO_CC") and
+    not bool(getattr(CP, "enableGasInterceptorDEPRECATED", False))
+  ):
+    return GM_SILVERADO_FAR_LEAD_COAST_HEADWAY_FLOOR
+  return 1.75
 
 
 def get_toyota_sienna_post_departure_restop_cap(CP, lead, v_ego, accel_min,

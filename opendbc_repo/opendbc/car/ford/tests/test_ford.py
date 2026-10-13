@@ -6,10 +6,10 @@ from hypothesis import settings, given, strategies as st
 from parameterized import parameterized
 import pytest
 
-from opendbc.car import Bus, gen_empty_fingerprint
-from opendbc.can import CANPacker
+from opendbc.car import Bus, gen_empty_fingerprint, structs
+from opendbc.can import CANPacker, CANParser
 from opendbc.car.ford import fordcan
-from opendbc.car.ford.carcontroller import FordStockCruiseButton, apply_creep_compensation
+from opendbc.car.ford.carcontroller import CarController, FordStockCruiseButton, apply_brake_rate_limit, apply_creep_compensation
 from opendbc.car.ford.carstate import CarState
 from opendbc.car.gps import FORD_MACH_E_GPS_MESSAGES, get_car_gps_config, parse_ford_can_gps
 from opendbc.car.structs import CarParams, CarState as CarStateStruct
@@ -88,6 +88,84 @@ def test_mach_e_does_not_apply_engine_creep_compensation():
                                    standstill=True, stopping=True) == -0.6
   assert apply_creep_compensation(0.0, 0.5, CAR.FORD_F_150_MK14,
                                    standstill=False, stopping=False) == -0.6
+
+
+@pytest.mark.parametrize("last", (0.0, 0.35, 0.8))
+def test_mach_e_mild_brake_transition_shapes_regen_and_brake_together(last):
+  accel, gas = apply_brake_rate_limit(-0.5, -0.5, last, 11.0, CAR.FORD_MUSTANG_MACH_E_MK1,
+                                     stopping=False, standstill=False, fcw=False)
+  assert accel == pytest.approx(-0.04)
+  assert gas == accel
+
+
+@pytest.mark.parametrize("accel,last", ((-0.2, -0.5), (-0.5, -0.48), (-0.8, -0.4)))
+def test_mach_e_mild_brake_ramp_does_not_delay_release(accel, last):
+  brake, gas = apply_brake_rate_limit(accel, accel, last, 11.0, CAR.FORD_MUSTANG_MACH_E_MK1,
+                                     stopping=False, standstill=False, fcw=False)
+  assert brake == pytest.approx(max(accel, last - 0.04))
+  assert gas == brake
+
+
+@pytest.mark.parametrize("accel,speed,stopping,standstill,fcw", (
+  (-3.5, 11.0, False, False, False),
+  (-1.0, 11.0, False, False, False),
+  (-0.5, 4.9, False, False, False),
+  (-0.5, 11.0, True, False, False),
+  (-0.5, 11.0, False, True, False),
+  (-0.5, 11.0, False, False, True),
+  (0.2, 11.0, False, False, False),
+))
+def test_mach_e_strong_braking_stops_and_warnings_keep_original_ramp(accel, speed, stopping, standstill, fcw):
+  brake, gas = apply_brake_rate_limit(accel, accel, 0.0, speed, CAR.FORD_MUSTANG_MACH_E_MK1,
+                                     stopping=stopping, standstill=standstill, fcw=fcw)
+  assert brake == pytest.approx(max(accel, -0.07))
+  assert gas == accel
+
+
+@pytest.mark.parametrize("fingerprint", [car for car in CAR if car != CAR.FORD_MUSTANG_MACH_E_MK1])
+def test_other_fords_keep_original_brake_requests_and_integral_gain(fingerprint):
+  brake, gas = apply_brake_rate_limit(-0.5, -0.5, 0.35, 11.0, fingerprint,
+                                     stopping=False, standstill=False, fcw=False)
+  assert brake == pytest.approx(0.28)
+  assert gas == -0.5
+  CP = CarInterface.get_params(fingerprint, gen_empty_fingerprint(), [], True, False, False, None)
+  assert list(CP.longitudinalTuning.kiV) == [0.5]
+
+
+def test_mach_e_integral_gain_preserves_delay_and_braking_authority():
+  CP = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, gen_empty_fingerprint(), [], True, False, False, None)
+  assert list(CP.longitudinalTuning.kiV) == pytest.approx([0.3])
+  assert CP.longitudinalActuatorDelay == pytest.approx(0.15)
+  assert CarInterface.get_pid_accel_limits(CP, 11.0, 20.0)[0] == -3.5
+
+
+def test_mach_e_can_brake_handoff_and_driver_override(monkeypatch):
+  monkeypatch.setattr("opendbc.car.ford.carcontroller.FordLateralController",
+                      lambda _: SimpleNamespace(update_inputs=lambda: None))
+  monkeypatch.setattr(fordcan, "create_acc_ui_msg", lambda *args: (0, b"", 0))
+  monkeypatch.setattr(fordcan, "create_lkas_ui_msg", lambda *args: (0, b"", 0))
+  CP = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, gen_empty_fingerprint(), [], True, False, False, None)
+  controller = CarController(DBC[CP.carFingerprint], CP)
+  parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("ACCDATA", 50)], 0)
+  CC = structs.CarControl.new_message()
+  CC.enabled = True
+  CC.actuators.longControlState = structs.CarControl.Actuators.LongControlState.pid
+  CS = SimpleNamespace(out=structs.CarState.new_message(), acc_tja_status_stock_values={"Tja_D_Stat": 0})
+  CS.out.vEgo = 11.0
+
+  for frame, active, request, expected in ((2, True, -0.5, -0.04), (4, False, 0.0, 0.0),
+                                         (8, True, -0.5, -0.04), (14, True, -3.5, -0.11)):
+    controller.frame = frame
+    CC.longActive = active
+    CC.actuators.accel = request
+    output, messages = controller.update(CC.as_reader(), CS, frame * 10_000_000, None)
+    parser.update([(frame * 10_000_000, [msg for msg in messages if msg[0] == 0x186])])
+    values = parser.vl["ACCDATA"]
+    assert output.accel == pytest.approx(expected)
+    assert values["AccBrkTot_A_Rq"] == pytest.approx(expected, abs=0.01)
+    assert values["AccPrpl_A_Rq"] == pytest.approx(expected if active and request > -1.0 else -5.0, abs=0.01)
+    assert values["Cmbb_B_Enbl"] == int(active)
+    assert values["AccResumEnbl_B_Rq"] == int(active)
 
 
 ECU_ADDRESSES = {

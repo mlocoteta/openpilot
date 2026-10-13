@@ -3,6 +3,7 @@ import numpy as np
 from opendbc.car.gm.values import CAR, GMFlags
 from opendbc.car.honda import cruise_brake_deadband
 from opendbc.car.honda.values import CAR as HONDA_CAR
+from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN_CAR
@@ -90,6 +91,9 @@ HONDA_BRAKE_ONSET_DEFAULT_DELAY = 0.30
 # 0.56 into shouldStop frames on slow lead approaches (replay of 25 routes 0x2eb-0x318).
 HONDA_BRAKE_ONSET_MIN_LEAD_TTC = 5.0
 HONDA_BRAKE_ONSET_MIN_SPEED = 8.0
+FORD_MACH_E_FINAL_STOP_MAX_SPEED = 3.0
+FORD_MACH_E_FINAL_STOP_CAP_BP = [0.0, 1.0, FORD_MACH_E_FINAL_STOP_MAX_SPEED]
+FORD_MACH_E_FINAL_STOP_CAP_V = [-0.35, -0.80, -1.50]
 
 
 def get_bolt_acc_pedal_friction_bias(output_accel, a_target, v_ego):
@@ -182,6 +186,9 @@ class LongControlVehicleTuning:
     self.is_volkswagen_taos = bool(
       CP.brand == "volkswagen" and
       str(getattr(CP, "carFingerprint", "")) == str(VOLKSWAGEN_CAR.VOLKSWAGEN_TAOS_MK1)
+    )
+    self.is_ford_mach_e = bool(
+      CP.brand == "ford" and getattr(CP, "carFingerprint", None) == FORD_CAR.FORD_MUSTANG_MACH_E_MK1
     )
     self.is_bolt_acc_pedal_friction_car = bool(
       CP.brand == "gm" and
@@ -293,6 +300,17 @@ class LongControlVehicleTuning:
 
   def shape_stopping_accel(self, output_accel, a_target, should_stop, v_ego, has_lead, stop_accel, leads=None):
     """Shape low-speed stop braking without overriding urgent targets."""
+    if self.is_ford_mach_e and should_stop and 0.1 < v_ego < FORD_MACH_E_FINAL_STOP_MAX_SPEED and a_target <= -1.5:
+      return min(float(output_accel), float(a_target))
+
+    if (
+      self.is_ford_mach_e and should_stop and not has_lead and
+      not any(bool(getattr(lead, "status", False)) for lead in (leads or ())) and
+      0.1 < v_ego < FORD_MACH_E_FINAL_STOP_MAX_SPEED and -1.5 < a_target <= 0.1
+    ):
+      final_stop_cap = float(interp(v_ego, FORD_MACH_E_FINAL_STOP_CAP_BP, FORD_MACH_E_FINAL_STOP_CAP_V))
+      return max(float(output_accel), min(float(a_target) - 0.15, final_stop_cap))
+
     if self.is_volkswagen_taos and should_stop and has_lead and v_ego < VOLKSWAGEN_TAOS_COMFORT_STOP_MAX_SPEED:
       comfort_lead = next((
         lead for lead in (leads or ())

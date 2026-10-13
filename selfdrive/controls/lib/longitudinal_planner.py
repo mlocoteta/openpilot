@@ -2149,7 +2149,8 @@ class LongitudinalPlanner:
       not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
       not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
       not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False)) and
-      any(is_kia_niro_ev_follow_lead(self.CP, lead, scene_v_ego) for lead in (self.lead_one, self.lead_two))
+      any(is_kia_niro_ev_follow_lead(self.CP, lead, scene_v_ego, sm['modelV2'].position)
+          for lead in (self.lead_one, self.lead_two))
     )
     lightning_stopped_radar_follow = (
       experimental_mode and
