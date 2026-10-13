@@ -190,6 +190,9 @@ struct StarPilotOnroadEvent @0xe344718567f9ce71 {
     teslaCCNotArmed @39;
     pedalNotCalibrated @40;
     gpuModelBackup @41;
+    standstillHold @42;
+    standstillHoldOnly @43;
+    standstillHoldBrake @44;
   }
 }
 

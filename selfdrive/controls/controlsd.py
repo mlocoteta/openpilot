@@ -42,6 +42,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_honda_accord_steer_ratio_scale,
 )
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.controls.lib.standstill_hold import ModeReader as StandstillModeReader, StandstillHold
 from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS, get_car_lateral_smooth_seconds
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -454,6 +455,8 @@ class Controls:
     self.calibrated_pose: Pose | None = None
 
     self.LoC = LongControl(self.CP)
+    self.standstill_hold = StandstillHold()
+    self.standstill_mode = StandstillModeReader()
     self.VM = VehicleModel(self.CP)
     self.LaC: LatControl
     if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
@@ -761,6 +764,11 @@ class Controls:
     if not CC.longActive and not tesla_pedal_override:
       self.LoC.reset()
 
+    # Standstill engage hold: SET while stopped on the brake latches a full stop until the gas (standstill_hold.py)
+    ss = self.sm['selfdriveState']
+    standstill_mode = self.standstill_mode.get(time.monotonic()) if self.CP.openpilotLongitudinalControl else 0
+    standstill_hold = self.standstill_hold.update(standstill_mode, ss.state, CC.enabled, CS, time.monotonic())
+
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     self.LoC.experimental_mode = bool(self.sm['selfdriveState'].experimentalMode)
@@ -772,7 +780,8 @@ class Controls:
                                                 leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo),
                                                 plan_source=str(long_plan.longitudinalPlanSource),
                                                 v_cruise=self.sm['starpilotPlan'].vCruise if self.sm.valid['starpilotPlan'] else None,
-                                                csc_active=self.sm['starpilotPlan'].cscControllingSpeed),
+                                                csc_active=self.sm['starpilotPlan'].cscControllingSpeed,
+                                                standstill_hold=standstill_hold),
                                 self.starpilot_toggles.max_desired_acceleration))
 
     # Steering PID loop and lateral MPC
