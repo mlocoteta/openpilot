@@ -121,3 +121,38 @@ def resume_set_speed_kph(previous_kph: float, floor_kph: float, is_metric: bool,
   if previous_kph > floor_kph:
     return min(previous_kph, max_kph)
   return 40.0 if is_metric else RESUME_DEFAULT_MPH * imperial_increment
+
+
+LOW_SPEED_SET_MPH = 9.0  # SET below this speed (incl. 0 mph) no longer sets the 7 mph engage floor
+LOW_SPEED_SET_KILL_FILE = "/data/standstill_limit_set_disabled"
+
+
+def low_speed_set_applies(mode: int, v_ego: float, standstill: bool, brake_pressed: bool) -> bool:
+  """Should a SET engage at this speed use low_speed_set_kph? Rolling below LOW_SPEED_SET_MPH: always (fixes the
+  5-7 mph crawl). At a standstill only when the hold will arm (mode on + brake held): with the mode Off, or no
+  brake, nothing holds the car, so a 35 mph set speed at a red light could pull it into the intersection; those
+  keep the stock 7 mph floor.
+  """
+  if v_ego >= LOW_SPEED_SET_MPH * 0.44704:
+    return False
+  if standstill:
+    return mode != MODE_OFF and brake_pressed
+  return True
+
+
+def low_speed_set_kph(speed_limit_ms: float, offset_ms: float, last_set_kph: float, floor_kph: float,
+                      is_metric: bool, min_kph: float, max_kph: float, imperial_increment: float) -> float:
+  """Set speed (cruise helper units) for a SET below LOW_SPEED_SET_MPH: the known speed limit plus the SLC offset
+  for that limit (the same limit + offset the "Auto Match Speed Limits" toggle uses), else the last set speed this
+  drive, else RESUME_DEFAULT_MPH (40 km/h metric). Snapped to whole mph/km/h so the dash label and the imperial
+  1.6 kph grid stay consistent with button presses.
+  """
+  if speed_limit_ms >= 1.0:
+    target_ms = speed_limit_ms + offset_ms
+    if is_metric:
+      kph = round(target_ms * 3.6)
+    else:
+      kph = round(target_ms / 0.44704) * imperial_increment
+    if kph > floor_kph:
+      return float(min(max(kph, min_kph), max_kph))
+  return resume_set_speed_kph(last_set_kph, floor_kph, is_metric, max_kph, imperial_increment)

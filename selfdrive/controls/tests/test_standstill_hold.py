@@ -7,7 +7,8 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState
 from openpilot.selfdrive.controls.lib.standstill_hold import (
   HOLD_TIMEOUT_S, MODE_HOLD_ONLY, MODE_OFF, MODE_RESUME, REASON_DOOR, REASON_GEAR, REASON_NONE, REASON_SEATBELT,
-  REASON_TIMEOUT, StandstillHold, brake_request_reason, read_mode, resume_set_speed_kph,
+  REASON_TIMEOUT, StandstillHold, brake_request_reason, low_speed_set_applies, low_speed_set_kph, read_mode,
+  resume_set_speed_kph,
 )
 
 GearShifter = car.CarState.GearShifter
@@ -177,3 +178,57 @@ def test_longcontrol_resumes_after_gas_ends_hold():
   outs = [LoC.update(True, c, 0.5, False, (-3.5, 2.0), toggles()) for _ in range(int(1. / DT_CTRL))]
   assert LoC.long_control_state == LongCtrlState.pid
   assert outs[-1] > 0.
+
+
+# --- low-speed SET: speed limit + SLC offset instead of the 7 mph floor ---
+
+MPH = 0.44704
+FLOOR_KPH = 7.0 * 1.609344
+INC = 1.6  # IMPERIAL_INCREMENT
+
+
+def lss(limit_mph=0., offset_mph=0., last_kph=0., metric=False):
+  return low_speed_set_kph(limit_mph * MPH, offset_mph * MPH, last_kph, FLOOR_KPH, metric, 8., 145., INC)
+
+
+@pytest.mark.parametrize("mode, v_mph, standstill, brake, expected", [
+  (MODE_RESUME, 0., True, True, True),       # standstill engage that will hold
+  (MODE_HOLD_ONLY, 0., True, True, True),
+  (MODE_OFF, 0., True, True, False),         # nothing holds the car: keep the 7 mph floor
+  (MODE_RESUME, 0., True, False, False),     # no brake -> no hold
+  (MODE_OFF, 5., False, False, True),        # rolling 5 mph crawl fix applies in every mode
+  (MODE_RESUME, 8.9, False, True, True),
+  (MODE_RESUME, 9.0, False, False, False),   # 9 mph and up: stock engage (SetSpeedLimit / current speed)
+  (MODE_OFF, 40., False, False, False),
+])
+def test_low_speed_set_applies(mode, v_mph, standstill, brake, expected):
+  assert low_speed_set_applies(mode, v_mph * MPH, standstill, brake) is expected
+
+
+def test_low_speed_set_limit_plus_offset_on_imperial_grid():
+  assert lss(30., 5.) == pytest.approx(35 * INC)   # 30 mph limit + 5 mph offset -> 35 mph (56.0 on the 1.6 grid)
+  assert lss(25., 0.) == pytest.approx(25 * INC)
+  assert lss(29.6, 0.) == pytest.approx(30 * INC)  # vision/map limits in m/s snap to whole mph
+  assert lss(45., -3.) == pytest.approx(42 * INC)  # negative offsets work too
+
+
+def test_low_speed_set_limit_wins_over_last_set():
+  assert lss(30., 5., last_kph=65 * INC) == pytest.approx(35 * INC)
+
+
+def test_low_speed_set_fallbacks():
+  assert lss(0., 5., last_kph=45 * INC) == pytest.approx(45 * INC)  # no known limit -> last set speed this drive
+  assert lss(0., 0., last_kph=0.) == pytest.approx(25 * INC)        # no limit, no set speed -> 25 mph
+  assert lss(0., 0., last_kph=FLOOR_KPH) == pytest.approx(25 * INC)  # the old 7 mph floor isn't a real set speed
+  assert lss(0.5, 0., last_kph=0.) == pytest.approx(25 * INC)       # sub-1 m/s limit = unknown
+
+
+def test_low_speed_set_metric_and_clamp():
+  assert low_speed_set_kph(50 / 3.6, 5 / 3.6, 0., FLOOR_KPH, True, 8., 145., INC) == pytest.approx(55.)
+  assert lss(100., 10.) == pytest.approx(145.)  # V_CRUISE_MAX
+
+
+def test_low_speed_set_grid_reads_back_as_exact_mph():
+  # the 9G dash label (honda-cruise-label-mph) and the UI read vCruise through imperial_grid_to_exact_kph
+  from openpilot.selfdrive.car.cruise import imperial_grid_to_exact_kph
+  assert imperial_grid_to_exact_kph(lss(30., 5.), False) / 1.609344 == pytest.approx(35.0)

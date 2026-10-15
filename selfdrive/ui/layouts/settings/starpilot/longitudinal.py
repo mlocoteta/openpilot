@@ -517,7 +517,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  on_click=self._show_deceleration_profile_selector,
                  visible=self._longitudinal_enabled),
       SettingRow("StandstillEngageMode", "value", tr_noop("Standstill Engage (Tap-to-Hold)"),
-                 subtitle=tr_noop("SET while stopped on the brake: openpilot holds the car. Gas ends the hold."),
+                 subtitle=tr_noop("SET on the brake at a stop holds the car until gas. SET under 9 mph sets speed limit + SLC offset."),
                  get_value=self._get_standstill_engage_label,
                  on_click=self._show_standstill_engage_selector,
                  visible=self._longitudinal_enabled),
