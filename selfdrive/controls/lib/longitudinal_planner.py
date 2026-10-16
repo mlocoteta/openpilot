@@ -21,6 +21,7 @@ from openpilot.selfdrive.controls.lib.lead_behavior import is_radarless_matched_
 from openpilot.selfdrive.controls.lib.lead_follow_policy import apply as apply_follow_policy
 from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_duplicate_vision_follow
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
+  get_planner_v_ego,
   get_far_follow_output_slew_rates,
   get_far_follow_output_slew_min_speed,
   is_kia_niro_ev_follow_lead,
@@ -527,22 +528,6 @@ VISION_CLOSE_RELEASE_HOLD_MAX_BRAKE = 0.40
 # prediction before the stop request is allowed to reassert.
 MANUAL_STOP_RESUME_OVERRIDE_TIME = 6.0
 MANUAL_STOP_RESUME_OVERRIDE_MAX_SPEED = 2.0
-
-def get_planner_v_ego(CP, car_state):
-  v_ego = max(car_state.vEgo, car_state.vEgoCluster)
-
-  is_gm = getattr(CP, "carName", "") == "gm" or getattr(CP, "brand", "") == "gm"
-  if is_gm and getattr(CP, "enableGasInterceptorDEPRECATED", False):
-    try:
-      from opendbc.car.gm.values import GMFlags
-      is_gm_pedal_long = bool(CP.flags & GMFlags.PEDAL_LONG.value)
-      if is_gm_pedal_long:
-        return float(car_state.vEgo)
-    except Exception:
-      pass
-
-  return float(v_ego)
-
 
 def get_accel_from_plan_classic(CP, speeds, accels, vEgoStopping, long_actuator_delay=None):
   delay = CP.longitudinalActuatorDelay if long_actuator_delay is None else long_actuator_delay

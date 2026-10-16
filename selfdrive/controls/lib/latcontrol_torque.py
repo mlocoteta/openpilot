@@ -596,7 +596,10 @@ class LatControlTorque(LatControl):
       elif kia_niro_phev_2022_active:
         friction_threshold = get_kia_niro_phev_2022_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
       elif kia_stinger_2022_active:
-        friction_threshold = get_kia_stinger_2022_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
+        friction_threshold = get_kia_stinger_2022_friction_threshold(
+          CS.vEgo, setpoint, desired_lateral_jerk, future_desired_lateral_accel,
+          CS.steeringPressed or self.prev_steering_pressed,
+        )
       elif kia_forte_active:
         ff *= get_kia_forte_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo) * kia_forte_center_taper
         friction_threshold = get_kia_forte_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
@@ -759,7 +762,10 @@ class LatControlTorque(LatControl):
             low_speed_output_limit,
           ))
       elif ioniq_5_active:
-        low_speed_output_limit = get_ioniq_5_low_speed_output_limit(setpoint, desired_lateral_jerk, CS.vEgo)
+        low_speed_output_limit = get_ioniq_5_low_speed_output_limit(
+          setpoint, desired_lateral_jerk, CS.vEgo,
+          desired_curvature if not CS.steeringPressed and not self.prev_steering_pressed else 0.0, output_torque,
+        )
         output_torque = float(np.clip(
           output_torque,
           -low_speed_output_limit,

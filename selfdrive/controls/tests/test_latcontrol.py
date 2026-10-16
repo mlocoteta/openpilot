@@ -1660,6 +1660,30 @@ class TestLatControl:
     assert turn > center
     assert highway > center
 
+  @pytest.mark.parametrize("direction", [-1, 1])
+  def test_ioniq_5_creep_turn_relief_preserves_center_and_unwind(self, direction):
+    args = (direction * 0.03, direction * 0.05, 1.0)
+    legacy = get_ioniq_5_low_speed_output_limit(*args)
+    assert get_ioniq_5_low_speed_output_limit(*args, direction * 0.02, direction) == pytest.approx(0.30)
+    for curvature, torque in [(0.0, direction), (direction * 0.005, direction),
+                              (direction * 0.02, -direction), (direction * 0.02, 0.0)]:
+      assert get_ioniq_5_low_speed_output_limit(*args, curvature, torque) == legacy
+    for speed in (10.0, 15.0, 25.0, 35.0):
+      assert get_ioniq_5_low_speed_output_limit(*args[:2], speed, direction * 0.1, direction) == \
+             get_ioniq_5_low_speed_output_limit(*args[:2], speed)
+
+  def test_ioniq_5_creep_turn_relief_is_continuous_and_bounded(self):
+    args = (0.03, 0.05, 1.0)
+    legacy = get_ioniq_5_low_speed_output_limit(*args)
+    for step in range(101):
+      curvature = step * 0.0004
+      limit = get_ioniq_5_low_speed_output_limit(*args, curvature, 1.0)
+      assert legacy <= limit <= 0.30
+      assert limit == pytest.approx(get_ioniq_5_low_speed_output_limit(-args[0], -args[1], args[2], -curvature, -1.0))
+    for boundary in (0.005, 0.020):
+      assert abs(get_ioniq_5_low_speed_output_limit(*args, boundary + 1e-7, 1.0) -
+                 get_ioniq_5_low_speed_output_limit(*args, boundary - 1e-7, 1.0)) < 1e-5
+
   def test_ioniq_ev_old_ff_scale_curve(self):
     assert get_ioniq_ev_old_ff_scale(0.0, 0.0, 20.0) == 1.0
     assert get_ioniq_ev_old_ff_scale(0.35, 0.0, 20.0) > get_ioniq_ev_old_ff_scale(-0.35, 0.0, 20.0)
@@ -2138,6 +2162,38 @@ class TestLatControl:
     assert lac_log.active
     assert abs(output) <= 0.05
 
+  @pytest.mark.parametrize("direction", [-1, 1])
+  @pytest.mark.parametrize("driver_state", ["clear", "pressed", "released"])
+  def test_ioniq_5_creep_turn_relief_update_path(self, monkeypatch, direction, driver_state):
+    controller, VM, CS, params, toggles = self._build_torque_controller(HYUNDAI.HYUNDAI_IONIQ_5)
+    CS.vEgo = 1.0
+    CS.steeringPressed = driver_state == "pressed"
+    controller.prev_steering_pressed = driver_state == "released"
+    curvature = direction * 0.04
+    controller.curvature_request_buffer = deque([curvature] * controller.request_buffer_len,
+                                               maxlen=controller.request_buffer_len)
+    limit = latcontrol_torque.get_ioniq_5_low_speed_output_limit
+    baseline, _, old_log = controller.update(True, CS, VM, params, False, curvature, False, 0.2, None, None, toggles)
+    controller.pid.reset()
+    controller.prev_steering_pressed = driver_state == "released"
+    monkeypatch.setattr(latcontrol_torque, "get_ioniq_5_low_speed_output_limit", lambda accel, jerk, speed, *_args: limit(accel, jerk, speed))
+    original, _, new_log = controller.update(True, CS, VM, params, False, curvature, False, 0.2, None, None, toggles)
+    assert old_log.desiredLateralAccel == new_log.desiredLateralAccel
+    assert old_log.actualLateralAccel == new_log.actualLateralAccel
+    if driver_state != "clear":
+      assert baseline == original
+    else:
+      assert abs(original) < abs(baseline) <= 0.30
+      assert baseline * direction < 0.0
+
+  @pytest.mark.parametrize("car_name", [HYUNDAI.HYUNDAI_IONIQ_6, HYUNDAI.HYUNDAI_IONIQ_5_PE, HYUNDAI.KIA_EV6])
+  def test_ioniq_5_creep_turn_relief_does_not_change_other_cars(self, monkeypatch, car_name):
+    monkeypatch.setattr(latcontrol_torque, "get_ioniq_5_low_speed_output_limit", lambda *_args: pytest.fail("Ioniq 5 limit reached another car"))
+    controller, VM, CS, params, toggles = self._build_torque_controller(car_name, force_torque=True)
+    CS.vEgo = 1.0
+    controller.update(True, CS, VM, params, False, 0.04, False, 0.2, None, None, toggles)
+    assert not controller.is_ioniq_5
+
   def test_ioniq_6_default_update_path(self):
     controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.HYUNDAI_IONIQ_6)
 
@@ -2204,6 +2260,76 @@ class TestLatControl:
     turn_threshold = get_kia_stinger_2022_friction_threshold(20.0, 0.60)
     assert center_threshold == pytest.approx(base_threshold * 1.10, rel=0.01)
     assert turn_threshold == pytest.approx(base_threshold, rel=0.01)
+
+  @pytest.mark.parametrize("direction", [-1, 1])
+  def test_kia_stinger_2022_highway_friction_preserves_turns_and_low_speed(self, direction):
+    threshold = get_kia_stinger_2022_friction_threshold
+    for speed in (0.0, 10.0, 20.0, 50.0 * 0.44704):
+      assert threshold(speed, direction * 0.10, direction * 0.10) == threshold(speed, direction * 0.10, direction * 0.10, 0.0, True)
+    for desired, future, jerk in [(0.40, 0.0, 0.0), (0.05, 0.40, 0.0), (0.0, 0.0, 0.75)]:
+      args = (30.0, direction * desired, direction * jerk, direction * future)
+      assert threshold(*args) == threshold(*args, True)
+    args = (30.0, direction * 0.05, direction * 0.10)
+    assert threshold(*args) == pytest.approx(threshold(*args, 0.0, True) + 0.20)
+
+  def test_kia_stinger_2022_highway_friction_is_symmetric_continuous_and_bounded(self):
+    threshold = get_kia_stinger_2022_friction_threshold
+    for step in range(101):
+      speed, desired, jerk = step * 0.4, step * 0.006, step * 0.01
+      value = threshold(speed, desired, jerk, desired)
+      base = threshold(speed, desired, jerk, desired, True)
+      assert base <= value <= base + 0.20
+      assert value == threshold(speed, -desired, -jerk, -desired)
+    for speed in (50.0 * 0.44704, 60.0 * 0.44704):
+      assert abs(threshold(speed + 1e-7) - threshold(speed - 1e-7)) < 1e-5
+    for desired in (0.15, 0.40):
+      assert abs(threshold(30.0, desired + 1e-7) - threshold(30.0, desired - 1e-7)) < 1e-5
+    for jerk in (0.20, 0.75):
+      assert abs(threshold(30.0, 0.0, jerk + 1e-7) - threshold(30.0, 0.0, jerk - 1e-7)) < 1e-5
+
+  def test_kia_stinger_2022_highway_friction_retains_full_compensation(self):
+    tune = car.CarParams.LateralTorqueTuning.new_message(friction=0.105, latAccelFactor=2.82)
+    quiet = get_kia_stinger_2022_friction_threshold(30.0)
+    base = get_kia_stinger_2022_friction_threshold(30.0, 0.0, 0.0, 0.0, True)
+    for error in (-1.0, -0.10, 0.10, 1.0):
+      new = get_friction(error, 0.0, quiet, tune)
+      old = get_friction(error, 0.0, base, tune)
+      if abs(error) >= 1.0:
+        assert new == old
+      else:
+        assert abs(new) < abs(old)
+
+  @pytest.mark.parametrize("driver_state", ["clear", "pressed", "released"])
+  def test_kia_stinger_2022_highway_friction_update_path(self, monkeypatch, driver_state):
+    threshold = latcontrol_torque.get_kia_stinger_2022_friction_threshold
+    def output():
+      controller, VM, CS, params, toggles = self._build_torque_controller(HYUNDAI.KIA_STINGER_2022)
+      CS.vEgo = 60.0 * 0.44704
+      CS.steeringAngleDeg = 0.5
+      CS.steeringPressed = driver_state == "pressed"
+      controller.prev_steering_pressed = driver_state == "released"
+      return controller.update(True, CS, VM, params, False, 0.0, False, 0.2, None, None, toggles)
+    quiet, _, quiet_log = output()
+    monkeypatch.setattr(latcontrol_torque, "get_kia_stinger_2022_friction_threshold",
+                        lambda speed, desired, jerk, future, _pressed: threshold(speed, desired, jerk, future, True))
+    baseline, _, original_log = output()
+    assert quiet_log.desiredLateralAccel == original_log.desiredLateralAccel
+    assert quiet_log.actualLateralAccel == original_log.actualLateralAccel
+    assert quiet_log.p == original_log.p
+    assert quiet_log.i == original_log.i
+    if driver_state == "clear":
+      assert abs(quiet) < abs(baseline)
+    else:
+      assert quiet == baseline
+
+  @pytest.mark.parametrize("car_name", [HYUNDAI.KIA_STINGER, HYUNDAI.GENESIS_G70_2020, HYUNDAI.HYUNDAI_IONIQ_5])
+  def test_kia_stinger_2022_highway_friction_does_not_change_other_cars(self, monkeypatch, car_name):
+    monkeypatch.setattr(latcontrol_torque, "get_kia_stinger_2022_friction_threshold",
+                        lambda *_args: pytest.fail("Stinger 2022 threshold reached another car"))
+    controller, VM, CS, params, toggles = self._build_torque_controller(car_name, force_torque=True)
+    CS.vEgo = 60.0 * 0.44704
+    controller.update(True, CS, VM, params, False, 0.0, False, 0.2, None, None, toggles)
+    assert not controller.is_kia_stinger_2022
 
   def test_kia_stinger_2022_default_update_path(self):
     controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.KIA_STINGER_2022)

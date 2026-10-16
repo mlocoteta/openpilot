@@ -144,6 +144,26 @@ FORD_MACH_E_FORCE_STOP_LOW_SPEED_HOLD = 1.0
 KIA_CARNIVAL_2025_STOP_SIGN_LOW_SPEED_HOLD = 0.75
 
 
+def get_planner_v_ego(CP, car_state):
+  v_ego = max(car_state.vEgo, car_state.vEgoCluster)
+
+  if (getattr(CP, "carFingerprint", None) == "KIA_RAY_EV" and
+      getattr(CP, "enableGasInterceptorDEPRECATED", False)):
+    return float(car_state.vEgo)
+
+  is_gm = getattr(CP, "carName", "") == "gm" or getattr(CP, "brand", "") == "gm"
+  if is_gm and getattr(CP, "enableGasInterceptorDEPRECATED", False):
+    try:
+      from opendbc.car.gm.values import GMFlags
+      is_gm_pedal_long = bool(CP.flags & GMFlags.PEDAL_LONG.value)
+      if is_gm_pedal_long:
+        return float(car_state.vEgo)
+    except Exception:
+      pass
+
+  return float(v_ego)
+
+
 def get_toyota_prius_stopped_lead_obstacle_bias(CP, lead, v_ego):
   """Move the ordinary Prius stopped-lead target back without touching stop targets."""
   if (

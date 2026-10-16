@@ -6,6 +6,9 @@ import pytest
 import openpilot.selfdrive.controls.lib.longcontrol as longcontrol
 import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tunes
 from opendbc.car.gm.values import CAR, GMFlags
+from opendbc.car import gen_empty_fingerprint
+from opendbc.car.hyundai.interface import CarInterface as HyundaiCarInterface
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
@@ -43,6 +46,29 @@ def make_longcontrol_cp(**overrides):
     setattr(CP, key, value)
 
   return CP
+
+
+@pytest.mark.parametrize("speed", [0.0, 5.0, 12.0, 25.0])
+def test_ray_pedal_feedback_corrects_acceleration_error_and_resets_on_disengage(speed):
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0][0x201] = 6
+  fingerprint[0][0x391] = 8
+  fingerprint[2][0x485] = 8
+  CP = HyundaiCarInterface.get_params(HYUNDAI_CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
+  controller = LongControl(CP)
+  CS = car.CarState.new_message(vEgo=speed, aEgo=0.2)
+  toggles = make_toggles()
+  first = controller.update(True, CS, 1.0, False, (-3.5, 2.0), toggles)
+  for _ in range(200):
+    output = controller.update(True, CS, 1.0, False, (-3.5, 2.0), toggles)
+  assert output > first > 1.0
+  assert controller.pid.i > 0.0
+  assert output <= 2.0
+
+  assert controller.update(False, CS, 0.0, False, (-3.5, 2.0), toggles) == 0.0
+  assert controller.pid.i == 0.0
+  CS.aEgo = 0.4
+  assert controller.update(True, CS, 0.0, False, (-3.5, 2.0), toggles) < 0.0
 
 
 @pytest.mark.parametrize("speed,target,expected", ((2.4, -1.18, -1.33), (1.6, -1.03, -1.18), (0.7, -0.83, -0.98)))

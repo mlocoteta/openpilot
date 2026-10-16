@@ -103,6 +103,24 @@ def test_wheel_controls_process_is_mapping_gated(enabled):
   assert wheel_controls_enabled(False, params, car.CarParams.new_message(), SimpleNamespace()) is enabled
 
 
+@pytest.mark.parametrize("started,platform,enabled,disable_logging,no_logging,not_car,expected", [
+  (True, "KIA_STINGER_2022", True, False, False, False, True),
+  (False, "KIA_STINGER_2022", True, False, False, False, False),
+  (True, "KIA_STINGER_2022", False, False, False, False, False),
+  (True, "KIA_STINGER_2022", True, True, False, False, False),
+  (True, "KIA_STINGER_2022", True, False, True, False, False),
+  (True, "KIA_STINGER_2022", True, False, False, True, False),
+  (True, "KIA_STINGER", True, False, False, False, False),
+  (True, "HYUNDAI_IONIQ_6", True, False, False, False, False),
+  (True, "KIA_EV6", True, False, False, False, False),
+])
+def test_stinger_logging_remains_opt_in_and_exact_platform_only(started, platform, enabled, disable_logging, no_logging, not_car, expected):
+  values = {"StingerObjectShadow": enabled, "DisableLogging": disable_logging}
+  params = SimpleNamespace(get_bool=lambda key: values.get(key, False))
+  cp = SimpleNamespace(carFingerprint=platform, notCar=not_car)
+  assert process_config.run_stinger_object_shadow(started, params, cp, SimpleNamespace(no_logging=no_logging)) is expected
+
+
 class CameraParams:
   def __init__(self, capture: bool):
     self.capture = capture

@@ -663,6 +663,10 @@ KIA_STINGER_2022_CENTER_TAPER_LAT_WIDTH = 0.05
 KIA_STINGER_2022_CENTER_TAPER_SPEED = 10.0
 KIA_STINGER_2022_CENTER_TAPER_SPEED_WIDTH = 2.5
 KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN = 0.10
+KIA_STINGER_2022_HIGHWAY_FRICTION_INCREMENT = 0.20
+KIA_STINGER_2022_HIGHWAY_FRICTION_SPEED_BP = [50.0 * CV.MPH_TO_MS, 60.0 * CV.MPH_TO_MS]
+KIA_STINGER_2022_HIGHWAY_FRICTION_LAT_BP = [0.15, 0.40]
+KIA_STINGER_2022_HIGHWAY_FRICTION_JERK_BP = [0.20, 0.75]
 
 KIA_CARNIVAL_CENTER_TAPER_MAX = 0.20
 KIA_CARNIVAL_CENTER_TAPER_LAT = 0.20
@@ -853,6 +857,8 @@ IONIQ_5_SUSTAINED_TURN_IN_FF_LAT_END = 3.60
 IONIQ_5_SUSTAINED_TURN_IN_FF_LAT_WIDTH = 0.30
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE = 0.05
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_TURN_RELIEF = 0.95
+IONIQ_5_LOW_SPEED_TURN_OUTPUT_FLOOR = 0.30
+IONIQ_5_LOW_SPEED_TURN_CURVATURE_BP = [0.005, 0.020]
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED = 8.0
 IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH = 0.8
 IONIQ_5_LOW_SPEED_CENTER_LAT = 0.40
@@ -2985,10 +2991,17 @@ def get_kia_stinger_2022_center_taper_scale(desired_lateral_accel: float, v_ego:
 
 
 def get_kia_stinger_2022_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0,
-                                            desired_lateral_jerk: float = 0.0) -> float:
-  del desired_lateral_jerk
+                                            desired_lateral_jerk: float = 0.0,
+                                            future_lateral_accel: float = 0.0, steering_pressed: bool = False) -> float:
   speed_weight, center_weight = _kia_stinger_2022_center_weights(desired_lateral_accel, v_ego)
-  return get_standard_friction_threshold(v_ego) * (1.0 + KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight)
+  threshold = get_standard_friction_threshold(v_ego) * (1.0 + KIA_STINGER_2022_FRICTION_THRESHOLD_GAIN * speed_weight * center_weight)
+  if not steering_pressed:
+    highway_weight = np.interp(v_ego, KIA_STINGER_2022_HIGHWAY_FRICTION_SPEED_BP, [0.0, 1.0])
+    requested_accel = max(abs(desired_lateral_accel), abs(future_lateral_accel))
+    highway_weight *= np.interp(requested_accel, KIA_STINGER_2022_HIGHWAY_FRICTION_LAT_BP, [1.0, 0.0])
+    highway_weight *= np.interp(abs(desired_lateral_jerk), KIA_STINGER_2022_HIGHWAY_FRICTION_JERK_BP, [1.0, 0.0])
+    threshold += KIA_STINGER_2022_HIGHWAY_FRICTION_INCREMENT * highway_weight
+  return float(threshold)
 
 
 def _kia_carnival_center_weights(desired_lateral_accel: float, v_ego: float) -> tuple[float, float]:
@@ -3871,7 +3884,8 @@ def get_ioniq_5_center_taper_scale(desired_lateral_accel: float, v_ego: float) -
 
 
 def get_ioniq_5_low_speed_output_limit(desired_lateral_accel: float,
-                                       desired_lateral_jerk: float, v_ego: float) -> float:
+                                       desired_lateral_jerk: float, v_ego: float,
+                                       desired_curvature: float = 0.0, output_torque: float = 0.0) -> float:
   """Bound stop-transition center chatter without blunting actual turns."""
   speed_weight = _ioniq_5_sigmoid((IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED - max(v_ego, 0.0)) /
                                   IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH)
@@ -3883,6 +3897,9 @@ def get_ioniq_5_low_speed_output_limit(desired_lateral_accel: float,
   center_limit = (IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE +
                   IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_TURN_RELIEF * (1.0 - center_weight))
   limit = 1.0 - speed_weight * (1.0 - center_limit)
+  if desired_curvature * output_torque > 0.0:
+    turn_weight = np.interp(abs(desired_curvature), IONIQ_5_LOW_SPEED_TURN_CURVATURE_BP, [0.0, 1.0])
+    limit += max(IONIQ_5_LOW_SPEED_TURN_OUTPUT_FLOOR - limit, 0.0) * turn_weight
   return float(np.clip(limit, IONIQ_5_LOW_SPEED_OUTPUT_LIMIT_BASE, 1.0))
 
 
