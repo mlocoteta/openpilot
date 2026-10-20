@@ -12,7 +12,11 @@ from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
-UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "10"))
+# The BIG StarPilot UI can legitimately take longer than ten seconds to create
+# its first frame on a comma after an update or cold asset-cache start.  Keep
+# the watchdog, but allow that bounded startup window instead of endlessly
+# respawning the UI before it can kick its first heartbeat.
+UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "30"))
 CAMERAD_WATCHDOG_MAX_DT = int(os.getenv("CAMERAD_WATCHDOG_MAX_DT", "5"))
 
 def driverview(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:

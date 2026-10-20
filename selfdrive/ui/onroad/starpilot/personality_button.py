@@ -18,13 +18,10 @@ class PersonalityButton(Widget):
     self._personality: int = 1  # default: standard
     self._traffic_mode: bool = False
 
-    # 0=traffic, 1=aggressive, 2=standard, 3=relaxed
-    self._icons = [
-      starpilot_texture("stock_theme/distance_icons/traffic.png", ICON_SIZE, ICON_SIZE),
-      starpilot_texture("stock_theme/distance_icons/aggressive.png", ICON_SIZE, ICON_SIZE),
-      starpilot_texture("stock_theme/distance_icons/standard.png", ICON_SIZE, ICON_SIZE),
-      starpilot_texture("stock_theme/distance_icons/relaxed.png", ICON_SIZE, ICON_SIZE),
-    ]
+    # Texture I/O must not occur while MainLayout is being assembled.  The
+    # startup watchdog has a short budget and this widget is often hidden
+    # until controls engage, so load these on first render instead.
+    self._icons: list[rl.Texture] = []
 
     self._rect = rl.Rectangle(0, 0, BTN_SIZE, BTN_SIZE)
 
@@ -47,6 +44,17 @@ class PersonalityButton(Widget):
       self._personality = PERSONALITY_TO_INT[sm["selfdriveState"].personality]
     self._traffic_mode = ui_state.traffic_mode_enabled
 
+  def _load_icons(self):
+    if self._icons:
+      return
+    # 0=traffic, 1=aggressive, 2=standard, 3=relaxed
+    self._icons = [
+      starpilot_texture("stock_theme/distance_icons/traffic.png", ICON_SIZE, ICON_SIZE),
+      starpilot_texture("stock_theme/distance_icons/aggressive.png", ICON_SIZE, ICON_SIZE),
+      starpilot_texture("stock_theme/distance_icons/standard.png", ICON_SIZE, ICON_SIZE),
+      starpilot_texture("stock_theme/distance_icons/relaxed.png", ICON_SIZE, ICON_SIZE),
+    ]
+
   def _handle_mouse_press(self, _):
     self._params_memory.put_bool("OnroadDistanceButtonPressed", True)
 
@@ -54,6 +62,7 @@ class PersonalityButton(Widget):
     self._params_memory.put_bool("OnroadDistanceButtonPressed", False)
 
   def _render(self, rect: rl.Rectangle):
+    self._load_icons()
     center_x = int(self._rect.x + self._rect.width / 2)
     center_y = int(self._rect.y + self._rect.height / 2)
 

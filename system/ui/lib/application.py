@@ -40,6 +40,7 @@ MACOS = platform.system() == "Darwin"
 ENABLE_VSYNC = os.getenv("ENABLE_VSYNC", "0") == "1"
 MICI_FORCE_RENDER_TEXTURE = os.getenv("MICI_FORCE_RENDER_TEXTURE", "0") == "1"
 TICI_FORCE_RENDER_TEXTURE = os.getenv("TICI_FORCE_RENDER_TEXTURE", "0") == "1"
+STREAM = os.getenv("STREAM", "0") == "1"
 BURN_IN_PREVENTION = os.getenv("BURN_IN_PREVENTION", "0" if PC else "1") == "1"
 BURN_IN_SHIFT_INTERVAL = max(1.0, float(os.getenv("BURN_IN_SHIFT_INTERVAL", "180")))
 BURN_IN_SHIFT_PIXELS = max(0, int(os.getenv("BURN_IN_SHIFT_PIXELS", "2")))
@@ -627,6 +628,7 @@ class GuiApplication:
       or RECORD
       or MICI_FORCE_RENDER_TEXTURE
       or TICI_FORCE_RENDER_TEXTURE
+      or STREAM
       or WHITE_LUMINANCE_CAP < 1.0
     )
 
@@ -662,6 +664,17 @@ class GuiApplication:
           cloudlog.warning("Forcing render texture path for tici UI")
         self._render_texture = rl.load_render_texture(self._render_texture_width, self._render_texture_height)
         rl.set_texture_filter(self._render_texture.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+
+      # Self-contained: independent of the virtual-touchscreen workaround, so
+      # either can be removed without affecting the other.
+      self._ui_stream = None
+      if STREAM and self._render_texture is not None:
+        try:
+          from openpilot.system.ui.lib import ui_stream
+          ui_stream.start(int(os.getenv("STREAM_PORT", "8088")))
+          self._ui_stream = ui_stream
+        except Exception:
+          cloudlog.exception("failed to start UI stream")
 
       if RECORD:
         output_fps = fps * RECORD_SPEED
@@ -1173,6 +1186,10 @@ class GuiApplication:
           data = bytes(rl.ffi.buffer(image.data, data_size))
           self._ffmpeg_queue.put(data)  # Async write via background thread
           rl.unload_image(image)
+
+        if getattr(self, "_ui_stream", None) is not None and self._render_texture is not None:
+          self._ui_stream.capture_frame(self, int(os.getenv("STREAM_QUALITY", "50")),
+                                        int(os.getenv("STREAM_FPS", "20")))
 
         self.frame_timing = FrameTiming(
           (time.monotonic() - frame_start) * 1000,
