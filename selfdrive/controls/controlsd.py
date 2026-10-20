@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+from collections import deque
 from numbers import Number
 import os
 import time
@@ -11,10 +12,11 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog
 
+from opendbc.car import ti_driver_limiter_binds
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import CAR as GM_CAR
-from opendbc.car.honda.values import CAR as HONDA_CAR
+from opendbc.car.honda.values import CAR as HONDA_CAR, TI_LIMITS
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.nissan.values import CAR as NISSAN_CAR
 from opendbc.car.vehicle_model import VehicleModel
@@ -53,6 +55,12 @@ LateralControlMode = car.CarControl.Actuators.LateralControlMode
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 REPLAY = "REPLAY" in os.environ
+
+# Honda 9G TI: carOutput answers the request of 1-3 frames earlier (2 on the 2026-09-26 logs).
+TI_OUTPUT_PIPELINE_FRAMES = 3
+# Honda 9G TI: a TI output that is not a driver override (rate limit, output headroom guard,
+# near-lock / stuck zeroing) freezes the lateral integrator only once it has lasted this long.
+TI_SUSTAINED_LIMIT_FRAMES = 10
 
 # After a smoothed lane change ends, ramp the curvature limits back to stock over this
 # time so the final recenter correction is shaped instead of stepping through unclamped.
@@ -439,6 +447,106 @@ class Controls:
     if self.CP.lateralTuning.which() == "torque" and (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite):
       self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
 
+    # Honda 9G Accord Torque Interceptor: live sigmoid reload + Kp override.
+    # Only when the TI toggle is on — otherwise the 9G runs stock PID LKAS untouched.
+    self.has_ti_sigmoid = (self.CP.carFingerprint == "HONDA_ACCORD_9G") and self.params.get_bool("TorqueInterceptorEnabled")
+    self._ti_frame = 0
+    self._ti_sigmoid_hash = getattr(self.CI.__class__, "_sigmoid_params", None)
+    self._ti_kp = None
+    self._ti_error_logged_time = 0.0
+    self._ti_torque_requests = deque([0.0] * TI_OUTPUT_PIPELINE_FRAMES, maxlen=TI_OUTPUT_PIPELINE_FRAMES)
+    self._ti_driver_bound = deque([False] * TI_OUTPUT_PIPELINE_FRAMES, maxlen=TI_OUTPUT_PIPELINE_FRAMES)
+    self._ti_limited_frames = 0
+    self.ti_driver_override = False
+    if self.has_ti_sigmoid:
+      self.sm = self.sm.extend(['pandaStates'])
+      self._update_ti_live_params()
+      if hasattr(self.LaC, "set_ti_low_speed_gain_schedule"):
+        self.LaC.set_ti_low_speed_gain_schedule(True)
+      if hasattr(self.LaC, "set_ti_recapture"):
+        self.LaC.set_ti_recapture(True)
+
+  def _lateral_kp(self):
+    # On the TI car TISteerKp replaces StarPilot's SteerKP. It used to be applied
+    # only every 100th frame and overwritten by steerKp on the next one.
+    return self._ti_kp if self._ti_kp is not None else self.starpilot_toggles.steerKp
+
+  def _read_ti_kp(self):
+    ti_kp = self.params.get_float("TISteerKp") or 0.3  # default to original-build value
+    return [[0], [ti_kp]] if ti_kp > 0 else None
+
+  def _update_ti_steer_limited(self, CC):
+    """Honda 9G TI: was the lateral request limited on its way to the TI?
+
+    Two differences from the generic check below, both measured on the 2026-09-26 drives:
+    - It runs whenever lateral is active, not only while selfdriveState is active. In
+      always-on-lateral the generic check is skipped, so steer_limited_by_safety kept the
+      value from the last engaged frame: either the integrator never froze, or (when that
+      value was True) it stayed frozen at zero for the rest of the drive (~21 min on
+      000002f1/000002f2).
+    - carOutput reaches controlsd one to three frames after the request it answers
+      (usually two), so comparing it with *this* frame's request flags every request change
+      > 6 counts as "limited" (54% of frames flagged, half of them false). Compare with the
+      recent requests instead: limited only if the TI output matches none of them.
+
+    Only a limit caused by the driver is an override (2026-09-30 turn-recovery report): the
+    TI driver-torque limiter cut the request, which needs the hand opposing it. Most mismatches
+    are DELTA_DOWN/UP holding the output 1-3 frames behind a fast request while a light hand
+    helps; counting those zeroed P for ~1.3 s and froze the turn-direction I on turn exits.
+    - ti_driver_override: limited and the driver limiter bound one of the recent requests.
+      Feeds the TI soft recapture.
+    - steer_limited_by_safety (integrator freeze): a driver override, or any other limit that
+      lasts TI_SUSTAINED_LIMIT_FRAMES (a held headroom guard, near-lock zeroing, a long slew).
+    The driver limiter is evaluated with the carcontroller's pairing: the request of the previous
+    frame is sent together with this frame's carState, so its TI sensor reading.
+    """
+    if not CC.latActive:
+      self.steer_limited_by_safety = False
+      self.ti_driver_override = False
+      self._ti_limited_frames = 0
+      self._ti_torque_requests.extend([0.0] * TI_OUTPUT_PIPELINE_FRAMES)
+      self._ti_driver_bound.extend([False] * TI_OUTPUT_PIPELINE_FRAMES)
+      return
+    driver_torque = float(self.sm['carState'].steeringTorque)
+    last_request = round(self._ti_torque_requests[-1] * TI_LIMITS.TI_STEER_MAX)
+    self._ti_driver_bound.append(ti_driver_limiter_binds(last_request, driver_torque, TI_LIMITS))
+    ti_output = self.sm['carOutput'].actuatorsOutput.torque
+    limited = all(abs(req - ti_output) > 1e-2 for req in self._ti_torque_requests)
+    self._ti_limited_frames = self._ti_limited_frames + 1 if limited else 0
+    self.ti_driver_override = limited and any(self._ti_driver_bound)
+    self.steer_limited_by_safety = self.ti_driver_override or self._ti_limited_frames >= TI_SUSTAINED_LIMIT_FRAMES
+    self._ti_torque_requests.append(float(CC.actuators.torque))
+
+  def _update_ti_live_params(self):
+    """Honda 9G TI: live sigmoid params, Kp and damping policy (~1 s cadence)."""
+    try:
+      if not self.params.get_bool("TISigmoidEnabled"):
+        if self._ti_sigmoid_hash is not None and hasattr(self.LaC, "reset_to_linear"):
+          self.LaC.reset_to_linear()
+          self._ti_sigmoid_hash = None
+      elif self.params.get_bool("TISigmoidLive") and hasattr(self.LaC, "update_sigmoid_lookup"):
+        a = self.params.get_float("TISigmoidA")
+        b = self.params.get_float("TISigmoidB")
+        c = self.params.get_float("TISigmoidC")
+        if a > 0 and b > 0 and c > 0 and (a, b, c) != self._ti_sigmoid_hash:
+          self.LaC.update_sigmoid_lookup(a, b, c)
+          self._ti_sigmoid_hash = (a, b, c)
+      self._ti_kp = self._read_ti_kp()
+      if hasattr(self.LaC, "update_honda_accord_low_speed_damping"):
+        self.LaC.update_honda_accord_low_speed_damping(
+          self.params.get_bool("TILowSpeedDampingEnabled"),
+          self.params.get_float("TILowSpeedDampingMax") or 0.12,
+          self.params.get_bool("TILowSpeedCenterDampingEnabled"),
+          self.params.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62,
+        )
+    except Exception:
+      # Keep the last good values, but never fail silently. Rate-limited so a
+      # persistent fault cannot flood the log at the 1 Hz update cadence.
+      now = time.monotonic()
+      if now - self._ti_error_logged_time > 60.0:
+        self._ti_error_logged_time = now
+        cloudlog.exception("controlsd: Honda TI live parameter update failed")
+
   def update(self):
     self.sm.update(15)
     if self.sm.updated["liveCalibration"]:
@@ -448,7 +556,12 @@ class Controls:
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
 
     if hasattr(self.LaC, "pid") and self.CP.lateralTuning.which() != "pid":
-      self.LaC.pid._k_p = self.starpilot_toggles.steerKp
+      self.LaC.pid._k_p = self._lateral_kp()
+
+    if self.has_ti_sigmoid:
+      self._ti_frame += 1
+      if self._ti_frame % 100 == 0:
+        self._update_ti_live_params()
 
     if self.sm.updated['liveDelay'] and hasattr(self.LaC, "update_live_delay"):
       self.LaC.update_live_delay(self.sm['liveDelay'].lateralDelay)
@@ -800,6 +913,8 @@ class Controls:
     lat_delay = self.sm["liveDelay"].lateralDelay + lat_smooth_seconds
 
     actuators.curvature = self.desired_curvature
+    if self.has_ti_sigmoid and hasattr(self.LaC, "set_ti_driver_override"):
+      self.LaC.set_ti_driver_override(self.ti_driver_override)
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                      self.steer_limited_by_safety, self.desired_curvature,
                                                      curvature_limited, lat_delay,
@@ -887,7 +1002,9 @@ class Controls:
       hudControl.leftLaneDepart = self.sm['driverAssistance'].leftLaneDeparture
       hudControl.rightLaneDepart = self.sm['driverAssistance'].rightLaneDeparture
 
-    if self.sm['selfdriveState'].active:
+    if getattr(self, "has_ti_sigmoid", False):
+      self._update_ti_steer_limited(CC)
+    elif self.sm['selfdriveState'].active:
       CO = self.sm['carOutput']
       if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
         output_healthy = (

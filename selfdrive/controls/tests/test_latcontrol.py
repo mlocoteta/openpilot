@@ -108,6 +108,8 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_genesis_gv70_reversal_output_scale,
   get_genesis_gv70_unwind_ff_scale,
   get_honda_accord_ff_scale,
+  get_honda_accord_continuous_center_damped_output,
+  get_honda_accord_low_speed_damped_output,
   get_elantra_non_scc_ff_scale,
   get_honda_accord_steer_ratio_scale,
   get_palisade_ff_scale,
@@ -190,6 +192,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_volt_plexy_friction_scale,
   get_volt_plexy_friction_threshold,
 )
+from openpilot.selfdrive.controls.lib.latcontrol_torque import get_ti_9g_low_speed_gain_scale
 
 
 class TestLatControl:
@@ -2430,6 +2433,170 @@ class TestLatControl:
     assert controller.pid._k_p[1][-1] == pytest.approx(HONDA_ACCORD_TORQUE_KP)
     assert controller.pid._k_i[1] == pytest.approx([HONDA_ACCORD_TORQUE_KI] * len(controller.pid._k_i[1]))
 
+  def test_honda_accord_9g_ti_damping_toggles_apply(self):
+    controller, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+
+    # The damping policies target the 9G TI, but the 10G gains/ff must stay 10G-only.
+    assert not controller.is_honda_accord
+    controller.update_honda_accord_low_speed_damping(True, 0.12)
+    assert controller.honda_accord_low_speed_damping_enabled
+    controller.update_honda_accord_low_speed_damping(False, 0.12, continuous_center_enabled=True)
+    assert controller.honda_accord_continuous_center_damping_enabled
+    controller.update_honda_accord_low_speed_damping(False, 0.12)
+    assert not controller.honda_accord_low_speed_damping_enabled
+    assert not controller.honda_accord_continuous_center_damping_enabled
+
+  def test_ti_9g_low_speed_gain_schedule_curve(self):
+    assert get_ti_9g_low_speed_gain_scale(0.0) == pytest.approx(0.5)
+    assert get_ti_9g_low_speed_gain_scale(7.0) == pytest.approx(0.5)
+    assert get_ti_9g_low_speed_gain_scale(8.5) == pytest.approx(0.75)
+    assert get_ti_9g_low_speed_gain_scale(10.0) == pytest.approx(1.0)
+    assert get_ti_9g_low_speed_gain_scale(30.0) == pytest.approx(1.0)
+    speeds = [0.5 * i for i in range(60)]
+    scales = [get_ti_9g_low_speed_gain_scale(v) for v in speeds]
+    assert all(b >= a for a, b in zip(scales, scales[1:], strict=False))
+
+  def test_ti_9g_low_speed_gain_schedule_is_9g_only(self):
+    controller_9g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller_10g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD, force_torque=True)
+    assert not controller_9g.ti_low_speed_gain_schedule_enabled
+    controller_9g.set_ti_low_speed_gain_schedule(True)
+    controller_10g.set_ti_low_speed_gain_schedule(True)
+    assert controller_9g.ti_low_speed_gain_schedule_enabled
+    assert not controller_10g.ti_low_speed_gain_schedule_enabled
+    controller_9g.set_ti_low_speed_gain_schedule(False)
+    assert not controller_9g.ti_low_speed_gain_schedule_enabled
+
+  @parameterized.expand([(4.5, 0.5), (8.5, 0.75), (12.0, 1.0), (25.0, 1.0)])
+  def test_ti_9g_low_speed_gain_schedule_scales_feedback_only(self, v_ego, expected_scale):
+    outputs = {}
+    for enabled in (False, True):
+      controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+      controller.set_ti_low_speed_gain_schedule(enabled)
+      CS.vEgo = v_ego
+      CS.steeringAngleDeg = -3.0
+      desired_curvature = 0.004
+      for _ in range(5):
+        torque, _, lac_log = controller.update(True, CS, VM, params, False, desired_curvature, False, 0.4, None, None,
+                                               starpilot_toggles)
+      state = controller.starpilot_lateral_state
+      outputs[enabled] = (torque, lac_log.error, lac_log.p, lac_log.f, state.lowSpeedFactor, state.frictionScale,
+                          state.feedforward)
+    off, on = outputs[False], outputs[True]
+    assert on[4] == pytest.approx(off[4] * expected_scale)
+    assert on[5] == pytest.approx(off[5] * expected_scale)
+    if expected_scale == 1.0:
+      assert on == pytest.approx(off)
+    else:
+      # Same direction, smaller feedback: the error term and the command both shrink.
+      assert abs(on[1]) < abs(off[1])
+      assert abs(on[2]) < abs(off[2])
+      assert on[0] * off[0] > 0.0
+      assert abs(on[0]) < abs(off[0])
+
+  def test_ti_9g_recapture_is_9g_only(self):
+    controller_9g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller_10g, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD, force_torque=True)
+    assert not controller_9g.ti_recapture_enabled
+    controller_9g.set_ti_recapture(True)
+    controller_10g.set_ti_recapture(True)
+    assert controller_9g.ti_recapture_enabled
+    assert not controller_10g.ti_recapture_enabled
+
+  def _recapture_run(self, enabled, schedule):
+    """schedule: list of (frames, steeringPressed, steeringTorque, limited) where limited is a bool (TI driver
+    override from controlsd: freezes the integrator too) or a (ti_driver_override, steer_limited_by_safety)
+    pair. Returns per-frame logs."""
+    controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+    controller.set_ti_recapture(enabled)
+    CS.vEgo = 14.0
+    CS.steeringAngleDeg = -2.0  # the car is wide of a left curve: large positive error
+    out = []
+    for frames, pressed, drv, limited in schedule:
+      override, steer_limited = limited if isinstance(limited, tuple) else (limited, limited)
+      for _ in range(frames):
+        CS.steeringPressed = pressed
+        CS.steeringTorque = drv
+        controller.set_ti_driver_override(override)
+        torque, _, lac_log = controller.update(True, CS, VM, params, steer_limited, 0.012, False, 0.4, None, None,
+                                               starpilot_toggles)
+        out.append((torque, lac_log.p, lac_log.f, lac_log.i, controller.ti_recapture_gain,
+                    controller.starpilot_lateral_state.feedforward))
+    return out
+
+  def test_ti_9g_recapture_holds_feedback_during_override_and_ramps_after(self):
+    # 50 frames hands-off, 50 frames of a sub-threshold hand (10 counts) with the TI limiter clipping,
+    # then release for 100 frames.
+    schedule = [(50, False, 0, False), (50, False, 10, True), (100, False, 0, False)]
+    off = self._recapture_run(False, schedule)
+    on = self._recapture_run(True, schedule)
+    # identical before any override
+    assert on[:50] == pytest.approx(off[:50])
+    # during the override the proportional term is held at zero (baseline keeps pushing)
+    assert all(abs(x[1]) < 1e-9 for x in on[60:100])
+    assert abs(off[99][1]) > 0.1
+    # the plan's feedforward (desired curvature * v^2, no roll here) is never scaled; only the
+    # error-driven friction relay on top of it is held (baseline adds +friction to it)
+    assert on[99][5] == pytest.approx(0.012 * 14.0 ** 2, abs=0.05)
+    assert off[99][5] > on[99][5]
+    # the hold keeps it latched ~0.2 s after the hand leaves, then a 0.6 s ramp back to full feedback
+    gains = [x[4] for x in on]
+    assert gains[100 + 15] == 0.0
+    assert 0.0 < gains[100 + 20 + 30] < 1.0
+    assert gains[100 + 20 + 61] == pytest.approx(1.0)
+    assert all(b >= a for a, b in zip(gains[100:], gains[101:], strict=False))
+    # the recaptured command approaches the baseline gradually instead of stepping
+    steps_on = max(abs(on[k + 1][0] - on[k][0]) for k in range(100, 199))
+    steps_off = max(abs(off[k + 1][0] - off[k][0]) for k in range(99, 199))
+    assert steps_on <= steps_off
+    assert on[199][0] == pytest.approx(off[199][0], abs=0.05)
+
+  def test_ti_9g_recapture_pressed_zeroes_feedback_immediately(self):
+    on = self._recapture_run(True, [(20, False, 0, False), (1, True, 20, False), (1, False, 0, False)])
+    assert on[20][4] == 0.0 and abs(on[20][1]) < 1e-9
+
+  def test_ti_9g_recapture_ignores_hands_resting_without_limit(self):
+    # a resting hand (sensor >= 6) with the TI following the request is not an override
+    off = self._recapture_run(False, [(80, False, 8, False)])
+    on = self._recapture_run(True, [(80, False, 8, False)])
+    assert on == pytest.approx(off)
+    # nor is a slew-limited frame with no hand
+    on2 = self._recapture_run(True, [(80, False, 2, True)])
+    assert all(x[4] == 1.0 for x in on2)
+
+  def test_ti_9g_recapture_ignores_rate_and_guard_limits(self):
+    # 2026-09-30 turn exits: a hand of 6-14 counts on the helping side while DELTA_DOWN or the output
+    # guard holds the TI output back. controlsd reports no driver override, so P stays live.
+    for steer_limited in (False, True):  # 1-3 frame rate mismatch / sustained guard clamp
+      on = self._recapture_run(True, [(20, False, 0, False), (60, False, 10, (False, steer_limited))])
+      assert all(x[4] == 1.0 for x in on)
+      assert abs(on[-1][1]) > 0.1
+
+  def test_ti_9g_integrator_freezes_on_override_only(self):
+    # The integrator keeps integrating through a short rate-limit mismatch (steer_limited_by_safety stays
+    # False from controlsd) and freezes during a real hold against the wheel (no windup behind the driver).
+    def run(drv, override, steer_limited):
+      controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HONDA.HONDA_ACCORD_9G, force_torque=True)
+      controller.set_ti_recapture(True)
+      CS.vEgo = 14.0
+      CS.steeringAngleDeg = 0.0  # small, unsaturated error toward a gentle left curve
+      out = []
+      for k in range(100):
+        CS.steeringTorque = drv if k >= 50 else 0
+        controller.set_ti_driver_override(override and k >= 50)
+        _, _, lac_log = controller.update(True, CS, VM, params, steer_limited and k >= 50, 0.001, False, 0.4, None, None,
+                                          starpilot_toggles)
+        out.append((lac_log.i, controller.ti_recapture_gain))
+      return out
+
+    free = run(10, False, False)
+    held = run(-20, True, True)
+    i_at_hold = held[49][0]
+    assert free[49][0] == pytest.approx(i_at_hold)
+    assert abs(free[-1][0] - i_at_hold) > 1e-3  # still integrating
+    assert all(x[0] == pytest.approx(i_at_hold) for x in held[50:])
+    assert all(x[1] == 1.0 for x in free) and all(x[1] == 0.0 for x in held[50:])
+
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33
     assert get_honda_accord_steer_ratio_scale(0.0) == pytest.approx(expected_scale)
@@ -2439,6 +2606,62 @@ class TestLatControl:
     assert get_honda_accord_ff_scale(0.0) > get_honda_accord_ff_scale(0.8)
     assert get_honda_accord_ff_scale(-0.8) == pytest.approx(get_honda_accord_ff_scale(0.8))
     assert get_honda_accord_ff_scale(0.0) == pytest.approx(1.0, abs=0.01)
+
+  def test_honda_accord_low_speed_damping_is_bounded_and_local(self):
+    damped, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12)
+    highway, highway_scale, highway_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 12.0, 0.12)
+    strong_turn, strong_turn_scale, strong_turn_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 2.0, 4.0, 0.12)
+
+    assert 0.88 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    # The sigmoid speed envelopes fade out rather than cut off: at 12 m/s the
+    # residual effect is <0.5% of output (envelope ~0.004 / ~0.002).
+    assert highway == pytest.approx(1.0, abs=0.005)
+    assert highway_scale == pytest.approx(1.0, abs=0.001)
+    assert highway_envelope == pytest.approx(0.0, abs=0.005)
+    assert strong_turn_scale > scale
+    assert strong_turn_envelope < envelope
+    assert strong_turn > damped
+
+  def test_honda_accord_low_speed_damping_requires_reversal_activation(self):
+    untouched, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=0.0)
+    active, active_scale, active_envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 4.0, 0.12, activation=1.0)
+
+    assert untouched == pytest.approx(1.0)
+    assert scale == pytest.approx(1.0)
+    assert envelope == pytest.approx(0.0)
+    assert active < untouched
+    assert active_scale < 1.0
+    assert active_envelope > 0.0
+
+  def test_honda_accord_low_speed_damping_has_gentle_crawl_tail(self):
+    # One mph has only a small smooth-envelope contribution, and still needs
+    # reversal activation before any output is changed.
+    _, scale, envelope = get_honda_accord_low_speed_damped_output(1.0, -1.0, 0.35, 1.0 * 0.44704, 0.12, activation=1.0)
+
+    assert 0.0 < envelope < 0.10
+    assert 0.98 < scale < 1.0
+
+  def test_honda_accord_continuous_center_damping_matches_reference_envelope(self):
+    # MoreTore-style path acts continuously in the small-signal center band.
+    damped, scale, envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0)
+    outside, outside_scale, outside_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.8, 4.0)
+    highway, highway_scale, highway_envelope = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 12.0)
+    lighter_cap, _, _ = get_honda_accord_continuous_center_damped_output(1.0, -1.0, 0.05, 4.0, max_reduction=0.20)
+
+    assert 0.62 <= scale < 1.0
+    assert 0.0 < envelope <= 1.0
+    assert damped < 1.0
+    assert outside > damped
+    assert outside_scale > scale
+    assert outside_envelope < envelope
+    # The sigmoid speed envelopes fade out rather than cut off: at 12 m/s the
+    # residual effect is <0.5% of output (envelope ~0.004 / ~0.002).
+    assert highway == pytest.approx(1.0, abs=0.005)
+    assert highway_scale == pytest.approx(1.0, abs=0.001)
+    assert highway_envelope == pytest.approx(0.0, abs=0.005)
+    assert lighter_cap > damped
 
   def test_subaru_impreza_pid_output_scale_preserves_small_errors(self):
     assert get_subaru_impreza_pid_output_scale(0.0) == 1.0

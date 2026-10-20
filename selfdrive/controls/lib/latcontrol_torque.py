@@ -77,6 +77,42 @@ def get_center_chatter_friction_jerk_deadzone(v_ego, setpoint, vehicle_deadzone=
 FF_ROLL_OFFSET_FADE_BP = [0.5, 2.5]  # m/s
 FF_ROLL_OFFSET_FADE_V = [0.0, 1.0]
 
+# Honda 9G Accord + Torque Interceptor: low-speed loop-gain schedule.
+# The low-speed factor makes the controller's gain in steering-angle terms roughly
+# constant below ~20 mph (~23 TI counts/deg proportional, plus a +-129 count friction
+# relay that switches inside +-3 deg of error). The TI-driven EPS is 2-3x more responsive
+# at ~2 Hz below 18 mph than at highway speed, so the loop there sits at |L| ~0.7 with
+# ~20-40 deg phase margin once the 15 count/frame TI slew adds its lag: a ~2 Hz
+# "ping-pong" (2026-09-26 logs, reports/2026-09-26-lowspeed-pingpong.md). Scaling the
+# low-speed factor (proportional + friction window + integrator rate) and the friction
+# amplitude by 0.5 roughly halves the oscillatory demand; above ~22 mph nothing changes.
+TI_9G_LOW_SPEED_GAIN_BP = [7.0, 10.0]  # m/s (15.7 mph -> 22.4 mph)
+TI_9G_LOW_SPEED_GAIN_V = [0.5, 1.0]
+
+
+def get_ti_9g_low_speed_gain_scale(v_ego):
+  return float(np.interp(v_ego, TI_9G_LOW_SPEED_GAIN_BP, TI_9G_LOW_SPEED_GAIN_V))
+
+
+# Honda 9G Accord + Torque Interceptor: soft recapture after a driver override.
+# While the driver holds the wheel against the controller, the tracking error keeps growing, so the
+# error-driven terms (proportional + friction relay) wind the request up to the TI cap while the TI
+# driver-torque limiter holds the applied torque back. As the driver's hand relaxes the limiter
+# releases 40 counts per sensor count and the car snaps past the path (2026-09-28 00:33 on-ramp:
+# P +1.25, request pinned at +599 counts, then 3.9-4.2 m/s^2 against 3.3 desired for ~1 s; curve
+# releases over the weekend: post-release excess median +0.30, p90 +0.73 m/s^2).
+# During an override the error-driven terms are held at zero (feedforward from the plan and the
+# frozen integrator stay live), then ramped back in over TI_RECAPTURE_TIME. The plan's feedforward
+# is never delayed. An override is steeringPressed, or the TI driver-torque limiter holding the output
+# back (ti_driver_override from controlsd: the hand opposes the request) while the TI sensor reads a hand
+# (>= TI_RECAPTURE_DRIVER_TORQUE counts; the 15-count steeringPressed threshold missed 27 of 91 curve
+# overrides). Rate-limit and guard mismatches are not overrides: counted as such they re-armed recapture
+# every ~10 s of driving and dropped P mid turn exit (2026-09-30 turn-recovery report).
+TI_RECAPTURE_TIME = 0.6              # s, ramp of the error-driven terms after release
+TI_RECAPTURE_DRIVER_TORQUE = 6       # TI torque sensor counts
+TI_RECAPTURE_HOLD_TIME = 0.2         # s, keeps a limiter-detected override latched across short gaps
+
+
 class LatControlTorque(LatControl):
   def __init__(self, CP, CI, dt):
     super().__init__(CP, CI, dt)
@@ -105,6 +141,20 @@ class LatControlTorque(LatControl):
     self.debug_counter = 0
     self.prev_desired_lateral_accel = 0.0
     self.starpilot_lateral_state = custom.StarPilotLateralState.new_message()
+    self.honda_accord_low_speed_damping_enabled = False
+    self.honda_accord_low_speed_damping_max = 0.12
+    self.honda_accord_continuous_center_damping_enabled = False
+    self.honda_accord_continuous_center_damping_max_reduction = 0.62
+    self.honda_accord_damping_prev_raw_output = 0.0
+    self.honda_accord_damping_prev_error = 0.0
+    self.honda_accord_damping_prev_setpoint = 0.0
+    self.honda_accord_damping_hold_frames = 0
+    # Enabled by controlsd only on a 9G Accord with the Torque Interceptor active.
+    self.ti_low_speed_gain_schedule_enabled = False
+    self.ti_recapture_enabled = False
+    self.ti_recapture_gain = 1.0
+    self.ti_override_hold = 0.0
+    self.ti_driver_override = False
 
     self.is_bolt = CP.carFingerprint in BOLT_CARS
     self.is_bolt_2022_2023 = CP.carFingerprint in BOLT_2022_2023_CARS
@@ -146,6 +196,10 @@ class LatControlTorque(LatControl):
     self.is_tucson_4th_gen = CP.carFingerprint in TUCSON_4TH_GEN_CARS
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA_CAR.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
     self.is_honda_accord = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD
+    # The TI damping policies were written for the 9G Accord Torque Interceptor, but were
+    # gated on the 10G fingerprint above, so they could never activate on the car they target.
+    # controlsd only feeds them on a 9G with the TI enabled; the 10G gains/ff stay 10G-only.
+    self.is_honda_accord_9g = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_9G
     self.is_silverado = CP.carFingerprint in SILVERADO_CARS
     self.is_gmc_yukon_cc = CP.carFingerprint in GMC_YUKON_CC_CARS
     self.is_ram_1500 = CP.carFingerprint in RAM_1500_CARS
@@ -203,6 +257,51 @@ class LatControlTorque(LatControl):
     self.starpilot_lateral_state.frictionJerkDeadzone = 0.0
     self.starpilot_lateral_state.lowSpeedFactor = 0.0
     self.starpilot_lateral_state.unwindDetected = False
+    self.starpilot_lateral_state.tiLowSpeedDampingActive = False
+    self.starpilot_lateral_state.tiLowSpeedDampingScale = 1.0
+
+  def update_honda_accord_low_speed_damping(self, enabled, max_reduction, continuous_center_enabled=False,
+                                            continuous_center_max_reduction=0.62):
+    self.honda_accord_low_speed_damping_enabled = bool(enabled) and (self.is_honda_accord or self.is_honda_accord_9g)
+    self.honda_accord_low_speed_damping_max = float(np.clip(max_reduction, 0.0, 0.25))
+    self.honda_accord_continuous_center_damping_enabled = bool(continuous_center_enabled) and (self.is_honda_accord or self.is_honda_accord_9g)
+    self.honda_accord_continuous_center_damping_max_reduction = float(np.clip(continuous_center_max_reduction, 0.0, 0.75))
+    # The two experimental policies are A/B alternatives. The continuous policy
+    # intentionally takes priority when selected, so they can never stack.
+    if self.honda_accord_continuous_center_damping_enabled:
+      self.honda_accord_low_speed_damping_enabled = False
+    if not self.honda_accord_low_speed_damping_enabled:
+      self.honda_accord_damping_prev_raw_output = 0.0
+      self.honda_accord_damping_prev_error = 0.0
+      self.honda_accord_damping_prev_setpoint = 0.0
+      self.honda_accord_damping_hold_frames = 0
+
+  def set_ti_low_speed_gain_schedule(self, enabled):
+    self.ti_low_speed_gain_schedule_enabled = bool(enabled) and self.is_honda_accord_9g
+
+  def set_ti_recapture(self, enabled):
+    self.ti_recapture_enabled = bool(enabled) and self.is_honda_accord_9g
+    self.ti_recapture_gain = 1.0
+    self.ti_override_hold = 0.0
+
+  def set_ti_driver_override(self, override):
+    """controlsd: the TI driver-torque limiter is holding the output back this frame."""
+    self.ti_driver_override = bool(override)
+
+  def update_ti_recapture(self, CS):
+    """Scale for the error-driven terms: 0 during a driver override, ramping to 1 after release."""
+    if not self.ti_recapture_enabled:
+      return 1.0
+    hand_on = abs(float(CS.steeringTorque)) >= TI_RECAPTURE_DRIVER_TORQUE
+    if CS.steeringPressed or (self.ti_driver_override and hand_on):
+      self.ti_override_hold = TI_RECAPTURE_HOLD_TIME
+    else:
+      self.ti_override_hold = max(self.ti_override_hold - self.dt, 0.0)
+    if CS.steeringPressed or self.ti_override_hold > 0.0:
+      self.ti_recapture_gain = 0.0
+    else:
+      self.ti_recapture_gain = min(self.ti_recapture_gain + self.dt / TI_RECAPTURE_TIME, 1.0)
+    return self.ti_recapture_gain
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     if self.is_palisade:
@@ -234,6 +333,21 @@ class LatControlTorque(LatControl):
     self.pid.set_limits(self.lateral_accel_from_torque(self.steer_max, self.torque_params),
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
 
+  def update_sigmoid_lookup(self, a, b, c):
+    """Live-swap the torque curve to sigmoid+linear (Honda 9G TI). Called from controlsd."""
+    from opendbc.car.honda.interface import CarInterface as HondaCI
+    HondaCI.rebuild_sigmoid_lookup(a, b, c)
+    lookup = HondaCI._sigmoid_lookup
+    self.torque_from_lateral_accel = lambda lat_accel, tp: float(np.interp(lat_accel, lookup[1], lookup[0]))
+    self.lateral_accel_from_torque = lambda torque, tp: float(np.interp(torque, lookup[0], lookup[1]))
+    self.update_limits()
+
+  def reset_to_linear(self):
+    """Live-swap back to the stock linear torque model."""
+    self.torque_from_lateral_accel = lambda lat_accel, tp: lat_accel / float(tp.latAccelFactor)
+    self.lateral_accel_from_torque = lambda torque, tp: torque * float(tp.latAccelFactor)
+    self.update_limits()
+
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay, calibrated_pose, model_data, starpilot_toggles):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
@@ -262,6 +376,8 @@ class LatControlTorque(LatControl):
       self.jerk_filter.x = 0.0
       self.prev_desired_lateral_accel = future_desired_lateral_accel
       self.ioniq_6_directional_taper_filter.x = 1.0
+      self.ti_recapture_gain = 1.0
+      self.ti_override_hold = 0.0
     else:
       if self.prev_steering_pressed and not CS.steeringPressed:
         self.pid.i *= self.steer_release_i_decay
@@ -294,9 +410,12 @@ class LatControlTorque(LatControl):
       self.previous_measurement = measurement
 
       low_speed_factor = (np.interp(CS.vEgo, LOW_SPEED_X, LOW_SPEED_Y) / max(CS.vEgo, MIN_SPEED)) ** 2
+      ti_low_speed_gain_scale = get_ti_9g_low_speed_gain_scale(CS.vEgo) if self.ti_low_speed_gain_schedule_enabled else 1.0
+      low_speed_factor *= ti_low_speed_gain_scale
       current_kp = np.interp(CS.vEgo, self.pid._k_p[0], self.pid._k_p[1])
       error = setpoint - measurement
       error_with_lsf = error * (1 + low_speed_factor / max(current_kp, 1e-3))
+      error_with_lsf *= self.update_ti_recapture(CS)
       if self.is_ioniq_6_2025:
         error_with_lsf *= get_ioniq_6_2025_low_speed_center_error_scale(
           setpoint, desired_lateral_jerk, CS.vEgo,
@@ -569,6 +688,7 @@ class LatControlTorque(LatControl):
       )
       friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0),
                                     desired_lateral_jerk)
+      friction_scale *= ti_low_speed_gain_scale
       friction_threshold += KIA_CARNIVAL_HEV_CENTER_FRICTION_INCREMENT * carnival_hev_center_weight
       ff += friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, self.torque_params)
       deadzone_boost_active = False
@@ -724,6 +844,33 @@ class LatControlTorque(LatControl):
         output_torque *= kia_stinger_2022_center_taper
       elif self.is_civic_bosch_modified and civic_bosch_modified_a_lateral_testing_ground_active():
         output_torque *= civic_bosch_modified_a_center_taper
+      ti_low_speed_damping_scale = 1.0
+      ti_low_speed_damping_envelope = 0.0
+      if self.honda_accord_continuous_center_damping_enabled:
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_continuous_center_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_continuous_center_damping_max_reduction,
+        )
+      elif self.honda_accord_low_speed_damping_enabled:
+        # The previous implementation reduced *every* command in the envelope.
+        # Only intervene when the output or tracking error reverses while the
+        # requested turn direction remains stable; that is the observed Accord
+        # TI ping-pong signature. A short hold damps the following limiter steps
+        # without adding steady-turn lag.
+        raw_output_torque = float(output_torque)
+        stable_turn = abs(setpoint) > 0.15 and setpoint * self.honda_accord_damping_prev_setpoint > 0.0
+        output_reversal = raw_output_torque * self.honda_accord_damping_prev_raw_output < -0.0025
+        error_reversal = error * self.honda_accord_damping_prev_error < -0.0025
+        if stable_turn and (output_reversal or error_reversal):
+          self.honda_accord_damping_hold_frames = max(self.honda_accord_damping_hold_frames, int(0.30 / self.dt))
+        activation = min(1.0, self.honda_accord_damping_hold_frames * self.dt / 0.30)
+        output_torque, ti_low_speed_damping_scale, ti_low_speed_damping_envelope = get_honda_accord_low_speed_damped_output(
+          output_torque, self.prev_output_torque, setpoint, CS.vEgo, self.honda_accord_low_speed_damping_max, activation,
+        )
+        self.honda_accord_damping_hold_frames = max(0, self.honda_accord_damping_hold_frames - 1)
+        self.honda_accord_damping_prev_raw_output = raw_output_torque
+        self.honda_accord_damping_prev_error = float(error)
+        self.honda_accord_damping_prev_setpoint = float(setpoint)
+
       pid_log.active = True
       pid_log.p = float(self.pid.p)
       pid_log.i = float(self.pid.i)
@@ -741,6 +888,8 @@ class LatControlTorque(LatControl):
       self.starpilot_lateral_state.frictionJerkDeadzone = float(friction_jerk_deadzone)
       self.starpilot_lateral_state.lowSpeedFactor = float(low_speed_factor)
       self.starpilot_lateral_state.unwindDetected = bool(unwind_detected)
+      self.starpilot_lateral_state.tiLowSpeedDampingActive = bool(ti_low_speed_damping_envelope > 0.05)
+      self.starpilot_lateral_state.tiLowSpeedDampingScale = float(ti_low_speed_damping_scale)
       pid_log.saturated = bool(self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited_by_safety, curvature_limited))
       self.prev_output_torque = float(output_torque)
 
