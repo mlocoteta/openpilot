@@ -28,6 +28,8 @@ from openpilot.selfdrive.selfdrived.egpu_alert import GpuBackupAlert
 from openpilot.selfdrive.modeld.egpu_recovery import read_status as read_egpu_recovery_status
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
+from openpilot.selfdrive.controls.lib.standstill_hold import (HELD_BACK_EVENTS, MODE_HOLD_ONLY, MODE_OFF, StandstillHold,
+                                                              brake_request_reason, read_mode as read_standstill_mode)
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 from openpilot.selfdrive.selfdrived.alert_sound import filter_forcing_stop_alert_sound
 
@@ -229,6 +231,9 @@ class SelfdriveD:
     self.is_metric = self.params.get_bool("IsMetric")
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    self.standstill_engage_mode = read_standstill_mode(self.params)
+    self.standstill_hold = StandstillHold()
+    self.standstill_held_back_events = {getattr(EventName, name) for name in HELD_BACK_EVENTS}
 
     car_recognized = self.CP.brand != 'mock'
 
@@ -491,9 +496,29 @@ class SelfdriveD:
         set_offroad_alert("Offroad_DriverMonitoringUncertain", True)
         self.dm_uncertain_alerted = True
 
+    # Standstill engage hold: same latch as controlsd, which holds the brake (selfdrive/controls/lib/standstill_hold.py).
+    # Uses last frame's state, which is what controlsd sees in selfdriveState.
+    now = time.monotonic()
+    standstill_mode = self.standstill_engage_mode if self.CP.openpilotLongitudinalControl else MODE_OFF
+    holding = self.standstill_hold.update(standstill_mode, self.state_machine.state, self.enabled, CS, now)
+    if holding:
+      if brake_request_reason(CS, self.standstill_hold.held_s(now)):
+        self.starpilot_events.add(StarPilotEventName.standstillHoldBrake)
+      elif self.standstill_hold.mode == MODE_HOLD_ONLY:
+        self.starpilot_events.add(StarPilotEventName.standstillHoldOnly)
+      else:
+        self.starpilot_events.add(StarPilotEventName.standstillHold)
+    elif self.standstill_hold.ended_by_gas and (self.standstill_hold.mode == MODE_HOLD_ONLY or brake_request_reason(CS, 0.)):
+      # Hold only: the gas ends the hold and longitudinal (AOL may keep steering). Also disengage when the gas ends a
+      # hold that was asking for the brake (door, seatbelt, gear), since those events were held back.
+      self.events.add(EventName.pedalPressed)
+
     # Add car events, ignore if CAN isn't valid
     if CS.canValid:
       car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
+      if holding:
+        # disengaging on these would release the brake with the car in gear; standstillHoldBrake asks for the brake instead
+        car_events = [e for e in car_events if e.name.raw not in self.standstill_held_back_events]
 
       # Once-per-drive latch for belowSteerSpeed — match old MinSteerSpeedBanner 1:1.
       min_steer_speed = float(self.CP.minSteerSpeed)
@@ -1019,6 +1044,7 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+      self.standstill_engage_mode = read_standstill_mode(self.params)
       if REPLAY:
         if self.safe_mode:
           self.experimental_mode = False

@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 import pyray as rl
 
+from openpilot.selfdrive.controls.lib.standstill_hold import read_mode as read_standstill_mode
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
 from openpilot.system.ui.lib.application import FontWeight, MouseEvent, MousePos, gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -57,6 +58,12 @@ from openpilot.common.constants import CV
 
 
 PANEL_STYLE = DEFAULT_PANEL_STYLE
+
+STANDSTILL_ENGAGE_OPTIONS = [
+  (0, "Off"),
+  (1, "Resume Cruise"),
+  (2, "Hold Only"),
+]
 
 ACCELERATION_PROFILE_OPTIONS = [
   (ACCELERATION_PROFILES["STANDARD"], "Standard"),
@@ -509,6 +516,11 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  get_value=self._get_deceleration_profile_label,
                  on_click=self._show_deceleration_profile_selector,
                  visible=self._longitudinal_enabled),
+      SettingRow("StandstillEngageMode", "value", tr_noop("Standstill Engage (Tap-to-Hold)"),
+                 subtitle=tr_noop("SET on the brake at a stop holds the car until gas. SET under 9 mph sets speed limit + SLC offset."),
+                 get_value=self._get_standstill_engage_label,
+                 on_click=self._show_standstill_engage_selector,
+                 visible=self._longitudinal_enabled),
       SettingRow("HumanLaneChanges", "toggle", tr_noop("Human-Like Lane Changes"),
                  subtitle=tr_noop("Radar-informed behavior during lane changes."),
                  get_state=lambda: self._params.get_bool("HumanLaneChanges"),
@@ -958,6 +970,13 @@ class StarPilotLongitudinalLayout(_SettingsPage):
   def _get_deceleration_profile_label(self) -> str:
     value = normalize_deceleration_profile(self._params.get("DecelerationProfile", encoding="utf-8"))
     return self._profile_label_for_value(value, DECELERATION_PROFILE_OPTIONS)
+
+  def _get_standstill_engage_label(self) -> str:
+    return self._profile_label_for_value(read_standstill_mode(self._params), STANDSTILL_ENGAGE_OPTIONS)
+
+  def _show_standstill_engage_selector(self):
+    self._show_labeled_select("Standstill Engage", "StandstillEngageMode", STANDSTILL_ENGAGE_OPTIONS,
+                              read_standstill_mode(self._params))
 
   def _show_acceleration_profile_selector(self):
     self._show_labeled_select("Acceleration Profile", "AccelerationProfile", ACCELERATION_PROFILE_OPTIONS,

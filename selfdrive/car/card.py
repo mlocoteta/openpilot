@@ -24,11 +24,14 @@ from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import (
-  VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN,
-  is_speed_limit_confirmation_pending,
+  VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN, V_CRUISE_UNSET,
+  imperial_grid_to_exact_kph, is_speed_limit_confirmation_pending,
 )
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
+from openpilot.selfdrive.controls.lib.standstill_hold import (
+  LOW_SPEED_SET_KILL_FILE, low_speed_set_applies, low_speed_set_kph, read_mode as read_standstill_mode,
+)
 
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_ACCEL_COUNTER,
@@ -236,6 +239,7 @@ class Car:
     self.rk = Ratekeeper(100, print_delay_threshold=None)
 
     self.resume_prev_button = False
+    self.last_set_kph = 0.  # last engaged set speed this drive (low-speed SET fallback, standstill_hold.py)
     self.starpilot_toggles = get_starpilot_toggles(read_persisted_force_params=True)
 
     self.FPCP.alternativeExperience |= interface_alternative_experience
@@ -347,6 +351,7 @@ class Car:
     if self.sm['carControl'].enabled and not self.CC_prev.enabled and not preap_software_cruise:
       # Use CarState w/ buttons from the step selfdrived enables on
       desired_speed_limit = self.sm['starpilotPlan'].slcSpeedLimit + self.sm['starpilotPlan'].slcSpeedLimitOffset
+      previous_v_cruise_kph = self.v_cruise_helper.v_cruise_kph
       self.v_cruise_helper.initialize_v_cruise(
         self.CS_prev,
         self.experimental_mode,
@@ -354,10 +359,31 @@ class Car:
         self.starpilot_toggles,
         desired_speed_limit=desired_speed_limit,
       )
+      # SET below 9 mph (incl. a standstill engage that will hold): instead of the 7 mph floor, set the known speed
+      # limit + SLC offset, else the last set speed this drive, else 25 mph (standstill_hold.low_speed_set_kph).
+      # RES/accel keeps resuming the previous set speed.
+      resume_button = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in self.CS_prev.buttonEvents)
+      resumed = resume_button and previous_v_cruise_kph not in (V_CRUISE_UNSET, -1)
+      if (self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and not resumed and
+          low_speed_set_applies(read_standstill_mode(self.params), self.CS_prev.vEgo, self.CS_prev.standstill,
+                                self.CS_prev.brakePressed) and
+          not os.path.exists(LOW_SPEED_SET_KILL_FILE)):
+        plan = self.sm['starpilotPlan']
+        # source "None" = no live/previous limit; slcSpeedLimit may then echo the old set speed (SLC set-speed fallback)
+        known_limit = plan.slcSpeedLimit if plan.slcSpeedLimitSource != SLC_SOURCE_NONE else 0.
+        self.v_cruise_helper.v_cruise_kph = low_speed_set_kph(
+          known_limit, plan.slcSpeedLimitOffset, self.last_set_kph, max(V_CRUISE_MIN, 7.0 * CV.MPH_TO_KPH),
+          self.is_metric, V_CRUISE_MIN, V_CRUISE_MAX, IMPERIAL_INCREMENT)
+        self.v_cruise_helper.v_cruise_cluster_kph = self.v_cruise_helper.v_cruise_kph
+        cloudlog.info(f"low-speed SET: v_cruise_kph={self.v_cruise_helper.v_cruise_kph} limit={known_limit:.2f} " +
+                      f"offset={plan.slcSpeedLimitOffset:.2f} last={self.last_set_kph}")
+
+    if self.sm['carControl'].enabled and V_CRUISE_MIN <= self.v_cruise_helper.v_cruise_kph <= V_CRUISE_MAX:
+      self.last_set_kph = self.v_cruise_helper.v_cruise_kph
 
     # TODO: mirror the carState.cruiseState struct?
-    CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
-    CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
+    CS.vCruise = float(imperial_grid_to_exact_kph(self.v_cruise_helper.v_cruise_kph, self.is_metric))
+    CS.vCruiseCluster = float(imperial_grid_to_exact_kph(self.v_cruise_helper.v_cruise_cluster_kph, self.is_metric))
 
     if any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents):
       self.resume_prev_button = True

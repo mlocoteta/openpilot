@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from cereal import log
 from openpilot.selfdrive.car.cruise import (
   VCruiseHelper, V_CRUISE_MIN, V_CRUISE_MAX, V_CRUISE_INITIAL, IMPERIAL_INCREMENT,
-  is_speed_limit_confirmation_pending,
+  V_CRUISE_UNSET, imperial_grid_to_exact_kph, is_speed_limit_confirmation_pending,
 )
 from cereal import car
 from openpilot.common.constants import CV
@@ -609,3 +609,16 @@ class TestVCruiseHelperRedneck:
 
     assert self.v_cruise_helper.v_cruise_kph == pytest.approx(75 * CV.MPH_TO_KPH)
     assert self.v_cruise_helper.v_cruise_cluster_kph == pytest.approx(75 * CV.MPH_TO_KPH)
+
+
+@pytest.mark.parametrize("grid_kph,expected_mph", [(104.0, 65.0), (96.0, 60.0), (40.0, 25.0), (16.0, 10.0)])
+def test_imperial_grid_publishes_exact_mph(grid_kph, expected_mph):
+  # Route 33d: "65 mph" was 104.0 kph = 64.62 mph, 0.12 mph above the 64/65 rounding line,
+  # so the speedometer flipped 64/65 at every small speed wobble.
+  assert imperial_grid_to_exact_kph(grid_kph, is_metric=False) * CV.KPH_TO_MPH == pytest.approx(expected_mph)
+  assert imperial_grid_to_exact_kph(grid_kph, is_metric=True) == grid_kph
+
+
+@pytest.mark.parametrize("kph", [104.6, 97.0, V_CRUISE_UNSET, 0.0])
+def test_imperial_off_grid_and_unset_pass_through(kph):
+  assert imperial_grid_to_exact_kph(kph, is_metric=False) == kph
