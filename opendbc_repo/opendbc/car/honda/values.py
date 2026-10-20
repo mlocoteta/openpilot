@@ -62,6 +62,33 @@ class HondaSafetyFlags(IntFlag):
   BOSCH_CANFD_MVL = 64
 
 
+class TI_LIMITS:
+  # Honda 9G Accord Torque Interceptor steering limits (separate CAN device).
+  TI_STEER_MAX = 599                 # theoretical max_steer 2047
+  TI_STEER_DELTA_UP = 15             # torque increase per refresh
+  TI_STEER_DELTA_DOWN = 15           # torque decrease per refresh
+  TI_STEER_DRIVER_ALLOWANCE = 5      # allowed driver torque before start limiting
+  TI_STEER_DRIVER_MULTIPLIER = 40    # weight driver torque
+  TI_STEER_DRIVER_FACTOR = 1         # from dbc
+  TI_STEER_THRESHOLD = 15            # steeringPressed threshold on the TI torque sensor
+
+
+class TI_STATE:
+  DISCOVER = 0
+  OFF = 1
+  DRIVER_OVER = 2
+  RUN = 3
+
+
+# The gen1 TI only leaves OFF after a run of zero-torque commands (2026-09-11 rlog:
+# 1571 + 200 frames). If a board never sends TI_FEEDBACK at all (older firmware),
+# open the gate after this many silent frames (5 s at 100 Hz) so it is not stranded.
+TI_DISCOVERY_FRAMES = 500
+# Once feedback has been seen, treat it as lost (gate closed) after this many
+# frames without a TI_FEEDBACK message (200 ms at 100 Hz).
+TI_FEEDBACK_TIMEOUT_FRAMES = 20
+
+
 class HondaFlags(IntFlag):
   # Detected flags
   # Bosch models with alternate set of LKAS_HUD messages
@@ -489,7 +516,10 @@ class CAR(Platforms):
       HondaCarDocs("Honda Accord Hybrid 2017", "All"),
     ],
     CarSpecs(mass=3343 * CV.LB_TO_KG, wheelbase=2.78, steerRatio=17.5, centerToFrontRatio=0.37),
-    radar_dbc_dict('honda_accord_2017_can_ext_generated'),
+    # 9G Accord (Nidec). Uses the honda_accord_2017 DBC (built from mvl-boston's
+    # 0111-op-honda-dev fragments) — stock STEERING_CONTROL + STEER_STATUS for normal
+    # LKAS, plus TI_STEERING_CONTROL/TI_FEEDBACK for the optional Torque Interceptor.
+    radar_dbc_dict('honda_accord_2017_can_generated'),
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
   )
   ACURA_MDX_3G = HondaNidecPlatformConfig(

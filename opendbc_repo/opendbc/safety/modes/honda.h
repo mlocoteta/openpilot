@@ -22,6 +22,10 @@
   {.msg = {{0x201, 0, 6, 50U, .max_counter = 15U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, \
            { 0 }, { 0 }}},                                                                                                          \
 
+// Honda 9G Accord Torque Interceptor: separate steering device on bus 0.
+#define HONDA_TI_STEERING_CONTROL 0x249U
+#define HONDA_TI_MAX_STEER 599  // matches TI_LIMITS.TI_STEER_MAX in opendbc/car/honda/values.py
+
 #define HONDA_N_COMMON_TX_MSGS            \
   {0xE4, 0, 5, .check_relay = true},    \
   {0x194, 0, 4, .check_relay = true},   \
@@ -281,6 +285,23 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // TORQUE INTERCEPTOR STEER: safety check (0x249 = 9G Accord Torque Interceptor).
+  // LKAS_REQUEST is a 12-bit unsigned field with a +2048 offset (see the TI DBC), so a
+  // neutral command is 0x800 on the wire, not 0x000. The offset must be decoded before
+  // the zero check, otherwise neutral reads as non-zero and is blocked whenever controls
+  // are off. Enforce a hard magnitude cap too; rate/driver limiting is applied upstream.
+  if (msg->addr == HONDA_TI_STEERING_CONTROL) {
+    uint32_t ti_raw = (((uint32_t)msg->data[0] & 0x0FU) << 8) | (uint32_t)msg->data[1];
+    int ti_steer = (int)ti_raw - 2048;
+    if (!(aol_allowed || controls_allowed)) {
+      if (ti_steer != 0) {
+        tx = false;
+      }
+    } else if ((ti_steer > HONDA_TI_MAX_STEER) || (ti_steer < -HONDA_TI_MAX_STEER)) {
+      tx = false;
+    }
+  }
+
   // Bosch supplemental control check
   if (msg->addr == 0xE5U) {
     if ((GET_BYTES(msg, 0, 4) != 0x10800004U) || ((GET_BYTES(msg, 4, 4) & 0x00FFFFFFU) != 0x0U)) {
@@ -331,10 +352,14 @@ static safety_config honda_nidec_init(uint16_t param) {
   // 0x1FA is dynamically forwarded based on stock AEB
   // 0xE4 is steering on all cars except CRV and RDX, 0x194 for CRV and RDX,
   // 0x1FA is brake control, 0x30C is acc hud, 0x33D is lkas hud
-  static CanMsg HONDA_N_TX_MSGS[] = {HONDA_N_COMMON_TX_MSGS};
+  static CanMsg HONDA_N_TX_MSGS[] = {
+    HONDA_N_COMMON_TX_MSGS
+    {HONDA_TI_STEERING_CONTROL, 0, 8, .check_relay = false},
+  };
   static CanMsg HONDA_N_INTERCEPTOR_TX_MSGS[] = {
     HONDA_N_COMMON_TX_MSGS
     {0x200, 0, 6, .check_relay = false},
+    {HONDA_TI_STEERING_CONTROL, 0, 8, .check_relay = false},
   };
 
   const uint16_t HONDA_PARAM_NIDEC_ALT = 4;
