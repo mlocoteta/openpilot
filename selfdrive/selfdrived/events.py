@@ -443,6 +443,21 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
   return NormalPermanentAlert("Invalid LKAS setting", text)
 
 
+# Set by selfdrived from the modeld external-GPU auto-recover state (selfdrive/modeld/egpu_recovery.py).
+GPU_MODEL_BACKUP_TEXT = {"text1": "", "text2": ""}
+
+
+def gpu_model_backup_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality,
+                           starpilot_toggles: SimpleNamespace) -> Alert:
+  # Minor, silent, lowest priority: any other alert wins.
+  text1, text2 = GPU_MODEL_BACKUP_TEXT["text1"], GPU_MODEL_BACKUP_TEXT["text2"]
+  return Alert(
+    text1,
+    text2,
+    AlertStatus.normal, AlertSize.mid if text2 else AlertSize.small,
+    Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2)
+
+
 def custom_startup_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, starpilot_toggles: SimpleNamespace) -> Alert:
   return StartupAlert(starpilot_toggles.startup_alert_top, starpilot_toggles.startup_alert_bottom, alert_status=StarPilotAlertStatus.starpilot)
 
@@ -539,7 +554,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.bigModelFailed: {
     ET.SOFT_DISABLE: soft_disable_alert("Big Model Failed"),
     ET.PERMANENT: NormalPermanentAlert("Big Model Failed",
-                                       "Restart the car to retry,\nsmall model is still available",
+                                       "Small model is still available,\nGPU retries automatically when safe",
                                        duration=20.),
   },
 
@@ -1163,6 +1178,10 @@ STARPILOT_EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   StarPilotEventName.customStartupAlert: {
     ET.PERMANENT: custom_startup_alert,
+  },
+
+  StarPilotEventName.gpuModelBackup: {
+    ET.PERMANENT: gpu_model_backup_alert,
   },
 
   StarPilotEventName.lateralManeuver: {

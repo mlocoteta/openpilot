@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from collections.abc import Callable
 from cereal import log
+from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -23,6 +24,9 @@ NetworkType = log.DeviceState.NetworkType
 
 
 # Color scheme
+TEMP_CYCLE_SECONDS = 3.0
+
+
 class Colors:
   WHITE = rl.WHITE
   WHITE_DIM = rl.Color(255, 255, 255, 85)
@@ -69,6 +73,12 @@ class Sidebar(Widget):
     self._net_strength = 0
 
     self._temp_status = MetricData(tr_noop("TEMP"), "--°C", Colors.GOOD)
+    try:
+      self._show_egpu_temp = Params().get_bool("SidebarEgpuTemp")
+    except Exception:
+      # an unregistered key raises UnknownKeyName; never let that reach the
+      # render loop, which would crash-loop the UI (and the stream with it)
+      self._show_egpu_temp = False
     self._panda_status = MetricData(tr_noop("VEHICLE"), tr_noop("ONLINE"), Colors.GOOD)
     self._connect_status = MetricData(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
     self._recording_audio = False
@@ -109,7 +119,7 @@ class Sidebar(Widget):
 
     self._recording_audio = ui_state.recording_audio
     self._update_network_status(device_state)
-    self._update_temperature_status(device_state)
+    self._update_temperature_status(device_state, sm)
     self._update_connection_status(device_state)
     self._update_panda_status()
 
@@ -118,16 +128,64 @@ class Sidebar(Widget):
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
 
-  def _update_temperature_status(self, device_state):
-    thermal_status = device_state.thermalStatus
-    temperature = f"{int(device_state.maxTempC)}°C"
+  def _egpu_temps(self, sm):
+    """External GPU (hotspot, memory), or None when unavailable.
 
-    if thermal_status == ThermalStatus.ok:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
-    elif thermal_status == ThermalStatus.warmDEPRECATED:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.WARNING)
+    The eGPU is driven in userspace over USB and has no thermal zone, so its
+    temperatures only arrive via chestnutState. Returns None whenever that is
+    missing, stale or zero so the caller can fall back to the on-die readings.
+    """
+    try:
+      if not sm.valid.get("chestnutState", False) or not sm.alive.get("chestnutState", False):
+        return None
+      cs = sm["chestnutState"]
+      temps = [float(cs.tempC), float(cs.memoryTempC)]
+      temps = [t for t in temps if t > 0]
+      return temps or None
+    except Exception:
+      return None
+
+  @staticmethod
+  def _top_two(values):
+    """Hottest two readings, formatted. Falls back gracefully to one or none."""
+    try:
+      vals = sorted((float(v) for v in values if float(v) > 0), reverse=True)[:2]
+    except Exception:
+      vals = []
+    if not vals:
+      return None
+    return "/".join(str(int(round(v))) for v in vals) + "\u00b0C"
+
+  def _update_temperature_status(self, device_state, sm=None):
+    thermal_status = device_state.thermalStatus
+    colour = Colors.GOOD if thermal_status == ThermalStatus.ok else (
+      Colors.WARNING if thermal_status == ThermalStatus.warmDEPRECATED else Colors.DANGER)
+
+    # Alternate between CPU and GPU rather than showing a single aggregate, so
+    # both are visible in one box. Colour still tracks the device thermal state.
+    phase_cpu = int(time.monotonic() / TEMP_CYCLE_SECONDS) % 2 == 0
+
+    if phase_cpu:
+      text = self._top_two(getattr(device_state, "cpuTempC", []) or [])
+      if text is not None:
+        self._temp_status.update(tr_noop("CPU"), text, colour)
+        return
     else:
-      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.DANGER)
+      if self._show_egpu_temp:
+        # eGPU only: falling back to the on-die zones here would show a
+        # plausible number for the wrong device, which is worse than nothing.
+        egpu = self._egpu_temps(sm) if sm is not None else None
+        text = self._top_two(egpu) if egpu else None
+        self._temp_status.update(tr_noop("eGPU"), text or "--\u00b0C",
+                                 colour if text else Colors.WHITE_DIM)
+        return
+      text = self._top_two(getattr(device_state, "gpuTempC", []) or [])
+      if text is not None:
+        self._temp_status.update(tr_noop("GPU"), text, colour)
+        return
+
+    # nothing usable this phase -- fall back to the aggregate rather than blanking
+    self._temp_status.update(tr_noop("TEMP"), f"{int(device_state.maxTempC)}\u00b0C", colour)
 
   def _update_connection_status(self, device_state):
     last_ping = device_state.lastAthenaPingTime

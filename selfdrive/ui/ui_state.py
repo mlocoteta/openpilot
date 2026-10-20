@@ -77,6 +77,7 @@ class UIState:
         "liveTracks",
         "liveDelay",
         "liveTorqueParameters",
+        "chestnutState",
       ],
       drain_services=["carState"],
     )

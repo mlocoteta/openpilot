@@ -756,6 +756,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ThemesDownloaded", {PERSISTENT, JSON, "{}", "{}"}},
     {"Timezone", {PERSISTENT, STRING, "", ""}},
     {"TinygradUpdateAvailable", {PERSISTENT, BOOL, "0", "0", 1}},
+    // Show the external GPU (Chestnut) temperatures in the sidebar's GPU phase
+    // instead of the on-die GPU zones; shows a placeholder when no eGPU is present.
+    {"SidebarEgpuTemp", {PERSISTENT, BOOL, "0", "0", 3}},
     // Honda 9G Accord Torque Interceptor (TI). ON by default (and as the "stock"
     // value) because this fork's car has the TI fitted; it only takes effect on
     // HONDA_ACCORD_9G. Excluded from toggle reset/sync/backup restores. When ON, the
