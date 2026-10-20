@@ -155,6 +155,15 @@ function launch {
     ./build.py
     sp_launch_timing "build_done"
   fi
+
+  # Accord TI fork: prebuilt trees run the git-tracked binaries, and StarPilot
+  # merges / updater resets restore Dom's builds (no fork params keys, no 0x249
+  # panda allow-list). Rebuild just those targets if they are stale.
+  if [ -f "$DIR/prebuilt" ] && [ -f /TICI ]; then
+    sp_launch_timing "prebuilt_guard_start"
+    python3 ./prebuilt_guard.py || echo "prebuilt guard could not repair the tree; continuing boot."
+    sp_launch_timing "prebuilt_guard_done"
+  fi
   sp_launch_timing "manager_start"
   ./manager.py
 
