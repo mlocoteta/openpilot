@@ -10,6 +10,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.selfdrive.controls.lib.drive_helpers import MIN_SPEED
 from openpilot.tools.longitudinal_maneuvers.maneuversd import Action, Maneuver as _Maneuver
 
@@ -44,14 +45,7 @@ def _default_status():
 
 def _load_status(params: Params):
   status = _default_status()
-  raw = params.get(STATUS_PARAM, encoding="utf-8") or ""
-  if raw:
-    try:
-      payload = json.loads(raw)
-      if isinstance(payload, dict):
-        status.update(payload)
-    except Exception:
-      pass
+  status.update(load_json_param(params.get(STATUS_PARAM, encoding="utf-8"), {}))
 
   history = status.get("history")
   if not isinstance(history, list):
@@ -162,8 +156,73 @@ MANEUVERS = [
 ]
 
 
+def _refresh_characterization_modules():
+  """Re-read the characterization modules if the loaded plan module is older than its file.
+
+  The manager imports characterization.settings (and so .plan) at boot and forks this
+  process from itself, so a tool update installed while the car is running would otherwise
+  keep the limits loaded at boot. Reload plan first: the others import from it.
+  """
+  import importlib
+  import os
+  import sys
+  prefix = "openpilot.tools.lateral_maneuvers.characterization."
+  plan = sys.modules.get(prefix + "plan")
+  if plan is None:
+    return
+  loaded = getattr(plan, "_SOURCE_MTIME", None)
+  if loaded is not None and loaded >= os.path.getmtime(plan.__file__):
+    return
+  for name in ("plan", "settings", "progress", "sidecar", "runner"):
+    module = sys.modules.get(prefix + name)
+    if module is not None:
+      importlib.reload(module)
+
+
+def _characterization_plan():
+  """Plan from /data/lateral_characterization_plan.json, None when absent, or a PlanError."""
+  _refresh_characterization_modules()
+  from openpilot.tools.lateral_maneuvers.characterization.plan import PLAN_PATH, PlanError, load_plan
+  from openpilot.tools.lateral_maneuvers.characterization.settings import restore_stale_snapshot
+  try:
+    restore_stale_snapshot(log=cloudlog.warning)
+  except Exception:
+    cloudlog.exception("lateral_maneuversd: stale characterization snapshot restore failed")
+  try:
+    return load_plan(PLAN_PATH)
+  except PlanError as e:
+    return e
+
+
+def _plan_error_loop(error):
+  """Invalid plan: show why, command nothing, change no params."""
+  cloudlog.error(f"lateral_maneuversd: invalid characterization plan: {error}")
+  sm = messaging.SubMaster(['modelV2'], poll='modelV2')
+  pm = messaging.PubMaster(['lateralManeuverPlan', 'alertDebug'])
+  while True:
+    sm.update()
+    alert_msg = messaging.new_message('alertDebug')
+    alert_msg.valid = True
+    alert_msg.alertDebug.alertText1 = "Characterization plan invalid"
+    alert_msg.alertDebug.alertText2 = str(error)[:120]
+    pm.send('alertDebug', alert_msg)
+    plan_send = messaging.new_message('lateralManeuverPlan')
+    plan_send.valid = False
+    pm.send('lateralManeuverPlan', plan_send)
+
+
 def main():
   config_realtime_process(5, Priority.CTRL_LOW)
+
+  characterization = _characterization_plan()
+  if isinstance(characterization, Exception):
+    _plan_error_loop(characterization)
+    return
+  if characterization is not None:
+    from openpilot.tools.lateral_maneuvers.characterization.runner import run_daemon
+    cloudlog.info("lateral_maneuversd: running characterization plan")
+    run_daemon(characterization)
+    return
 
   params = Params()
   cloudlog.info("lateral_maneuversd is waiting for CarParams")

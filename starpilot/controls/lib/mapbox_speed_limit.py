@@ -1,11 +1,11 @@
 import calendar
-import json
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.starpilot.common.json_param import load_json_param
 from openpilot.starpilot.common.starpilot_utilities import calculate_bearing_offset, is_url_pingable
 
 
@@ -15,10 +15,7 @@ FREE_MAPBOX_REQUESTS = 100_000
 class MapboxSpeedLimit:
   def __init__(self, params):
     self.params = params
-    try:
-      self.requests = json.loads(params.get("MapBoxRequests", encoding="utf-8") or "{}")
-    except (TypeError, ValueError):
-      self.requests = {}
+    self.requests = load_json_param(params.get("MapBoxRequests", encoding="utf-8"), {})
     self.requests.setdefault("total_requests", 0)
     self.requests.setdefault("max_requests", FREE_MAPBOX_REQUESTS - 28 * 100)
 
@@ -50,7 +47,7 @@ class MapboxSpeedLimit:
       return 0.0, v_ego
 
     self.requests["total_requests"] += 1
-    self.params.put_nonblocking("MapBoxRequests", json.dumps(self.requests))
+    self.params.put_nonblocking("MapBoxRequests", dict(self.requests))
 
     bearing = position.get("bearing")
     latitude = position.get("latitude")
