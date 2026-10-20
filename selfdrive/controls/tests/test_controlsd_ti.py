@@ -196,3 +196,119 @@ def test_ti_driver_limiter_flag_matches_limiter():
       assert ti_driver_limiter_binds(request, s, TI_LIMITS) == clipped
       if clipped:
         assert s * request < 0 and abs(s) > TI_LIMITS.TI_STEER_DRIVER_ALLOWANCE
+
+
+# --- Honda 9G TI: lateral only while the panda would pass 0x249 (drives 305/310/313) ---
+
+AOL = ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL
+NIDEC = car.CarParams.SafetyModel.hondaNidec
+
+
+def panda(controls_allowed=False, alt=AOL, model=NIDEC, tx_blocked=0):
+  return SimpleNamespace(controlsAllowed=controls_allowed, alternativeExperience=alt, safetyModel=model,
+                         safetyTxBlocked=tx_blocked)
+
+
+def test_honda_panda_lateral_allowed_needs_cruise_main():
+  # honda.h: !acc_main_on clears controls_allowed, and aol_allowed = acc_main_on && ALT_EXP bit
+  for engaged in (False, True):
+    for ps in ([panda()], [panda(controls_allowed=True)], []):
+      assert not honda_panda_lateral_allowed(False, engaged, ps)
+
+
+def test_honda_panda_lateral_allowed_with_cruise_main():
+  assert honda_panda_lateral_allowed(True, False, [panda()])                           # AOL bit
+  assert honda_panda_lateral_allowed(True, False, [panda(controls_allowed=True, alt=0)])
+  assert not honda_panda_lateral_allowed(True, False, [panda(alt=0)])                  # no AOL, not engaged
+  # engaged: a 10 Hz pandaStates that has not caught up yet must not drop lateral (controlsMismatch covers it)
+  assert honda_panda_lateral_allowed(True, True, [panda(alt=0)])
+  # no panda health yet, or only a silent/noOutput panda: nothing contradicts cruise main
+  assert honda_panda_lateral_allowed(True, False, [])
+  assert honda_panda_lateral_allowed(True, False, [panda(alt=0, model=car.CarParams.SafetyModel.noOutput)])
+
+
+def make_gate_controls(panda_states):
+  controls = make_controls()
+  controls.sm = {'pandaStates': panda_states}
+  controls._ti_panda_blocking = False
+  controls._ti_panda_block_log_time = -TI_PANDA_LOG_INTERVAL
+  controls._ti_tx_blocked_last = None
+  controls._ti_tx_blocked_log_time = -TI_PANDA_LOG_INTERVAL
+  controls._ti_pedals_last = None
+  controls._ti_pedal_edge_frames = TI_PANDA_TX_PEDAL_EDGE_FRAMES
+  return controls
+
+
+def cs(available):
+  return SimpleNamespace(cruiseState=SimpleNamespace(available=available))
+
+
+def test_ti_panda_gate_holds_lateral_off_while_main_off_and_logs_once(mocker):
+  log = mocker.patch("openpilot.selfdrive.controls.controlsd.cloudlog")
+  controls = make_gate_controls([panda()])
+  # AOL with ACC main on: untouched
+  assert all(controls._ti_panda_lateral_gate(True, cs(True), False) for _ in range(50))
+  # MAIN pressed off: held off every frame, one log line for the episode
+  assert not any(controls._ti_panda_lateral_gate(True, cs(False), False) for _ in range(960))
+  assert log.warning.call_count == 1
+  # MAIN back on: lateral resumes on the same frame
+  assert controls._ti_panda_lateral_gate(True, cs(True), False)
+  # a second episode right after is not logged again (rate limit)
+  assert not controls._ti_panda_lateral_gate(True, cs(False), False)
+  assert log.warning.call_count == 1
+
+
+def test_ti_panda_gate_never_turns_lateral_on():
+  controls = make_gate_controls([panda(controls_allowed=True)])
+  assert not controls._ti_panda_lateral_gate(False, cs(True), True)
+  assert not controls._ti_panda_blocking
+
+
+def pedals(gas=False, brake=False):
+  return SimpleNamespace(gasPressed=gas, brakePressed=brake)
+
+
+def test_ti_panda_tx_blocked_diagnostics(mocker):
+  log = mocker.patch("openpilot.selfdrive.controls.controlsd.cloudlog")
+  controls = make_gate_controls([panda(tx_blocked=40)])
+  controls._log_ti_panda_tx_blocked(True, pedals())            # first sample only sets the baseline
+  controls.sm['pandaStates'] = [panda(tx_blocked=61)]
+  controls._log_ti_panda_tx_blocked(False, pedals())           # blocks while lateral is off are not reported
+  assert log.warning.call_count == 0
+  controls.sm['pandaStates'] = [panda(tx_blocked=70)]
+  controls._log_ti_panda_tx_blocked(True, pedals())
+  assert log.warning.call_count == 1
+  assert "blocked 9 TX (any address)" in log.warning.call_args[0][0] and "0x249" not in log.warning.call_args[0][0]
+  controls.sm['pandaStates'] = [panda(tx_blocked=3)]  # panda reboot resets the counter
+  controls._log_ti_panda_tx_blocked(True, pedals())
+  assert log.warning.call_count == 1
+
+
+def test_ti_panda_tx_blocked_ignores_pedal_edges(mocker):
+  # drives 314-318: all 38 "panda blocked" lines were single 0x200/0x1FA frames at gas/brake edges
+  log = mocker.patch("openpilot.selfdrive.controls.controlsd.cloudlog")
+  controls = make_gate_controls([panda(tx_blocked=10)])
+  controls._log_ti_panda_tx_blocked(True, pedals())
+  for gas, brake in ((True, False), (False, False), (False, True), (False, False)):
+    controls._log_ti_panda_tx_blocked(True, pedals(gas=gas, brake=brake))   # the edge frame
+    for _ in range(TI_PANDA_TX_PEDAL_EDGE_FRAMES - 2):
+      controls._log_ti_panda_tx_blocked(True, pedals(gas=gas, brake=brake))
+    controls.sm['pandaStates'] = [panda(tx_blocked=controls._ti_tx_blocked_last + 1)]
+    controls._log_ti_panda_tx_blocked(True, pedals(gas=gas, brake=brake))   # 0.19 s after the edge
+  assert log.warning.call_count == 0
+  # 0.2 s after the last edge (pedal held, no new edge): reported again
+  controls._log_ti_panda_tx_blocked(True, pedals())
+  controls.sm['pandaStates'] = [panda(tx_blocked=controls._ti_tx_blocked_last + 2)]
+  controls._log_ti_panda_tx_blocked(True, pedals())
+  assert log.warning.call_count == 1 and "blocked 2 TX (any address)" in log.warning.call_args[0][0]
+
+
+def test_ti_panda_tx_blocked_edge_timer_runs_while_lateral_off(mocker):
+  # an edge just before lateral comes on still explains the next increase
+  log = mocker.patch("openpilot.selfdrive.controls.controlsd.cloudlog")
+  controls = make_gate_controls([panda(tx_blocked=5)])
+  controls._log_ti_panda_tx_blocked(False, pedals())
+  controls._log_ti_panda_tx_blocked(False, pedals(gas=True))
+  controls.sm['pandaStates'] = [panda(tx_blocked=6)]
+  controls._log_ti_panda_tx_blocked(True, pedals(gas=True))
+  assert log.warning.call_count == 0
