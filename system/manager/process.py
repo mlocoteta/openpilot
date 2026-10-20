@@ -435,9 +435,15 @@ def launcher(proc: str, name: str, nice: int | None = None) -> None:
     mod.main()
   except KeyboardInterrupt:
     cloudlog.warning(f"child {proc} got SIGINT")
+  except SystemExit as error:
+    # A process calling sys.exit(1) otherwise bypasses the normal Exception
+    # logger and leaves the manager with only an unhelpful exit code.
+    cloudlog.exception(f"child {proc} exited with SystemExit({error.code!r})")
+    raise
   except Exception:
     # can't install the crash handler because sys.excepthook doesn't play nice
     # with threads, so catch it here.
+    cloudlog.exception(f"child {proc} crashed")
     sentry.capture_exception()
     raise
 

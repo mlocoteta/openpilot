@@ -2,6 +2,7 @@
 
 #include <cassert>
 
+#include "cereal/services.h"
 #include "common/util.h"
 
 extern ExitHandler do_exit;
@@ -108,7 +109,17 @@ void MsgqToZmq::zmqMonitorThread() {
           if (++pair.connected_clients == 1) {
             // Create new MSGQ subscriber socket and map to ZMQ publisher
             pair.sub_sock = std::make_unique<MSGQSubSocket>();
-            pair.sub_sock->connect(msgq_context.get(), pair.endpoint, "127.0.0.1");
+            // Pass the service's real queue size. msgq_new_queue() ftruncate()s the
+            // segment on *subscribe* as well as publish, so attaching with the 1MB
+            // DEFAULT_SEGMENT_SIZE shrinks larger queues (can is 10MB, sendcan 2MB)
+            // out from under their publisher, which then SIGBUSes writing past the
+            // new EOF. Observed killing pandad every time a client attached.
+            size_t seg_size = 0;
+            auto svc_it = services.find(pair.endpoint);
+            if (svc_it != services.end()) {
+              seg_size = svc_it->second.queue_size;
+            }
+            pair.sub_sock->connect(msgq_context.get(), pair.endpoint, "127.0.0.1", false, true, seg_size);
             sub2pub[pair.sub_sock.get()] = pair.pub_sock.get();
             registerSockets();
           }
