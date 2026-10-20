@@ -234,10 +234,12 @@ class LongControl:
     return min(output_accel, float(positive_cap))
 
   def update(self, active, CS, a_target, should_stop, accel_limits, starpilot_toggles, has_lead=False,
-             traffic_mode_enabled=False, profile_max_accel=0.0, pedal_override=False, leads=None):
+             traffic_mode_enabled=False, profile_max_accel=0.0, pedal_override=False, leads=None,
+             plan_source="cruise", v_cruise=None, csc_active=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
+    self.vehicle_tuning.track_honda_brake_onset(active, getattr(CS, "gasPressed", False), a_target)
 
     if pedal_override:
       self.pedal_override_active = True
@@ -323,6 +325,15 @@ class LongControl:
       freeze_integrator = self.vehicle_tuning.get_integrator_freeze(
         self.last_output_accel, a_target, error, CS.vEgo, accel_limits,
       )
+      if self.vehicle_tuning.hold_honda_brake_onset_integrator(
+        self.pid, a_target, CS, should_stop, leads, starpilot_toggles,
+      ):
+        freeze_integrator = True
+      if self.vehicle_tuning.hold_honda_cruise_deadband_integrator(
+        self.pid, a_target, feedforward, error, CS, should_stop, leads, self.last_output_accel,
+        plan_source=plan_source, v_cruise=v_cruise, csc_active=csc_active,
+      ):
+        freeze_integrator = True
       leaving_experimental = self.transitioning and self.prev_mode == 'blended' and self.current_mode == 'acc'
       if leaving_experimental:
         freeze_integrator = True

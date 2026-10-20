@@ -7,6 +7,7 @@ from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_in
                         apply_ti_steer_torque_limits, ti_output_headroom_limits
 from opendbc.car.carlog import carlog
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
 from opendbc.car.honda.pedal_learner import PedalGasFactorGuard, applied_gas_factor
 from opendbc.car.honda.values import (
   CAR,
@@ -315,6 +316,10 @@ class CarController(CarControllerBase):
       self.bosch_gas_factor = self.pedal_guard.start
       self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
     self.pedal_learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
+    # Accord 9G pedal long: hold the friction brake off at a steady cruise (set-speed hunt, routes 33d/352).
+    # card.py feeds it the plan; None on every other car.
+    self.cruise_brake_deadband = CruiseBrakeDeadband() if (
+      CP.carFingerprint == CAR.HONDA_ACCORD_9G and CP.enableGasInterceptorDEPRECATED) else None
     self.pitch = 0.0
     self.mvl_accord_mode = CP.carFingerprint == CAR.HONDA_ACCORD_11G
     # MVL Bosch low-speed extra-brake integrator. Active only for Accord 11G MVL mode.
@@ -651,6 +656,13 @@ class CarController(CarControllerBase):
             )
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
+          if self.cruise_brake_deadband is not None:
+            brake_limit = self.cruise_brake_deadband.update(
+              CC.longActive and actuators.longControlState == LongCtrlState.pid, CS.out.vEgo, accel, float(apply_brake),
+              2 * DT_CTRL)
+            if brake_limit is not None:
+              # the pedal still follows accel (it closes on its own), only the friction brake is held off
+              apply_brake = min(apply_brake, brake_limit)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
           pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
 

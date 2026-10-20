@@ -1787,3 +1787,166 @@ def test_leaving_experimental_does_not_reset_mode_transition_timer():
     lc.update_mpc_mode(False)
 
   assert not lc.transitioning
+
+
+def make_honda_9g_pedal_lc(pedal=True, fingerprint=None):
+  from opendbc.car.honda.values import CAR as HONDA_CAR
+  CP = make_longcontrol_cp(
+    brand="honda",
+    carFingerprint=fingerprint or HONDA_CAR.HONDA_ACCORD_9G,
+    enableGasInterceptorDEPRECATED=pedal,
+  )
+  CP.longitudinalTuning.kiV = [1.0]
+  return LongControl(CP)
+
+
+def run_honda_brake_onset(lc, frames, a_target=-1.2, a_ego=-0.2, should_stop=False, leads=None, gas_frames=0, i0=0.0,
+                          toggles=None, v_ego=20.0):
+  toggles = toggles or make_toggles(longitudinalActuatorDelay=0.30)
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.3, gasPressed=True)
+  for _ in range(gas_frames):  # gas override: long inactive, as controlsd does
+    lc.reset()
+    lc.update(False, CS, 0.0, False, (-3.5, 2.0), toggles)
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.0)
+  lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles)  # cruising
+  lc.pid.i = i0
+  CS = car.CarState.new_message(vEgo=v_ego, aEgo=a_ego)
+  out = []
+  for _ in range(frames):
+    out.append((lc.update(True, CS, a_target, should_stop, (-3.5, 2.0), toggles, leads=leads), lc.pid.i))
+  return out
+
+
+def test_honda_9g_brake_onset_window_is_actuator_delay_plus_015():
+  tune = vehicle_tunes.LongControlVehicleTuning
+  assert tune._honda_brake_onset_window_frames(make_toggles(longitudinalActuatorDelay=0.30)) == 45
+  assert tune._honda_brake_onset_window_frames(make_toggles(longitudinalActuatorDelay=0.40)) == 55
+  assert tune._honda_brake_onset_window_frames(make_toggles()) == 45  # no param: 0.30 default
+  assert tune._honda_brake_onset_window_frames(make_toggles(longitudinalActuatorDelay=float("nan"))) == 45
+
+
+def test_honda_9g_brake_onset_freezes_integrator_for_the_lag_window():
+  lc = make_honda_9g_pedal_lc()
+  out = run_honda_brake_onset(lc, 80)
+  # error -1.0 would integrate 0.01 per frame; held at 0 for the 45-frame window (incl. the
+  # crossing frame), then normal integration resumes
+  assert out[43][1] == pytest.approx(0.0)
+  assert out[60][1] < -0.1
+  assert out[43][0] == pytest.approx(-1.2)
+
+
+def test_honda_9g_brake_onset_clamps_stale_negative_i():
+  lc = make_honda_9g_pedal_lc()
+  out = run_honda_brake_onset(lc, 10, i0=-0.9)
+  assert out[0][1] == pytest.approx(vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR)
+  assert out[0][0] == pytest.approx(-1.2 + vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR)
+
+
+def test_honda_9g_brake_onset_after_gas_release():
+  lc = make_honda_9g_pedal_lc()
+  lc.vehicle_tuning.honda_prev_a_target = -1.2  # target already below -0.3: only the gas/longActive edge starts the window
+  out = run_honda_brake_onset(lc, 50, gas_frames=30)
+  assert all(i == pytest.approx(0.0) for _, i in out[:43])
+
+
+@pytest.mark.parametrize("case", ["close_lead", "closing_lead", "low_speed", "small_target", "already_braking", "other_honda",
+                                  "no_pedal"])
+def test_honda_9g_brake_onset_hold_does_not_trigger(case):
+  kwargs = {}
+  lc = make_honda_9g_pedal_lc()
+  if case == "close_lead":
+    kwargs["leads"] = (SimpleNamespace(status=True, dRel=25.0, vRel=-10.0, vLead=10.0),)  # TTC 2.5 s
+  elif case == "closing_lead":
+    kwargs["leads"] = (None, SimpleNamespace(status=True, dRel=45.0, vRel=-10.0, vLead=10.0))  # TTC 4.5 s, lead two
+  elif case == "low_speed":
+    kwargs["v_ego"] = 7.5
+  elif case == "small_target":
+    kwargs["a_target"] = -0.25
+  elif case == "already_braking":
+    kwargs["a_ego"] = -1.0  # aEgo - aTarget = 0.2 <= 0.3
+  elif case == "other_honda":
+    from opendbc.car.honda.values import CAR as HONDA_CAR
+    lc = make_honda_9g_pedal_lc(fingerprint=HONDA_CAR.HONDA_CIVIC)
+  elif case == "no_pedal":
+    lc = make_honda_9g_pedal_lc(pedal=False)
+  out = run_honda_brake_onset(lc, 20, i0=-0.9, **kwargs)
+  assert out[0][1] < -0.9  # stale I kept and still integrating
+
+
+def test_honda_9g_brake_onset_hold_skips_should_stop():
+  lc = make_honda_9g_pedal_lc()
+  lc.vehicle_tuning.track_honda_brake_onset(True, False, -1.2)
+  assert lc.vehicle_tuning.honda_brake_onset_frames == 0
+  lc.pid.i = -0.9
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=-0.2)
+  toggles = make_toggles(longitudinalActuatorDelay=0.30)
+  assert not lc.vehicle_tuning.hold_honda_brake_onset_integrator(lc.pid, -1.2, CS, True, None, toggles)
+  assert lc.pid.i == pytest.approx(-0.9)
+  assert lc.vehicle_tuning.hold_honda_brake_onset_integrator(lc.pid, -1.2, CS, False, None, toggles)
+  assert lc.pid.i == pytest.approx(vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR)
+
+
+def test_honda_9g_brake_onset_hold_ends_after_the_window():
+  lc = make_honda_9g_pedal_lc()
+  run_honda_brake_onset(lc, 50)
+  lc.pid.i = -0.9  # 0.5 s after the onset: outside the window, no clamp
+  lc.update(True, car.CarState.new_message(vEgo=20.0, aEgo=-0.2), -1.2, False, (-3.5, 2.0),
+            make_toggles(longitudinalActuatorDelay=0.30))
+  assert lc.pid.i < -0.9
+
+
+def test_honda_9g_brake_onset_far_lead_still_holds():
+  lc = make_honda_9g_pedal_lc()
+  far = (SimpleNamespace(status=True, dRel=60.0, vRel=-5.0, vLead=15.0),  # TTC 12 s
+         SimpleNamespace(status=True, dRel=30.0, vRel=1.0, vLead=21.0))   # pulling away
+  out = run_honda_brake_onset(lc, 20, i0=-0.9, leads=far)
+  assert out[0][1] == pytest.approx(vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR)
+
+
+V65 = 65 * 0.44704
+
+
+def run_honda_cruise_hold(lc, frames, a_target=0.0, a_ego=0.3, i0=-0.85, v_ego=V65, v_cruise=V65, should_stop=False,
+                          leads=None, plan_source="cruise"):
+  toggles = make_toggles(longitudinalActuatorDelay=0.30)
+  CS = car.CarState.new_message(vEgo=v_ego, aEgo=0.0)
+  lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles, v_cruise=v_cruise)
+  lc.pid.i = i0
+  for _ in range(250):  # steady (zero error) past the gate's post-demand hold
+    lc.update(True, CS, 0.0, False, (-3.5, 2.0), toggles, v_cruise=v_cruise)
+  CS = car.CarState.new_message(vEgo=v_ego, aEgo=a_ego)  # downhill: accelerating although the command is negative
+  out = []
+  for _ in range(frames):
+    out.append(lc.update(True, CS, a_target, should_stop, (-3.5, 2.0), toggles, leads=leads, plan_source=plan_source,
+                         v_cruise=v_cruise))
+  return out
+
+
+def test_honda_9g_cruise_deadband_stops_i_at_pedal_close(monkeypatch, tmp_path):
+  from opendbc.car.honda import cruise_brake_deadband as cbd
+  monkeypatch.setattr(cbd, "KILL_FILE", str(tmp_path / "off"))
+  lc = make_honda_9g_pedal_lc()
+  floor = cbd.pedal_close_accel(V65)
+  out = run_honda_cruise_hold(lc, 200, i0=floor + 0.05)
+  assert out[-1] == pytest.approx(floor, abs=0.02)  # wound down to the pedal-closed point, no further
+  assert lc.pid.i >= floor - 0.02
+
+
+@pytest.mark.parametrize("kw", [dict(a_target=-0.6), dict(plan_source="lead0"),  # should_stop: stopping state resets I
+                                dict(v_cruise=None), dict(v_ego=V65, v_cruise=V65 - 3 * 0.44704),
+                                dict(leads=(SimpleNamespace(status=True, dRel=40.0, vRel=-8.0, vLead=21.0),))])
+def test_honda_9g_cruise_deadband_leaves_real_demand_alone(monkeypatch, tmp_path, kw):
+  from opendbc.car.honda import cruise_brake_deadband as cbd
+  monkeypatch.setattr(cbd, "KILL_FILE", str(tmp_path / "off"))
+  lc = make_honda_9g_pedal_lc()
+  floor = cbd.pedal_close_accel(V65)
+  run_honda_cruise_hold(lc, 200, i0=floor + 0.05, **kw)
+  assert lc.pid.i < floor - 0.2  # stock winding
+
+
+def test_honda_9g_cruise_deadband_not_on_other_cars():
+  from opendbc.car.honda.values import CAR as HONDA_CAR
+  for lc in (make_honda_9g_pedal_lc(pedal=False), make_honda_9g_pedal_lc(fingerprint=HONDA_CAR.HONDA_CIVIC)):
+    assert lc.vehicle_tuning.honda_cruise_deadband is None
+    run_honda_cruise_hold(lc, 200, i0=-0.8)
+    assert lc.pid.i < -1.0
