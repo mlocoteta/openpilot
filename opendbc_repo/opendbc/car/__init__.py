@@ -97,6 +97,15 @@ def rate_limit(new_value, last_value, dw_step, up_step):
   return float(np.clip(new_value, last_value + dw_step, last_value + up_step))
 
 
+def ti_output_headroom_limits(driver_torque_min, driver_torque_max, LIMITS):
+  # Honda 9G Accord TI: (min, max) command keeping the TI's computed output s + cmd/D inside
+  # +GUARD_POS/-GUARD_NEG for every s in [driver_torque_min, driver_torque_max] (the caller's
+  # peak-hold of s). Continuous in s, so sensor noise around s = 0 cannot switch it on and off.
+  max_allowed = min(max((LIMITS.TI_OUTPUT_GUARD_POS - driver_torque_max) * LIMITS.TI_OUTPUT_TORQUE_DIV, 0), LIMITS.TI_STEER_MAX)
+  min_allowed = max(min((-LIMITS.TI_OUTPUT_GUARD_NEG - driver_torque_min) * LIMITS.TI_OUTPUT_TORQUE_DIV, 0), -LIMITS.TI_STEER_MAX)
+  return min_allowed, max_allowed
+
+
 def ti_driver_torque_limits(driver_torque, LIMITS):
   # Honda 9G Accord TI: (min, max) command allowed by the driver-torque limiter.
   driver_max_torque = LIMITS.TI_STEER_MAX + (LIMITS.TI_STEER_DRIVER_ALLOWANCE +
@@ -114,19 +123,35 @@ def ti_driver_limiter_binds(apply_torque, driver_torque, LIMITS):
   return not min_steer_allowed <= apply_torque <= max_steer_allowed
 
 
-def apply_ti_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS):
+def apply_ti_steer_torque_limits(apply_torque, apply_torque_last, driver_torque, LIMITS, output_guard=False, force_zero=False,
+                                 guard_driver_torque=None):
   # Honda 9G Accord Torque Interceptor limiting (mirrors apply_driver_steer_torque_limits
   # but with the TI_* constants and the TI's own driver-torque units).
+  # output_guard: also apply ti_output_headroom_limits (driver_torque must be the TI sensor, in TI counts)
+  # over guard_driver_torque = (min, max) of the recent TI sensor, or this frame's driver_torque.
+  # force_zero: ramp to zero. Either one cutting the command allows TI_STEER_DELTA_DOWN_FAST toward zero
+  # (not the driver limiter: a fast step there tripled fast steps and chatter in replay).
   min_steer_allowed, max_steer_allowed = ti_driver_torque_limits(driver_torque, LIMITS)
   apply_torque = np.clip(apply_torque, min_steer_allowed, max_steer_allowed)
 
+  delta_down = LIMITS.TI_STEER_DELTA_DOWN
+  if force_zero:
+    apply_torque = 0
+    delta_down = LIMITS.TI_STEER_DELTA_DOWN_FAST
+  elif output_guard:
+    guard_min, guard_max = ti_output_headroom_limits(*(guard_driver_torque or (driver_torque, driver_torque)), LIMITS)
+    # fast step only toward zero on the side the guard cut
+    if (apply_torque > guard_max and apply_torque_last > 0) or (apply_torque < guard_min and apply_torque_last < 0):
+      delta_down = LIMITS.TI_STEER_DELTA_DOWN_FAST
+    apply_torque = np.clip(apply_torque, guard_min, guard_max)
+
   # slow rate if steer torque increases in magnitude
   if apply_torque_last > 0:
-    apply_torque = np.clip(apply_torque, max(apply_torque_last - LIMITS.TI_STEER_DELTA_DOWN, -LIMITS.TI_STEER_DELTA_UP),
+    apply_torque = np.clip(apply_torque, max(apply_torque_last - delta_down, -LIMITS.TI_STEER_DELTA_UP),
                            apply_torque_last + LIMITS.TI_STEER_DELTA_UP)
   else:
     apply_torque = np.clip(apply_torque, apply_torque_last - LIMITS.TI_STEER_DELTA_UP,
-                           min(apply_torque_last + LIMITS.TI_STEER_DELTA_DOWN, LIMITS.TI_STEER_DELTA_UP))
+                           min(apply_torque_last + delta_down, LIMITS.TI_STEER_DELTA_UP))
   return int(round(float(apply_torque)))
 
 
