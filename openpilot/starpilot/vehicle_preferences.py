@@ -48,6 +48,7 @@ class VehicleStartupPreferences:
   toyota_radar_mode: int = 0
   gm_cancel_remap: bool = False
   vw_stock_long: bool = field(default=False, kw_only=True)
+  honda_torque_interceptor: bool = False
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -69,6 +70,13 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       honda_radar = False
     try:
+      # 9G Accord Torque Interceptor: opt-in ("1" only). A 9G without the board can't steer with TI on
+      # (0xE4 carries zero torque), and the board is silent until its handshake, so it can't be detected.
+      raw_ti, ti_readable = read_saved(params, "TorqueInterceptorEnabled", 8)
+      honda_ti = ti_readable and raw_ti == b"1"
+    except (OSError, TypeError, ValueError):
+      honda_ti = False
+    try:
       raw, readable = read_saved(params, "DisableOpenpilotLongitudinal", 8)
       disable_bolt = not readable or raw not in (None, b"0")
     except (OSError, TypeError, ValueError):
@@ -87,7 +95,8 @@ class VehicleStartupPreferences:
                             readable and safe in (None, b"0"))
     except (OSError, TypeError, ValueError):
       return cls(vw_stock_long=vw_stock_long,
-                 subaru_smoothing=smoothing, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, tesla_preap_stock=preap_stock,
+                 subaru_smoothing=smoothing, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, honda_torque_interceptor=honda_ti,
+                 tesla_preap_stock=preap_stock,
                  tesla_preap_radar=radar, tesla_preap_pedal=pedal,
                  gm_camera_pedal=False, toyota_filter=False)
     try:
@@ -128,7 +137,7 @@ class VehicleStartupPreferences:
                gm_camera_pedal=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
-               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar,
+               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, honda_torque_interceptor=honda_ti,
                tesla_preap_stock=preap_stock, tesla_preap_radar=radar, tesla_preap_pedal=pedal)
 
   def _prepare_honda_radar(self, cp) -> None:
@@ -188,6 +197,10 @@ class VehicleStartupPreferences:
     cp = prepare_startup(cp, self.subaru_stop_start_off)
     from opendbc.car.subaru.avh import prepare as prepare_avh
     cp = prepare_avh(cp, self.subaru_avh_startup)
+    if cp.brand == "honda":
+      # Before CarState/CarController exist: both select the TI path from this safety bit.
+      from opendbc.car.honda.torque_interceptor import apply_torque_interceptor
+      apply_torque_interceptor(cp, self.honda_torque_interceptor)
     from opendbc.car.gm.values import apply_gm_auto_hold, apply_volt_one_pedal
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock, self.tesla_preap_radar, self.tesla_preap_pedal)
