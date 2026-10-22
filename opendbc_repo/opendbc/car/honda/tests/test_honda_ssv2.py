@@ -5,12 +5,13 @@ from types import SimpleNamespace
 import pytest
 
 from opendbc.can import CANPacker, CANParser
-from opendbc.car import Bus, gen_empty_fingerprint, structs
+from opendbc.car import STD_CARGO_KG, Bus, gen_empty_fingerprint, scale_tire_stiffness, structs
+from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.serial_steering import apply_ssv2_steer_torque_limits
-from opendbc.car.honda.values import CAR, DBC, SSV2_DBC, SSV2_LIMITS, HondaFlags, get_pt_dbc
+from opendbc.car.honda.values import CAR, DBC, SSV2_DBC, SSV2_LIMITS, STEER_THRESHOLD, HondaFlags, get_pt_dbc
 
 STEER_STATUS = 0x190
 STEERING_CONTROL = 0xE4
@@ -73,7 +74,31 @@ class TestSSV2Params:
     assert list(CP.lateralParams.torqueV) == [0, SSV2_LIMITS.STEER_MAX]
     assert list(CP.lateralTuning.pid.kpV) == pytest.approx([0.4, 0.3])
     assert list(CP.lateralTuning.pid.kiV) == pytest.approx([0., 0.])
+    assert list(CP.lateralTuning.pid.kpBP) == pytest.approx([0., 20.])
+    assert list(CP.lateralTuning.pid.kiBP) == pytest.approx([0., 20.])
+    assert CP.lateralTuning.pid.kf == pytest.approx(0.00006)
     assert CP.steerActuatorDelay == pytest.approx(0.3)
+    assert CP.steerLimitTimer == pytest.approx(0.8)
+
+  def test_old_chassis_numbers(self):
+    # sunnypilot_SSV2 077d7091e16 ACCORD_NIDEC_4_CYL: mass 3279 lb + STD_CARGO_KG, wheelbase 2.75,
+    # centerToFront 0.39 of the wheelbase, steerRatio 13.66, tire_stiffness_factor 0.8467
+    CP = get_cp()
+    assert CP.mass == pytest.approx(3279. * CV.LB_TO_KG + STD_CARGO_KG)
+    assert CP.wheelbase == pytest.approx(2.75)
+    assert CP.centerToFront == pytest.approx(2.75 * 0.39)
+    assert CP.steerRatio == pytest.approx(13.66)
+    assert CP.tireStiffnessFactor == pytest.approx(0.8467)
+    front, rear = scale_tire_stiffness(CP.mass, CP.wheelbase, CP.centerToFront, 0.8467)
+    assert CP.tireStiffnessFront == pytest.approx(front)
+    assert CP.tireStiffnessRear == pytest.approx(rear)
+
+  def test_old_limits(self):
+    # the second (effective) LKAS_LIMITS class of sunnypilot_SSV2 077d7091e16, and STEER_THRESHOLD 30
+    L = SSV2_LIMITS
+    assert (L.STEER_MAX, L.STEER_DELTA_UP, L.STEER_DELTA_DOWN) == (239, 5, 9)
+    assert (L.STEER_DRIVER_ALLOWANCE, L.STEER_DRIVER_MULTIPLIER, L.STEER_DRIVER_FACTOR) == (25, 18, 1)
+    assert STEER_THRESHOLD[CAR.HONDA_ACCORD_9G] == 30
 
   def test_safety_params(self):
     # SSV2 adds no safety param: the bus 2 steering rule is part of every Nidec config.

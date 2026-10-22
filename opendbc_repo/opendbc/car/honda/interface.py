@@ -320,7 +320,13 @@ class CarInterface(CarInterfaceBase):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     elif candidate == CAR.HONDA_ACCORD_9G and ret.flags & HondaFlags.SERIAL_STEERING_V2:
-      # SSV2 board, PID lateral. Tune from mlocoteta/openpilot sunnypilot_SSV2 077d7091e16.
+      # SSV2 board, PID lateral. Tune and chassis numbers from mlocoteta/openpilot sunnypilot_SSV2 077d7091e16
+      # (ACCORD_NIDEC_4_CYL); the platform's CarSpecs are Dom's SSV3-era values. STD_CARGO_KG is added later.
+      ret.mass = 3279. * CV.LB_TO_KG
+      ret.wheelbase = 2.75
+      ret.centerToFront = ret.wheelbase * 0.39
+      ret.steerRatio = 13.66  # 13.37 is spec
+      ret.tireStiffnessFactor = 0.8467
       ret.steerActuatorDelay = 0.3
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, SSV2_LIMITS.STEER_MAX], [0, SSV2_LIMITS.STEER_MAX]]
       ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[0., 20.], [0., 20.]]
