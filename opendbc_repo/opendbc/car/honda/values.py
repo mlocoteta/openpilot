@@ -96,6 +96,7 @@ class HondaSafetyFlags(IntFlag):
   ALT_RADAR_AOL = 1024  # Exact marked DEBUG alpha owner; physical EPS/gear token.
   NIDEC_PEDAL_AOL = 512  # Model1 only; distinct from model20 STOCK_TJA.
   STOCK_TJA = 512  # Marked MDX4G AOL; EPS status1 is healthy TJA lockout.
+  TORQUE_INTERCEPTOR = 4096  # 9G Accord TI: allows 0x249 (honda_ti.h, torque_interceptor.py); 512 is NIDEC_PEDAL_AOL
 
 
 class HondaFlags(IntFlag):
