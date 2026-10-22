@@ -68,6 +68,12 @@ class CarInterface(CarInterfaceBase):
 
       ret.pcmCruise = True
       ret.enableGasInterceptorDEPRECATED = 0x201 in fingerprint[CAN.pt]
+      if ret.enableGasInterceptorDEPRECATED and not docs:
+        try:
+          if Params().get_bool("HondaPedalSwapped"):
+            ret.flags |= HondaFlags.PEDAL_SIGNALS_SWAPPED.value
+        except UnknownKeyName:
+          pass
       if ret.enableGasInterceptorDEPRECATED:
         ret.pcmCruise = False
 

@@ -128,7 +128,7 @@ def make_cs(steering_torque=0.0, v_ego=20.0):
     out=SimpleNamespace(vEgo=v_ego, aEgo=0.0, steeringPressed=False, gasPressed=False, brakePressed=False,
                         steeringTorque=steering_torque, cruiseState=SimpleNamespace(available=True)),
     v_cruise_factor=1.0, acc_hud=defaultdict(int), lkas_hud=False, stock_brake=defaultdict(int), is_metric=False,
-    dash_speed_seen=False,
+    dash_speed_seen=False, pedal_tracks=None,
   )
 
 

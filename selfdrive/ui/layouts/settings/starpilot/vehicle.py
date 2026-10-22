@@ -362,6 +362,14 @@ class VehicleSettingsManagerView(PanelManagerView):
         "get_state": lambda: self._controller._params.get_bool("VoltSNG"),
         "set_state": lambda s: self._controller._on_toggle("VoltSNG"),
       })
+    if cs.isHonda and cs.hasPedal:
+      toggles.append({
+        "title": tr("Pedal Tracks Swapped"),
+        "subtitle": tr("Only for a gas pedal interceptor wired with its two sensor tracks reversed. "
+                       "If this doesn't match the wiring, openpilot sends no gas. Applies on the next drive."),
+        "get_state": lambda: self._controller._params.get_bool("HondaPedalSwapped"),
+        "set_state": lambda s: self._controller._on_toggle("HondaPedalSwapped"),
+      })
     if cs.isJeep:
       toggles.append({
         "title": tr("Jeep Brake Hold"),

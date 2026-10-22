@@ -324,8 +324,13 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
   }
 
   // GAS: safety check (interceptor)
+  // The generic check looks at the first track (bytes 0-1) only. Check the second one (bytes 2-3) as well so the
+  // check holds for a pedal wired with its tracks swapped (HondaFlags.PEDAL_SIGNALS_SWAPPED), where either track
+  // can carry the gas command.
   if (msg->addr == 0x200U) {
-    if (longitudinal_interceptor_checks(msg)) {
+    const bool second_track_gas = (msg->data[2] != 0U) || (msg->data[3] != 0U);
+    if (longitudinal_interceptor_checks(msg) ||
+        ((!get_longitudinal_allowed() || brake_pressed_prev) && second_track_gas)) {
       tx = false;
     }
   }

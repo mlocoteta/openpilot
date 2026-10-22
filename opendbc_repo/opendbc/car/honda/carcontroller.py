@@ -263,6 +263,7 @@ class CarController(CarControllerBase):
     self.CAN = hondacan.CanBus(CP)
     self.tja_control = CP.carFingerprint in HONDA_BOSCH_TJA_CONTROL
     self.ssv2 = bool(CP.flags & HondaFlags.SERIAL_STEERING_V2)
+    self.pedal_signals_swapped = bool(CP.flags & HondaFlags.PEDAL_SIGNALS_SWAPPED)
     self.ssv2_apply_torque_last = 0
 
     # MVL CAN-FD ownership state. These do not affect non-CANFD vehicles.
@@ -644,8 +645,12 @@ class CarController(CarControllerBase):
                 0.0,
                 1.0,
               ))
+            if CS.pedal_tracks is not None and CS.pedal_tracks.mismatch:
+              # tracks wired the other way from HondaPedalSwapped: gas would put them out of step at the ECU
+              gas_interceptor_command = 0.0
             idx = (self.frame // 2) % 0x10
-            can_sends.append(create_gas_interceptor_command(self.packer, gas_interceptor_command, idx))
+            can_sends.append(create_gas_interceptor_command(self.packer, gas_interceptor_command, idx,
+                                                           swap_channels=self.pedal_signals_swapped))
 
     # Send dashboard UI commands. On CAN-FD, ACC_HUD is owned by the radar and must only start
     # after the handover, aligned to the radar's 10 Hz HUD tick.

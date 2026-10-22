@@ -3615,6 +3615,15 @@
         "settings_tier": "simple"
       },
       {
+        "key": "HondaPedalSwapped",
+        "label": "Pedal Tracks Swapped",
+        "description": "Only for a Honda/Acura gas pedal interceptor wired with its two sensor tracks reversed. Gas commands go out swapped to match. If the setting doesn't match the wiring, openpilot sends no gas for that drive. Applies on the next drive.",
+        "picker_description": "Swaps the gas pedal interceptor's two tracks for reversed wiring.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
         "key": "SubaruSNG",
         "label": "Stop and Go",
         "description": "Stop and go for supported Subaru vehicles.",

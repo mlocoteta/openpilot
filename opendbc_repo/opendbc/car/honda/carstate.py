@@ -6,6 +6,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
+from opendbc.car.honda.pedal_tracks import PedalTrackCheck
 from opendbc.car.honda.values import CAR, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
                                                  HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
@@ -37,6 +38,8 @@ class CarState(CarStateBase):
     super().__init__(CP, FPCP)
     can_define = CANDefine(get_pt_dbc(CP))
     self.ssv2 = bool(CP.flags & HondaFlags.SERIAL_STEERING_V2)
+    self.pedal_tracks = PedalTrackCheck(bool(CP.flags & HondaFlags.PEDAL_SIGNALS_SWAPPED)) \
+      if CP.enableGasInterceptorDEPRECATED else None
 
     if CP.transmissionType != TransmissionType.manual:
       self.gearbox_msg = "GEARBOX_AUTO"
@@ -207,7 +210,10 @@ class CarState(CarStateBase):
       ret.gearShifter = self.parse_gear_shifter(gear_position)
 
     if self.CP.enableGasInterceptorDEPRECATED:
-      gas = (cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
+      # average of both tracks: the same with HondaFlags.PEDAL_SIGNALS_SWAPPED (panda HONDA_GET_INTERCEPTOR too)
+      track1, track2 = cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"], cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]
+      self.pedal_tracks.update(track1, track2)
+      gas = (track1 + track2) / 2.
       ret.gasPressed = gas > 492
     else:
       ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5

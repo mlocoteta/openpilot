@@ -101,6 +101,10 @@ class HondaFlags(IntFlag):
   # 9G Accord (2016-17) with the Serial Steering V2 board: STEERING_CONTROL goes to the
   # board on the camera bus and STEER_STATUS comes back from it in the 4-byte SSV2 layout.
   SERIAL_STEERING_V2 = 16384
+  # Pedal interceptor wired with its two sensor tracks swapped (HondaPedalSwapped param): commands go out swapped.
+  # Reading is unchanged: carstate and the panda use the average of both tracks, which doesn't depend on the order, and
+  # the panda checks both tracks of 0x200, so it needs no setting. pedal_tracks.py stops gas if the wiring disagrees.
+  PEDAL_SIGNALS_SWAPPED = 32768
 
 
 # Car button codes

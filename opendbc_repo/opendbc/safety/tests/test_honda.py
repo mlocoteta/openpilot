@@ -30,6 +30,16 @@ def honda_interceptor_msg(gas: int, addr: int, counter: int = 0):
   to_send[0].data[4] = counter & 0xF
   return to_send
 
+
+def honda_interceptor_tracks_msg(track1: int, track2: int, addr: int, counter: int = 0):
+  # separate values per track: real pedals read track 2 at about twice track 1, swapped wiring the other way round
+  to_send = honda_interceptor_msg(0, addr, counter)
+  to_send[0].data[0] = (track1 >> 8) & 0xFF
+  to_send[0].data[1] = track1 & 0xFF
+  to_send[0].data[2] = (track2 >> 8) & 0xFF
+  to_send[0].data[3] = track2 & 0xFF
+  return to_send
+
 # Honda safety has several different configurations tested here:
 #  * Nidec
 #    * normal (PCM-enable)
@@ -435,6 +445,46 @@ class TestHondaNidecGasInterceptorSafety(GasInterceptorSafetyTest, HondaButtonEn
     msg = honda_interceptor_msg(gas, 0x201, self.__class__.cnt_user_gas)
     self.__class__.cnt_user_gas += 1
     return msg
+
+  # Pedal wired with its two tracks swapped (HondaPedalSwapped / HondaFlags.PEDAL_SIGNALS_SWAPPED): the panda needs no
+  # setting, so these run the same checks with both track orders.
+  def _user_tracks(self, track1, track2):
+    msg = honda_interceptor_tracks_msg(track1, track2, 0x201, self.__class__.cnt_user_gas)
+    self.__class__.cnt_user_gas += 1
+    return msg
+
+  def test_gas_pressed_same_for_both_track_orders(self):
+    for t1 in range(0, 1400, 50):
+      t2 = int(t1 * 2.2)
+      for a, b in ((t1, t2), (t2, t1)):
+        self._rx(self._user_tracks(0, 0))
+        self._rx(self._user_tracks(a, b))
+        self.assertEqual((a + b) // 2 > self.INTERCEPTOR_THRESHOLD, self.safety.get_gas_pressed_prev(), (a, b))
+
+  def test_rest_and_pressed_in_both_track_orders(self):
+    # resting 236/531 is not pressed in either order; pressed 600/1320 is in either order
+    for normal in (True, False):
+      for (t1, t2), pressed in (((236, 531), False), ((600, 1320), True)):
+        self._rx(self._user_tracks(0, 0))
+        self.safety.set_controls_allowed(True)
+        self._rx(self._user_tracks(*((t1, t2) if normal else (t2, t1))))
+        self._rx(self._user_tracks(*((t1, t2) if normal else (t2, t1))))
+        self.assertEqual(pressed, self.safety.get_gas_pressed_prev())
+
+  def test_gas_command_checked_on_both_tracks(self):
+    # normal order (track 2 = 2x track 1), swapped order, and either track alone
+    for track1, track2 in ((300, 600), (600, 300), (0, 600), (600, 0), (0, 1), (1, 0)):
+      for controls_allowed in (True, False):
+        self.safety.set_controls_allowed(controls_allowed)
+        self.assertEqual(controls_allowed, self._tx(honda_interceptor_tracks_msg(track1, track2, 0x200)), (track1, track2))
+    self.safety.set_controls_allowed(False)
+    self.assertTrue(self._tx(honda_interceptor_tracks_msg(0, 0, 0x200)))
+
+  def test_gas_command_blocked_on_brake_for_both_tracks(self):
+    self.safety.set_controls_allowed(True)
+    self._rx(self._user_brake_msg(True))
+    for track1, track2 in ((300, 600), (600, 300), (0, 600)):
+      self.assertFalse(self._tx(honda_interceptor_tracks_msg(track1, track2, 0x200)), (track1, track2))
 
 
 class TestHondaNidecAltGasInterceptorSafety(TestHondaNidecGasInterceptorSafety):
