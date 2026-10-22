@@ -7,6 +7,7 @@ from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
+from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -102,6 +103,7 @@ class CarController(CarControllerBase):
     self.nidec_interceptor = NidecInterceptor(CP) if interceptor_qualified(CP) else None
     self.interceptor_learning_params = None
     self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
+    self.ti = TorqueInterceptor(CP) if ti_qualified(CP) else None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -120,7 +122,8 @@ class CarController(CarControllerBase):
     self.last_torque = 0.0
 
   def update(self, CC, CS, now_nanos):
-    _projection = self.learning_projection_observer
+    # The TI command is not the 0xE4 lookup codec the projection observer models.
+    _projection = self.learning_projection_observer if self.ti is None else None
     if _projection is not None:
       _projection.begin(CC.actuators.torque, self.frame)
     actuators = CC.actuators
@@ -174,8 +177,14 @@ class CarController(CarControllerBase):
       if self.frame % 10 == 0:
         can_sends.append(make_tester_present_msg(0x18DAB0F1, 1, suppress_response=True))
 
-    # Send steering command.
-    can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    # Send steering command. On the TI car 0xE4 reaches no EPS: it carries zero torque
+    # (request still follows latActive) and the torque goes to the TI board on 0x249.
+    if self.ti is not None:
+      ti_apply_steer = self.ti.update(CC, CS, torque_cmd)
+      can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))
+      can_sends.append(create_ti_steering_control(self.packer, ti_apply_steer))
+    else:
+      can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
     if _projection is not None:
       _projection.emit('honda.STEERING_CONTROL', apply_torque, CC.latActive, can_sends[-1])
 
@@ -283,8 +292,13 @@ class CarController(CarControllerBase):
     new_actuators.accel = self.accel
     new_actuators.gas = self.gas
     new_actuators.brake = self.brake
-    new_actuators.torque = self.last_torque
-    new_actuators.torqueOutputCan = apply_torque
+    if self.ti is not None:
+      # Report the real limited TI command so steer_limited_by_safety sees what the car got.
+      new_actuators.torque = ti_apply_steer / TI_LIMITS.TI_STEER_MAX
+      new_actuators.torqueOutputCan = ti_apply_steer
+    else:
+      new_actuators.torque = self.last_torque
+      new_actuators.torqueOutputCan = apply_torque
 
     self.frame += 1
     if _projection is not None:
