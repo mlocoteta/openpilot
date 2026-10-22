@@ -4,7 +4,7 @@ import numpy as np
 
 from opendbc.car import structs
 from opendbc.car.can_definitions import CanData
-from opendbc.car.honda.values import CAR, HondaFlags
+from opendbc.car.honda.values import CAR, HondaFlags, HondaSafetyFlags
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 NIDEC_INTERCEPTOR_CARS = frozenset((
@@ -36,10 +36,12 @@ def qualified(cp):
           cp.openpilotLongitudinalControl and not cp.pcmCruise and
           not cp.passive and not cp.dashcamOnly and not cp.notCar and len(configs) == 1 and
           configs[0].safetyModel == structs.CarParams.SafetyModel.hondaNidec and
-          (configs[0].safetyParam == (36 if cp.flags & HondaFlags.NIDEC_ALT_SCM_MESSAGES else 32) or
+          # the 9G Torque Interceptor bit is independent of the pedal (torque_interceptor.py)
+          ((configs[0].safetyParam & ~int(HondaSafetyFlags.TORQUE_INTERCEPTOR)) == (36 if cp.flags & HondaFlags.NIDEC_ALT_SCM_MESSAGES else 32) or
            (len(cp.safetyConfigs) == 1 and cp.alternativeExperience == 32 and
-            configs[0].safetyParam == ((36 if cp.flags & HondaFlags.NIDEC_ALT_SCM_MESSAGES else 32) | 512 |
-                                      (256 if cp.carFingerprint == CAR.HONDA_ODYSSEY_TWN else 0)))))
+            (configs[0].safetyParam & ~int(HondaSafetyFlags.TORQUE_INTERCEPTOR)) ==
+            ((36 if cp.flags & HondaFlags.NIDEC_ALT_SCM_MESSAGES else 32) | 512 |
+             (256 if cp.carFingerprint == CAR.HONDA_ODYSSEY_TWN else 0)))))
 
 
 def create_command(packer, gas_amount, counter):
