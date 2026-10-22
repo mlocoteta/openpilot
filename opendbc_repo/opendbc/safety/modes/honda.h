@@ -3,6 +3,7 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/honda_interceptor.h"
 #include "opendbc/safety/modes/honda_stock_aol.h"
+#include "opendbc/safety/modes/honda_ti.h"
 
 // All common address checks except SCM_BUTTONS which isn't on one Nidec safety configuration
 #define HONDA_COMMON_NO_SCM_FEEDBACK_RX_CHECKS(pt_bus)                                                                                      \
@@ -337,13 +338,19 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     tx = tx && honda_interceptor_tx(msg);
   }
 
+  if (msg->addr == HONDA_TI_STEERING_CONTROL) {
+    tx = tx && honda_ti_tx(msg);
+  }
+
   if (tx && honda_mvl_stock && msg_matches(msg, 0x296U, 2U, 4U)) {
     honda_mvl_buttons_fresh = 10U;
   }
   return tx;
 }
 
-static safety_config honda_nidec_init(uint16_t param) {
+static safety_config honda_nidec_init(uint16_t raw_param) {
+  // the 9G Torque Interceptor bit is independent of every other Nidec profile word
+  const uint16_t param = honda_ti_reset(raw_param);
   honda_mvl_stock = false;
   honda_mvl_buttons_fresh = 0U;
   // 0x1FA is dynamically forwarded based on stock AEB
@@ -409,11 +416,18 @@ static safety_config honda_nidec_init(uint16_t param) {
   if (honda_interceptor && (ret.rx_checks_len < 7)) {
     honda_rx_workspace[ret.rx_checks_len] = interceptor_source;
     ret.rx_checks_len++;
-    SET_TX_MSGS(HONDA_N_INTERCEPTOR_TX_MSGS, ret);
+    if (honda_ti) {
+      SET_TX_MSGS(HONDA_TI_N_INTERCEPTOR_TX_MSGS, ret);
+    } else {
+      SET_TX_MSGS(HONDA_N_INTERCEPTOR_TX_MSGS, ret);
+    }
+  } else if (honda_ti) {
+    SET_TX_MSGS(HONDA_TI_N_TX_MSGS, ret);
   } else {
     SET_TX_MSGS(HONDA_N_TX_MSGS, ret);
   }
-  ret = honda_stock_aol_configure(param, true, enable_nidec_alt, 0U, ret);
+  // raw_param: a TI word is never a stock AOL word, so the TI car stays out of stock AOL
+  ret = honda_stock_aol_configure(raw_param, true, enable_nidec_alt, 0U, ret);
 
   return ret;
 }
@@ -422,6 +436,7 @@ static safety_config honda_bosch_init(uint16_t param) {
   honda_mvl_stock = ((param == 80U) || (param == 81U)) && (alternative_experience == 0);
   honda_mvl_buttons_fresh = 0U;
   honda_interceptor_reset(false);
+  (void)honda_ti_reset(0U);
   // Bosch
   static CanMsg HONDA_BOSCH_TX_MSGS[] = {
     {0xE4, 0, 5, .check_relay = true},

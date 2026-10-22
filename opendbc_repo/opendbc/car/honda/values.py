@@ -92,6 +92,7 @@ class HondaSafetyFlags(IntFlag):
   RADARLESS = 8
   BOSCH_CANFD = 16
   BOSCH_CANFD_MVL = 64
+  TORQUE_INTERCEPTOR = 512  # 9G Accord TI: allows 0x249 (honda_ti.h, torque_interceptor.py)
 
 
 class HondaFlags(IntFlag):
