@@ -9,6 +9,7 @@ from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HondaFlags, CruiseButtons, CruiseSettings, \
                                                  GearShifter, CarControllerParams
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.honda.torque_interceptor import TiCarState, ti_can_messages, ti_qualified
 from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, honda_sign, parser_expiry
 from opendbc.can.dbc import DBC as CANDBC
 
@@ -38,6 +39,7 @@ class CarState(CarStateBase):
     self.brake_error_msg = "HYBRID_BRAKE_ERROR" if CP.flags & HondaFlags.HYBRID else "STANDSTILL"
 
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
+    self.ti = TiCarState() if ti_qualified(CP) else None
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -172,6 +174,8 @@ class CarState(CarStateBase):
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+    if self.ti is not None:
+      ret.steeringTorque, ret.steeringPressed = self.ti.update(cp, ret.steeringTorque, STEER_THRESHOLD.get(self.CP.carFingerprint, 1200))
 
     if self.CP.flags & HondaFlags.BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
@@ -254,6 +258,8 @@ class CarState(CarStateBase):
     pt_messages = [("CAMERA_MESSAGES", math.nan)] if has_tsr and on_pt else []
     if CP.flags & HondaFlags.GAS_INTERCEPTOR:
       pt_messages.append(("GAS_SENSOR", 50))
+    if ti_qualified(CP):
+      pt_messages += ti_can_messages()
     parsers = {
       Bus.pt: CANParser(dbc_name, pt_messages, CanBus(CP).pt),
       Bus.cam: CANParser(dbc_name, [("CAMERA_MESSAGES", math.nan)] if has_tsr and not on_pt else [], CanBus(CP).camera),
