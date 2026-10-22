@@ -1,4 +1,2 @@
 acados_ocp_long.json
 c_generated_code/**
-!c_generated_code/acados_ocp_solver_pyx.so
-!c_generated_code/libacados_ocp_solver_long.so

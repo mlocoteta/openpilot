@@ -38,7 +38,4 @@ tests/safety/coverage.info
 *.profdata
 mull.yml
 
-# Keep signed panda outputs trackable for prebuilt device images
-!board/obj/
-!board/obj/**
 board/obj/.DS_Store

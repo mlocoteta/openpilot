@@ -1,9 +1,1 @@
 generated/*
-!generated/car.cpp
-!generated/car.h
-!generated/pose.cpp
-!generated/pose.h
-!generated/libcar.so
-!generated/libpose.so
-!generated/car.os
-!generated/pose.os

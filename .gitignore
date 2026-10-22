@@ -109,28 +109,15 @@ Pipfile
 .history
 .ionide
 
-# Keep prebuilt runtime artifacts trackable
-!cereal/messaging/bridge
-!system/camerad/camerad
-!system/loggerd/loggerd
-!system/loggerd/encoderd
-!system/loggerd/bootlog
-!selfdrive/pandad/pandad
+# Source branch (no `prebuilt` marker): the device builds everything with
+# ./build.py, so build outputs stay untracked and ignored.
+cereal/messaging/bridge
+system/camerad/camerad
+system/loggerd/loggerd
+system/loggerd/encoderd
+system/loggerd/bootlog
+selfdrive/pandad/pandad
+selfdrive/locationd/models/generated/
+panda/board/obj/*
+!panda/board/obj/.placeholder
 !cereal/services.h
-!cereal/libcereal.a
-!cereal/libsocketmaster.a
-!common/params_pyx.so
-!common/params_pyx.cpp
-!common/transformations/transformations.so
-!selfdrive/modeld/models/commonmodel_pyx.so
-!selfdrive/pandad/pandad_api_impl.so
-!selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
-!selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/libacados_ocp_solver_lat.so
-!selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
-!selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/libacados_ocp_solver_long.so
-!common/libcommon.a
-!msgq_repo/msgq/ipc_pyx.so
-!msgq_repo/msgq/visionipc/visionipc_pyx.so
-!rednose_repo/rednose/helpers/ekf_sym_pyx.so
-!panda/board/obj/
-!panda/board/obj/**
