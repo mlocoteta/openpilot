@@ -1032,6 +1032,22 @@ FW_VERSIONS = {
       b'8S302-T90-A040\x00\x00',
     ],
   },
+  # 9G Accord (Nidec, 2016-17). A140/X840/A030 were read from Mat's car (TI branch 2471f7021);
+  # X830/A020 come from the 2022 serial-steering branch (master_SSV2_0.9 94f6c85cb2e).
+  # Aftermarket steering boards change the CAN set, so FW is the reliable fingerprint.
+  CAR.HONDA_ACCORD_9G: {
+    (Ecu.fwdRadar, 0x18dab0f1, None): [
+      b'36161-T2F-A140\x00\x00',
+    ],
+    (Ecu.vsa, 0x18da28f1, None): [
+      b'57114-T2F-X830\x00\x00',
+      b'57114-T2F-X840\x00\x00',
+    ],
+    (Ecu.srs, 0x18da53f1, None): [
+      b'77959-T2F-A020\x00\x00',
+      b'77959-T2F-A030\x00\x00',
+    ],
+  },
   CAR.HONDA_ACCORD_11G: {
     (Ecu.fwdRadar, 0x18dab0f1, None): [
       b'8S302-30A-A040\x00\x00',

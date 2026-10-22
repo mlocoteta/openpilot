@@ -15,7 +15,9 @@ from opendbc.car.honda.values import (
   HONDA_NIDEC_ALT_PCM_ACCEL,
   CarControllerParams,
   HondaFlags,
+  SSV2_LIMITS,
 )
+from opendbc.car.honda.serial_steering import apply_ssv2_steer_torque_limits
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.common.pid import PIDController
 from openpilot.common.params import Params
@@ -226,6 +228,8 @@ class CarController(CarControllerBase):
     self.param_store = Params()
     self.CAN = hondacan.CanBus(CP)
     self.tja_control = CP.carFingerprint in HONDA_BOSCH_TJA_CONTROL
+    self.ssv2 = bool(CP.flags & HondaFlags.SERIAL_STEERING_V2)
+    self.ssv2_apply_torque_last = 0
 
     # MVL CAN-FD ownership state. These do not affect non-CANFD vehicles.
     self.radar_disable_counter = 0
@@ -277,6 +281,19 @@ class CarController(CarControllerBase):
     )
     self.steering_pressed_robust_prev = steering_pressed
     return steering_pressed
+
+  def _ssv2_steer(self, torque_cmd: float, driver_torque: float, lat_active: bool) -> tuple[int, bool]:
+    """SSV2 board torque and request flag, in CAN reference (positive when steering right)."""
+    if not lat_active:
+      # the frame carries zero torque anyway; restart the rate limit from zero on re-engage
+      self.ssv2_apply_torque_last = 0
+      return 0, False
+
+    apply_torque = int(np.interp(torque_cmd * self.params.STEER_MAX, self.params.STEER_LOOKUP_BP, self.params.STEER_LOOKUP_V))
+    apply_torque = apply_ssv2_steer_torque_limits(apply_torque, self.ssv2_apply_torque_last, driver_torque, SSV2_LIMITS)
+    self.ssv2_apply_torque_last = apply_torque
+    # as in the 2023 SSV2 code, the request bit is only set while the torque is non-zero
+    return -apply_torque, apply_torque != 0
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     actuators = CC.actuators
@@ -334,6 +351,11 @@ class CarController(CarControllerBase):
 
     # steer torque is converted back to CAN reference (positive when steering right)
     apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX, self.params.STEER_LOOKUP_BP, self.params.STEER_LOOKUP_V))
+    steer_request = CC.latActive
+    if self.ssv2:
+      # SSV2 limits torque in board units against the driver torque (replaces the normalized rate limit)
+      apply_torque, steer_request = self._ssv2_steer(torque_cmd, CS.out.steeringTorque, CC.latActive)
+      self.last_torque = -apply_torque / self.params.STEER_MAX
 
     # Send CAN commands
     can_sends = []
@@ -389,7 +411,7 @@ class CarController(CarControllerBase):
         can_sends.append((addr, dat, self.CAN.camera))
 
     # Send steering command.
-    can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, steer_request, self.tja_control))
 
     # wind brake from air resistance decel at high speed
     wind_brake = float(np.interp(CS.out.vEgo, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))

@@ -6,9 +6,10 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
+from opendbc.car.honda.values import CAR, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HONDA_BOSCH_TJA_CONTROL, \
-                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags
+                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags, \
+                                                 DBC, get_pt_dbc
 from opendbc.car.interfaces import CarStateBase
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -34,7 +35,8 @@ def calculate_speed_limit(CP, FPCP, cp, cp_cam):
 class CarState(CarStateBase):
   def __init__(self, CP, FPCP):
     super().__init__(CP, FPCP)
-    can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
+    can_define = CANDefine(get_pt_dbc(CP))
+    self.ssv2 = bool(CP.flags & HondaFlags.SERIAL_STEERING_V2)
 
     if CP.transmissionType != TransmissionType.manual:
       self.gearbox_msg = "GEARBOX_AUTO"
@@ -139,10 +141,16 @@ class CarState(CarStateBase):
 
     ret.seatbeltUnlatched = bool(cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LAMP"] or not cp.vl["SEATBELT_STATUS"]["SEATBELT_DRIVER_LATCHED"])
 
-    steer_status = self.steer_status_values[cp.vl["STEER_STATUS"]["STEER_STATUS"]]
+    # The SSV2 board reports the EPS on the camera bus (it sits between the harness and the camera)
+    cp_steer = cp_cam if self.ssv2 else cp
+    steer_status = self.steer_status_values[cp_steer.vl["STEER_STATUS"]["STEER_STATUS"]]
     ret.steerFaultPermanent = steer_status not in ("NORMAL", "NO_TORQUE_ALERT_1", "NO_TORQUE_ALERT_2", "LOW_SPEED_LOCKOUT", "TJA_LOW_SPEED_LOCKOUT",
                                                    "TMP_FAULT")
-    if self.CP.carFingerprint in (HONDA_BOSCH_ALT_RADAR | {CAR.HONDA_ACCORD_11G}):
+    if self.ssv2:
+      # Only the board's LIN fatal error is permanent; any EPS status other than these is temporary
+      ret.steerFaultPermanent = bool(cp_cam.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"])
+      ret.steerFaultTemporary = steer_status not in ("NORMAL", "LOW_SPEED_LOCKOUT", "NO_TORQUE_ALERT_2")
+    elif self.CP.carFingerprint in (HONDA_BOSCH_ALT_RADAR | {CAR.HONDA_ACCORD_11G}):
       # MVL treats CAN-FD low-speed lockout as an expected EPS state too.
       min_steer_speed = max(CarControllerParams.STEER_GLOBAL_MIN_SPEED, self.CP.minSteerSpeed)
       expected_low_speed_lockout = steer_status == "LOW_SPEED_LOCKOUT" and ret.vEgo < min_steer_speed
@@ -204,7 +212,7 @@ class CarState(CarStateBase):
     else:
       ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5
 
-    ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
+    ret.steeringTorque = cp_steer.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
 
     if self.CP.carFingerprint in HONDA_BOSCH:
@@ -358,14 +366,15 @@ class CarState(CarStateBase):
       # Both deliberately go silent during the handover, so skip alive/timeout checks.
       pt_messages += [("ACC_CONTROL", float("nan")), ("STEERING_CONTROL", float("nan"))]
 
-    pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt)
+    pt_dbc = get_pt_dbc(CP)
+    pt_parser = CANParser(pt_dbc, pt_messages, CanBus(CP).pt)
     if CP.enableGasInterceptorDEPRECATED:
       pt_parser.message_states[0x201].ignore_checksum = True
       pt_parser.message_states[0x201].ignore_counter = True
 
     parsers = {
       Bus.pt: pt_parser,
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.cam: CANParser(pt_dbc, [], CanBus(CP).camera),
     }
     if CP.enableBsm:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)

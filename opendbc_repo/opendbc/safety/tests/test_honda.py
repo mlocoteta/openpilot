@@ -6,9 +6,11 @@ from opendbc.car.honda.values import HondaSafetyFlags
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.car.structs import CarParams
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.common import CANPackerSafety, GasInterceptorSafetyTest, MAX_WRONG_COUNTERS
 
-HONDA_N_COMMON_TX_MSGS = [[0xE4, 0], [0x194, 0], [0x1FA, 0], [0x30C, 0], [0x33D, 0]]
+# [0xE4, 2]: STEERING_CONTROL to the 9G Accord serial steering (SSV2) board on the camera side
+HONDA_N_COMMON_TX_MSGS = [[0xE4, 0], [0x194, 0], [0x1FA, 0], [0x30C, 0], [0x33D, 0], [0xE4, 2]]
 
 
 class Btn:
@@ -342,6 +344,45 @@ class TestHondaNidecSafetyBase(HondaBase):
           else:
             send = brake == 0
           self.assertEqual(send, self._tx(self._send_brake_msg(brake)))
+
+  # ***** SSV2 serial steering board: STEERING_CONTROL on the camera bus *****
+
+  SSV2_STEER_VALUES = (0, 1, -1, 5, -5, 239, -239, 240, 0x1000, -3840, 0x7FFF, -0x8000)
+
+  def _ssv2_steer_msg(self, steer, bus=2):
+    return self.packer.make_can_msg_safety("STEERING_CONTROL", bus, {"STEER_TORQUE": steer})
+
+  def test_ssv2_camera_bus_steer_check(self):
+    # same rule as bus 0: zero torque is always allowed, non-zero only with controls allowed
+    for controls_allowed in (False, True):
+      self.safety.set_controls_allowed(controls_allowed)
+      for steer in self.SSV2_STEER_VALUES:
+        for bus in (0, 2):
+          self.assertEqual(controls_allowed or steer == 0, self._tx(self._ssv2_steer_msg(steer, bus)), (controls_allowed, steer, bus))
+
+  def test_ssv2_camera_bus_steer_aol(self):
+    # always-on lateral: non-zero torque on bus 2 is allowed while ACC main is on, blocked once it is off
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL)
+    self.safety.set_controls_allowed(False)
+    self._rx(self._acc_state_msg(True))
+    self.assertTrue(self._tx(self._ssv2_steer_msg(100)))
+    self._rx(self._acc_state_msg(False))
+    self.assertFalse(self._tx(self._ssv2_steer_msg(100)))
+    self.assertTrue(self._tx(self._ssv2_steer_msg(0)))
+
+  def test_ssv2_camera_bus_steer_wrong_length(self):
+    self.safety.set_controls_allowed(True)
+    for length in (4, 6, 8):
+      self.assertFalse(self._tx(common.make_msg(2, 0xE4, length)), length)
+    self.assertTrue(self._tx(common.make_msg(2, 0xE4, 5)))
+
+  def test_ssv2_camera_bus_steer_no_relay_check(self):
+    # the original rule had no relay check on bus 2: 0xE4 seen there (e.g. from the board) is not a
+    # relay malfunction, and bus 0 -> 2 forwarding of 0xE4 is unchanged
+    self._rx(common.make_msg(2, 0xE4, 5))
+    self.assertFalse(self.safety.get_relay_malfunction())
+    self.assertEqual(2, self.safety.safety_fwd_hook(0, 0xE4))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0xE4))
 
 
 class TestHondaNidecPcmSafety(HondaPcmEnableBase, TestHondaNidecSafetyBase):

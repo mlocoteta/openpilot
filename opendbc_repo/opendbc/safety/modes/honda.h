@@ -22,12 +22,18 @@
   {.msg = {{0x201, 0, 6, 50U, .max_counter = 15U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, \
            { 0 }, { 0 }}},                                                                                                          \
 
+// {0xE4, 2}: STEERING_CONTROL to a serial steering (SSV2) board on the camera side, as in
+// mlocoteta/panda d1baf1f / 8d10843 ("Change camera port for V2 SS board", "Repeat 0xE4 on Bus 2").
+// Allowed for every Nidec config like the original rule, with no relay check on bus 2 (the original
+// only checked bus 0), and covered by the same address-only steer check as bus 0 in honda_tx_hook
+// (zero torque unless controls or AOL are allowed).
 #define HONDA_N_COMMON_TX_MSGS            \
   {0xE4, 0, 5, .check_relay = true},    \
   {0x194, 0, 4, .check_relay = true},   \
   {0x1FA, 0, 8, .check_relay = false},  \
   {0x30C, 0, 8, .check_relay = true},   \
   {0x33D, 0, 5, .check_relay = true},   \
+  {0xE4, 2, 5, .check_relay = false},   \
 
 enum {
   HONDA_BTN_NONE = 0,

@@ -50,6 +50,20 @@ class CarControllerParams:
     self.STEER_LOOKUP_V = [v * -1 for v in CP.lateralParams.torqueV][1:][::-1] + list(CP.lateralParams.torqueV)
 
 
+class SSV2_LIMITS:
+  # Serial Steering V2 board limits, in board units (STEER_TORQUE ±239, driver torque from
+  # STEER_STATUS.STEER_TORQUE_SENSOR). Values from mlocoteta/openpilot sunnypilot_SSV2 077d7091e16.
+  STEER_MAX = 239
+  STEER_DELTA_UP = 5
+  STEER_DELTA_DOWN = 9
+  STEER_DRIVER_ALLOWANCE = 25
+  STEER_DRIVER_MULTIPLIER = 18
+  STEER_DRIVER_FACTOR = 1
+
+
+SSV2_DBC = 'honda_accord_2017_can_ssv2_generated'
+
+
 class HondaSafetyFlags(IntFlag):
   ALT_BRAKE = 1
   BOSCH_LONG = 2
@@ -84,6 +98,9 @@ class HondaFlags(IntFlag):
   HYBRID = 2048
   BOSCH_TJA_CONTROL = 4096
   EPS_MODIFIED = 8192
+  # 9G Accord (2016-17) with the Serial Steering V2 board: STEERING_CONTROL goes to the
+  # board on the camera bus and STEER_STATUS comes back from it in the 4-byte SSV2 layout.
+  SERIAL_STEERING_V2 = 16384
 
 
 # Car button codes
@@ -547,6 +564,12 @@ HONDA_CAMERA_MESSAGE_CARS = {
 
 
 DBC = CAR.create_dbc_map()
+
+
+def get_pt_dbc(CP) -> str:
+  if CP.flags & HondaFlags.SERIAL_STEERING_V2:
+    return SSV2_DBC
+  return DBC[CP.carFingerprint][Bus.pt]
 
 
 STEER_THRESHOLD = {

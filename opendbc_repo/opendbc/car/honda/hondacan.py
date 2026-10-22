@@ -25,6 +25,9 @@ class CanBus(CanBusBase):
     else:
       self._pt, self._radar, self._lkas = self.offset, self.offset + 1, self.offset
 
+    # The SSV2 serial-steering board listens for STEERING_CONTROL on the camera side
+    self._steer = self.camera if (CP.flags & HondaFlags.SERIAL_STEERING_V2) else self._lkas
+
   @property
   def pt(self) -> int:
     return self._pt
@@ -40,6 +43,10 @@ class CanBus(CanBusBase):
   @property
   def lkas(self) -> int:
     return self._lkas
+
+  @property
+  def steer(self) -> int:
+    return self._steer
 
   # B-CAN is forwarded to ACC-CAN radar side (CAN 0 on fake ethernet port)
   @property
@@ -128,7 +135,7 @@ def create_steering_control(packer, CAN, apply_torque, lkas_active, tja_control)
   if tja_control:
     values["STEER_DOWN_TO_ZERO"] = lkas_active
 
-  return packer.make_can_msg("STEERING_CONTROL", CAN.lkas, values)
+  return packer.make_can_msg("STEERING_CONTROL", CAN.steer, values)
 
 
 def create_bosch_supplemental_1(packer, CAN):

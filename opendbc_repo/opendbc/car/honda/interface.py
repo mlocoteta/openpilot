@@ -6,7 +6,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HONDA_BOSCH, HONDA_BOSCH_A, HONDA_BOSCH_A_RADAR_VERIFIED, HONDA_BOSCH_CANFD, \
-                                                 HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HondaSafetyFlags
+                                                 HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HondaSafetyFlags, SSV2_LIMITS
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
@@ -80,6 +80,12 @@ class CarInterface(CarInterfaceBase):
 
     if 0x184 in fingerprint[CAN.pt]:
       ret.flags |= HondaFlags.HYBRID.value
+
+    # This branch drives the 9G Accord through the SSV2 serial-steering board. It can't be told apart
+    # from a fingerprint: the 9G's logs show a 5-byte STEER_STATUS (0x190, SSV3 layout) on the car side, the
+    # board adds a 4-byte one on the camera side, and both share one wire while the relay is open.
+    if candidate == CAR.HONDA_ACCORD_9G:
+      ret.flags |= HondaFlags.SERIAL_STEERING_V2.value
 
     if ret.flags & HondaFlags.ALLOW_MANUAL_TRANS and all(msg not in fingerprint[CAN.pt] for msg in (0x191, 0x1A3)):
       # Manual transmission support for allowlisted cars only, to prevent silent fall-through on auto-detection failures
@@ -306,6 +312,13 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.15
       ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, 2560, 5120], [0, 2560, 12789]]
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.HONDA_ACCORD_9G and ret.flags & HondaFlags.SERIAL_STEERING_V2:
+      # SSV2 board, PID lateral. Tune from mlocoteta/openpilot sunnypilot_SSV2 077d7091e16.
+      ret.steerActuatorDelay = 0.3
+      ret.lateralParams.torqueBP, ret.lateralParams.torqueV = [[0, SSV2_LIMITS.STEER_MAX], [0, SSV2_LIMITS.STEER_MAX]]
+      ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kiBP = [[0., 20.], [0., 20.]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.4, 0.3], [0., 0.]]
 
     else:
       ret.steerActuatorDelay = 0.15
