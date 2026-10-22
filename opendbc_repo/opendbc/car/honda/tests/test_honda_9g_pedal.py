@@ -4,10 +4,17 @@ import pytest
 from opendbc.car import structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.honda import carcontroller, carstate, interface
+from opendbc.car.honda.accord_9g_tune import TI_CAR, use_tune
 from opendbc.car.honda.values import CAR
 from opendbc.car.tests.test_car_interfaces import get_test_starpilot_toggles
 
 DT_NS = 10_000_000
+
+@pytest.fixture(autouse=True)
+def ti_car_tune():
+  # These tests pin the TI car's numbers; the branch default (stock) is covered in test_accord_9g_tune.py.
+  with use_tune(TI_CAR):
+    yield
 
 
 class FakeParams:
@@ -39,10 +46,10 @@ class TestNidecWindBrake:
     v = 22.4  # 50 mph
     stock = carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_CIVIC)
     wind_brake = carcontroller.get_honda_nidec_wind_brake(v, CAR.HONDA_ACCORD_9G)
-    assert wind_brake == pytest.approx(0.136 / carcontroller.ACCORD_9G_BRAKE_ACCEL_PER_UNIT)
+    assert wind_brake == pytest.approx(0.136 / TI_CAR.brake_accel_per_unit)
     assert wind_brake < stock / 2
     # brakes engage (hysteresis on at 0.02) for requests below ~-0.23 m/s^2 instead of ~-0.55
-    assert (wind_brake + 0.02) * carcontroller.ACCORD_9G_BRAKE_ACCEL_PER_UNIT < 0.25
+    assert (wind_brake + 0.02) * TI_CAR.brake_accel_per_unit < 0.25
 
   def test_accord_9g_keeps_low_speed_floor_and_is_monotonic(self):
     assert carcontroller.get_honda_nidec_wind_brake(0.0, CAR.HONDA_ACCORD_9G) == pytest.approx(0.001)

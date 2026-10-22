@@ -2,12 +2,19 @@ import pytest
 
 from opendbc.car import structs
 from opendbc.car.honda import carcontroller, cruise_brake_deadband as cbd
+from opendbc.car.honda.accord_9g_tune import TI_CAR, use_tune
 from opendbc.car.honda.tests.test_honda_9g_pedal import DT_NS, pedal_interface
 
 MPH = cbd.MPH
 V65 = 65 * MPH
 DT = 0.02
 CREATE_BRAKE_COMMAND = carcontroller.hondacan.create_brake_command
+
+@pytest.fixture(autouse=True)
+def ti_car_tune():
+  # These tests pin the TI car's numbers; the branch default (stock) is covered in test_accord_9g_tune.py.
+  with use_tune(TI_CAR):
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -92,7 +99,7 @@ class TestGate:
   def test_pedal_close_accel(self):
     assert cbd.pedal_close_accel(V65) == pytest.approx(-0.75 * 5.0 * carcontroller.get_honda_bosch_wind_brake_mps2(V65))
     assert cbd.wind_brake_mps2(V65) == carcontroller.get_honda_bosch_wind_brake_mps2(V65)
-    assert cbd.ACCORD_9G_BRAKE_ACCEL_PER_UNIT == carcontroller.ACCORD_9G_BRAKE_ACCEL_PER_UNIT
+    assert cbd.ACCORD_9G_BRAKE_ACCEL_PER_UNIT == TI_CAR.brake_accel_per_unit
     assert cbd.pedal_close_accel(12.0) == cbd.I_FLOOR_MAX
 
 

@@ -36,7 +36,9 @@ LEAD_GAP_MIN = 1.0  # s; a lead nearer than this time gap gets the brakes (a lea
 LEAD_CLOSING_MIN = 0.3  # m/s
 OVERSPEED_RAMP = 0.25  # brake units/s when the brakes return only because of overspeed
 RELEASE_CLEAR_S = 1.0  # after an overspeed release, re-arm only once the stock request has been 0 this long
-ACCORD_9G_BRAKE_ACCEL_PER_UNIT = 3.6  # carcontroller.ACCORD_9G_BRAKE_ACCEL_PER_UNIT
+# The thresholds above are generic; the two car numbers below default to the TI car (accord_9g_tune.TI_CAR) and
+# callers pass the active tune's values. The gate only exists when accord_9g_tune.cruise_brake_deadband is on.
+ACCORD_9G_BRAKE_ACCEL_PER_UNIT = 3.6
 
 # The pedal closes at accel = -0.75 * wind_factor * wind_brake_mps2 (carcontroller's wind term).
 # The learned wind factor sits at ~5 on the 9G, so this is about -0.89 m/s^2 at 65 mph.
@@ -49,8 +51,8 @@ def wind_brake_mps2(v_ego: float) -> float:
   return float(np.interp(v_ego, [0.0, 13.4, 22.4, 31.3, 40.2], [0.000, 0.049, 0.136, 0.267, 0.441]))
 
 
-def pedal_close_accel(v_ego: float) -> float:
-  return float(np.clip(-0.75 * PEDAL_CLOSE_WIND_FACTOR * wind_brake_mps2(v_ego), I_FLOOR_MIN, I_FLOOR_MAX))
+def pedal_close_accel(v_ego: float, wind_factor: float = PEDAL_CLOSE_WIND_FACTOR) -> float:
+  return float(np.clip(-0.75 * wind_factor * wind_brake_mps2(v_ego), I_FLOOR_MIN, I_FLOOR_MAX))
 
 
 def lead_needs_brake(v_ego: float, lead_status: bool, d_rel: float, v_rel: float) -> bool:
@@ -68,9 +70,9 @@ def real_demand(v_ego: float, a_target: float, should_stop: bool, lead_brake: bo
           plan_source not in ("cruise", ""))
 
 
-def friction_request(accel: float, v_ego: float) -> float:
+def friction_request(accel: float, v_ego: float, brake_accel_per_unit: float = ACCORD_9G_BRAKE_ACCEL_PER_UNIT) -> float:
   """Approximate stock 9G friction request (brake units) for an accel command, for LongControl's copy of the gate."""
-  return max(0.0, -accel / ACCORD_9G_BRAKE_ACCEL_PER_UNIT - wind_brake_mps2(v_ego) / ACCORD_9G_BRAKE_ACCEL_PER_UNIT - 0.02)
+  return max(0.0, -accel / brake_accel_per_unit - wind_brake_mps2(v_ego) / brake_accel_per_unit - 0.02)
 
 
 _kill_cache = {"frame": 0, "value": False}

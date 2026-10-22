@@ -5,8 +5,9 @@ from opendbc.can import CANPacker
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, create_gas_interceptor_command, rate_limit, make_tester_present_msg, structs
 from opendbc.car.carlog import carlog
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.accord_9g_tune import get_tune as get_accord_9g_tune
 from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
-from opendbc.car.honda.pedal_learner import PedalGasFactorGuard, applied_gas_factor
+from opendbc.car.honda.pedal_learner import PedalGasFactorGuard
 from opendbc.car.honda.values import (
   CAR,
   CruiseButtons,
@@ -123,12 +124,12 @@ def get_honda_nidec_wind_brake(v_ego: float, car_fingerprint) -> float:
   # Brake units (accel / brake accel per unit) of decel the car is assumed to get for free from drag. Brake requests
   # below this are left to the PCM speed target and the applied brake is reduced by it.
   wind_brake = float(np.interp(v_ego, [0.0, 2.3, 35.0], [0.001, 0.002, 0.15]))
-  if car_fingerprint == CAR.HONDA_ACCORD_9G:
+  if car_fingerprint == CAR.HONDA_ACCORD_9G and get_accord_9g_tune().aero_wind_brake:
     # The stock curve assumes ~0.45 m/s^2 of free decel at 50 mph. On the 9G (2026-09-25 rlogs, ~50 mph)
     # requests of -0.1..-0.5 m/s^2 got only 0.01-0.07 m/s^2 and the brakes waited until ~-0.56 m/s^2.
-    # Use the aero drag estimate instead, keeping the stock low-speed floor.
+    # Use the aero drag estimate instead, keeping the stock low-speed floor. Opt-in (accord_9g_tune.py).
     wind_brake = max(float(np.interp(v_ego, [0.0, 2.3], [0.001, 0.002])),
-                     get_honda_bosch_wind_brake_mps2(v_ego) / ACCORD_9G_BRAKE_ACCEL_PER_UNIT)
+                     get_honda_bosch_wind_brake_mps2(v_ego) / get_nidec_brake_accel_per_unit(car_fingerprint))
   return wind_brake
 
 
@@ -169,13 +170,15 @@ def compute_gb_honda_bosch(accel, speed):
 
 
 # m/s^2 of decel per unit of Nidec brake command. The 9G measured 2.8-3.8 (2026-09-25/26 rlogs, 0-35 m/s),
-# so the stock 4.8 left it at ~70% of the requested braking.
+# so the stock 4.8 left it at ~70% of the requested braking (3.6 = accord_9g_tune.TI_CAR). On this branch the
+# 9G uses accord_9g_tune.brake_accel_per_unit, stock 4.8 unless /data/accord_9g_tune.json says otherwise.
 NIDEC_BRAKE_ACCEL_PER_UNIT = 4.8
-ACCORD_9G_BRAKE_ACCEL_PER_UNIT = 3.6
 
 
 def get_nidec_brake_accel_per_unit(car_fingerprint) -> float:
-  return ACCORD_9G_BRAKE_ACCEL_PER_UNIT if car_fingerprint == CAR.HONDA_ACCORD_9G else NIDEC_BRAKE_ACCEL_PER_UNIT
+  if car_fingerprint == CAR.HONDA_ACCORD_9G:
+    return get_accord_9g_tune().brake_accel_per_unit
+  return NIDEC_BRAKE_ACCEL_PER_UNIT
 
 
 def compute_gb_honda_nidec(accel, speed, brake_accel_per_unit=NIDEC_BRAKE_ACCEL_PER_UNIT):
@@ -295,17 +298,20 @@ class CarController(CarControllerBase):
     self.bosch_wind_factor_before_gasmax = self.bosch_wind_factor
     self.log_pedal_learner = bool(CP.enableGasInterceptorDEPRECATED and CP.carFingerprint not in HONDA_BOSCH)
     # Accord 9G pedal: bounded, gated, slow gas-factor learner and a launch-speed cap (pedal_learner.py).
+    # Opt-in with its band (accord_9g_tune.py); otherwise the stock learner.
+    is_9g_pedal = bool(CP.enableGasInterceptorDEPRECATED and CP.carFingerprint == CAR.HONDA_ACCORD_9G)
+    tune_9g = get_accord_9g_tune() if CP.carFingerprint == CAR.HONDA_ACCORD_9G else None
     self.pedal_guard = None
     self.gas_factor_stored = self.bosch_gas_factor
-    if CP.enableGasInterceptorDEPRECATED and CP.carFingerprint == CAR.HONDA_ACCORD_9G:
-      self.pedal_guard = PedalGasFactorGuard(self.bosch_gas_factor)
+    if is_9g_pedal and tune_9g.gas_guard:
+      self.pedal_guard = PedalGasFactorGuard(self.bosch_gas_factor, tune_9g.gas_factor_min, tune_9g.gas_factor_max,
+                                             tune_9g.gas_factor_default, tune_9g.low_speed_gas_cap)
       self.bosch_gas_factor = self.pedal_guard.start
       self.bosch_gas_factor_before_gasmax = self.bosch_gas_factor
     self.pedal_learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
     # Accord 9G pedal long: hold the friction brake off at a steady cruise (set-speed hunt, routes 33d/352).
     # card.py feeds it the plan; None on every other car.
-    self.cruise_brake_deadband = CruiseBrakeDeadband() if (
-      CP.carFingerprint == CAR.HONDA_ACCORD_9G and CP.enableGasInterceptorDEPRECATED) else None
+    self.cruise_brake_deadband = CruiseBrakeDeadband() if is_9g_pedal and tune_9g.cruise_brake_deadband else None
     self.pitch = 0.0
     self.mvl_accord_mode = CP.carFingerprint == CAR.HONDA_ACCORD_11G
     # MVL Bosch low-speed extra-brake integrator. Active only for Accord 11G MVL mode.
@@ -346,7 +352,7 @@ class CarController(CarControllerBase):
     if self.pedal_guard is not None:
       counts = self.pedal_guard.counts
       total = max(1, sum(counts.values()) - counts["inactive"])
-      guard = (f"guard: stored {self.gas_factor_stored:.3f}, band {self.pedal_guard.start:.3f}+-0.10 in 1.2-1.6, " +
+      guard = (f"guard: stored {self.gas_factor_stored:.3f}, band {self.pedal_guard.start:.3f}+-0.10 in {self.pedal_guard.lo:.2f}-{self.pedal_guard.hi:.2f}, " +
                "learned " + " ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.items() if k != "inactive" and v))
     else:
       guard = "clips gas 0.1-3.0"
@@ -631,7 +637,7 @@ class CarController(CarControllerBase):
                 self.bosch_wind_factor_before_brake = self.bosch_wind_factor
 
             gas_mult = float(np.interp(CS.out.vEgo, [0.0, 10.0], [0.4, 1.0]))
-            gas_factor = self.bosch_gas_factor if self.pedal_guard is None else applied_gas_factor(self.bosch_gas_factor, CS.out.vEgo)
+            gas_factor = self.bosch_gas_factor if self.pedal_guard is None else self.pedal_guard.applied(self.bosch_gas_factor, CS.out.vEgo)
             if CC.longActive:
               gas_interceptor_command = float(np.clip(
                 gas_mult * ((gas * gas_factor) - brake + (wind_brake * self.bosch_wind_factor * 3.0 / 4.0)),

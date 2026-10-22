@@ -1789,7 +1789,8 @@ def test_leaving_experimental_does_not_reset_mode_transition_timer():
   assert not lc.transitioning
 
 
-def make_honda_9g_pedal_lc(pedal=True, fingerprint=None):
+def make_honda_9g_pedal_lc(pedal=True, fingerprint=None, tune=None):
+  from opendbc.car.honda.accord_9g_tune import TI_CAR, use_tune
   from opendbc.car.honda.values import CAR as HONDA_CAR
   CP = make_longcontrol_cp(
     brand="honda",
@@ -1797,7 +1798,8 @@ def make_honda_9g_pedal_lc(pedal=True, fingerprint=None):
     enableGasInterceptorDEPRECATED=pedal,
   )
   CP.longitudinalTuning.kiV = [1.0]
-  return LongControl(CP)
+  with use_tune(tune or TI_CAR):  # the TI car's numbers unless a test passes another tune
+    return LongControl(CP)
 
 
 def run_honda_brake_onset(lc, frames, a_target=-1.2, a_ego=-0.2, should_stop=False, leads=None, gas_frames=0, i0=0.0,
@@ -1950,3 +1952,21 @@ def test_honda_9g_cruise_deadband_not_on_other_cars():
     assert lc.vehicle_tuning.honda_cruise_deadband is None
     run_honda_cruise_hold(lc, 200, i0=-0.8)
     assert lc.pid.i < -1.0
+
+
+def test_honda_9g_stock_tune_has_no_brake_onset_hold_or_deadband():
+  # The SSV2 branch is for a different 9G: the TI car's long-PID helpers stay off unless the tune file asks for them.
+  from opendbc.car.honda.accord_9g_tune import STOCK
+  lc = make_honda_9g_pedal_lc(tune=STOCK)
+  assert lc.vehicle_tuning.honda_cruise_deadband is None
+  assert not lc.vehicle_tuning.honda_brake_onset_hold
+  out = run_honda_brake_onset(lc, 10, i0=-0.9)
+  assert out[0][1] < vehicle_tunes.HONDA_BRAKE_ONSET_I_FLOOR  # no clamp
+
+
+def test_honda_9g_brake_onset_i_floor_from_tune():
+  import dataclasses
+  from opendbc.car.honda.accord_9g_tune import TI_CAR
+  lc = make_honda_9g_pedal_lc(tune=dataclasses.replace(TI_CAR, brake_onset_i_floor=-0.6))
+  out = run_honda_brake_onset(lc, 10, i0=-0.9)
+  assert out[0][1] == pytest.approx(-0.6)

@@ -21,6 +21,7 @@ from collections import deque
 
 import numpy as np
 
+# Band and cap defaults are the TI car's numbers (accord_9g_tune.TI_CAR); a different 9G passes its own.
 # Closed-loop tracking on drives 302-31a by live factor (aEgo 0.3 s later - cmd, positive demand):
 # at >= 10 m/s the bias is -0.07..+0.02 for factors 1.2-1.6 and the >+0.5 m/s^2 overshoot share is 0-6 %;
 # above 1.6 it is 4-21 %, above 1.9 14-21 %; below 1.2 it under-delivers (-0.06..-0.14).
@@ -44,23 +45,26 @@ LOW_SPEED_CAP_BP = [6.0, 12.0]
 LOW_SPEED_CAP = 1.0
 
 
-def clamp_gas_factor(gas_factor: float) -> float:
+def clamp_gas_factor(gas_factor: float, lo: float = GAS_FACTOR_MIN, hi: float = GAS_FACTOR_MAX,
+                     default: float = GAS_FACTOR_DEFAULT) -> float:
   if not np.isfinite(gas_factor):
-    return GAS_FACTOR_DEFAULT
-  return float(np.clip(gas_factor, GAS_FACTOR_MIN, GAS_FACTOR_MAX))
+    return default
+  return float(np.clip(gas_factor, lo, hi))
 
 
-def applied_gas_factor(gas_factor: float, v_ego: float) -> float:
+def applied_gas_factor(gas_factor: float, v_ego: float, cap: float = LOW_SPEED_CAP, hi: float = GAS_FACTOR_MAX) -> float:
   """Factor used for the pedal command: the learned value, capped at launch speeds."""
-  cap = float(np.interp(v_ego, LOW_SPEED_CAP_BP, [LOW_SPEED_CAP, GAS_FACTOR_MAX]))
+  cap = float(np.interp(v_ego, LOW_SPEED_CAP_BP, [min(cap, hi), hi]))
   return min(gas_factor, cap)
 
 
 class PedalGasFactorGuard:
   REASONS = ("ok", "inactive", "speed", "gas", "cmd_change", "brake", "hill", "error", "drive_limit")
 
-  def __init__(self, gas_factor_start: float):
-    self.start = clamp_gas_factor(gas_factor_start)
+  def __init__(self, gas_factor_start: float, lo: float = GAS_FACTOR_MIN, hi: float = GAS_FACTOR_MAX,
+               default: float = GAS_FACTOR_DEFAULT, low_speed_cap: float = LOW_SPEED_CAP):
+    self.lo, self.hi, self.low_speed_cap = lo, hi, low_speed_cap
+    self.start = clamp_gas_factor(gas_factor_start, lo, hi, default)
     self.cmd_hist: deque = deque(maxlen=CMD_WINDOW_STEPS)
     self.steps_since_brake = BRAKE_HOLDOFF_STEPS
     self.counts = dict.fromkeys(self.REASONS, 0)
@@ -75,12 +79,15 @@ class PedalGasFactorGuard:
     if reason is None:
       error = accel_cmd - a_ego
       new = gas_factor + error / LEARN_DIV * gas * 4.8
-      lo = max(GAS_FACTOR_MIN, self.start - MAX_DRIVE_CHANGE)
-      hi = min(GAS_FACTOR_MAX, self.start + MAX_DRIVE_CHANGE)
+      lo = max(self.lo, self.start - MAX_DRIVE_CHANGE)
+      hi = min(self.hi, self.start + MAX_DRIVE_CHANGE)
       gas_factor = float(np.clip(new, lo, hi))
       reason = "drive_limit" if gas_factor != new else "ok"
     self.counts[reason] += 1
     return gas_factor
+
+  def applied(self, gas_factor: float, v_ego: float) -> float:
+    return applied_gas_factor(gas_factor, v_ego, self.low_speed_cap, self.hi)
 
   def _reject_reason(self, accel_cmd, a_ego, v_ego, gas, hill) -> str | None:
     if v_ego < MIN_SPEED:

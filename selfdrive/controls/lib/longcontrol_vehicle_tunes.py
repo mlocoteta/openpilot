@@ -2,6 +2,7 @@ import numpy as np
 
 from opendbc.car.gm.values import CAR, GMFlags
 from opendbc.car.honda import cruise_brake_deadband
+from opendbc.car.honda.accord_9g_tune import get_tune as get_accord_9g_tune
 from opendbc.car.honda.values import CAR as HONDA_CAR
 from opendbc.car.ford.values import CAR as FORD_CAR
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
@@ -79,7 +80,8 @@ VOLKSWAGEN_TAOS_COMFORT_STOP_CAP_V = [-0.45, -0.55, -0.65, -0.80, -0.95, -1.10]
 # Honda Accord 9G (Nidec + pedal) brake onset: the brake reaches the wheels ~0.35 s after the
 # command, so during the first (LongitudinalActuatorDelay + 0.15) s of a braking request the
 # aEgo error is lag, not a model error. Integrating it wound I down to -0.85 (p10) and over-braked
-# after gas releases (drives 314-318).
+# after gas releases (drives 314-318). Measured on the TI car: opt-in via accord_9g_tune.brake_onset_hold,
+# whose brake_onset_i_floor replaces HONDA_BRAKE_ONSET_I_FLOOR.
 HONDA_BRAKE_ONSET_TARGET = -0.3
 HONDA_BRAKE_ONSET_MIN_ERROR = 0.3
 HONDA_BRAKE_ONSET_I_FLOOR = -0.4
@@ -204,7 +206,12 @@ class LongControlVehicleTuning:
     # Brake-onset event tracking survives reset(): controlsd resets LongControl every frame
     # while long is inactive, and the longActive rising edge is one of the events.
     self.honda_brake_onset_frames = 1 << 30
-    self.honda_cruise_deadband = cruise_brake_deadband.CruiseBrakeDeadband() if self.is_honda_accord_9g_pedal_long else None
+    tune_9g = get_accord_9g_tune() if self.is_honda_accord_9g_pedal_long else None
+    self.honda_brake_onset_hold = bool(tune_9g and tune_9g.brake_onset_hold)
+    self.honda_brake_onset_i_floor = tune_9g.brake_onset_i_floor if tune_9g else HONDA_BRAKE_ONSET_I_FLOOR
+    self.honda_brake_accel_per_unit = tune_9g.brake_accel_per_unit if tune_9g else cruise_brake_deadband.ACCORD_9G_BRAKE_ACCEL_PER_UNIT
+    self.honda_pedal_close_wind_factor = tune_9g.pedal_close_wind_factor if tune_9g else cruise_brake_deadband.PEDAL_CLOSE_WIND_FACTOR
+    self.honda_cruise_deadband = cruise_brake_deadband.CruiseBrakeDeadband() if (tune_9g and tune_9g.cruise_brake_deadband) else None
     self.honda_prev_long_active = False
     self.honda_prev_gas_pressed = False
     self.honda_prev_a_target = 0.0
@@ -268,7 +275,7 @@ class LongControlVehicleTuning:
     """Honda Accord 9G pedal long: during the brake-lag window after a brake onset, freeze I
     and keep it >= HONDA_BRAKE_ONSET_I_FLOOR (negative-side mirror of the positive-overshoot
     trim). Stops, low speed and closing leads (TTC < 5 s) are left alone. Returns True to freeze I."""
-    if not self.is_honda_accord_9g_pedal_long or should_stop or CS.vEgo < HONDA_BRAKE_ONSET_MIN_SPEED:
+    if not self.honda_brake_onset_hold or should_stop or CS.vEgo < HONDA_BRAKE_ONSET_MIN_SPEED:
       return False
     if self.honda_brake_onset_frames >= self._honda_brake_onset_window_frames(starpilot_toggles):
       return False
@@ -276,7 +283,7 @@ class LongControlVehicleTuning:
       return False
     if self._has_close_lead(CS.vEgo, leads):
       return False
-    pid.i = max(pid.i, HONDA_BRAKE_ONSET_I_FLOOR)
+    pid.i = max(pid.i, self.honda_brake_onset_i_floor)
     return True
 
   def hold_honda_cruise_deadband_integrator(self, pid, a_target, feedforward, error, CS, should_stop, leads,
@@ -295,8 +302,9 @@ class LongControlVehicleTuning:
     gate.set_plan(v_cruise is not None, v_cruise if v_cruise is not None else 0.0, a_target, should_stop,
                   plan_source, lead_brake, csc_active)
     gate.update(True, CS.vEgo, last_output_accel,
-                cruise_brake_deadband.friction_request(last_output_accel, CS.vEgo), DT_CTRL)
-    return gate.suppressing and error < 0.0 and pid.i + feedforward <= cruise_brake_deadband.pedal_close_accel(CS.vEgo)
+                cruise_brake_deadband.friction_request(last_output_accel, CS.vEgo, self.honda_brake_accel_per_unit), DT_CTRL)
+    return (gate.suppressing and error < 0.0 and
+            pid.i + feedforward <= cruise_brake_deadband.pedal_close_accel(CS.vEgo, self.honda_pedal_close_wind_factor))
 
   def shape_stopping_accel(self, output_accel, a_target, should_stop, v_ego, has_lead, stop_accel, leads=None):
     """Shape low-speed stop braking without overriding urgent targets."""
