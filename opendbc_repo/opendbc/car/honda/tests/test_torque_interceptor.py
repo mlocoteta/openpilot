@@ -79,7 +79,8 @@ class TestQualification:
     ci = CarInterface(cp)
     assert ci.CC.nidec_interceptor is not None and ci.CC.ti is not None
 
-  @pytest.mark.parametrize("pedal", (True, False))
+  # F05: the pedal TI car joins stock AOL on the exact word 548|TI only (starpilot/aol/tests/test_honda_ti_aol.py)
+  @pytest.mark.parametrize("pedal", (False,))
   @pytest.mark.parametrize("experience", (0, 32))
   def test_ti_car_is_never_stock_aol(self, pedal, experience):
     cp = params(pedal=pedal)
@@ -189,8 +190,9 @@ def ti_car():
   return ci, CANPacker(DBC[cp.carFingerprint][Bus.pt])
 
 
-def run_frame(ci, packer, frame, feedback, torque=0.5, lat_active=True):
-  msgs = []
+def run_frame(ci, packer, frame, feedback, torque=0.5, lat_active=True, main_on=True):
+  # ACC main on (0x1A6 MAIN_ON): the TI only applies torque with it (F05)
+  msgs = [CanData(*packer.make_can_msg("SCM_BUTTONS", 0, {"MAIN_ON": int(main_on)}))]
   if feedback is not None:
     addr, dat, bus = packer.make_can_msg("TI_FEEDBACK", 0, feedback)
     msgs.append(CanData(addr, dat, bus))
