@@ -128,7 +128,8 @@ class TestHondaTorqueInterceptor(unittest.TestCase):
       self.assertFalse(rx_invalid(4 | TI))
       self.assertFalse(rx_invalid(36 | TI))
       self.assertTrue(rx_invalid(548))
-      self.assertFalse(rx_invalid(548 | TI))
+      # F05: 548|TI is the TI AOL word and attaches the same policy (test_honda_ti_aol.py)
+      self.assertTrue(rx_invalid(548 | TI))
       self.assertFalse(self.tx(ti_frame(1)))
     finally:
       self.safety.set_alternative_experience(0)
