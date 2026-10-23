@@ -23,7 +23,9 @@ from opendbc.car.honda.values import CAR, HondaSafetyFlags
 TI_SAFETY_PARAM = int(HondaSafetyFlags.TORQUE_INTERCEPTOR)
 # Nidec safety words of the 9G with and without the gas pedal interceptor (NIDEC_ALT, + GAS_INTERCEPTOR).
 TI_BASE_SAFETY_PARAMS = (int(HondaSafetyFlags.NIDEC_ALT),
-                         int(HondaSafetyFlags.NIDEC_ALT | HondaSafetyFlags.GAS_INTERCEPTOR))
+                         int(HondaSafetyFlags.NIDEC_ALT | HondaSafetyFlags.GAS_INTERCEPTOR),
+                         # F05: the pedal word after 7.0's AOL policy adds NIDEC_PEDAL_AOL (548)
+                         int(HondaSafetyFlags.NIDEC_ALT | HondaSafetyFlags.GAS_INTERCEPTOR | HondaSafetyFlags.NIDEC_PEDAL_AOL))
 # FrogPilot/6.x TI tune; the board adds its own lag on top of the EPS.
 TI_STEER_ACTUATOR_DELAY = 0.5
 
@@ -426,7 +428,9 @@ class TorqueInterceptor:
     # The gen1 board only leaves OFF after a run of zero-torque frames and latches a violation
     # if torque ramps before it reports RUN, so torque is gated on the board's own state. Must
     # also follow latActive: the panda rejects non-zero 0x249 while lateral is not allowed.
-    if CC.latActive and CS.ti.lkas_allowed:
+    # F05: and ACC main (same 0x1A6 MAIN_ON the panda uses), checked at 100 Hz, so a MAIN press
+    # zeroes torque in the same frame instead of after the ~10 Hz native lateralAllowed update.
+    if CC.latActive and CS.ti.lkas_allowed and CS.out.cruiseState.available:
       # The TI drives the EPS motor directly with its own sign convention, not the Honda CAN
       # one, so no negation here. Verified on the car: negating steers the wrong way.
       new_steer = int(round(torque_cmd * TI_LIMITS.TI_STEER_MAX))
