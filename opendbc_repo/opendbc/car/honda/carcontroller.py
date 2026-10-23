@@ -180,9 +180,9 @@ class CarController(CarControllerBase):
     # Send steering command. On the TI car 0xE4 reaches no EPS: it carries zero torque
     # (request still follows latActive) and the torque goes to the TI board on 0x249.
     if self.ti is not None:
-      ti_apply_steer = self.ti.update(CC, CS, torque_cmd)
+      ti_apply_steer, ti_option = self.ti.update(CC, CS, torque_cmd)
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))
-      can_sends.append(create_ti_steering_control(self.packer, ti_apply_steer))
+      can_sends.append(create_ti_steering_control(self.packer, ti_apply_steer, ti_option))
     else:
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
     if _projection is not None:
