@@ -31,7 +31,9 @@ CANFD_STOCK = frozenset((CAR.HONDA_CRV_6G, CAR.HONDA_PILOT_4G,
 ALT_RADAR_STOCK = frozenset((CAR.ACURA_RDX_3G_MMR, CAR.HONDA_ODYSSEY_5G_MMR,
   CAR.ACURA_TLX_2G, CAR.ACURA_MDX_4G))
 BOSCH_WORDS = frozenset((0, 1, 8, 9, 10, 11, 16, 17, 80, 81, 512, 513, 1058, 1059, 1570, 1571, 2082, 2083, 2211))
-NIDEC_WORDS = frozenset((0, 4, 260, 544, 548, 804))
+# 4644 = 548 | TORQUE_INTERCEPTOR: the 9G Torque Interceptor car on the pedal AOL word (F05, honda_ti.h)
+NIDEC_TI_AOL_WORD = 548 | int(HondaSafetyFlags.TORQUE_INTERCEPTOR)
+NIDEC_WORDS = frozenset((0, 4, 260, 544, 548, 804, NIDEC_TI_AOL_WORD))
 MANUAL_SELECTION_PORTS = CLASSIC_BOSCH | NIDEC | RADARLESS | CANFD_STOCK | ALT_RADAR_STOCK | {CAR.HONDA_ACCORD_11G}
 
 # qualified() runs several times per 100 Hz frame in card and selfdrived, so
@@ -98,6 +100,11 @@ def qualified(cp, *, marked_only=False):
         expected |= int(HondaSafetyFlags.NIDEC_PEDAL_AOL)
     if fingerprint == CAR.HONDA_ODYSSEY_TWN and cp.alternativeExperience == 32:
       expected |= 256
+    # The 9G pedal car may carry the TI bit (torque_interceptor.py); with it the panda accepts AOL
+    # only on the exact word 548|TI (honda_ti_stock_aol_param), so allow only that combination.
+    if (fingerprint == CAR.HONDA_ACCORD_9G and pedal and flags & _NIDEC_ALT_SCM_MESSAGES and
+        safety.safetyParam & int(HondaSafetyFlags.TORQUE_INTERCEPTOR)):
+      expected |= int(HondaSafetyFlags.TORQUE_INTERCEPTOR)
     return (bool(cp.pcmCruise) == (not pedal) and cp.openpilotLongitudinalControl and
             safety.safetyModel == _HONDA_NIDEC and safety.safetyParam == expected)
   if fingerprint in CLASSIC_BOSCH and flags & _BOSCH and not flags & _BOSCH_RADARLESS:
