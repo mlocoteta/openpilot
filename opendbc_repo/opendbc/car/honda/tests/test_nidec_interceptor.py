@@ -93,6 +93,65 @@ def test_original_nidec_learning_and_inactive_zero():
   assert owner.update(cc, cs, 0.0, 0.0, 0.01) == 0.0
 
 
+
+def _pid(accel):
+  cc = structs.CarControl(longActive=True)
+  cc.actuators.accel = accel
+  cc.actuators.longControlState = "pid"
+  return cc
+
+
+def test_accord_9g_guard_clamps_start_and_bounds_runaway():
+  from opendbc.car.honda import pedal_learner as PL
+  owner = NidecInterceptor(factory(CAR.HONDA_ACCORD_9G))
+  assert owner.pedal_guard is not None
+  owner.set_factors(2.044, 4.9)  # the first 7.0 drive's runaway value, as BoschLearningParams loads it
+  assert owner.bosch_gas_factor == PL.GAS_FACTOR_MAX and owner.gas_factor_stored == pytest.approx(2.044)
+  assert owner.bosch_wind_factor == pytest.approx(4.9)
+  owner.set_factors(1.5566, 4.9)
+  cc = _pid(1.0)
+  cs = SimpleNamespace(out=SimpleNamespace(aEgo=0.0, gasPressed=False, brakePressed=False, vEgo=20.0))
+  for _ in range(50 * 60):  # 1 min of a 1 m/s^2 under-delivery at 20 m/s: stock would run to its 3.0 clip
+    owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.05)
+  assert owner.bosch_gas_factor == pytest.approx(PL.GAS_FACTOR_MAX)  # 1.5566 + 0.10 capped at 1.6
+  cs.out.aEgo = 0.95
+  for _ in range(50 * 60):  # low-speed launches never learn and are capped at 1.0
+    cs.out.vEgo = 3.0
+    output = owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.002)
+  assert owner.bosch_gas_factor == pytest.approx(PL.GAS_FACTOR_MAX)
+  gas_mult = 0.4 + 0.6 * 3.0 / 10.0
+  assert output == pytest.approx(gas_mult * (1.0 / 4.8 * 1.0 + 0.002 * owner.bosch_wind_factor * 0.75))
+
+
+def test_accord_9g_guard_brake_holdoff_and_hill():
+  owner = NidecInterceptor(factory(CAR.HONDA_ACCORD_9G))
+  owner.set_factors(1.4, 1.0)
+  cc = _pid(1.0)
+  cs = SimpleNamespace(out=SimpleNamespace(aEgo=0.5, gasPressed=False, brakePressed=False, vEgo=20.0))
+  for _ in range(200):
+    owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.05, apply_brake=1)
+  assert owner.bosch_gas_factor == 1.4 and owner.pedal_guard.counts["brake"] == 200
+  for _ in range(99):
+    owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.05)
+  assert owner.bosch_gas_factor == 1.4
+  owner.observe_orientation([0.0, 0.1, 0.0])  # ~5.7 deg grade, ~0.98 m/s^2
+  for _ in range(100):
+    owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.05)
+  assert owner.bosch_gas_factor == 1.4 and owner.pedal_guard.counts["hill"] > 0
+  owner.observe_orientation([0.0, 0.0, 0.0])
+  for _ in range(100):
+    owner.update(cc, cs, 1.0 / 4.8, 0.0, 0.05)
+  assert 1.4 < owner.bosch_gas_factor < 1.45
+
+
+@pytest.mark.parametrize("identity", [i for i in IDENTITIES if i != CAR.HONDA_ACCORD_9G])
+def test_other_interceptor_cars_keep_stock_learner(identity):
+  owner = NidecInterceptor(factory(identity))
+  assert owner.pedal_guard is None
+  owner.set_factors(2.5, 1.0)
+  assert owner.bosch_gas_factor == 2.5
+
+
 def source_frames(cp, packer, tick, *, sensor=True, level=0, state=0):
   from opendbc.can import CANDefine
   from opendbc.can.dbc import DBC as CANDBC
