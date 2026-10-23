@@ -132,6 +132,9 @@ class CarController(CarControllerBase):
     pcm_cancel_cmd = CC.cruiseControl.cancel
     if self.bosch_longitudinal is not None:
       self.bosch_longitudinal.observe_orientation(CC.orientationNED)
+    if self.nidec_interceptor is not None:
+      self.nidec_interceptor.observe_orientation(CC.orientationNED)
+      self.nidec_interceptor.tick(self.frame)
 
     if CC.longActive:
       accel = actuators.accel
@@ -254,7 +257,7 @@ class CarController(CarControllerBase):
           self.apply_brake_last = apply_brake
           self.brake = apply_brake / self.params.NIDEC_BRAKE_MAX
           if self.nidec_interceptor is not None:
-            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake)
+            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake, apply_brake)
             can_sends.append(create_command(self.packer, command, (self.frame // 2) % 16))
 
     # Send dashboard UI commands.
