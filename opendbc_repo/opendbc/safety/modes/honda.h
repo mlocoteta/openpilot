@@ -429,8 +429,8 @@ static safety_config honda_nidec_init(uint16_t raw_param) {
   } else {
     SET_TX_MSGS(HONDA_N_TX_MSGS, ret);
   }
-  // raw_param: a TI word is never a stock AOL word, so the TI car stays out of stock AOL
-  ret = honda_stock_aol_configure(raw_param, true, enable_nidec_alt, 0U, ret);
+  // A TI word reaches stock AOL only as the exact 9G pedal AOL word (honda_ti_stock_aol_param)
+  ret = honda_stock_aol_configure(honda_ti_stock_aol_param(raw_param), true, enable_nidec_alt, 0U, ret);
 
   return ret;
 }
