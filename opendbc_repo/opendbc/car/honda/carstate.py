@@ -176,6 +176,9 @@ class CarState(CarStateBase):
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
     if self.ti is not None:
       ret.steeringTorque, ret.steeringPressed = self.ti.update(cp, ret.steeringTorque, STEER_THRESHOLD.get(self.CP.carFingerprint, 1200))
+      # TI dropped out of RUN mid-drive: openpilot is not steering -> "Steering Temporarily Unavailable"
+      if self.ti.locked_out:
+        ret.steerFaultTemporary = True
 
     if self.CP.flags & HondaFlags.BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
