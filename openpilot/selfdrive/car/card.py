@@ -370,6 +370,8 @@ class Car:
 
     from openpilot.starpilot.car.hyundai.button_migration import migrate_lkas_default
     migrate_lkas_default(self.CP, self.params)
+    from openpilot.starpilot.car.honda.ti_button_default import enroll_lkas_default
+    enroll_lkas_default(self.CP, self.params)
     self.is_metric = self.params.get_bool("IsMetric")
     aol_policy = aol_policy_for(self.CP)
     if aol_policy.full_axis_runtime_required and not self.aol_replay:
