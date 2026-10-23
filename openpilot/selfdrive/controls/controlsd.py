@@ -22,6 +22,7 @@ from openpilot.selfdrive.controls.lib.highway_correction_gain import HighwayCorr
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.lateral_controller_factory import create_lateral_controller
+from openpilot.selfdrive.controls.lib.latcontrol_torque_ti import ti_lateral_qualified
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.modeld.constants import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -79,6 +80,7 @@ class Controls:
     self.subaru_smoothing = read_frozen(self.CP, self.params)
 
     self.CI = interfaces[self.CP.carFingerprint](self.CP)
+    self.ti_lateral = ti_lateral_qualified(self.CP)  # Honda 9G TI: LatControlTorqueTI, no learning (F03)
     self.hyundai_lateral_fault = LateralFaultLatch(self.CP.carFingerprint)
     self.lateral_controller_selection = read_selection(self.params, self.CP)
     self.vehicle_startup_preferences = VehicleStartupPreferences.read(self.params, enabled=self.params.get_bool("OpenpilotEnabledToggle"))
@@ -133,7 +135,7 @@ class Controls:
     self.lane_centering_host = LaneCenteringHost(self.params) if lane_runtime_supported(self.CP) else None
     self.torque_host = (
       TorqueHost(self.params, self.CP, allow_learning=(self.torque_learning_allowed if self.lateral_controller_selection.policy is not None else None))
-      if torque_runtime_enabled(self.CP, self.params)
+      if not getattr(self, 'ti_lateral', False) and torque_runtime_enabled(self.CP, self.params)
       else None
     )
     self.last_lane_centering_result: LaneCenteringResult | None = None
@@ -182,7 +184,9 @@ class Controls:
     preference = read_preference(self.params, self.CP)
     route_effects, self.route_flm_status = self._configure_route_tune(manual_status)
     self.global_learning = (
-      GlobalRuntime(self.CP, self.CI, self.LaC, confirmed_live_history=load_confirmed_history(self.params)) if preference.valid and preference.enabled else None
+      GlobalRuntime(self.CP, self.CI, self.LaC, confirmed_live_history=load_confirmed_history(self.params))
+      if not getattr(self, 'ti_lateral', False) and preference.valid and preference.enabled
+      else None
     )
     # Load optional capture and live-trial code before the first control command.
     # Engagement must not compile/import replay and feedback modules in the loop.
@@ -751,7 +755,9 @@ class Controls:
       hudControl.rightLaneDepart = self.sm['driverAssistance'].rightLaneDeparture
 
     feedback_input_limited = self.steer_limited_by_safety
-    if CC.latActive:
+    if getattr(self, 'ti_lateral', False):
+      self.steer_limited_by_safety = self.LaC.controls_steer_limited(CC, CS, self.sm['carOutput'])
+    elif CC.latActive:
       CO = self.sm['carOutput']
       if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
         from openpilot.starpilot.car.tesla.coop_saturation import is_angle_steering_limited
