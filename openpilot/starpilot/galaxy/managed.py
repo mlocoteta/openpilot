@@ -9,9 +9,10 @@ from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.galaxy.server import make_remote_server
 from openpilot.starpilot.galaxy.remote import default_remote_pairing, make_gateway_auth_server
 from openpilot.starpilot.galaxy.remote_service import supervise_tunnel
+from openpilot.starpilot.galaxy import memory_watchdog
 
 
-def serve_managed(server, *, extra_servers=(), tunnel=None) -> None:
+def serve_managed(server, *, extra_servers=(), tunnel=None, watchdog=None) -> None:
   # The manual server retains its normal threading policy. A managed child has
   # a five-second stop grace, so a slow request cannot keep the process alive.
   server.daemon_threads = True
@@ -50,6 +51,14 @@ def serve_managed(server, *, extra_servers=(), tunnel=None) -> None:
       errors.append(exc)
       stop.set()
 
+  def serve_watchdog():
+    try:
+      assert watchdog is not None
+      watchdog(stop)
+    except BaseException as exc:
+      errors.append(exc)
+      stop.set()
+
   old_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
   for sig in old_handlers:
     signal.signal(sig, request_stop)
@@ -58,6 +67,8 @@ def serve_managed(server, *, extra_servers=(), tunnel=None) -> None:
   extras = [threading.Thread(target=serve_extra, args=(extra,), daemon=True)
             for extra in extra_servers]
   tunnel_worker = threading.Thread(target=serve_tunnel, daemon=True) if tunnel is not None else None
+  # A due memory restart sets stop; the clean exit lets manager restart Galaxy.
+  watchdog_worker = threading.Thread(target=serve_watchdog, name='galaxy-memory', daemon=True) if watchdog is not None else None
   started = False
   try:
     for extra, thread in zip(extra_servers, extras, strict=True):
@@ -67,6 +78,8 @@ def serve_managed(server, *, extra_servers=(), tunnel=None) -> None:
     started = True
     if tunnel_worker is not None:
       tunnel_worker.start()
+    if watchdog_worker is not None:
+      watchdog_worker.start()
     while worker.is_alive() and not stop.wait(0.1):
       pass
   finally:
@@ -126,7 +139,8 @@ def main() -> None:
     server.server_close()
     raise
   print(f'Galaxy local/LAN service listening on port {server.server_port}', flush=True)
-  serve_managed(server, extra_servers=(remote_server, auth_server), tunnel=lambda stop: supervise_tunnel(stop, pairing))
+  serve_managed(server, extra_servers=(remote_server, auth_server), tunnel=lambda stop: supervise_tunnel(stop, pairing),
+                watchdog=memory_watchdog.run)
 
 
 if __name__ == '__main__':
