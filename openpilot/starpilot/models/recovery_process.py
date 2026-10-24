@@ -5,6 +5,7 @@ import time
 from multiprocessing import Process
 
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.models.egpu_return import STOP_GRACE_NS, EgpuReturn, chestnut_usb_identity
 from openpilot.starpilot.models.receipt import process_start_ticks, read_receipt
 from openpilot.starpilot.models.recovery import KILL_GRACE_NS, STARTUP_FALLBACK_EXIT, ModelRecoveryOwner, RecoveryEvidence
 from openpilot.starpilot.models.status import ModelVariant
@@ -28,6 +29,54 @@ class ModeldProcess(PythonProcess):
     self.recovery = ModelRecoveryOwner()
     self.context_ready = False
     self.launch_drive_id = 0
+    self.egpu = EgpuReturn()
+    self.egpu_deadline_ns = 0
+    self.egpu_killed = False
+
+  def _egpu_stopping(self, now, alive, drive_id):
+    # Accord F16: our own Small -> Chestnut restart. Nothing else may start or
+    # latch modeld until this Small process has exited.
+    if alive:
+      if now >= self.egpu_deadline_ns:
+        if self.egpu_killed:
+          self.egpu_deadline_ns = 0
+          cloudlog.error('modeld.egpu_return: Small did not exit; leaving it running')
+          return False
+        self.egpu_killed = True
+        self.egpu_deadline_ns = now + STOP_GRACE_NS
+        try:
+          self.signal(signal.SIGKILL)
+        except ProcessLookupError:
+          pass
+      return True
+    self.proc.join(timeout=0)
+    self.proc = None
+    self.shutting_down = False
+    self.egpu_deadline_ns = 0
+    # Clears this drive's small_only latch; a failed Chestnut start takes the normal startup-exit path again.
+    self.recovery.__init__()
+    self.recovery.drive_id = drive_id
+    cloudlog.event('modeld.egpu_return', action='restart', drive=drive_id, attempt=self.egpu.attempts)
+    return True
+
+  def _egpu_check(self, sm, now, drive_id, running_small):
+    chestnut = chestnut_usb_identity() if running_small else None
+    cc = sm['carControl'] if running_small else None
+    safe = bool(running_small and sm.seen['carControl'] and sm.alive['carControl'] and
+                not (cc.enabled or cc.latActive or cc.longActive))
+    def big_selected():
+      from openpilot.starpilot.models.manager import preferences
+      return bool(preferences()['big'])
+    if not self.egpu.step(now, drive_id, running_small, chestnut, safe, big_selected):
+      return
+    self.egpu_killed = False
+    self.egpu_deadline_ns = now + STOP_GRACE_NS
+    try:
+      self.signal(signal.SIGINT)
+    except ProcessLookupError:
+      pass
+    cloudlog.event('modeld.egpu_return', action='stop-small', pid=self.proc.pid, drive=drive_id,
+                   chestnut=list(chestnut), attempt=self.egpu.attempts)
 
   def observe(self, sm, started):
     now = time.monotonic_ns()
@@ -51,6 +100,8 @@ class ModeldProcess(PythonProcess):
     device_fresh = (sm.seen['deviceState'] and sm.valid['deviceState'] and sm.alive['deviceState'] and
                     0 < int(sm.logMonoTime['deviceState']) <= now <= int(sm.logMonoTime['deviceState']) + 1_000_000_000)
     self.context_ready = bool(device_fresh and started)
+    if self.egpu_deadline_ns and self.proc is not None and self._egpu_stopping(now, alive, evidence.drive_id):
+      return
     if (self.context_ready and self.proc is not None and not alive and not self.shutting_down and
         self.proc.exitcode == STARTUP_FALLBACK_EXIT and self.recovery.phase == 'monitor' and
         not self.recovery.small_only and 0 < self.launch_drive_id == evidence.drive_id):
@@ -83,6 +134,10 @@ class ModeldProcess(PythonProcess):
       self.proc = None
       self.shutting_down = False
       cloudlog.event('modeld.recovery', action='small-after-exit', pid=pid, drive=evidence.drive_id)
+    elif (action is None and self.context_ready and alive and not self.shutting_down and
+          self.recovery.phase in ('monitor', 'small')):
+      self._egpu_check(sm, now, evidence.drive_id,
+                       bool(load is not None and matches and load.variant == ModelVariant.SMALL))
 
   def stop(self, retry=True, block=True, sig=None):
     if self.recovery.phase in ('sigint', 'sigkill', 'failed'):
@@ -111,7 +166,7 @@ class ModeldProcess(PythonProcess):
     return super().stop(retry=retry, block=block, sig=sig)
 
   def start(self):
-    if not self.context_ready or self.recovery.phase in ('sigint', 'sigkill', 'failed'):
+    if not self.context_ready or self.recovery.phase in ('sigint', 'sigkill', 'failed') or self.egpu_deadline_ns:
       return
     if self.shutting_down:
       self.stop(block=False)
@@ -120,5 +175,6 @@ class ModeldProcess(PythonProcess):
     self.proc = Process(name=self.name, target=modeld_launcher,
                         args=(self.module, self.name, self.recovery.small_only))
     self.launch_drive_id = self.recovery.drive_id
+    self.egpu.launched(chestnut_usb_identity(), self.recovery.small_only)
     self.proc.start()
     self.shutting_down = False
