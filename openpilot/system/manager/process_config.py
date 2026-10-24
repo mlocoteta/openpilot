@@ -176,7 +176,7 @@ procs = [
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run, restart_on_exit=True),
   PythonProcess("navigationd", "openpilot.starpilot.navigation.runtime", always_run),
   PythonProcess("navtilesd", "openpilot.starpilot.navigation.navtilesd", always_run, enabled=platform.system() == "Linux"),
-  PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local),
+  PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local, restart_on_exit=True),  # memory watchdog exits offroad
   PythonProcess(
     "galaxy_phone",
     "openpilot.starpilot.galaxy_bluetooth.bootstrap",
