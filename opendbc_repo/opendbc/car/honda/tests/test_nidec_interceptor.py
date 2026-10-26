@@ -107,7 +107,7 @@ def test_accord_9g_guard_clamps_start_and_bounds_runaway():
   assert owner.pedal_guard is not None
   owner.set_factors(2.044, 4.9)  # the first 7.0 drive's runaway value, as BoschLearningParams loads it
   assert owner.bosch_gas_factor == PL.GAS_FACTOR_MAX and owner.gas_factor_stored == pytest.approx(2.044)
-  assert owner.bosch_wind_factor == pytest.approx(4.9)
+  assert owner.bosch_wind_factor == PL.WIND_FACTOR_HOLD and owner.wind_factor_stored == pytest.approx(4.9)
   owner.set_factors(1.5566, 4.9)
   cc = _pid(1.0)
   cs = SimpleNamespace(out=SimpleNamespace(aEgo=0.0, gasPressed=False, brakePressed=False, vEgo=20.0))
@@ -144,12 +144,35 @@ def test_accord_9g_guard_brake_holdoff_and_hill():
   assert 1.4 < owner.bosch_gas_factor < 1.45
 
 
+def test_accord_9g_wind_factor_held():
+  # 2026-10-25 route 30: the stock wind learner had walked to 3.3, the long PID sat at -0.3 m/s^2 to cancel the
+  # extra pedal and the brake tapped ~16 times a minute at a 50 mph cruise. The 9G holds the factor instead.
+  from opendbc.car.honda import pedal_learner as PL
+  owner = NidecInterceptor(factory(CAR.HONDA_ACCORD_9G))
+  owner.set_factors(1.25, 3.304)
+  assert owner.bosch_wind_factor == PL.WIND_FACTOR_HOLD == 2.3
+  assert owner.learner_start == (1.25, 2.3)
+  wind_brake = 0.091  # stock table at 22 m/s
+  cs = SimpleNamespace(out=SimpleNamespace(aEgo=0.0, gasPressed=False, brakePressed=False, vEgo=22.0))
+  for accel in (0.6, -0.4):  # a minute each of under- and over-delivery: the stock law would move it ~25 %
+    cc = _pid(accel)
+    for _ in range(50 * 60):
+      output = owner.update(cc, cs, max(accel, 0.0) / 4.8, max(-accel, 0.0) / 4.8, wind_brake)
+    assert owner.bosch_wind_factor == PL.WIND_FACTOR_HOLD
+  assert output == pytest.approx(1.0 * (0.0 * 1.25 - 0.4 / 4.8 + wind_brake * 2.3 * 0.75))
+  owner.log_learner()  # the per-drive log names the held and stored values
+
+
 @pytest.mark.parametrize("identity", [i for i in IDENTITIES if i != CAR.HONDA_ACCORD_9G])
 def test_other_interceptor_cars_keep_stock_learner(identity):
   owner = NidecInterceptor(factory(identity))
   assert owner.pedal_guard is None
   owner.set_factors(2.5, 1.0)
   assert owner.bosch_gas_factor == 2.5
+  cs = SimpleNamespace(out=SimpleNamespace(aEgo=0.0, gasPressed=False, brakePressed=False, vEgo=22.0))
+  for _ in range(100):
+    owner.update(_pid(0.6), cs, 0.6 / 4.8, 0.0, 0.091)
+  assert owner.bosch_wind_factor > 1.0 and owner.bosch_gas_factor > 2.5
 
 
 def source_frames(cp, packer, tick, *, sensor=True, level=0, state=0):
