@@ -5,7 +5,7 @@ import numpy as np
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.carlog import carlog
-from opendbc.car.honda.pedal_learner import PedalGasFactorGuard, applied_gas_factor
+from opendbc.car.honda.pedal_learner import WIND_FACTOR_HOLD, PedalGasFactorGuard, applied_gas_factor
 from opendbc.car.honda.values import CAR, HondaFlags, HondaSafetyFlags
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -86,9 +86,11 @@ class NidecInterceptor:
     self.bosch_wind_factor = float(wind) if math.isfinite(wind) and 0.1 <= wind <= 5.0 else 1.0
     self.bosch_wind_factor_before_brake = self.bosch_wind_factor
     self.gas_factor_stored = self.bosch_gas_factor
+    self.wind_factor_stored = self.bosch_wind_factor
     if self.guarded:
       self.pedal_guard = PedalGasFactorGuard(self.bosch_gas_factor)
       self.bosch_gas_factor = self.pedal_guard.start
+      self.bosch_wind_factor = self.bosch_wind_factor_before_brake = WIND_FACTOR_HOLD
     self.learner_start = (self.bosch_gas_factor, self.bosch_wind_factor)
 
   def observe_orientation(self, orientation):
@@ -102,7 +104,8 @@ class NidecInterceptor:
       counts = self.pedal_guard.counts
       total = max(1, sum(counts.values()) - counts["inactive"])
       guard = (f"guard: stored {self.gas_factor_stored:.3f}, band {self.pedal_guard.start:.3f}+-0.10 in 1.2-1.6, " +
-               "learned " + " ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.items() if k != "inactive" and v))
+               "learned " + " ".join(f"{k} {100 * v / total:.0f}%" for k, v in counts.items() if k != "inactive" and v) +
+               f"; wind held {WIND_FACTOR_HOLD:.2f} (stored {self.wind_factor_stored:.3f})")
     else:
       guard = "clips gas 0.1-3.0"
     carlog.warning(" ".join((
@@ -126,8 +129,8 @@ class NidecInterceptor:
       hill = math.sin(self.pitch) * ACCELERATION_DUE_TO_GRAVITY
       self.bosch_gas_factor = self.pedal_guard.update(self.bosch_gas_factor, CC.actuators.accel, CS.out.aEgo, CS.out.vEgo,
                                                       gas, braking, hill, learn_allowed)
-    if learn_allowed:
-      if self.pedal_guard is None and gas_error != 0.0 and gas > 0.0:
+    if learn_allowed and self.pedal_guard is None:  # the 9G holds its wind factor (pedal_learner.WIND_FACTOR_HOLD)
+      if gas_error != 0.0 and gas > 0.0:
         self.bosch_gas_factor = float(np.clip(self.bosch_gas_factor + gas_error / 150.0 * (gas * 4.8), 0.1, 3.0))
       if gas_error != 0.0 and not CS.out.brakePressed and CS.out.vEgo > 0.0:
         wind_adjust = 1.0 + (wind_brake * 4.8) / 1000.0
