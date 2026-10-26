@@ -82,6 +82,7 @@ AlertLevel = log.DriverMonitoringState.AlertLevel
 MonitoringPolicy = log.DriverMonitoringState.MonitoringPolicy
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
+BIG_MODEL_WARMUP_S = 5.  # after the big model load ends: comm checks relaxed and engaging held off
 
 
 class SelfdriveD:
@@ -359,7 +360,10 @@ class SelfdriveD:
     if self.big_model_loading and not loading:
       self.big_model_ready_t = time.monotonic()
     self.big_model_loading = loading
-    if self.big_model_loading:
+    # No engaging until the warmup after the load ends either: traintrack's first Chestnut frames stall card
+    # once for ~0.14 s about 2-3 s after "models loaded" (every 7.0 drive 10-24/25), and an engage inside that
+    # window ended in commIssue / controlsMismatch "TAKE CONTROL IMMEDIATELY" (routes 2f, 30).
+    if self.big_model_settling():
       self.events.add(EventName.bigModelLoading)
 
     if self.jetlink_swaps is not None:
@@ -612,8 +616,7 @@ class SelfdriveD:
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (hardware_events_added == 0 and len(self.events) == num_can_events)
-    warmup_sec = 5.
-    big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + warmup_sec
+    big_model_settling = self.big_model_settling()
     if not self.sm.all_checks() and no_system_errors and not big_model_settling:  # the load holds modelV2 and friends back on purpose
       if not self.sm.all_alive():
         self.events.add(EventName.commIssue)
@@ -808,6 +811,9 @@ class SelfdriveD:
       self.mismatch_counter += 1
 
     return CS
+
+  def big_model_settling(self):
+    return self.big_model_loading or time.monotonic() < self.big_model_ready_t + BIG_MODEL_WARMUP_S
 
   def source_deadline_deferral_supported(self):
     from openpilot.starpilot.car.hyundai.aol import source_deadline_supported
