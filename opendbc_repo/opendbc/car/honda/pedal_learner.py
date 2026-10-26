@@ -24,6 +24,14 @@ import numpy as np
 # Closed-loop tracking on drives 302-31a by live factor (aEgo 0.3 s later - cmd, positive demand):
 # at >= 10 m/s the bias is -0.07..+0.02 for factors 1.2-1.6 and the >+0.5 m/s^2 overshoot share is 0-6 %;
 # above 1.6 it is 4-21 %, above 1.9 14-21 %; below 1.2 it under-delivers (-0.06..-0.14).
+# Wind factor, held (not learned) on the 9G. The stock wind learner is a free integrator on (accel_cmd - aEgo); on 7.0
+# it wandered 1.5-5.0 within a drive. The pedal's wind term (wind_brake * factor * 3/4) is the cruise feedforward, so a
+# high factor over-feeds the pedal and the long PID integrator sits negative to cancel it: no-lead 45-65 mph cruise on
+# 7.0 drives 28/29/2b (factor 2.2-2.4) ran at PID accel -0.04..-0.10 with 0-0.3 brake pulses/min, drives 2c/2f/30
+# (2.9-3.4) at -0.22..-0.30, 0.2-0.3 m/s^2 above the stock brake onset (-(wind_brake + 0.02) * 4.8), with 2.7-15.7
+# friction-brake taps/min and the pedal hunting (route 30). The same negative bias walked the gas factor to its floor.
+WIND_FACTOR_HOLD = 2.3
+
 GAS_FACTOR_MIN = 1.2
 GAS_FACTOR_MAX = 1.6
 GAS_FACTOR_DEFAULT = 1.4
