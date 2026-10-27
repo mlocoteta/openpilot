@@ -1462,8 +1462,9 @@ class Supervisor:
   def _adapter_address(self) -> str:
     """This comma's Bluetooth address for the head unit's pairing request; empty when BlueZ is not up."""
     try:
-      return str(self._bluez.adapter()[1].get("Address", "")).upper() if self._bluez is not None else ""
-    except Exception:  # DBus errors vary; the pairing request is optional
+      return str(self._phone().adapter()[1].get("Address", "")).upper()
+    except Exception as error:  # DBus errors vary; the pairing request is optional
+      self.log("phone_address_unavailable", error=f"{type(error).__name__}: {error}")
       return ""
 
   def _project(self, result, lease, ident, connect=None, fragment_acks: bool = False) -> None:
