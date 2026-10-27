@@ -78,7 +78,8 @@ class SavedSlcLifecycle:
         self.runtime.reset()
       self.runtime = (SlcRuntime(settings, vision_enabled=vision,
                                  vision_control_qualified=configuration[3],
-                                 vision_display_qualified=configuration[4])
+                                 vision_display_qualified=configuration[4],
+                                 source_stability=str(self.cp.carFingerprint) == 'HONDA_ACCORD_9G')
                       if configuration[0] else None)
     self.configuration = configuration
     if pending_actions is not None:
