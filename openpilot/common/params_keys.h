@@ -346,6 +346,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SLCAdvanceLowerSeconds", {PERSISTENT, INT, "0"}},
     {"SLCOverrideMode", {PERSISTENT, INT, "1"}},
     {"SLCWheelOverride", {PERSISTENT, BOOL, "0"}},
+    // Accord 9G (F28): debounce SLC map/vision flaps before selection. Off by default (Mat 2026-10-28).
+    {"SLCSourceStability", {PERSISTENT, BOOL, "0"}},
     {"SLCQualifiedHistory", {PERSISTENT, JSON}},
     {"ConditionalModeConfig", {PERSISTENT | DONT_LOG, JSON}},
     {"ConditionalManualState", {PERSISTENT | DONT_LOG, JSON}},
