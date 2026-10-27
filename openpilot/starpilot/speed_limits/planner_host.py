@@ -25,6 +25,7 @@ class SavedSlcLifecycle:
     self.params, self.cp, self.environment = params, cp, dict(environment)
     self.runtime = None
     self.configuration = None
+    self.source_stability = False
     self.last_refresh_ns = None
 
   def source_services(self):
@@ -47,7 +48,9 @@ class SavedSlcLifecycle:
                      vision_control_enabled(self.params, self.cp, saved_slc=saved_slc),
                      feature_enabled(self.params, self.cp, 'vision', {}, saved_slc=saved_slc),
                      self.params.get_bool('IsMetric'))
-    if configuration == self.configuration:
+    # F28 map/vision debounce: Accord 9G only, and only while SLCSourceStability is on (default off).
+    stability = str(self.cp.carFingerprint) == 'HONDA_ACCORD_9G' and self.params.get_bool('SLCSourceStability')
+    if configuration == self.configuration and stability == self.source_stability:
       return self.runtime, False
     previous_runtime = self.runtime
     continuing_control = bool(self.runtime is not None and self.runtime.settings.enabled and settings.enabled and configuration[0])
@@ -59,6 +62,8 @@ class SavedSlcLifecycle:
                         advance_lower_seconds=settings.advance_lower_seconds)
       timing_only = configuration == (old_admitted, retimed, *old_display)
       preserve_runtime |= configuration[:-1] == (old_admitted, replace(retimed, offsets=settings.offsets), *old_display[:-1])
+    if stability != self.source_stability:
+      preserve_runtime = timing_only = False  # F28: flipping the debounce builds a fresh runtime
     if preserve_runtime:
       assert self.runtime is not None and self.configuration is not None
       # Policy/source edits renew choices without releasing the engaged speed cap.
@@ -66,6 +71,9 @@ class SavedSlcLifecycle:
                          settings.acceptance != self.runtime.settings.acceptance or configuration[2:5] != self.configuration[2:5])
       if choices_changed or settings.offsets != self.runtime.settings.offsets or configuration[5] != self.configuration[5]:
         self.runtime.update_offsets(settings.offsets, is_metric=configuration[5])
+      if self.runtime.source_stability and (settings.selection != self.runtime.settings.selection or
+                                            configuration[2:5] != self.configuration[2:5]):
+        self.runtime.reset_source_stability()  # F28: a new source set starts a fresh debounce
       if (settings.advance_higher_seconds != self.runtime.settings.advance_higher_seconds or
           settings.advance_lower_seconds != self.runtime.settings.advance_lower_seconds):
         self.runtime.update_advance(settings.advance_higher_seconds, settings.advance_lower_seconds)
@@ -83,9 +91,11 @@ class SavedSlcLifecycle:
       self.runtime = (SlcRuntime(settings, vision_enabled=vision,
                                  vision_control_qualified=configuration[3],
                                  vision_display_qualified=configuration[4], is_metric=configuration[5],
-                                 session_id=session_id, previous_limit=history.decode(saved_history, session_id=session_id))
+                                 session_id=session_id, previous_limit=history.decode(saved_history, session_id=session_id),
+                                 source_stability=stability)
                       if configuration[0] else None)
     self.configuration = configuration
+    self.source_stability = stability
     if pending_actions is not None and not timing_only:
       pending_actions.clear()
     if pending_cruise is not None and (self.runtime is None or self.runtime is not previous_runtime):
