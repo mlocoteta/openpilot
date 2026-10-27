@@ -113,11 +113,14 @@ class Runtime:
   """Own a unique drive session, action ledger and current-frame UI receipt."""
 
   def __init__(self, settings: Settings, *, session_id: str | None = None, vision_enabled: bool = False,
-               vision_control_qualified: bool = False, vision_display_qualified: bool = False, is_metric: bool = False):
+               vision_control_qualified: bool = False, vision_display_qualified: bool = False, is_metric: bool = False,
+               source_stability: bool = False):
     if type(is_metric) is not bool:
       raise ValueError('SLC display units must be Boolean')
     self.settings = settings
     self.is_metric = is_metric
+    # Debounce map/vision flaps before selection (source_stability.py); plannerd enables it on the Accord 9G.
+    self.source_stability = source_stability is True
     self.map_source = MapSource()
     self.vision_enabled = vision_enabled
     # Exact saved Vision opt-in may grant control; source identity and current
@@ -374,7 +377,8 @@ class Runtime:
                       self.settings.acceptance, self.settings.offsets,
                       sd.DomainStatus.VALID if car_fresh and selected_cluster is not None else sd.DomainStatus.STALE,
                       ego, bool(car_state.gasPressed) if car_fresh else False, host, action=action, adopt=adopt,
-                      classified_cruise=classified, is_metric=self.is_metric, set_speed_ready=self._set_speed_ready(sm))
+                      classified_cruise=classified, is_metric=self.is_metric, set_speed_ready=self._set_speed_ready(sm),
+                      source_stability=self.source_stability and self.settings.enabled)
 
   def _action(self, request: Action | None, now_ns: int) -> tuple[acc.DriverAction | None, acc.AdoptRequest | None, int | None]:
     if request is None or request.session_id != self.session_id or request.kind not in ("accept", "reject", "adopt"):

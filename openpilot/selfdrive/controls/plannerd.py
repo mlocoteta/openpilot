@@ -52,6 +52,7 @@ class SavedSlcLifecycle:
     self.params, self.cp, self.environment = params, cp, dict(environment)
     self.runtime = None
     self.configuration = None
+    self.source_stability = False
     self.last_refresh_ns = None
 
   def refresh(self, now_ns: int, *, pending_actions=None, pending_cruise=None):
@@ -68,10 +69,13 @@ class SavedSlcLifecycle:
                      vision_control_enabled(self.params, self.cp, saved_slc=saved_slc),
                      feature_enabled(self.params, self.cp, 'vision', {}, saved_slc=saved_slc),
                      self.params.get_bool('IsMetric'))
-    if configuration == self.configuration:
+    # F28 map/vision debounce: Accord 9G only, and only while SLCSourceStability is on (default off).
+    stability = str(self.cp.carFingerprint) == 'HONDA_ACCORD_9G' and self.params.get_bool('SLCSourceStability')
+    if configuration == self.configuration and stability == self.source_stability:
       return self.runtime, False
     previous_runtime = self.runtime
     if (self.runtime is not None and self.configuration is not None and
+        stability == self.source_stability and
         configuration[:-1] == (self.configuration[0], replace(self.runtime.settings, offsets=settings.offsets),
                                *self.configuration[2:-1])):
       self.runtime.update_offsets(settings.offsets, is_metric=configuration[5])
@@ -81,11 +85,13 @@ class SavedSlcLifecycle:
         self.runtime.reset()
       self.runtime = (SlcRuntime(settings, vision_enabled=vision,
                                  vision_control_qualified=configuration[3],
-                                 vision_display_qualified=configuration[4], is_metric=configuration[5])
+                                 vision_display_qualified=configuration[4], is_metric=configuration[5],
+                                 source_stability=stability)
                       if configuration[0] else None)
       if self.runtime is not None:
         self.runtime.set_speed_after_ns = set_speed_after_ns
     self.configuration = configuration
+    self.source_stability = stability
     if pending_actions is not None:
       pending_actions.clear()
     if pending_cruise is not None and (self.runtime is None or self.runtime is not previous_runtime):

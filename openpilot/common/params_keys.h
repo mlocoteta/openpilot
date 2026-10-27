@@ -328,6 +328,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"HidePersonalityAlerts", {PERSISTENT, BOOL, "0"}},
     {"ShowSpeedLimits", {PERSISTENT, BOOL, "1"}},
     {"SLCConfirmation", {PERSISTENT, BOOL, "0"}},
+    // Accord 9G (F28): debounce SLC map/vision flaps before selection. Off by default (Mat 2026-10-28).
+    {"SLCSourceStability", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationHigher", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationLower", {PERSISTENT, BOOL, "0"}},
     {"SLCFallback", {PERSISTENT, INT, "2"}},
