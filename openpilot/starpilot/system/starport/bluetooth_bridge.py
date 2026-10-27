@@ -864,6 +864,10 @@ class LeaseAwarePhone:
     self._require_lease()
     self.phone.connect_device(address)
 
+  def disconnect_stray_link(self):
+    self._require_lease()
+    return self.phone.disconnect_stray_link()
+
   def release(self):
     lease, self.lease = self.lease, None
     if lease is not None:

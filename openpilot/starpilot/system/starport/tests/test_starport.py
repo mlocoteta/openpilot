@@ -813,6 +813,10 @@ class FakeBluez:
   def connect_device(self, address):
     pass
 
+  def disconnect_stray_link(self):
+    self.stray_disconnects = getattr(self, "stray_disconnects", 0) + 1
+    return 7
+
 
 def test_supervisor_full_wireless_session(identity, tmp_path, monkeypatch):
   from openpilot.starpilot.system.starport import bt_sockets, hw_encoder, identity as identity_store, supervisor as supervisor_module
