@@ -9,6 +9,7 @@ from openpilot.starpilot.speed_limits import acceptance as acc
 from openpilot.starpilot.speed_limits import action_arbitration as arb
 from openpilot.starpilot.speed_limits import overrides as ov
 from openpilot.starpilot.speed_limits import selection as sel
+from openpilot.starpilot.speed_limits import source_stability as stab
 from openpilot.starpilot.speed_limits import speed_domain as sd
 
 
@@ -40,6 +41,8 @@ class Frame:
   classified_cruise: arb.Result | None = None
   is_metric: bool | None = None
   set_speed_ready: bool = True
+  # Debounce source flaps (hold, dwell, sticky source) before selection.
+  source_stability: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class State:
   previous_owner: acc.LongitudinalOwner | None = None
   was_active_path: bool = False
   reset_required: bool = False
+  stability: stab.State = stab.EMPTY
 
 
 @dataclass(frozen=True)
@@ -88,7 +92,8 @@ def _state_valid(state: object) -> bool:
   if (type(state.session_id) is not str or not state.session_id or state.acceptance.session_id != state.session_id or
       state.override.session_id != state.session_id or not _integer(state.control_generation) or
       (state.last_now_ns is not None and not _integer(state.last_now_ns)) or
-      type(state.was_active_path) is not bool or type(state.reset_required) is not bool):
+      type(state.was_active_path) is not bool or type(state.reset_required) is not bool or
+      not stab.state_is_valid(state.stability)):
     return False
   if ((state.previous_mode is None) != (state.previous_owner is None) or
       (state.previous_mode is not None and not isinstance(state.previous_mode, acc.Mode)) or
@@ -160,6 +165,10 @@ def step(state: State, frame: Frame) -> Result:
   selected = sel.select_limit(frame.observations, frame.selection_policy)
   if selected.errors:
     return Result(replace(base, reset_required=True), selection=selected, status="invalid_selection", errors=selected.errors)
+  if frame.source_stability is True:
+    stability, observations = stab.stabilize(base.stability, frame.observations, frame.selection_policy, frame.now_ns)
+    base = replace(base, stability=stability)
+    selected = sel.select_limit(observations, frame.selection_policy)
   ego = frame.ego_pair
   candidate = selected.observation.candidate
   matches_set = False
