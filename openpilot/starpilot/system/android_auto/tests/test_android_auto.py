@@ -1283,3 +1283,27 @@ def test_discovery_waits_past_the_message_timeout_for_a_slow_adapter():
     sender.join()
     a.close()
     b.close()
+
+
+def test_supervisor_finds_the_phone_address_through_the_lease_wrapper(identity, tmp_path, monkeypatch):
+  """Production wraps BlueZ in LeaseAwarePhone; the AAWireless pairing request used to go out with no
+  address because the wrapper had no adapter() and the error was swallowed (Accord blank screen, 2026-10-27)."""
+  from openpilot.starpilot.system.android_auto.bluetooth_bridge import LeaseAwarePhone
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: None)
+
+  class AdapterBluez(FakeBluez):
+    def adapter(self):
+      return "/org/bluez/hci0", {"Address": "39:90:21:64:07:00"}
+
+  sup._bluez = LeaseAwarePhone(Mock(), None, sup.log, lambda log: AdapterBluez(log))
+  assert sup._adapter_address() == "39:90:21:64:07:00"
+
+  class BrokenBluez(FakeBluez):
+    def adapter(self):
+      raise RuntimeError("Bluetooth adapter is not available")
+
+  logged = []
+  sup._bluez = LeaseAwarePhone(Mock(), None, sup.log, lambda log: BrokenBluez(log))
+  monkeypatch.setattr(sup, "log", lambda event, **kw: logged.append((event, kw)))
+  assert sup._adapter_address() == ""
+  assert logged and logged[0][0] == "phone_address_unavailable"
