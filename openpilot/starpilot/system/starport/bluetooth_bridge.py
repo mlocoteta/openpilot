@@ -830,6 +830,8 @@ class LeaseAwarePhone:
   def devices(self): return self.phone.devices()
   def device(self, address): return self.phone.device(address)
   def snapshot(self, address): return self.phone.snapshot(address)
+  # Read-only: this comma's own controller, for the AAWireless head-unit pairing request; needs no lease.
+  def adapter(self): return self.phone.adapter()
 
   def acquire(self, phone_class: bool = True) -> None:
     if self.lease is None:
