@@ -520,3 +520,20 @@ def test_default_agent_failure_cleans_registration_before_pairing_visibility():
   with pytest.raises(BluetoothRejected, match='permission denied'):
     client.register_incoming_agent(Mock(wraps=object()), ':1.20')
   assert calls == ['RegisterAgent', 'RequestDefaultAgent', 'UnregisterAgent', 'filter_closed']
+
+
+def test_lease_aware_phone_reports_the_controller_without_a_lease(tmp_path):
+  """The AAWireless profile sends this comma's address in the head unit's Bluetooth pairing request;
+  reading it must work through the production wrapper, before and without a phone-role lease."""
+  from openpilot.starpilot.system.android_auto.bluetooth_bridge import LeaseAwarePhone
+  state = {'parked': True, 'session': ('aa', 'run')}
+  shared = owner(tmp_path, state, FakeBlueZ())
+
+  class AdapterPhone(Phone):
+    def adapter(self):
+      return "/org/bluez/hci0", {"Address": "39:90:21:64:07:00"}
+
+  wrapper = LeaseAwarePhone(shared, None, lambda *a, **k: None, lambda log: AdapterPhone())
+  assert wrapper.lease is None
+  assert wrapper.adapter()[1]["Address"] == "39:90:21:64:07:00"
+  shared.close()
