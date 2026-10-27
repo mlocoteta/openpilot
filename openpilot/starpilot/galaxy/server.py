@@ -39,6 +39,7 @@ from openpilot.starpilot.galaxy.sentry_events import SentryEvents, SentryEventsU
 from openpilot.starpilot.sentry_mode.notifications import NotificationOwner, NotificationUnavailable
 from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
 from openpilot.starpilot.galaxy.map_operations import MapOperationError, MapOperations, validate_action
+from openpilot.starpilot.galaxy.hud import Hud
 from openpilot.starpilot.galaxy.plots import Plots
 from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareUnavailable
 from openpilot.starpilot.galaxy.web_manifest import web_manifest
@@ -91,7 +92,7 @@ def forget_app_keys(address):
 
 
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
-                plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
+                plots=None, hud=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, training_results=None, bluetooth=None, vehicle_selection=None,
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
@@ -209,6 +210,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   model_manager_source = model_manager
   plot_source = plots
   plots_lock = threading.Lock()
+  hud_source = hud
+  hud_lock = threading.Lock()
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   aa_setup_source = android_auto_setup
@@ -422,6 +425,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         plot_source = Plots()
         server.plots_source = plot_source
     return plot_source.snapshot()
+
+  def hud_status():
+    nonlocal hud_source
+    with hud_lock:
+      if hud_source is None:
+        hud_source = Hud()
+        server.hud_source = hud_source
+    return hud_source.snapshot()
 
   def local_media():
     nonlocal recording_media_source
@@ -1356,6 +1367,17 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         except (OSError, ValueError, RuntimeError):
           if self.require_session():
             self.json(503, {'error': 'Live plots are unavailable'})
+        else:
+          if self.require_session():
+            self.json(200, result)
+      elif path == '/api/hud':
+        if not self.require_session():
+          return
+        try:
+          result = hud_status()
+        except (OSError, ValueError, RuntimeError):
+          if self.require_session():
+            self.json(503, {'error': 'HUD data is unavailable'})
         else:
           if self.require_session():
             self.json(200, result)
@@ -2873,6 +2895,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.model_source = model_source
   if plot_source is not None:
     server.plots_source = plot_source
+  if hud_source is not None:
+    server.hud_source = hud_source
   if settings_gateway is not None:
     server.settings_source = settings_gateway
   if toyota_source is not None:
