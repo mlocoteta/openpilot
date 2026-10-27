@@ -327,6 +327,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ShowSpeedLimits", {PERSISTENT, BOOL, "1"}},
     {"SLCConfirmation", {PERSISTENT, BOOL, "0"}},
     {"SLCAdvanceSeconds", {PERSISTENT, INT, "0"}},
+    // Accord 9G (F28): debounce SLC map/vision flaps before selection. Off by default (Mat 2026-10-28).
+    {"SLCSourceStability", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationHigher", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationLower", {PERSISTENT, BOOL, "0"}},
     {"SLCFallback", {PERSISTENT, INT}},  // Retired; preserve saved bytes for older versions.
