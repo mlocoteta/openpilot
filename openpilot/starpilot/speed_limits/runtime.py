@@ -13,6 +13,7 @@ from openpilot.starpilot.speed_limits import acceptance as acc
 from openpilot.starpilot.speed_limits import action_arbitration as arb
 from openpilot.starpilot.speed_limits import composition as comp
 from openpilot.starpilot.speed_limits import selection as sel
+from openpilot.starpilot.speed_limits import source_stability as stab
 from openpilot.starpilot.speed_limits import speed_domain as sd
 from openpilot.starpilot.speed_limits.runtime_settings import ADVANCE_SECONDS, Settings
 from openpilot.starpilot.speed_limits.map_observation import MapSource, copy_frame
@@ -119,11 +120,15 @@ class Runtime:
 
   def __init__(self, settings: Settings, *, session_id: str | None = None, vision_enabled: bool = False,
                vision_control_qualified: bool = False, vision_display_qualified: bool = False, is_metric: bool = False,
-               previous_limit: acc.AcceptedLimit | None = None):
+               previous_limit: acc.AcceptedLimit | None = None, source_stability: bool = False):
     if type(is_metric) is not bool:
       raise ValueError('SLC display units must be Boolean')
     self.settings = settings
     self.is_metric = is_metric
+    # Debounce map/vision flaps before selection (source_stability.py); plannerd enables it on the Accord 9G.
+    self.source_stability = source_stability is True
+    self.stability = stab.EMPTY
+    self.source_readings: dict[sel.Source, acc.Observation] = {}
     self.map_source = MapSource()
     self.advance = Advance()
     self.vision_enabled = vision_enabled
@@ -150,6 +155,7 @@ class Runtime:
   def reset(self) -> None:
     previous_limit = self.history_limit
     self.map_source.reset()
+    self.stability = stab.EMPTY
     self.advance = Advance()
     self.vision_diagnostic = acc.Observation(acc.ObservationKind.UNKNOWN)
     self._last_vision_producer = ''
@@ -169,6 +175,10 @@ class Runtime:
     self._ui_receipt = None
     self.last_received = None
     self.current_presentation = None
+
+  def reset_source_stability(self) -> None:
+    """F28: forget held/dwelling map and vision limits (a saved source edit kept this runtime)."""
+    self.stability = stab.EMPTY
 
   def update_offsets(self, offsets: sd.OffsetSchedule, *, is_metric: bool | None = None) -> None:
     if is_metric is not None:
@@ -360,7 +370,10 @@ class Runtime:
            if ego_valid else sd.SpeedPair(sd.DomainStatus.STALE if sm.logMonoTime.get("carState", 0) else sd.DomainStatus.UNKNOWN))
     host = comp.HostState(bool(CP.openpilotLongitudinalControl), host_long, bool(selfdrive.enabled and selfdrive_fresh),
                           bool(controls.forceDecel) if controls_fresh else True, selected, selected_cluster)
-    observations = self._observations(sm, CP, now_ns, now_boot_ns)
+    observations = self.source_readings = self._observations(sm, CP, now_ns, now_boot_ns)
+    if self.source_stability and self.settings.enabled:
+      # Debounced once here, so the current road, advance and selection all read the same stable limits.
+      self.stability, observations = stab.stabilize(self.stability, observations, self.settings.selection, now_ns)
     wheel_enabled = (self.settings.wheel_override and not CP.pcmCruise and car_fresh and car_state.canValid and
                      V_CRUISE_MIN <= selected <= V_CRUISE_MAX and selected_cluster == selected and
                      not car_state.brakePressed)
@@ -522,7 +535,7 @@ class Runtime:
       enabled_sources.add(sel.Source.ONLINE)
     rows = state.init('sourceReadings', len(sel.Source))
     for row, source in zip(rows, sel.Source, strict=True):
-      observation = frame.observations.get(source)
+      observation = self.source_readings.get(source)  # raw readings, also with the debounce on
       row.source = source.value
       row.enabled = bool(self.settings.display and source in enabled_sources)
       row.observationKind = observation.kind.value if observation is not None else 'unknown'
