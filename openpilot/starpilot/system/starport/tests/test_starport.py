@@ -1608,3 +1608,27 @@ def test_heard_networks_come_from_the_latest_scan_only(monkeypatch):
   assert lease._heard("/dev/wlan0") == {b"phone": 40, b"cafe": 70}  # home was only heard long ago
   last_scan[0] = 300_000  # an old scan does not vouch for what it heard
   assert lease._heard("/dev/wlan0") == {b"cafe": 70}
+
+
+def test_supervisor_finds_the_phone_address_through_the_lease_wrapper(identity, tmp_path, monkeypatch):
+  """Production wraps BlueZ in LeaseAwarePhone; the AAWireless pairing request used to go out with no
+  address because the wrapper had no adapter() and the error was swallowed (Accord blank screen, 2026-10-27)."""
+  from openpilot.starpilot.system.starport.bluetooth_bridge import LeaseAwarePhone
+  sup, _ = make_supervisor(identity, tmp_path, monkeypatch, lambda *a, **k: None)
+
+  class AdapterBluez(FakeBluez):
+    def adapter(self):
+      return "/org/bluez/hci0", {"Address": "39:90:21:64:07:00"}
+
+  sup._bluez = LeaseAwarePhone(Mock(), None, sup.log, lambda log: AdapterBluez(log))
+  assert sup._adapter_address() == "39:90:21:64:07:00"
+
+  class BrokenBluez(FakeBluez):
+    def adapter(self):
+      raise RuntimeError("Bluetooth adapter is not available")
+
+  logged = []
+  sup._bluez = LeaseAwarePhone(Mock(), None, sup.log, lambda log: BrokenBluez(log))
+  monkeypatch.setattr(sup, "log", lambda event, **kw: logged.append((event, kw)))
+  assert sup._adapter_address() == ""
+  assert logged and logged[0][0] == "adapter_address_unavailable" and logged[0][1]["kind"] == "RuntimeError"

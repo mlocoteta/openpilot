@@ -545,3 +545,20 @@ def test_recovery_defers_while_another_process_holds_the_adapter(tmp_path):
   assert bluez.writes[-1] == (False, False)
   assert not second.journal_path.exists()
   second.close()
+
+
+def test_lease_aware_phone_reports_the_controller_without_a_lease(tmp_path):
+  """The AAWireless profile sends this comma's address in the head unit's Bluetooth pairing request;
+  reading it must work through the production wrapper, before and without a phone-role lease."""
+  from openpilot.starpilot.system.starport.bluetooth_bridge import LeaseAwarePhone
+  state = {'parked': True, 'session': ('aa', 'run')}
+  shared = owner(tmp_path, state, FakeBlueZ())
+
+  class AdapterPhone(Phone):
+    def adapter(self):
+      return "/org/bluez/hci0", {"Address": "39:90:21:64:07:00"}
+
+  wrapper = LeaseAwarePhone(shared, None, lambda *a, **k: None, lambda log: AdapterPhone())
+  assert wrapper.lease is None
+  assert wrapper.adapter()[1]["Address"] == "39:90:21:64:07:00"
+  shared.close()
