@@ -80,9 +80,23 @@ def cruise_ceiling(sm, CP, now_ns: int, cruise_mps: float) -> float | None:
     return None
   for instruction in (nav.instruction, nav.nextManeuver):
     target = turn_speed(instruction, max(minimum, 0.))
-    if target is not None and target + .25 < cruise_mps:
+    if target is not None and target + .25 < cruise_mps and turn_signalled(cs, instruction):
       return target
   return None
+
+
+def turn_signalled(cs, maneuver) -> bool:
+  """Accord (F27): slow for a route turn only while the driver signals it. A route
+  the driver is not following must never pull cruise down on a straight road."""
+  left, right = bool(cs.leftBlinker), bool(cs.rightBlinker)
+  kind, modifier = maneuver.maneuverType, maneuver.maneuverModifier
+  if 'roundabout' in kind or 'rotary' in kind:
+    return left != right  # the modifier is the exit side, not the signal side
+  if modifier in ('left', 'sharpLeft'):
+    return left and not right
+  if modifier in ('right', 'sharpRight'):
+    return right and not left
+  return left != right  # U-turn: either single blinker, never hazards
 
 
 def matching_turn_signal(sm, now_ns: int, *, supported: bool) -> bool:
