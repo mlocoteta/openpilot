@@ -96,6 +96,7 @@ def test_native_planner_navigation_cap_and_default_equivalence():
     now = FRAME_NOW + tick * 50_000_000
     frame['carState'].vEgo = 20.
     frame['carState'].gearShifter = 'drive'
+    frame['carState'].rightBlinker = True  # F27: a route turn caps cruise only while signalled
     frame.logMonoTime = dict.fromkeys(frame, now)
     with patch('openpilot.selfdrive.controls.lib.longitudinal_planner.navigation_ceiling', return_value=None):
       baseline.update(frame, now_ns=now)
