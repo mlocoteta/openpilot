@@ -55,11 +55,32 @@ def source_receiver(services):
   # Wake on the actual motion/native/state delivery rather than waiting for
   # another CarState. All envelope, source-age and current authority checks
   # still run on the real received messages.
-  sm = messaging.SubMaster(services, ignore_alive=['aolSafetyWire'],
+  queued_services = {'deviceMotion', 'driverMonitoringState'} & set(services)
+
+  class SourceReceiver(messaging.SubMaster):
+    def update_msgs(self, cur_time, msgs):
+      latest = []
+      received_extra = False
+      for packet in msgs:
+        if packet is not None and packet.which() in queued_services:
+          service, received_at = packet.which(), cur_time
+          # Count actual dequeued packets with actual receipt clocks. Keep only
+          # the newest body for normal SubMaster state; never restamp a source.
+          for _ in range(7):
+            following = messaging.recv_one_or_none(self.sock[service])
+            if following is None:
+              break
+            received_extra = True
+            self.freq_tracker[service].record_recv_time(received_at)
+            packet, received_at = following, time.monotonic()
+        latest.append(packet)
+      super().update_msgs(time.monotonic() if received_extra else cur_time, latest)
+
+  sm = SourceReceiver(services, ignore_alive=['aolSafetyWire'],
     ignore_valid=['aolSafetyWire'], ignore_avg_freq=['aolSafetyWire', 'carState'])
+  for service in queued_services:
+    sm.sock[service] = messaging.sub_sock(service, conflate=False)
   if 'deviceMotion' in services:
-    # Separate waiting from accounting: keep every original frequency tracker,
-    # health bit and socket, and still receive all incidental deliveries.
     poller = messaging.Poller()
     poller.registerSocket(sm.sock['deviceMotion'])
     sm.poller = poller
@@ -592,7 +613,7 @@ def run(
                   # Preserve the actual startup refusal instead of the previous identity-reset status.
                   live_actor.reason = unavailable_reason
                   from openpilot.starpilot.flm.source_stall_log import log_source_stall
-                  log_source_stall(live_actor, collector, now_ns=received_now, bootstrap_allowed=True)
+                  log_source_stall(live_actor, collector, now_ns=received_now, bootstrap_allowed=True, sm=sm)
                 collector = None
                 return
           else:
