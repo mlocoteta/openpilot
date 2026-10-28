@@ -40,6 +40,7 @@ from openpilot.starpilot.sentry_mode.notifications import NotificationOwner, Not
 from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
 from openpilot.starpilot.galaxy.map_operations import MapOperationError, MapOperations, validate_action
 from openpilot.starpilot.galaxy.hud import Hud
+from openpilot.starpilot.galaxy.perf import Perf
 from openpilot.starpilot.galaxy.plots import Plots
 from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareUnavailable
 from openpilot.starpilot.galaxy.web_manifest import web_manifest
@@ -92,7 +93,7 @@ def forget_app_keys(address):
 
 
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
-                plots=None, hud=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
+                plots=None, hud=None, perf=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, training_results=None, bluetooth=None, vehicle_selection=None,
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
@@ -212,6 +213,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   plots_lock = threading.Lock()
   hud_source = hud
   hud_lock = threading.Lock()
+  perf_source = perf
+  perf_lock = threading.Lock()
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   aa_setup_source = android_auto_setup
@@ -433,6 +436,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         hud_source = Hud()
         server.hud_source = hud_source
     return hud_source.snapshot()
+
+  def perf_status(since):
+    nonlocal perf_source
+    with perf_lock:
+      if perf_source is None:
+        perf_source = Perf()
+        server.perf_source = perf_source
+    return perf_source.snapshot(since)
 
   def local_media():
     nonlocal recording_media_source
@@ -1378,6 +1389,25 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         except (OSError, ValueError, RuntimeError):
           if self.require_session():
             self.json(503, {'error': 'HUD data is unavailable'})
+        else:
+          if self.require_session():
+            self.json(200, result)
+      elif path == '/api/perf':
+        if not self.require_session():
+          return
+        try:
+          query = parse_qs(urlsplit(self.path).query, keep_blank_values=True, max_num_fields=1)
+        except ValueError:
+          query = {'': ['']}
+        since_text = query.get('since', [''])[0]
+        if set(query) - {'since'} or len(since_text) > 12 or (since_text and not since_text.isascii()) or (since_text and not since_text.isdigit()):
+          self.json(400, {'error': 'Invalid perf query'})
+          return
+        try:
+          result = perf_status(int(since_text) if since_text else None)
+        except (OSError, ValueError, RuntimeError):
+          if self.require_session():
+            self.json(503, {'error': 'Performance data is unavailable'})
         else:
           if self.require_session():
             self.json(200, result)
@@ -2897,6 +2927,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.plots_source = plot_source
   if hud_source is not None:
     server.hud_source = hud_source
+  if perf_source is not None:
+    server.perf_source = perf_source
   if settings_gateway is not None:
     server.settings_source = settings_gateway
   if toyota_source is not None:
