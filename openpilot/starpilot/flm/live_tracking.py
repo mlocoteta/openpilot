@@ -18,7 +18,7 @@ import statistics
 from openpilot.starpilot.flm.automatic import T95
 
 from openpilot.starpilot.flm.canonical_surface_adapter import NAMES, GROUPS, coordinate_bounds, full_profile_sha256
-from openpilot.starpilot.flm.live_trial_contract import LiveTrialBinding, LiveTrialOffer, VERSION, MAX_STEP, MAX_LEASE_NS
+from openpilot.starpilot.flm.live_trial_contract import LiveTrialBinding, LiveTrialOffer, VERSION, MAX_STEP, MAX_LEASE_NS, SOURCE_EXPERIMENT_STEP
 
 if TYPE_CHECKING:
   from openpilot.starpilot.flm.live_tracking_response import ResponseCertificate, ValidatedResponseWitness
@@ -1076,7 +1076,7 @@ class LiveTrackingOptimizer:
           # Actual worse/inconclusive directions below remain disqualified;
           # independent baseline, later feedback and slew are unchanged.
           low, high = coordinate_bounds(name)
-          step_limit = MAX_STEP if self.rmse is None else min(MAX_STEP, 0.1 * confidence)
+          step_limit = SOURCE_EXPERIMENT_STEP if self.rmse is None else min(MAX_STEP, 0.1 * confidence)
           if self.rmse is None and min(high, max(low, self.accepted[name] + sign * step_limit)) == self.accepted[name]:
             sign = -sign
 

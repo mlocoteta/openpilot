@@ -5,7 +5,7 @@ import pytest
 from openpilot.starpilot.flm.live_tracking import HookSensitivity
 from openpilot.starpilot.flm.live_tracking_episodes import TrackingEpisodeBuilder
 from openpilot.starpilot.flm.live_tracking_probe import _physical_row
-from openpilot.starpilot.flm.live_trial_contract import MAX_STEP
+from openpilot.starpilot.flm.live_trial_contract import MAX_STEP, SOURCE_EXPERIMENT_STEP
 from openpilot.starpilot.flm.tests.test_tracking_source_context import owner, refresh
 from openpilot.starpilot.flm.tests.test_live_tracking import episode
 
@@ -50,7 +50,7 @@ def test_visible_direction_still_gets_a_bounded_trial():
     if o.offer_state is not None:
       break
   assert o.offer_state is not None
-  assert o.offer_state['target']['ff_gain_right'] == MAX_STEP
+  assert o.offer_state['target']['ff_gain_right'] == SOURCE_EXPERIMENT_STEP
   assert not o.offer_state.get('accepted', False) and (not any(o.accepted.values()))
 
 def test_recovery_requires_visibility_in_the_already_selected_direction():

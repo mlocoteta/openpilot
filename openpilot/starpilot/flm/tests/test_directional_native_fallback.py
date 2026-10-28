@@ -1,6 +1,6 @@
 """A dead native direction must not monopolize another measurable correction."""
 from dataclasses import replace
-from openpilot.starpilot.flm.live_trial_contract import MAX_STEP
+from openpilot.starpilot.flm.live_trial_contract import SOURCE_EXPERIMENT_STEP
 from openpilot.starpilot.flm.tests.test_live_tracking import episode
 from openpilot.starpilot.flm.tests.test_tracking_source_context import owner, refresh
 from openpilot.starpilot.flm.tests.test_directional_native_visibility import feature
@@ -18,6 +18,6 @@ def test_quantized_preference_allows_a_different_measurable_calming_hook():
       break
   assert o.offer_state is not None
   assert o.offer_state['names'] == ('center_taper_max',)
-  assert o.offer_state['target']['center_taper_max'] == MAX_STEP
+  assert o.offer_state['target']['center_taper_max'] == SOURCE_EXPERIMENT_STEP
   assert o.offer_state['target']['ff_gain_right'] == 0.0
   assert not o.offer_state.get('accepted', False) and (not any(o.accepted.values()))

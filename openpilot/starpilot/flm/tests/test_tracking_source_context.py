@@ -15,7 +15,7 @@ from openpilot.starpilot.flm.live_tracking_response import (
   source_context,
 )
 from openpilot.starpilot.flm.canonical_surface_adapter import NAMES, coordinate_bounds
-from openpilot.starpilot.flm.live_trial_contract import MAX_STEP
+from openpilot.starpilot.flm.live_trial_contract import MAX_STEP, SOURCE_EXPERIMENT_STEP
 from openpilot.starpilot.flm.tests.test_live_tracking import fixture_certificate, episode
 from openpilot.starpilot.flm.live_tracking import LiveTrackingOptimizer
 
@@ -416,7 +416,7 @@ def test_source_boundary_tries_feasible_direction_without_claiming_plant_sign(up
       discovery_ids.update(o.selector_hint['source_episode_ids'])
   selected = o.offer(e.end_ns)
   assert selected is not None and selected.names == (name,)
-  assert dict(selected.target)[name] == pytest.approx(o.accepted[name] + (-MAX_STEP if upper else MAX_STEP))
+  assert dict(selected.target)[name] == pytest.approx(o.accepted[name] + (-SOURCE_EXPERIMENT_STEP if upper else SOURCE_EXPERIMENT_STEP))
   assert len(o.before) == 3 and discovery_ids.isdisjoint(row.episode_id for row in o.before)
   assert not o.offer_state['accepted'] and o.offer_state['alpha'] == 0.0
 
@@ -481,7 +481,7 @@ def test_new_input_regime_retires_only_source_discovery_before_launch(source_onl
 
 
 @pytest.mark.parametrize('estimate', [.0002, -.0002])
-def test_source_experiment_uses_measured_full_bound_not_tiny_confidence_fraction(estimate):
+def test_source_experiment_uses_measured_one_second_step_not_tiny_confidence_fraction(estimate):
   # Numerical proposal only; native visibility still needs actual controller/CAN evidence.
   o = owner()
   for index in range(6):
@@ -493,7 +493,7 @@ def test_source_experiment_uses_measured_full_bound_not_tiny_confidence_fraction
   selected = o.offer(row.end_ns)
   assert selected is not None and selected.names == ('ff_gain_left',)
   delta = dict(selected.target)['ff_gain_left'] - dict(selected.baseline)['ff_gain_left']
-  assert delta == pytest.approx(MAX_STEP if estimate > 0 else -MAX_STEP)
+  assert delta == pytest.approx(SOURCE_EXPERIMENT_STEP if estimate > 0 else -SOURCE_EXPERIMENT_STEP)
   assert abs(delta) > .1 * abs(estimate)
   assert len(selected.target) == 30 and len(o.before) == 3
   assert not any(o.accepted.values()) and not o.future
