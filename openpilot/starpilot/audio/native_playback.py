@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,26 @@ TIMING_COLUMNS = ('ordinal', 'entry_mono_ns', 'entry_cpu_ns', 'exit_mono_ns', 'e
 # sounddevice marks its pointer closed even when Pa_CloseStream returns an error.
 # Keep code, userdata and PCM alive until process exit if that fence fails.
 _unclosed_streams = []
+
+
+def request_alsa_realtime(stream, sd) -> bool:
+  """Request PortAudio's FIFO-1 callback thread; the Python owner stays ordinary."""
+  if sys.platform != 'linux':
+    return False
+  try:
+    device = sd.query_devices(stream.device, 'output')
+    if sd.query_hostapis(device['hostapi'])['name'] != 'ALSA':
+      return False
+    enable = ctypes.CDLL(sd._libname).PaAlsa_EnableRealtimeScheduling
+    pointer = int(sd._ffi.cast('uintptr_t', stream._ptr))
+  except (AttributeError, KeyError, OSError, TypeError, ValueError):
+    return False
+  if not pointer:
+    return False
+  enable.argtypes = [ctypes.c_void_p, ctypes.c_int]
+  enable.restype = None
+  enable(pointer, 1)
+  return True
 
 
 class NativePlayback:
@@ -55,6 +76,7 @@ class NativePlayback:
     if not self.handle:
       raise MemoryError('Native audio allocation failed')
     self._close_failed = False
+    self.realtime_requested = False
     self.signature = None
     self.sounds = {}
     self.builtin = {}
@@ -194,6 +216,7 @@ class NativePlayback:
     try:
       base.__init__(stream, kind='output', wrap_callback=None, channels=1, dtype='float32',
                     samplerate=self.rate, blocksize=self.buffer, callback=callback, userdata=userdata)
+      self.realtime_requested = request_alsa_realtime(stream, self.sd)
     except BaseException as constructor_error:
       pointer = getattr(stream, '_ptr', self.sd._ffi.NULL)
       # Before a successful open, sounddevice holds PaStream**; after open it
