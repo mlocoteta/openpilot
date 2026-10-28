@@ -66,7 +66,7 @@ class FordCardIntent(AolCardIntent):
     if not (self.main_seen and not self.main_available and self.main_neutral and state.cruiseState.available):
       return
     try:
-      if (not qualified(self.cp, marked_only=True) or self.cp.openpilotLongitudinalControl or not panda_ready or
+      if (not qualified(self.cp, marked_only=True) or not panda_ready or
           not state.canValid or state.canTimeout or state.steerFaultTemporary or state.steerFaultPermanent or
           state.accFaulted or state.doorOpen or state.vehicleSensorsInvalid or state.steeringDisengage or
           state.gearShifter != structs.CarState.GearShifter.drive or not producer or

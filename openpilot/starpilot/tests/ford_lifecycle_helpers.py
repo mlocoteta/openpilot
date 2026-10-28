@@ -424,7 +424,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
         host.state_publish(state, None)
         assert 'aolIntentWire' in published
         parser_ready = bool(
-          state.canValid and not state.canTimeout and (state.cruiseState.available or scenario == 'route49') and
+          state.canValid and not state.canTimeout and (state.cruiseState.available or scenario == 'route49' or warmup and main_off) and
           str(state.gearShifter) == 'drive' and safety.safety_config_valid()
         )
         if warmup and not parser_ready:
@@ -437,7 +437,9 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
           assert state.canValid and not state.canTimeout
         qualified_samples += 1
         parsed_before_producer = state.to_dict()
-        assert (main_off or scenario == 'route49' or state.cruiseState.available or availability_transition and not state.cruiseState.enabled
+        assert (main_off or scenario == 'route49' or state.cruiseState.available or
+                getattr(monkeypatch, 'ford_main_off_warmup', False) and steps <= start_tick + 130 or
+                availability_transition and not state.cruiseState.enabled
                 or scenario == 'route45' and getattr(monkeypatch, 'ford_route45_refusal', None) == 'main-off')
         assert scenario in ('route45', 'route49', 'route22') or not state.steeringPressed
         assert bool(state.gasPressed) == (fault in ('gas', 'temporary-eps-gas', 'temporary-lkas-gas')
@@ -557,7 +559,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
         return libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])
 
       for _ in range(120):
-        step(warmup=True, main_off=scenario == 'route49')
+        step(warmup=True, main_off=scenario == 'route49' or getattr(monkeypatch, 'ford_main_off_warmup', False))
       assert 0 <= warmup_waits < 120 and qualified_samples >= 100
       assert host.ci_initialized  # Read-only witness: real controls_update completed init.
       assert not host.aol_card_intent.allowed_latch
