@@ -119,8 +119,10 @@ class TestRadarLeadProjectionCache(unittest.TestCase):
         radar.leadOne.dRel = float('nan')
         self.assertIsNone(policy.leads_from_radar(value, **self.kwargs))
         radar.leadOne.dRel = 14.5
-        self.assertIsNone(policy.leads_from_radar(value, **dict(self.kwargs, valid=False)))
-        self.assertIsNone(policy.leads_from_radar(value, **dict(self.kwargs, now_ns=2_000_000_000)))
+        invalid: ProjectionArguments = {**self.kwargs, 'valid': False}
+        stale: ProjectionArguments = {**self.kwargs, 'now_ns': 2_000_000_000}
+        self.assertIsNone(policy.leads_from_radar(value, **invalid))
+        self.assertIsNone(policy.leads_from_radar(value, **stale))
         self.assertIsNotNone(policy.leads_from_radar(value, **self.kwargs))
 
 
