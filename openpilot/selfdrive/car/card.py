@@ -1374,7 +1374,7 @@ class Car:
                 len(pandas) == len(self.CP.safetyConfigs) and
                 all(ps.safetyModel == cfg.safetyModel and ps.safetyParam == cfg.safetyParam and
                     ps.alternativeExperience == self.CP.alternativeExperience and
-                    (not ps.safetyRxChecksInvalid or inactive_keepalive and self.volt_startup_keepalive())
+                    (not ps.safetyRxChecksInvalid or inactive_keepalive and self.gm_startup_keepalive())
                     for ps, cfg in zip(pandas, self.CP.safetyConfigs, strict=True)))
 
   def _feedback_capture(self, now_ns):
@@ -1436,7 +1436,7 @@ class Car:
       builder = messaging.log_from_bytes(packet).as_builder()
       builder.logMonoTime = int(getattr(self, 'volt_cc_now_boot_ns', 0))
       packet = builder.to_bytes()
-    elif self.volt_startup_keepalive() or monitored_steering:
+    elif self.volt_startup_keepalive() or monitored_steering or (self.gm_startup_keepalive() and not self.initialized_prev):
       builder = messaging.log_from_bytes(packet).as_builder()
       builder.logMonoTime = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
       packet = builder.to_bytes()
@@ -1479,6 +1479,11 @@ class Car:
     self.volt_cc_now_boot_ns = boot_ns
     self.volt_cc_now_mono_ns = now_ns
     return True
+
+  def gm_startup_keepalive(self):
+    # Every GM EPS needs a continuous neutral stream after the camera relay opens,
+    # including while the host is still initializing and the vehicle is in reverse.
+    return (getattr(getattr(self, 'CP', None), 'brand', None) == 'gm' and not self.CP.passive)
 
   def volt_sdgm_startup_keepalive(self):
     if getattr(getattr(self, 'CP', None), 'brand', None) != 'gm':
@@ -1554,7 +1559,7 @@ class Car:
       source_ns = int(self.sm.logMonoTime['carControl'])
       receipt_ns = int(self.sm.recv_time['carControl'] * 1e9)
       # Disabled torque/accel are commands; inactive curvature is only telemetry.
-      if (not (mixed_startup or ev6_startup or classic_startup or
+      if (not (mixed_startup or ev6_startup or classic_startup or self.gm_startup_keepalive() or
                (self.aol_replay and native_bootstrap_supported(self.CP) and self.vehicle_startup.owner is None)) or
           not CS.canValid or CS.canTimeout or
           not (self.sm.seen['carControl'] and self.sm.valid['carControl'] and self.sm.alive['carControl']) or
@@ -1678,7 +1683,7 @@ class Car:
           self.last_actuators_output, can_sends = self.CI.apply(inactive, now_boot_ns)
           self.publish_sendcan(can_sends, valid=CS.canValid)
         return
-      if (((isinstance(self.CI, GMInterface) and self.volt_startup_keepalive()) or ev6_startup or classic_startup) and
+      if (((isinstance(self.CI, GMInterface) and self.gm_startup_keepalive()) or ev6_startup or classic_startup) and
           self.startup_panda_configured(inactive_keepalive=True)):
         inactive = car.CarControl.new_message().as_reader()
         now_boot_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
@@ -1786,11 +1791,11 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
-    elif ((not self.ci_initialized or self.volt_startup_keepalive() or self.ev6_startup_keepalive() or
+    elif ((not self.ci_initialized or self.gm_startup_keepalive() or self.ev6_startup_keepalive() or
            self.classic_startup_keepalive() or self.torque_ev_startup_keepalive() or self.mixed_startup_keepalive()) and
           self.sm.seen['onroadEvents'] and
           any(e.name == EventName.selfdriveInitializing for e in self.sm['onroadEvents']) and
-          ((self.aol_replay and native_bootstrap_supported(self.CP)) or self.ev6_startup_keepalive() or
+          (self.gm_startup_keepalive() or (self.aol_replay and native_bootstrap_supported(self.CP)) or self.ev6_startup_keepalive() or
            self.classic_startup_keepalive() or self.torque_ev_startup_keepalive() or self.mixed_startup_keepalive())):
       self.controls_update(CS, self.sm['carControl'], initialize_only=True)
 

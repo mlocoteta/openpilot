@@ -447,6 +447,8 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
+    if startup_keepalive:
+      CC = structs.CarControl.new_message().as_reader()
     _projection = self.learning_projection_observer
     if _projection is not None:
       _projection.begin(CC.actuators.torque, self.frame)
@@ -634,6 +636,17 @@ class CarController(CarControllerBase):
       if _projection is not None:
         _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
+
+    if startup_keepalive:
+      # Startup owns steering continuity only. Never run cruise-button, pedal,
+      # brake, dashboard, or hold producers before normal controls are ready.
+      new_actuators = actuators.as_builder()
+      new_actuators.torque = 0.0
+      new_actuators.torqueOutputCan = 0
+      self.frame += 1
+      if _projection is not None:
+        _projection.finish(0.0)
+      return new_actuators, can_sends
 
     status_bolt = self.CP.carFingerprint in NO_ACC_BOLT_CAR and (
       is_bolt_present_no_acc_pedal_profile(self.CP) or is_bolt_pedal_removed_profile(self.CP))
