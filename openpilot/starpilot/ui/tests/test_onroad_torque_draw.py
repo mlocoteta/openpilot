@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pyray as rl
 import pytest
 
+from openpilot.starpilot.ui import onroad_torque_draw
 from openpilot.starpilot.ui.onroad_torque_draw import TorqueBarPainter
 
 
@@ -33,7 +34,11 @@ def record_gpu():
        patch.object(rl, 'rl_end', side_effect=finish), \
        patch.object(rl, 'unload_shader', side_effect=lambda shader: data.unloads.append(shader.id)), \
        patch.object(rl, 'is_window_ready', return_value=True), patch.object(rl, 'rl_get_shader_id_default', return_value=0):
-    yield data
+    native = NS(BeginShaderMode=rl.begin_shader_mode, EndShaderMode=rl.end_shader_mode,
+                SetShaderValue=rl.set_shader_value, rlSetTexture=rl.rl_set_texture,
+                rlBegin=rl.rl_begin, rlTexCoord2f=rl.rl_tex_coord2f, rlVertex2f=rl.rl_vertex2f, rlEnd=rl.rl_end)
+    with patch.object(onroad_torque_draw, 'native_rl', native):
+      yield data
 
 
 def test_small_torque_changes_reach_the_screen_without_angle_steps():

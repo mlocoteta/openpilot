@@ -3,6 +3,7 @@
 import math
 
 import pyray as rl
+from raylib import rl as native_rl
 
 from openpilot.system.ui.lib.application import GL_VERSION
 from openpilot.starpilot.ui.onroad_torque_geometry import MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT, MIN_OFFSET, RADIUS, TORQUE_ANGLE_SPAN
@@ -116,24 +117,25 @@ class TorqueBarPainter:
     extent += 4
     top = rect.y + rect.height - torque_offset - thickness + offset[1] - 4
     bottom = cy - (radius + cap) * cosine + cap + 4
-    rl.begin_shader_mode(self._shader)
+    # These arguments are already typed CFFI values; avoid per-vertex generic wrapping.
+    native_rl.BeginShaderMode(self._shader)
     try:
       for name, value in values.items():
         if self._previous.get(name) != value:
           location, pointer = self._uniforms[name]
           pointer[0:4] = value
-          rl.set_shader_value(self._shader, location, pointer, rl.ShaderUniformDataType.SHADER_UNIFORM_VEC4)
+          native_rl.SetShaderValue(self._shader, location, pointer, rl.ShaderUniformDataType.SHADER_UNIFORM_VEC4)
           self._previous[name] = value
       # rlgl may transform positions on the CPU; UVs keep distance calculations in logical pixels.
       left, right = cx - extent, cx + extent
-      rl.rl_set_texture(0)
-      rl.rl_begin(rl.RL_QUADS)
+      native_rl.rlSetTexture(0)
+      native_rl.rlBegin(rl.RL_QUADS)
       for x, y in ((left, top), (left, bottom), (right, bottom), (right, top)):
-        rl.rl_tex_coord2f(x, y)
-        rl.rl_vertex2f(x, y)
-      rl.rl_end()
+        native_rl.rlTexCoord2f(x, y)
+        native_rl.rlVertex2f(x, y)
+      native_rl.rlEnd()
     finally:
-      rl.end_shader_mode()
+      native_rl.EndShaderMode()
 
   def close(self) -> None:
     if self._shader is not None and rl.is_window_ready():
