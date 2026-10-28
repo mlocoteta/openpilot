@@ -14,7 +14,8 @@ from unittest import mock
 from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
-from openpilot.starpilot.galaxy.hud import SERVICES, TI_SAFETY_PARAM, Hud, HudReading, MessagingHudReader, empty, extract, ti_car
+from openpilot.starpilot.galaxy.hud import (SERVICES, TI_SAFETY_PARAM, FuelTrip, Hud, HudReading, MessagingHudReader, empty, extract,
+                                           fuel_count, ti_car, tracks)
 from openpilot.starpilot.galaxy.server import make_server
 
 CONTRACT_KEYS = {'schemaVersion', 'state', 'sessionId', 'seq', 'ageSeconds', 'error', *empty()}
@@ -59,11 +60,165 @@ def drive(**overrides):
   }
   lead = events['radarState'].radarState.leadOne
   lead.present, lead.dRel, lead.vRel, lead.vLead, lead.radar = True, 41.5, -1.25, 27.75, True
+  lead.yRel, lead.radarTrackId = 0.5, 7
   events.update(overrides)
   msgs = {name: getattr(msg.as_reader(), name) if msg is not None else None for name, msg in events.items()}
   msgs['carParams'] = car_params(36 | 512 | 4096)
   fresh = {name: msgs.get(name) is not None for name in SERVICES}
   return msgs, fresh
+
+
+def model_event(probs=(0.4, 0.9, 0.9, 0.3), stds=(0.6, 0.7)):
+  msg = messaging.new_message('modelV2', valid=True)
+  model = msg.modelV2
+  xs = [i * 4.0 for i in range(33)]
+  for name, count, offsets in (('laneLines', 4, (-5.4, -1.8, 1.8, 5.4)), ('roadEdges', 2, (-7.0, 7.5))):
+    lines = model.init(name, count)
+    for line, y in zip(lines, offsets, strict=True):
+      line.x = xs
+      line.y = [y + 0.001 * x for x in xs]
+      line.z = [0.0] * 33
+  model.laneLineProbs = list(probs)
+  model.roadEdgeStds = list(stds)
+  model.position.x = xs
+  model.position.y = [0.002 * x for x in xs]
+  model.position.z = [0.0] * 33
+  return msg
+
+
+def radar_tracks_event(points):
+  msg = messaging.new_message('radarTracks', valid=True)
+  out = msg.radarTracks.init('points', len(points))
+  for point, (track_id, d_rel, y_rel, v_rel) in zip(out, points, strict=True):
+    point.trackId, point.dRel, point.yRel, point.vRel = track_id, d_rel, y_rel, v_rel
+  return msg
+
+
+class HudV2Test(unittest.TestCase):
+  def test_model_road_and_tracks(self):
+    msgs, fresh = drive(modelV2=model_event(), mapdOut=event('mapdOut', lanes=3, estimatedRoadWidth=11.1, roadName='NY-347'),
+                        radarTracks=radar_tracks_event([(5, 60.0, 3.4, -2.0), (4, 30.0, 0.2, -1.0)]))
+    out = extract(msgs, fresh, is_metric=False)
+    self.assertEqual(set(out), set(empty()))
+    model = out['model']
+    self.assertEqual([len(line) for line in model['laneLines']], [14] * 4)
+    self.assertEqual([len(edge) for edge in model['roadEdges']], [14] * 2)
+    self.assertEqual(model['laneLines'][1][0], [0.0, -1.8])
+    self.assertEqual(model['laneLines'][1][13], [104.0, -1.7])   # grid point 26 (x 104 m here)
+    self.assertEqual((model['laneLineProbs'], model['roadEdgeStds']), ([0.4, 0.9, 0.9, 0.3], [0.6, 0.7]))
+    self.assertEqual(len(model['path']), 14)
+    self.assertEqual(out['road'], {'lanes': 3, 'width': 11.1, 'name': 'NY-347'})
+    self.assertEqual([t['id'] for t in out['tracks']], [4, 5])   # sorted by distance
+    self.assertEqual(out['tracks'][1], {'id': 5, 'dRel': 60.0, 'yRel': -3.4, 'vRel': -2.0, 'vLead': 27.0, 'stopped': False})
+    self.assertIsNone(out['fuel'])
+    json.dumps(out)
+
+  def test_v2_fields_null_when_absent_stale_or_short(self):
+    msgs, fresh = drive()
+    out = extract(msgs, fresh)
+    self.assertEqual((out['model'], out['road'], out['tracks'], out['fuel']), (None, None, None, None))
+    short = messaging.new_message('modelV2', valid=True)
+    lines = short.modelV2.init('laneLines', 4)
+    for line in lines:
+      line.x, line.y = [1.0] * 5, [0.0] * 5
+    msgs, fresh = drive(modelV2=short)
+    self.assertIsNone(extract(msgs, fresh)['model'])
+    msgs, fresh = drive(modelV2=model_event(), mapdOut=event('mapdOut', lanes=0, estimatedRoadWidth=0.0, roadName=''))
+    fresh['modelV2'] = False
+    out = extract(msgs, fresh)
+    self.assertIsNone(out['model'])
+    self.assertEqual(out['road'], {'lanes': None, 'width': None, 'name': None})
+
+  def test_tracks_filter(self):
+    seen = {}
+    v_ego = 25.0
+    msg = radar_tracks_event([
+      (1, 40.0, 0.0, -1.0),      # moving with us -> kept
+      (2, 30.0, 3.5, -25.0),     # never-moving return (sign, parked car) -> dropped
+      (3, 50.0, -3.5, -55.0),    # oncoming -> dropped
+      (4, 0.5, 0.0, 0.0),        # too close
+      (5, 160.0, 0.0, 0.0),      # too far
+      (6, 30.0, 13.0, 0.0),      # too wide
+    ]).radarTracks
+    out = tracks(msg, v_ego, seen)
+    self.assertEqual([t['id'] for t in out], [1])
+    self.assertEqual(set(seen), {1, 4, 5, 6})   # moving ids are remembered even when filtered out by range
+    # id 1 brakes to a stop (a queue at a light): still shown, as stopped
+    out = tracks(radar_tracks_event([(1, 20.0, 0.0, -24.0)]).radarTracks, v_ego, seen)
+    self.assertEqual(out, [{'id': 1, 'dRel': 20.0, 'yRel': -0.0, 'vRel': -24.0, 'vLead': 1.0, 'stopped': True}])
+    self.assertEqual(set(seen), {1})   # vanished ids are forgotten
+    out = tracks(radar_tracks_event([(i, 10.0 + i, 0.0, 0.0) for i in range(20)]).radarTracks, v_ego, seen)
+    self.assertEqual(len(out), 16)
+    self.assertIsNone(tracks(None, v_ego, seen))
+    self.assertIsNone(tracks(msg, None, seen))
+
+
+def frame(address, src, dat):
+  return NS(address=address, src=src, dat=dat)
+
+
+class FuelTest(unittest.TestCase):
+  def test_counter_scan_uses_the_newest_powertrain_frame(self):
+    old = [frame(0x324, 0, bytes([80, 70, 0x01, 0x00, 0, 0, 0, 0]))]
+    new = [frame(0x1E7, 0, b'\x00' * 8), frame(0x324, 128, bytes([0, 0, 0xFF, 0xFF])), frame(0x324, 0, bytes([80, 70, 0x01, 0x10]))]
+    self.assertEqual(fuel_count([old, [], new]), 0x0110)
+    self.assertEqual(fuel_count([old] + [[]] * 12), None)   # only the newest 12 batches are scanned
+    self.assertIsNone(fuel_count([[frame(0x324, 0, b'\x01\x02')]]))
+
+  def test_trip_accumulates_only_across_short_gaps(self):
+    f = FuelTrip()
+    self.assertIsNone(f.value())
+    f.update(1000, 30.0, 0.0, True)
+    self.assertEqual(f.value()['tripMl'], 0.0)
+    for i in range(1, 9):   # 2 s at 30 m/s burning 1 mL/s (10 counts/s)
+      f.update(1000 + i * 2.5, 30.0, i * 0.25, True)
+    v = f.value()
+    self.assertEqual((v['tripMl'], v['tripM'], v['rateMlS']), (2.0, 60, 1.0))
+    self.assertAlmostEqual(v['instMpg'], (60 / 1609.344) / (2 / 3785.41), delta=0.1)
+    self.assertIsNone(v['avgMpg'])   # under 400 m
+    f.update(1100, 30.0, 10.0, True)   # 8 s gap: re-baselines, adds nothing
+    self.assertEqual((f.value()['tripMl'], f.value()['tripM']), (2.0, 60))
+
+  def test_wrap_ignition_reset_offroad_and_caps(self):
+    f = FuelTrip()
+    f.update(65_530, 20.0, 0.0, True)
+    f.update(4, 20.0, 0.25, True)   # wrapped: +10 counts
+    self.assertEqual(f.value()['tripMl'], 1.0)
+    f.update(2, 20.0, 0.5, True)   # small drop = the car reset the counter (new ignition)
+    self.assertEqual((f.value()['tripMl'], f.value()['tripM']), (0.0, 0))
+    f.update(2, 20.0, 0.75, True)   # coasting: fuel cut
+    f.update(2, 20.0, 1.0, True)
+    self.assertEqual(f.value()['instMpg'], 99.9)
+    f.update(2, 0.0, 1.1, None)   # device state unknown: keep the trip
+    self.assertIsNotNone(f.value())
+    f.update(2, 0.0, 1.25, False)   # offroad: next drive starts fresh
+    self.assertIsNone(f.value())
+    f.update(10, 0.5, 2.0, True)
+    f.update(12, 0.5, 2.25, True)
+    self.assertIsNone(f.value()['instMpg'])   # crawling / stopped: no instant mpg
+
+  def test_average_and_history_buckets(self):
+    f = FuelTrip()
+    t, count = 0.0, 0
+    f.update(count, 30.0, t, True)
+    for _ in range(int(60 / 0.25)):   # 60 s at 30 m/s (1.12 mi), 1.5 mL/s
+      t += 0.25
+      count += 3.75
+      f.update(int(count), 30.0, t, True)
+    v = f.value()
+    self.assertAlmostEqual(v['avgMpg'], (1800 / 1609.344) / (v['tripMl'] / 3785.41), delta=0.1)
+    self.assertTrue(30 < v['avgMpg'] < 50)
+    self.assertEqual(len(v['hist']), 4)
+    self.assertTrue(all(0.24 < b - a < 0.3 for a, b in zip([0.0] + [h[0] for h in v['hist']], [h[0] for h in v['hist']])))
+    json.dumps(v)
+
+  def test_fuel_only_read_on_the_accord_9g(self):
+    reader = MessagingHudReader.__new__(MessagingHudReader)
+    nine = car.CarParams.new_message(carFingerprint='HONDA_ACCORD_9G').as_reader()
+    civic = car.CarParams.new_message(carFingerprint='HONDA_CIVIC').as_reader()
+    self.assertTrue(reader._fuel_car(nine))
+    self.assertFalse(reader._fuel_car(civic))
+    self.assertFalse(reader._fuel_car(None))
 
 
 class HudProjectionTest(unittest.TestCase):
@@ -76,7 +231,8 @@ class HudProjectionTest(unittest.TestCase):
     self.assertAlmostEqual(out['vEgo'], 29.0)
     self.assertAlmostEqual(out['vCruise'], 31.2928, places=3)  # 70 mph set
     self.assertAlmostEqual(out['vCruiseCluster'], 31.1111, places=3)
-    self.assertEqual(out['lead'], {'status': True, 'dRel': 41.5, 'vRel': -1.25, 'vLead': 27.75, 'radar': True})
+    self.assertEqual(out['lead'], {'status': True, 'dRel': 41.5, 'vRel': -1.25, 'vLead': 27.75, 'radar': True,
+                                   'yRel': -0.5, 'trackId': 7})
     self.assertEqual(out['steering'], {'latActive': True, 'source': 'ti', 'detail': 'steering', 'fault': False})
     self.assertIsNone(out['alert'])
     self.assertEqual((out['experimental'], out['personality'], out['blinker'], out['gear']), (False, 'standard', 'right', 'drive'))
@@ -248,7 +404,7 @@ class HudWorkerTest(unittest.TestCase):
         while source.snapshot()['state'] != 'current' and time.monotonic() < deadline:
           time.sleep(0.005)
         current = source.snapshot()
-        self.assertEqual((current['state'], current['onroad'], current['schemaVersion']), ('current', False, 1))
+        self.assertEqual((current['state'], current['onroad'], current['schemaVersion']), ('current', False, 2))
         self.assertGreaterEqual(current['seq'], 1)
         time.sleep(0.15)
         self.assertTrue(readers[0].closed)
@@ -424,7 +580,7 @@ class HudHttpTest(unittest.TestCase):
         cookie = headers['Set-Cookie'].split(';', 1)[0]
         self.assertTrue(cookie.startswith('galaxy_session='))
         status, body, _ = request('/api/hud', {'Cookie': cookie})
-        self.assertEqual((status, json.loads(body)['schemaVersion']), (200, 1))
+        self.assertEqual((status, json.loads(body)['schemaVersion']), (200, 1))   # the fake snapshot above
         # Host must name the socket's own address.
         self.assertEqual(request('/api/hud', {'Cookie': cookie, 'Host': 'comma.local:8082'})[0], 403)
       finally:
@@ -447,10 +603,11 @@ class HudHttpTest(unittest.TestCase):
         pass
 
       def __getitem__(self, key):
-        return self.data[key]
+        return self.data.get(key)
 
     reader = object.__new__(MessagingHudReader)
     reader.sm = Cached()
+    reader.seen_moving, reader.fuel, reader.can_sock = {}, FuelTrip(), None
     reader.params = None
     reader.is_metric = True
     reader.car_params = None
