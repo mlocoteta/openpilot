@@ -156,7 +156,10 @@ def get_radar_can_parser(CP):
                20 if mrr35 and addr == start + count - 1 else
                float("nan") if mrr35 or g90 and addr >= start + RADAR_MSG_COUNT else 20 if gv70 else 50) for addr in range(start, start + count)]
   mrr30 = radar_dbc(CP) == HYUNDAI_MRR30_RADAR_DBC
-  return CANParser(radar_dbc(CP), messages, radar_bus(CP) if mrr35 or mrr30 or gv70 else 1)
+  # MRR35 publishes many unused/unknown fields in each object packet. Decode
+  # the four consumed track fields, retaining parser integrity fields automatically.
+  selected = ({name: ('STATE', 'LONG_DIST', 'LAT_DIST', 'REL_SPEED') for name, _ in messages} if mrr35 else None)
+  return CANParser(radar_dbc(CP), messages, radar_bus(CP) if mrr35 or mrr30 or gv70 else 1, signals=selected)
 
 
 def radar_message_range(CP) -> tuple[int, int]:

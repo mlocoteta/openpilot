@@ -112,10 +112,18 @@ class VLDict(dict):
 
 
 class CANParser:
-  def __init__(self, dbc_name: str, messages: Sequence[tuple[str | int, float]], bus: int):
+  def __init__(self, dbc_name: str, messages: Sequence[tuple[str | int, float]], bus: int, *, signals: dict[str | int, Sequence[str]] | None = None):
     self.dbc_name: str = dbc_name
     self.bus: int = bus
     self.dbc = DBC(dbc_name)
+    self._signal_selection: dict[int, frozenset[str]] = {}
+    for key, names in (signals or {}).items():
+      message = self.dbc.addr_to_msg.get(int(key)) if isinstance(key, numbers.Number) else self.dbc.name_to_msg.get(key)
+      if message is None or not set(names).issubset(message.sigs):
+        raise ValueError(f"Unknown signal selection for {key!r} in DBC {dbc_name}")
+      if message.address in self._signal_selection:
+        raise ValueError(f"Duplicate signal selection for {key!r}")
+      self._signal_selection[message.address] = frozenset(names)
 
     self.vl: dict[int | str, dict[str, float]] = VLDict(self)
     self.vl_all: dict[int | str, dict[str, list[float]]] = {}
@@ -148,7 +156,13 @@ class CANParser:
     assert msg.address not in self.addresses
 
     self.addresses.add(msg.address)
-    signal_names = list(msg.sigs.keys())
+    selected = self._signal_selection.get(msg.address)
+    # Projection only: counters and checksum fields still use the original
+    # decoder, validation, rejection and freshness path on every message.
+    decoded_signals = [sig for sig in msg.sigs.values() if selected is None or sig.name in selected or
+                       sig.type != 0 or sig.calc_checksum is not None or
+                       'COUNTER' in sig.name or 'CHECKSUM' in sig.name]
+    signal_names = [sig.name for sig in decoded_signals]
     signals_dict = {s: 0.0 for s in signal_names}
     dict.__setitem__(self.vl, msg.address, signals_dict)
     dict.__setitem__(self.vl, msg.name, signals_dict)
@@ -161,7 +175,7 @@ class CANParser:
       address=msg.address,
       name=msg.name,
       size=msg.size,
-      signals=list(msg.sigs.values()),
+      signals=decoded_signals,
       ignore_alive=freq is not None and math.isnan(freq),
     )
     if freq is not None and freq > 0:
