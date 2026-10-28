@@ -60,7 +60,77 @@ def test_null_stream_is_never_passed_to_native_extension():
   enable.assert_not_called()
 
 
-def test_native_stream_requests_realtime_before_starting():
+def test_callback_inherits_only_unprotected_cores_and_owner_is_restored():
+  sd, stream, _, _ = environment()
+  calls = []
+  stream.start = lambda: calls.append('start')
+  def affinity(pid, cores):
+    calls.append(set(cores))
+  with patch.object(audio.sys, 'platform', 'linux'), \
+       patch.object(audio.os, 'sched_getaffinity', create=True, return_value=set(range(8))), \
+       patch.object(audio.os, 'sched_setaffinity', create=True, side_effect=affinity), \
+       patch.object(audio, 'request_alsa_realtime', side_effect=lambda *args: calls.append('request') or True):
+    assert audio.start_native_stream(stream, sd)
+  assert calls == [{0, 1, 2, 3, 7}, 'request', 'start', set(range(8))]
+
+
+@pytest.mark.parametrize('allowed', [{4}, {5, 6}, {6}])
+def test_realtime_never_requested_when_only_driving_cores_are_available(allowed):
+  sd, stream, _, _ = environment()
+  stream.start = Mock()
+  with patch.object(audio.sys, 'platform', 'linux'), \
+       patch.object(audio.os, 'sched_getaffinity', create=True, return_value=allowed), \
+       patch.object(audio, 'request_alsa_realtime') as request:
+    assert not audio.start_native_stream(stream, sd)
+  request.assert_not_called()
+  stream.start.assert_called_once_with()
+
+
+def test_start_failure_restores_parent_affinity():
+  sd, stream, _, _ = environment()
+  stream.start = Mock(side_effect=OSError('start failed'))
+  with patch.object(audio.sys, 'platform', 'linux'), \
+       patch.object(audio.os, 'sched_getaffinity', create=True, return_value=set(range(8))), \
+       patch.object(audio.os, 'sched_setaffinity', create=True) as affinity, \
+       patch.object(audio, 'request_alsa_realtime', return_value=True), pytest.raises(OSError, match='start failed'):
+    audio.start_native_stream(stream, sd)
+  assert affinity.call_args_list[-1].args == (0, set(range(8)))
+
+
+def test_affinity_failure_never_enables_realtime():
+  sd, stream, _, _ = environment()
+  stream.start = Mock()
+  with patch.object(audio.sys, 'platform', 'linux'), \
+       patch.object(audio.os, 'sched_getaffinity', create=True, return_value=set(range(8))), \
+       patch.object(audio.os, 'sched_setaffinity', create=True, side_effect=OSError), \
+       patch.object(audio, 'request_alsa_realtime') as request:
+    assert not audio.start_native_stream(stream, sd)
+  request.assert_not_called()
+  stream.start.assert_called_once_with()
+
+
+def test_missing_extension_restores_affinity_before_ordinary_start():
+  sd, stream, _, _ = environment()
+  calls = []
+  stream.start = lambda: calls.append('start')
+  with patch.object(audio.sys, 'platform', 'linux'), \
+       patch.object(audio.os, 'sched_getaffinity', create=True, return_value=set(range(8))), \
+       patch.object(audio.os, 'sched_setaffinity', create=True, side_effect=lambda pid, cores: calls.append(set(cores))), \
+       patch.object(audio, 'request_alsa_realtime', return_value=False):
+    assert not audio.start_native_stream(stream, sd)
+  assert calls == [{0, 1, 2, 3, 7}, set(range(8)), 'start']
+
+
+def test_non_linux_start_does_not_change_scheduling():
+  sd, stream, _, _ = environment()
+  stream.start = Mock()
+  with patch.object(audio.sys, 'platform', 'darwin'), patch.object(audio, 'request_alsa_realtime') as request:
+    assert not audio.start_native_stream(stream, sd)
+  request.assert_not_called()
+  stream.start.assert_called_once_with()
+
+
+def test_native_stream_requests_realtime_when_starting_and_closes_cleanly():
   sd, _, _, _ = environment()
   calls = []
   class Stream:
@@ -80,15 +150,17 @@ def test_native_stream_requests_realtime_before_starting():
   native.sd = sd
   native.handle = 1234
   native.rate, native.buffer = 48000, 4096
-  def request(*args):
+  native.realtime_requested = False
+  def start(stream, device):
     calls.append('request')
+    stream.start()
     return True
-  with patch.object(audio, 'request_alsa_realtime', side_effect=request), \
+  with patch.object(audio, 'start_native_stream', side_effect=start), \
        patch.object(native, 'lib', NS(audio_callback_address=lambda: 0), create=True), \
        patch.object(native, 'close', side_effect=lambda: calls.append('destroy')):
     stream = native.stream()
-    assert native.realtime_requested
-    assert calls == ['open', 'request']
+    assert calls == ['open']
     with stream:
+      assert native.realtime_requested
       assert calls == ['open', 'request', 'start']
   assert calls == ['open', 'request', 'start', 'stop', 'close', 'destroy']

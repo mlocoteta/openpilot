@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,28 @@ def request_alsa_realtime(stream, sd) -> bool:
   enable.restype = None
   enable(pointer, 1)
   return True
+
+
+def start_native_stream(stream, sd) -> bool:
+  if sys.platform != 'linux':
+    stream.start()
+    return False
+  original = os.sched_getaffinity(0)
+  callback_cores = original - {4, 5, 6}
+  if callback_cores:
+    try:
+      os.sched_setaffinity(0, callback_cores)
+    except OSError:
+      pass
+    else:
+      try:
+        if request_alsa_realtime(stream, sd):
+          stream.start()
+          return True
+      finally:
+        os.sched_setaffinity(0, original)
+  stream.start()
+  return False
 
 
 class NativePlayback:
@@ -216,7 +239,6 @@ class NativePlayback:
     try:
       base.__init__(stream, kind='output', wrap_callback=None, channels=1, dtype='float32',
                     samplerate=self.rate, blocksize=self.buffer, callback=callback, userdata=userdata)
-      self.realtime_requested = request_alsa_realtime(stream, self.sd)
     except BaseException as constructor_error:
       pointer = getattr(stream, '_ptr', self.sd._ffi.NULL)
       # Before a successful open, sounddevice holds PaStream**; after open it
@@ -244,7 +266,7 @@ class NativeStream:
 
   def __enter__(self):
     try:
-      self.stream.start()
+      self.playback.realtime_requested = start_native_stream(self.stream, self.playback.sd)
     except BaseException as start_error:
       try:
         self.close()
