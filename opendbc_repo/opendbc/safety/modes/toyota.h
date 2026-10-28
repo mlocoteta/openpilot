@@ -221,53 +221,53 @@ static void toyota_hold_observe(const CANPacket_t *msg) {
 static void toyota_optional_rx_hook(const CANPacket_t *msg) {
   // Only bus0 pedal RX belongs to the required catalog. A CRC-valid camera
   // copy must neither invalidate its parent nor refresh the primary lease.
-  if (toyota_pedal && msg_matches(msg, 0x201U, 2U) && (GET_LEN(msg) == 6U) &&
-      (msg->data[5] == toyota_pedal_checksum(msg))) {
-    return;
-  }
-  if (toyota_dsu_bypass) {
-    if (msg_matches(msg, 0x343U, 2U)) {
-      // A malformed packet outside the required catalog cannot retain LONG.
-      toyota_bypass_control = false;
+  const bool camera_copy = toyota_pedal && msg_matches(msg, 0x201U, 2U) && (GET_LEN(msg) == 6U) &&
+    (msg->data[5] == toyota_pedal_checksum(msg));
+  if (!camera_copy) {
+    if (toyota_dsu_bypass) {
+      if (msg_matches(msg, 0x343U, 2U)) {
+        // A malformed packet outside the required catalog cannot retain LONG.
+        toyota_bypass_control = false;
+      }
+      if ((msg->addr == 0x201U) || (msg->addr == 0x2FFU) || (msg->addr == 0x2AAU)) {
+        toyota_bypass_ambiguous = true;
+      }
+      if (msg_matches(msg, 0x283U, 2U)) {
+        const bool valid = (GET_LEN(msg) == 7U) && (toyota_get_checksum(msg) == toyota_compute_checksum(msg));
+        toyota_bypass_aeb = !valid || (GET_BIT(msg, 41U) && GET_BIT(msg, 23U));
+      }
     }
-    if ((msg->addr == 0x201U) || (msg->addr == 0x2FFU) || (msg->addr == 0x2AAU)) {
-      toyota_bypass_ambiguous = true;
+    if (toyota_prius_advert() && ((msg->addr == 0x201U) || (msg->addr == 0x2AAU) ||
+        ((msg->addr == 0x2FFU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) != 4U))))) {
+      toyota_prius_sdsu_ambiguous = true;
     }
-    if (msg_matches(msg, 0x283U, 2U)) {
-      const bool valid = (GET_LEN(msg) == 7U) && (toyota_get_checksum(msg) == toyota_compute_checksum(msg));
-      toyota_bypass_aeb = !valid || (GET_BIT(msg, 41U) && GET_BIT(msg, 23U));
+    if (toyota_prius_sdsu() && ((msg->addr == 0x201U) || (msg->addr == 0x2AAU) ||
+        ((msg->addr == 0x2FFU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) == 4U))))) {
+      toyota_prius_sdsu_ambiguous = true;
     }
-  }
-  if (toyota_prius_advert() && ((msg->addr == 0x201U) || (msg->addr == 0x2AAU) ||
-      ((msg->addr == 0x2FFU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) != 4U))))) {
-    toyota_prius_sdsu_ambiguous = true;
-  }
-  if (toyota_prius_sdsu() && ((msg->addr == 0x201U) || (msg->addr == 0x2AAU) ||
-      ((msg->addr == 0x2FFU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) == 4U))))) {
-    toyota_prius_sdsu_ambiguous = true;
-  }
-  if (toyota_camera_2aa() && ((msg->addr == 0x2FFU) || (msg->addr == 0x201U) ||
-      ((msg->addr == 0x2AAU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) != 8U))))) {
-    // A discriminator cannot authorize a contradictory status/pedal receiver.
-    // Keep the refusal until a new safety configuration, including with AOL off.
-    toyota_camera_2aa_ambiguous = true;
-  }
-  const bool aol_checksum_source = (!toyota_alt_cruise && (msg->addr == 0x1D3U)) || (msg->addr == 0x262U) || (toyota_aol_secoc && (msg->addr == 0x127U));
-  const unsigned int aol_source_len = ((toyota_factory_eps5 || (toyota_dsu_bypass && toyota_bypass_eps5) || toyota_aol_rav4h_filter || toyota_alt_cruise || toyota_legacy_sdsu || toyota_legacy_advert() || (current_safety_param == 856U)) && (msg->addr == 0x262U)) ? 5U : 8U;
-  if (!aol_checksum_source || ((GET_LEN(msg) == aol_source_len) && (toyota_get_checksum(msg) == toyota_compute_checksum(msg)))) {
-    toyota_aol_observe(msg);
-  } else if ((toyota_dsu_bypass || toyota_pedal_composite || toyota_aol_enabled || toyota_legacy_advert() || toyota_camera_2aa() || toyota_prius_filter()) && (msg->bus == 0U)) {
-    unsigned int index = 3U;
-    if (msg->addr == 0x1D3U) {
-      index = 0U;
-    } else if (msg->addr == 0x127U) {
-      index = 1U;
+    if (toyota_camera_2aa() && ((msg->addr == 0x2FFU) || (msg->addr == 0x201U) ||
+        ((msg->addr == 0x2AAU) && (((msg->bus != 0U) && (msg->bus != 2U)) || (GET_LEN(msg) != 8U))))) {
+      // A discriminator cannot authorize a contradictory status/pedal receiver.
+      // Keep the refusal until a new safety configuration, including with AOL off.
+      toyota_camera_2aa_ambiguous = true;
+    }
+    const bool aol_checksum_source = (!toyota_alt_cruise && (msg->addr == 0x1D3U)) || (msg->addr == 0x262U) || (toyota_aol_secoc && (msg->addr == 0x127U));
+    const unsigned int aol_source_len = ((toyota_factory_eps5 || (toyota_dsu_bypass && toyota_bypass_eps5) || toyota_aol_rav4h_filter || toyota_alt_cruise || toyota_legacy_sdsu || toyota_legacy_advert() || (current_safety_param == 856U)) && (msg->addr == 0x262U)) ? 5U : 8U;
+    if (!aol_checksum_source || ((GET_LEN(msg) == aol_source_len) && (toyota_get_checksum(msg) == toyota_compute_checksum(msg)))) {
+      toyota_aol_observe(msg);
+    } else if ((toyota_dsu_bypass || toyota_pedal_composite || toyota_aol_enabled || toyota_legacy_advert() || toyota_camera_2aa() || toyota_prius_filter()) && (msg->bus == 0U)) {
+      unsigned int index = 3U;
+      if (msg->addr == 0x1D3U) {
+        index = 0U;
+      } else if (msg->addr == 0x127U) {
+        index = 1U;
+      } else {
+      }
+      toyota_aol_seen[index] = false;
     } else {
     }
-    toyota_aol_seen[index] = false;
-  } else {
+    toyota_hold_observe(msg);
   }
-  toyota_hold_observe(msg);
 }
 
 static void toyota_rx_hook(const CANPacket_t *msg) {

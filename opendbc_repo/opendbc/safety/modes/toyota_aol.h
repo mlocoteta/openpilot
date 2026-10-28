@@ -99,10 +99,13 @@ static bool toyota_pedal_composite_param(uint16_t param) {
 }
 
 static uint16_t toyota_pedal_parent_param(uint16_t param) {
+  uint16_t parent;
   if ((param == 0xE449U) || (param == 0xE649U)) {
-    return (param == 0xE449U) ? 0x9849U : 0x9A49U;
+    parent = (param == 0xE449U) ? 0x9849U : 0x9A49U;
+  } else {
+    parent = toyota_pedal_composite_param(param) ? (uint16_t)(param & ~0x2000U) : param;
   }
-  return toyota_pedal_composite_param(param) ? (uint16_t)(param & ~0x2000U) : param;
+  return parent;
 }
 
 static bool toyota_alt_cruise = false;
