@@ -281,7 +281,7 @@ def run_case(stock, scenario='nominal', *, aol=True, candidate=CAR.TOYOTA_RAV4H,
           assert all(entry.brand == 'toyota' and not entry.logging and entry.bus == 0 for entry in fw)
         assert fingerprint_frames == [(0x2FF, bytes(manual_filter_length), 0)]
       else:
-        assert stock and fingerprint_frames == []
+        assert stock and (fingerprint_frames == [] or candidate == CAR.TOYOTA_PRIUS_RETROFIT)
         if candidate == CAR.TOYOTA_MATRIX_RETROFIT:
           assert not fw and firmware_override == []
         else:

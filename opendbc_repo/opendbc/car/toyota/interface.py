@@ -167,10 +167,9 @@ class CarInterface(CarInterfaceBase):
       # These manually selected retrofits currently own stock PCM longitudinal.
       # Observed takeover hardware needs its paired controller/native port.
       camera_fp = fingerprint.get(2, {})
-      late_camera = candidate == CAR.TOYOTA_PRIUS_RETROFIT and any(
-        fw.ecu == Ecu.fwdCamera and bytes(fw.fwVersion).startswith(b"8646F4705") for fw in car_fw)
       bypass = 0x343 in camera_fp or 0x4CB in camera_fp
-      if late_camera:
+      # A camera-bus copy of a still-present native DSU is not a takeover.
+      if candidate == CAR.TOYOTA_PRIUS_RETROFIT:
         bypass = ((0x343 in camera_fp and not any(0x343 in fingerprint.get(bus, {}) for bus in (0, 1))) or
                   (0x4CB in camera_fp and 0x4CB not in fingerprint[0]))
       smart_dsu = (candidate == CAR.TOYOTA_PRIUS_RETROFIT and
