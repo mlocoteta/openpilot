@@ -4,7 +4,16 @@ Modeled on plots.py: the worker owns its IPC sockets, no subscription exists
 until an authenticated request arrives, and the worker leaves after six seconds
 without a viewer. Requests are served from the last cached projection. Absent or
 stale inputs stay null; nothing here writes Params, files or logs.
+
+Schema 2 (F29, Accord head unit, accord-head-unit/upper-screen/HUD-V2.md) adds, all optional:
+- model: modelV2 laneLines/laneLineProbs/roadEdges/roadEdgeStds/position as 14 [x fwd m, y m] points (grid 0,2,..,26)
+- road: mapdOut lanes/estimatedRoadWidth/roadName
+- lead.yRel (right positive) + lead.trackId (radarTrackId, -1 = vision-only lead)
+- tracks (v2.1): credible radarTracks points, moving with us or stopped after being seen moving
+- fuel (v2.2, Accord 9G only): the car's own trip-fuel counter (CAN 0x324 bytes 2-3) as mL + mpg
 """
+
+from collections import deque
 
 import math
 import secrets
@@ -24,7 +33,30 @@ MAX_AGE_S = {'deviceState': 2.0, 'chestnutState': 1.5, 'peripheralState': 2.0}
 STATIC_SERVICES = ('carParams',)
 PARAMS_RETRY_S = 10.0
 SERVICES = ('deviceState', 'selfdriveState', 'carState', 'carControl', 'radarState', 'slcState',
-            'chestnutState', 'drivingModelData', 'peripheralState', 'carParams')
+            'chestnutState', 'drivingModelData', 'peripheralState', 'carParams', 'modelV2', 'radarTracks', 'mapdOut')
+
+# v2 model geometry: every other point of the 33-point modelV2 grid -> 14 points, x 0..~126 m.
+MODEL_IDX = tuple(range(0, 27, 2))
+# v2.1 tracks: the Nidec radar has 16 slots. "Moving" = over-ground speed of at least 2.5 m/s.
+TRACKS_MAX = 16
+TRACK_MOVING = 2.5
+TRACK_D_RANGE = (1.0, 150.0)
+TRACK_Y_MAX = 12.0
+# v2.2 fuel (Accord 9G): CAN 0x324 bytes 2-3 big-endian = trip fuel since ignition, 0.1 mL per count (checked against
+# EPA highway/city on 10-26 rlogs), wraps at 65536, 10 Hz on the powertrain bus.
+FUEL_CAR = 'HONDA_ACCORD_9G'
+FUEL_ADDR = 0x324
+FUEL_BUS = 0
+FUEL_ML_PER_COUNT = 0.1
+FUEL_SCAN_BATCHES = 12      # 0x324 is in every 10th 100 Hz batch: the newest 12 always hold one
+FUEL_GAP_S = 2.0            # longer sample gaps add neither fuel nor distance
+FUEL_WINDOW_S = 2.0
+FUEL_MPG_CAP = 99.9
+FUEL_AVG_MIN_M = 400.0
+FUEL_BUCKET_MI = 0.25
+FUEL_HIST_MAX = 120
+M_PER_MI = 1609.344
+ML_PER_GAL = 3785.41
 
 # opendbc HondaSafetyFlags.TORQUE_INTERCEPTOR (F01): set in the Nidec safety word only when the TI drives lateral.
 TI_SAFETY_PARAM = 4096
@@ -54,6 +86,7 @@ def empty():
     'egpu': None,
     'blinker': None, 'gear': None,
     'batteryVolts': None,
+    'model': None, 'road': None, 'tracks': None, 'fuel': None,
   }
 
 
@@ -141,7 +174,171 @@ def _lead(radar):
   d_rel, v_rel, v_lead = finite(_field(lead, 'dRel')), finite(_field(lead, 'vRel')), finite(_field(lead, 'vLead'))
   if d_rel is None or v_rel is None or v_lead is None:
     return None
-  return {'status': True, 'dRel': d_rel, 'vRel': v_rel, 'vLead': v_lead, 'radar': _bool(lead, 'radar')}
+  y_rel = finite(_field(lead, 'yRel'))
+  radar = _bool(lead, 'radar')
+  track = _field(lead, 'radarTrackId')
+  track_id = int(track) if isinstance(track, int) and radar else -1
+  return {'status': True, 'dRel': d_rel, 'vRel': v_rel, 'vLead': v_lead, 'radar': radar,
+          'yRel': -y_rel if y_rel is not None else None, 'trackId': track_id}
+
+
+def _r2(value):
+  return round(value, 2)
+
+
+def _line(xyz):
+  """14 [x, y] points of a modelV2 XYZTData, or None when short or non-finite."""
+  xs, ys = _field(xyz, 'x'), _field(xyz, 'y')
+  try:
+    if xs is None or ys is None or len(xs) <= MODEL_IDX[-1] or len(ys) <= MODEL_IDX[-1]:
+      return None
+    points = [(finite(xs[i]), finite(ys[i])) for i in MODEL_IDX]
+  except (IndexError, TypeError, ValueError):
+    return None
+  if any(x is None or y is None for x, y in points):
+    return None
+  return [[_r2(x), _r2(y)] for x, y in points]
+
+
+def _floats(values, count):
+  try:
+    out = [finite(v) for v in values] if values is not None else []
+  except (TypeError, ValueError):
+    return None
+  return [_r2(v) for v in out] if len(out) == count and all(v is not None for v in out) else None
+
+
+def _model(model):
+  lines = [_line(line) for line in (_field(model, 'laneLines') or [])]
+  edges = [_line(edge) for edge in (_field(model, 'roadEdges') or [])]
+  if len(lines) != 4 or len(edges) != 2 or any(line is None for line in lines + edges):
+    return None
+  return {'laneLines': lines, 'laneLineProbs': _floats(_field(model, 'laneLineProbs'), 4), 'roadEdges': edges,
+          'roadEdgeStds': _floats(_field(model, 'roadEdgeStds'), 2), 'path': _line(_field(model, 'position'))}
+
+
+def _road(mapd):
+  lanes = _field(mapd, 'lanes')
+  width = finite(_field(mapd, 'estimatedRoadWidth'))
+  name = _text(mapd, 'roadName', 80)
+  return {'lanes': lanes if isinstance(lanes, int) and 0 < lanes <= 8 else None,
+          'width': _r2(width) if width is not None and width > 0 else None,
+          'name': name or None}
+
+
+def tracks(radar_tracks, v_ego, seen_moving):
+  """Credible radar tracks (HUD-V2.md v2.1). seen_moving: {trackId: True} kept by the caller across samples; ids that
+  disappear are dropped from it. radar yRel is +left, the HUD's is +right."""
+  points = _field(radar_tracks, 'points')
+  if points is None or v_ego is None:
+    return None
+  out, live = [], set()
+  try:
+    ordered = sorted(points, key=lambda point: point.dRel)
+  except (AttributeError, TypeError, ValueError):
+    return None
+  for point in ordered:
+    d_rel, y_rel, v_rel = finite(_field(point, 'dRel')), finite(_field(point, 'yRel')), finite(_field(point, 'vRel'))
+    track_id = _field(point, 'trackId')
+    if d_rel is None or y_rel is None or v_rel is None or not isinstance(track_id, int):
+      continue
+    live.add(track_id)
+    v_lead = v_ego + v_rel
+    if v_lead >= TRACK_MOVING:
+      seen_moving[track_id] = True
+    if not TRACK_D_RANGE[0] < d_rel < TRACK_D_RANGE[1] or abs(y_rel) > TRACK_Y_MAX or v_lead <= -TRACK_MOVING:
+      continue
+    stopped = v_lead < TRACK_MOVING
+    if stopped and not seen_moving.get(track_id):
+      continue
+    out.append({'id': track_id, 'dRel': _r2(d_rel), 'yRel': _r2(-y_rel), 'vRel': _r2(v_rel), 'vLead': _r2(v_lead),
+                'stopped': stopped})
+  for gone in [track_id for track_id in seen_moving if track_id not in live]:
+    del seen_moving[gone]
+  return out[:TRACKS_MAX]
+
+
+class FuelTrip:
+  """v2.2 fuel from the 0x324 trip counter. Fuel and distance only accumulate across consecutive samples at most
+  FUEL_GAP_S apart, so both cover exactly the time the HUD watched; a counter drop that is not a wrap = new ignition."""
+
+  def __init__(self):
+    self.reset()
+
+  def reset(self):
+    self.count = None
+    self.at = None
+    self.v = None
+    self.ml = 0.0
+    self.m = 0.0
+    self.window = deque()
+    self.hist = []
+    self.bucket = (0.0, 0.0)   # (miles, mL) at the start of the open bucket
+    self.seen = False
+
+  def update(self, count, v_ego, now, onroad):
+    if onroad is not True:
+      if onroad is False:
+        self.reset()
+      return
+    if count is None or v_ego is None:
+      return
+    delta = None
+    if self.count is not None and self.at is not None and 0 < now - self.at <= FUEL_GAP_S:
+      delta = count - self.count
+      if delta < 0:
+        if self.count - count > 30_000:
+          delta += 65_536
+        else:
+          self.reset()   # the car zeroes the counter at ignition: a new trip starts at this sample
+          delta = None
+    if delta is not None:
+      self.ml += delta * FUEL_ML_PER_COUNT
+      self.m += (v_ego + self.v) / 2 * (now - self.at)
+      mi = self.m / M_PER_MI
+      start_mi, start_ml = self.bucket
+      if mi - start_mi >= FUEL_BUCKET_MI:
+        used = self.ml - start_ml
+        if used > 0:
+          self.hist = (self.hist + [[_r2(mi), round(min(FUEL_MPG_CAP, (mi - start_mi) / (used / ML_PER_GAL)), 1)]])[-FUEL_HIST_MAX:]
+        self.bucket = (mi, self.ml)
+    self.count, self.at, self.v, self.seen = count, now, v_ego, True
+    self.window.append((now, self.ml, self.m))
+    while self.window and self.window[0][0] < now - FUEL_WINDOW_S:
+      self.window.popleft()
+
+  def value(self):
+    if not self.seen:
+      return None
+    rate = inst = None
+    if self.window:
+      t0, ml0, m0 = self.window[0]
+      t1, ml1, m1 = self.window[-1]
+      span = t1 - t0
+      if span >= 0.5:
+        rate = round((ml1 - ml0) / span, 3)
+        if (m1 - m0) / span >= 1.0:
+          used = ml1 - ml0
+          inst = FUEL_MPG_CAP if used <= 0 else round(min(FUEL_MPG_CAP, ((m1 - m0) / M_PER_MI) / (used / ML_PER_GAL)), 1)
+    avg = None
+    if self.m > FUEL_AVG_MIN_M and self.ml > 0:
+      avg = round(min(FUEL_MPG_CAP, (self.m / M_PER_MI) / (self.ml / ML_PER_GAL)), 1)
+    return {'tripMl': round(self.ml, 1), 'tripM': round(self.m), 'rateMlS': rate, 'instMpg': inst, 'avgMpg': avg,
+            'hist': [list(item) for item in self.hist]}
+
+
+def fuel_count(batches):
+  """Newest 0x324 trip counter in drained CAN batches (oldest first), scanning at most FUEL_SCAN_BATCHES from the end."""
+  for can in reversed(batches[-FUEL_SCAN_BATCHES:]):
+    try:
+      for frame in can:
+        if frame.address == FUEL_ADDR and frame.src == FUEL_BUS:
+          data = bytes(frame.dat)
+          if len(data) >= 4:
+            return int.from_bytes(data[2:4], 'big')
+    except (AttributeError, TypeError, ValueError):
+      continue
+  return None
 
 
 def _alert(state):
@@ -207,10 +404,11 @@ def _egpu(msgs, fresh, onroad):
   return result
 
 
-def extract(msgs, fresh, is_metric=None):
+def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None):
   """Project a fixed allowlist; missing or stale services stay null, never zero.
 
-  msgs: service -> capnp reader (or None); fresh: service -> bool.
+  msgs: service -> capnp reader (or None); fresh: service -> bool. seen_moving: the caller's v2.1 track memory
+  (a fresh dict when omitted); fuel: the v2.2 object from FuelTrip.value(), passed through.
   """
   result = empty()
   result['isMetric'] = is_metric if isinstance(is_metric, bool) else None
@@ -255,6 +453,13 @@ def extract(msgs, fresh, is_metric=None):
     mv = finite(_field(msgs.get('peripheralState'), 'voltage'))
     if mv is not None and BATTERY_MV_RANGE[0] <= mv <= BATTERY_MV_RANGE[1]:
       result['batteryVolts'] = round(mv / 1000, 2)
+  if fresh.get('modelV2'):
+    result['model'] = _model(msgs.get('modelV2'))
+  if fresh.get('mapdOut'):
+    result['road'] = _road(msgs.get('mapdOut'))
+  if fresh.get('radarTracks') and result['vEgo'] is not None:
+    result['tracks'] = tracks(msgs.get('radarTracks'), result['vEgo'], {} if seen_moving is None else seen_moving)
+  result['fuel'] = fuel if isinstance(fuel, dict) else None
   return result
 
 
@@ -281,6 +486,10 @@ def _read_params():
     return None
 
 
+# Survives worker restarts (the worker exits 6 s after the last request): one drive = one fuel trip.
+FUEL = FuelTrip()
+
+
 class MessagingHudReader:
   def __init__(self):
     from openpilot.cereal import messaging
@@ -289,6 +498,9 @@ class MessagingHudReader:
     self.started_ns = time.monotonic_ns()
     self.boot_offset_ns = paired_boot_offset_ns()
     self.sm = messaging.SubMaster(list(SERVICES))
+    self.seen_moving = {}
+    self.fuel = FUEL
+    self.can_sock = None
     self.params = _read_params()
     self.is_metric = None
     self.car_params = None
@@ -357,16 +569,42 @@ class MessagingHudReader:
       onroad = fresh['deviceState'] and _bool(sm['deviceState'], 'started') is True
       cached = self._cached_car_params(now) if onroad else None
       msgs['carParams'], fresh['carParams'] = cached, cached is not None
-    values = extract(msgs, fresh, self.is_metric)
+    fuel = None
+    if self._fuel_car(msgs['carParams']):
+      device = msgs['deviceState']
+      onroad = _bool(device, 'started') if device is not None else None
+      car_state = msgs['carState']
+      v_ego = finite(_field(car_state, 'vEgo')) if car_state is not None else None
+      self.fuel.update(self._fuel_count() if onroad else None, v_ego, now, onroad)
+      fuel = self.fuel.value()
+    values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel)
     current = core_fresh(values, fresh)
     core = ('selfdriveState', 'carState') if values['onroad'] else ('deviceState',)
     source_age = max(ages[key] for key in core) if current else None
     signature = tuple(sm.logMonoTime[key] if key in ages else 0 for key in SERVICES)
     return HudReading(values, current, source_age, signature)
 
+  def _fuel_car(self, car_params):
+    return car_params is not None and _text(car_params, 'carFingerprint', 60) == FUEL_CAR
+
+  def _fuel_count(self):
+    """Drain the raw (non-conflated) CAN queue and return the newest 0x324 counter, or None."""
+    try:
+      if self.can_sock is None:
+        self.can_sock = self.messaging.sub_sock('can', conflate=False)
+      batches = []
+      for raw in self.messaging.drain_sock_raw(self.can_sock)[-FUEL_SCAN_BATCHES:]:
+        event = self.messaging.log_from_bytes(raw)
+        if event.which() == 'can':
+          batches.append(event.can)
+      return fuel_count(batches)
+    except Exception:
+      return None
+
   def close(self):
     self.sm = None
     self.params = None
+    self.can_sock = None
 
 
 class Hud:
@@ -404,7 +642,7 @@ class Hud:
       if expired and self.error:
         state = 'unavailable'
       return {
-        'schemaVersion': 1,
+        'schemaVersion': 2,
         'state': state,
         'sessionId': self.session_id,
         'seq': self.seq,
