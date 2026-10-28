@@ -20,17 +20,19 @@ CLIENT_IDLE_S = 6.0
 STALE_AFTER_S = 1.5
 SOURCE_MAX_AGE_S = 1.0
 # Slow publishers get a wider window; carParams (0.02 Hz) is per-drive static data.
-MAX_AGE_S = {'deviceState': 2.0, 'chestnutState': 1.5}
+MAX_AGE_S = {'deviceState': 2.0, 'chestnutState': 1.5, 'peripheralState': 2.0}
 STATIC_SERVICES = ('carParams',)
 PARAMS_RETRY_S = 10.0
 SERVICES = ('deviceState', 'selfdriveState', 'carState', 'carControl', 'radarState', 'slcState',
-            'chestnutState', 'drivingModelData', 'carParams')
+            'chestnutState', 'drivingModelData', 'peripheralState', 'carParams')
 
 # opendbc HondaSafetyFlags.TORQUE_INTERCEPTOR (F01): set in the Nidec safety word only when the TI drives lateral.
 TI_SAFETY_PARAM = 4096
 CV_KPH_TO_MS = 1 / 3.6
 V_CRUISE_UNSET_KPH = 255
 CHESTNUT_MIN_SUPPLY_MV = 10_000
+# panda harness voltage (car 12 V bus); outside this range it is a bad read, not a battery value.
+BATTERY_MV_RANGE = (5_000, 20_000)
 
 STATUS_NAMES = {'disabled': 'disengaged', 'preEnabled': 'preEnabled', 'enabled': 'engaged',
                 'softDisabling': 'softDisabling', 'overriding': 'overriding'}
@@ -51,6 +53,7 @@ def empty():
     'slc': None,
     'egpu': None,
     'blinker': None, 'gear': None,
+    'batteryVolts': None,
   }
 
 
@@ -248,6 +251,10 @@ def extract(msgs, fresh, is_metric=None):
     if result['personality'] is not None and _field(_field(slc, 'trafficMode'), 'effective') is True:
       result['personality'] = 'traffic'
   result['egpu'] = _egpu(msgs, fresh, onroad)
+  if fresh.get('peripheralState'):
+    mv = finite(_field(msgs.get('peripheralState'), 'voltage'))
+    if mv is not None and BATTERY_MV_RANGE[0] <= mv <= BATTERY_MV_RANGE[1]:
+      result['batteryVolts'] = round(mv / 1000, 2)
   return result
 
 
