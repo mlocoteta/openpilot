@@ -12,6 +12,7 @@ from openpilot.common.constants import CV
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, DT_CTRL, Priority, Ratekeeper, set_core_affinity
+from openpilot.selfdrive.controls.lib.cycle_timing import ControlCycleTiming
 from openpilot.common.swaglog import cloudlog
 
 from opendbc.car.car_helpers import interfaces
@@ -180,6 +181,9 @@ class Controls:
       self.LaC.__dict__.pop(name, None)
 
   def state_control(self, *, lane_centering: LaneCenteringRequest | None = None):
+    cycle_timing = getattr(self, 'control_cycle_timing', None)
+    if cycle_timing is not None:
+      cycle_timing.start()
     diagnostic_observer = getattr(self, 'aol_transition_diagnostic', None)
     diagnostic_entry = diagnostic_gate = diagnostic_native = None
     diagnostic_reason = ''
@@ -325,6 +329,8 @@ class Controls:
       if not CC.latActive:
         self.LaC.pid.reset()
 
+    if cycle_timing is not None:
+      cycle_timing.mark()
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
 
@@ -351,6 +357,8 @@ class Controls:
       # Publish the selected launch state to the vehicle controller in this same frame.
       actuators.longControlState = self.LoC.long_control_state
 
+    if cycle_timing is not None:
+      cycle_timing.mark()
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
     if self.sm.valid['lateralManeuverPlan']:
@@ -423,6 +431,8 @@ class Controls:
     lat_delay = self.sm["lateralDelay"].lateralDelay + LAT_SMOOTH_SECONDS + subaru_smooth_seconds(CS.vEgo, control_maximum(self))
 
     actuators.curvature = self.desired_curvature
+    if cycle_timing is not None:
+      cycle_timing.mark()
     automatic = getattr(self, 'global_learning', None)
     if automatic is not None:
       try:
@@ -442,6 +452,8 @@ class Controls:
       except Exception:
         self._discard_global_learning()
         automatic = None
+    if cycle_timing is not None:
+      cycle_timing.mark()
     steer, lateral_output, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                      self.steer_limited_by_safety, self.desired_curvature,
                                                      curvature_limited, lat_delay)
@@ -488,6 +500,8 @@ class Controls:
         diagnostic_observer.disabled = True
         diagnostic_observer.pending = None
     self.aol_previous_lateral_active = bool(CC.latActive)
+    if cycle_timing is not None:
+      cycle_timing.mark()
     return CC, lac_log
 
   def publish(self, CC, lac_log):
@@ -613,6 +627,7 @@ class Controls:
   def run(self):
     rk = Ratekeeper(100, print_delay_threshold=None)
     next_overrun_log_ns = 0
+    self.control_cycle_timing = ControlCycleTiming()
     while True:
       started, cpu_started = time.monotonic_ns(), time.thread_time_ns()
       self.update()
@@ -627,7 +642,8 @@ class Controls:
         cloudlog.event('controls_cycle_overrun', update_ms=(updated - started) / 1e6,
                        control_ms=(controlled - updated) / 1e6, publish_ms=(published - controlled) / 1e6,
                        wall_ms=(published - started) / 1e6, cpu_ms=(time.thread_time_ns() - cpu_started) / 1e6,
-                       error=True)
+                       control_phases=self.control_cycle_timing.snapshot(),
+                       control_phases_complete=self.control_cycle_timing.complete, error=True)
       rk.monitor_time()
 
 
