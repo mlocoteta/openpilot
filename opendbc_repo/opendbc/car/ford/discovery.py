@@ -75,9 +75,11 @@ def normal_bus_query_brand(can_recv, hyundai_probe, *, gm_probe=None, clock=time
 
   if hyundai_probe(observe):
     return 'hyundai'
-  # A Ford CAN1 frame can invalidate an HKG-only layout on the first read.
-  # Complete Ford evidence within the original time/read budget, not a new probe.
-  while not malformed and received != NORMAL_BUS0_LAYOUT and reads < 24 and clock() < deadline:
+  # Rejecting HKG or Ford does not reject GM. Finish the shared passive window
+  # within its original budget even when an early frame excludes Ford.
+  while not (not malformed and received == NORMAL_BUS0_LAYOUT) and reads < 24 and clock() < deadline:
+    if malformed and (gm_probe is None or gm_malformed):
+      break
     observe(wait_for_one=True)
   if not malformed and received == NORMAL_BUS0_LAYOUT and normal_bus0_queries():
     return 'ford'

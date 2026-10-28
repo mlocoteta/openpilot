@@ -158,3 +158,32 @@ def test_latest_bypassed_volt_uses_gm_queries_and_retains_automatic_cc_identity(
   assert result[0] == data['expected'] == CAR.CHEVROLET_VOLT_CC
   assert callbacks and set(callbacks) == {False}
   assert peer.sent and all(frame.src == 0 for frame in peer.sent)
+
+
+def test_early_ford_rejection_still_collects_later_gm_frames_in_same_budget():
+  # Actual 2017 Bolt DLCs: 0x204 is four bytes, 0x4f1 is eight. The first
+  # rejects Ford and the second rejects HKG before GM core messages arrive.
+  layout = FINGERPRINTS[CAR.CHEVROLET_BOLT_CC_2017][0]
+  assert layout[0x204] == 4 and layout[0x4F1] == 8
+  early = [CanData(a, bytes(layout[a]), 0) for a in (0x204, 0x4F1)]
+  remaining = frames({0: layout})
+  calls = []
+  clock = [0.]
+
+  def recv(wait_for_one: bool = False) -> list[list[CanData]]:
+    clock[0] += .01
+    calls.append(wait_for_one)
+    return [early if len(calls) == 1 else remaining]
+  assert normal_bus_query_brand(recv, lambda read: hyundai_probe(read, clock=lambda: clock[0]),
+                                gm_probe=normal_bus0_topology, clock=lambda: clock[0]) == 'gm'
+  assert 1 < len(calls) <= 13
+
+
+def test_early_ford_rejection_does_not_add_reads_without_gm_probe():
+  calls = []
+
+  def recv(wait_for_one: bool = False) -> list[list[CanData]]:
+    calls.append(wait_for_one)
+    return [[CanData(0x204, bytes(4), 0), CanData(0x4F1, bytes(8), 0)]]
+  assert normal_bus_query_brand(recv, hyundai_probe, clock=lambda: 0.) is None
+  assert len(calls) == 1
