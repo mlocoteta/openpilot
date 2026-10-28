@@ -103,7 +103,17 @@ def test_composed_car_frame_converts_to_the_same_picture(gpu, width, height, mar
 @pytest.mark.parametrize("width,height,margin_w,margin_h", [(32, 18, 0, 0), (32, 18, 4, 2), (32, 20, 3, 5)])
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_fused_projection_conversion_matches_rgba_composition(gpu, width, height, margin_w, margin_h, asynchronous):
-  """The fast car path folds margins and vertical orientation into NV12 conversion."""
+  """Centered and asymmetric safe rectangles retain their pixels through both paths."""
+  cases = [(width, height, margin_w, margin_h, None)]
+  if (width, height, margin_w, margin_h) == (32, 20, 3, 5):
+    cases.extend([(32, 18, 4, 2, (4, 0)), (32, 20, 3, 5, (0, 0)), (32, 20, 3, 5, (3, 5)),
+                  (1280, 720, 0, 231, (0, 0)), (1280, 720, 0, 231, (0, 231))])
+  for case in cases:
+    assert_fused_frame(gpu, *case, asynchronous)
+
+
+def assert_fused_frame(gpu, width, height, margin_w, margin_h, origin, asynchronous):
+  placement = {} if origin is None else {"content_left": origin[0], "content_top": origin[1]}
   rl = gpu
   visible_w, visible_h = width - margin_w, height - margin_h
   pixels = np.random.default_rng(17).integers(0, 256, (visible_h, visible_w, 4), dtype=np.uint8)
@@ -111,10 +121,14 @@ def test_fused_projection_conversion_matches_rgba_composition(gpu, width, height
   texture_id = rl.rl_load_texture(rl.ffi.cast("void *", buffer), visible_w, visible_h, 7, 1)
   source = rl.Texture(texture_id, visible_w, visible_h, 1, 7)
   output = rl.load_render_texture(width, height)
-  converter = gpu_nv12.Nv12Converter(width, height, margin_w=margin_w, margin_h=margin_h, compose=True)
+  converter = gpu_nv12.Nv12Converter(width, height, margin_w=margin_w, margin_h=margin_h, compose=True, **placement)
   try:
-    gpu_nv12.compose_rgba(source, output, margin_w, margin_h)
+    gpu_nv12.compose_rgba(source, output, margin_w, margin_h, **placement)
     rgba = read_frame(width * height * 4, [(output.id, width, height, 0)])
+    if origin is not None:
+      actual = np.frombuffer(rgba, dtype=np.uint8).reshape(height, width, 4)
+      left, top = origin
+      assert np.array_equal(actual[top:top + visible_h, left:left + visible_w, :3], pixels[::-1, :, :3])
     nv12 = read_frame(width * height * 3 // 2, converter.convert(source), asynchronous)
     assert nv12 == gpu_nv12.reference_nv12(rgba, width, height)
   finally:

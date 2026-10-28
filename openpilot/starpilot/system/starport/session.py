@@ -150,6 +150,8 @@ class VideoMode:
   fps: int
   margin_width: int
   margin_height: int
+  content_left: int | None = None
+  content_top: int | None = None
 
   @property
   def content_width(self) -> int:
@@ -161,7 +163,8 @@ class VideoMode:
 
   def as_dict(self) -> dict:
     return {"channel": self.channel, "config_index": self.config_index, "width": self.width, "height": self.height,
-            "fps": self.fps, "margin_width": self.margin_width, "margin_height": self.margin_height}
+            "fps": self.fps, "margin_width": self.margin_width, "margin_height": self.margin_height,
+            **({"content_left": self.content_left, "content_top": self.content_top} if self.content_left is not None else {})}
 
 
 def describe_video_config(config: dict, display_type: int | None = None) -> str:
@@ -197,7 +200,19 @@ def choose_video_mode(channels: list[dict]) -> VideoMode:
       if not (0 <= margin_width < width and 0 <= margin_height < height):
         continue
       fps = FRAME_RATES.get(one(config, 2, 2), 30)
-      mode = VideoMode(int(channel["id"]), index, width, height, fps, margin_width, margin_height)
+      left = top = None
+      additional = one(config, 11)
+      if isinstance(additional, bytes):
+        insets = one(parse_fields(additional), 1)
+        if isinstance(insets, bytes):
+          edges = parse_fields(insets)
+          top_edge, bottom, left_edge, right = (one(edges, field, 0) for field in (1, 2, 3, 4))
+          # Use explicit placement only when it describes the same visible area
+          # as the legacy totals. Otherwise retain the negotiated centered mode.
+          if (all(type(value) is int and value >= 0 for value in (top_edge, bottom, left_edge, right)) and
+              top_edge + bottom == margin_height and left_edge + right == margin_width):
+            left, top = left_edge, top_edge
+      mode = VideoMode(int(channel["id"]), index, width, height, fps, margin_width, margin_height, left, top)
       candidates.append((RESOLUTION_PREFERENCE.index(resolution), fps != 30, index, mode))
   if not candidates:
     raise ValueError(f"Head unit did not advertise a supported H.264 video mode (offered {describe_video_configs(channels)})")
@@ -675,7 +690,8 @@ class ProjectionSession(Session):
       # Echo the advertised keycodes, as a phone does; touch needs no binding.
       self.send(channel["id"], INPUT_BINDING_REQUEST, b"".join(field(1, code) for code in config.keycodes))
       if self.mode is not None:
-        self.touch = TouchMapper(config, self.mode.width, self.mode.height, self.mode.margin_width, self.mode.margin_height)
+        self.touch = TouchMapper(config, self.mode.width, self.mode.height, self.mode.margin_width, self.mode.margin_height,
+                                 content_left=self.mode.content_left, content_top=self.mode.content_top)
       self.event("input_opened", channel=channel["id"], keycodes=list(config.keycodes),
                  touch=f"{config.touch_width}x{config.touch_height}")
     except (TimeoutError, ValueError) as error:

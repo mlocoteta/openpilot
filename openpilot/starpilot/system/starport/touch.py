@@ -83,11 +83,13 @@ def parse_input_config(data: bytes) -> InputConfig:
 class TouchMapper:
   """Stateful single-pointer decoder for one projection session."""
 
-  def __init__(self, config: InputConfig, video_width: int, video_height: int, margin_width: int, margin_height: int):
+  def __init__(self, config: InputConfig, video_width: int, video_height: int, margin_width: int, margin_height: int, *,
+               content_left: int | None = None, content_top: int | None = None):
     self.touch_width = config.touch_width or video_width
     self.touch_height = config.touch_height or video_height
     self.video_width, self.video_height = video_width, video_height
-    self.left, self.top = margin_width // 2, margin_height // 2
+    self.left = margin_width // 2 if content_left is None else content_left
+    self.top = margin_height // 2 if content_top is None else content_top
     self.content_width, self.content_height = video_width - margin_width, video_height - margin_height
     self.pointer: int | None = None
 

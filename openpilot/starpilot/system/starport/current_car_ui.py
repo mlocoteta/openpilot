@@ -229,7 +229,8 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
     if request.flags & FLAG_NV12:
       try:
         converter = gpu_nv12.Nv12Converter(request.width, request.height,
-                                           margin_w=request.margin_w, margin_h=request.margin_h, compose=True)
+                                           margin_w=request.margin_w, margin_h=request.margin_h, compose=True,
+                                           content_left=request.content_left, content_top=request.content_top)
         resources.callback(converter.close)
       except Exception as error:
         print(f"NV12 conversion unavailable, publishing RGBA: {error}", flush=True)
@@ -376,7 +377,8 @@ def run(frames_path: str, touch_path: str | None = None, control_path: str | Non
         rl.end_texture_mode()
       layout.handle_touches(projected_touches(touch.drain(), geometry))
       if output is not None:
-        gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h)
+        gpu_nv12.compose_rgba(content.texture, output, request.margin_w, request.margin_h,
+                              content_left=request.content_left, content_top=request.content_top)
       regions = converter.convert(content.texture) if converter is not None else rgba_regions
       producer.advance(request, captured_ns)
       readback.start(regions)

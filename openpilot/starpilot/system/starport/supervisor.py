@@ -1451,13 +1451,15 @@ class Supervisor:
     software_fps = min(SOFTWARE_FPS, config["fps"]) if config["fps"] else SOFTWARE_FPS
     encoder, fps = create_encoder(mode.width, mode.height, preference=encoder_preference(config["encoder"]),
                                   bitrate_kbps=config["bitrate_kbps"],
-                                  margin_height=mode.margin_height, software_fps=software_fps, log=self.log,
+                                  margin_height=mode.margin_height if mode.content_top in (None, mode.margin_height // 2) else 0,
+                                  software_fps=software_fps, log=self.log,
                                   rate_control=config["rate_control"])
     fps = min(fps, mode.fps, config["fps"] or fps)
     interval = 1.0 / fps
     flags = (FLAG_NV12 if config["gpu_nv12"] and getattr(encoder, "supports_nv12", False) else 0) | \
             (FLAG_ASYNC_READBACK if config["async_readback"] else 0)
-    request = FrameRequest(mode.width, mode.height, mode.margin_width, mode.margin_height, int(interval * 1e6), flags)
+    request = FrameRequest(mode.width, mode.height, mode.margin_width, mode.margin_height, int(interval * 1e6), flags,
+                           mode.content_left, mode.content_top)
     self.log("frame_pipeline", nv12=bool(flags & FLAG_NV12), async_readback=bool(flags & FLAG_ASYNC_READBACK),
              target_fps=fps, encoder=getattr(encoder, "backend", "libx264"))
     view = config["view"]

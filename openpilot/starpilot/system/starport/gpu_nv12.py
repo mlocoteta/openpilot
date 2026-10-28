@@ -78,7 +78,7 @@ void main() {
 """
 
 
-def compose_rgba(source, target, margin_w: int, margin_h: int, *, fit: bool = False) -> None:
+def compose_rgba(source, target, margin_w: int, margin_h: int, *, fit: bool = False, content_left: int | None = None, content_top: int | None = None) -> None:
   """RGBA fallback composition, matching ``Nv12Converter(compose=True)``.
 
   Centers the UI texture inside the car's margins, flips it top-down and copies
@@ -91,13 +91,15 @@ def compose_rgba(source, target, margin_w: int, margin_h: int, *, fit: bool = Fa
   rl.rl_set_blend_factors(GL_ONE, GL_ZERO, GL_FUNC_ADD)
   rl.begin_blend_mode(rl.BlendMode.BLEND_CUSTOM)
   # A positive source height flips on the GPU so the readback is top-down for the encoder.
-  destination = rl.Rectangle(margin_w // 2, margin_h // 2, source.width, source.height)
+  left = margin_w // 2 if content_left is None else content_left
+  bottom = margin_h // 2 if content_top is None else margin_h - content_top
+  destination = rl.Rectangle(left, bottom, source.width, source.height)
   if fit:
     width, height = target.texture.width - margin_w, target.texture.height - margin_h
     scale = min(width / source.width, height / source.height)
     drawn_w, drawn_h = source.width * scale, source.height * scale
-    destination = rl.Rectangle(margin_w // 2 + (width - drawn_w) / 2,
-                               margin_h // 2 + (height - drawn_h) / 2, drawn_w, drawn_h)
+    destination = rl.Rectangle(left + (width - drawn_w) / 2,
+                               bottom + (height - drawn_h) / 2, drawn_w, drawn_h)
   rl.draw_texture_pro(source, rl.Rectangle(0, 0, source.width, source.height),
                       destination, rl.Vector2(0, 0), 0.0, rl.WHITE)
   rl.end_blend_mode()
@@ -112,7 +114,8 @@ def supported(width: int, height: int) -> bool:
 # Altering this can degrade video smoothness or introduce lag on Android Auto.
 # Do not change it autonomously; require an explicit user request specifically for this video optimization.
 class Nv12Converter:
-  def __init__(self, width: int, height: int, *, margin_w: int = 0, margin_h: int = 0, compose: bool = False):
+  def __init__(self, width: int, height: int, *, margin_w: int = 0, margin_h: int = 0, compose: bool = False,
+               content_left: int | None = None, content_top: int | None = None):
     if not supported(width, height):
       raise ValueError("NV12 conversion needs a width divisible by 4 and an even height")
     if not 0 <= margin_w < width or not 0 <= margin_h < height:
@@ -132,7 +135,8 @@ class Nv12Converter:
         # The old composition pass places floor(margin_h / 2) rows above the
         # flipped texture. Readback starts at the bottom, so an odd extra row
         # belongs at the start of the encoded image, matching that pass exactly.
-        offset = rl.ffi.new("int[]", [margin_w // 2, margin_h - margin_h // 2])
+        offset = rl.ffi.new("int[]", [margin_w // 2 if content_left is None else content_left,
+                                      margin_h - margin_h // 2 if content_top is None else content_top])
         compose_value = rl.ffi.new("int *", int(compose))
         rl.set_shader_value(shader, rl.get_shader_location(shader, "sourceOffset"), offset, rl.ShaderUniformDataType.SHADER_UNIFORM_IVEC2)
         rl.set_shader_value(shader, rl.get_shader_location(shader, "composeSource"), compose_value, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
