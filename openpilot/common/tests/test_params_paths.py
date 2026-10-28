@@ -16,6 +16,41 @@ class TestParamsPaths(unittest.TestCase):
     with patch.dict(os.environ, {}, clear=True), patch("os.path.isfile", return_value=True):
       self.assertEqual(params_path(), "/data/params")
 
+  def test_actual_python_caller_and_native_reader_share_device_startup_params(self):
+    import tempfile
+    from openpilot.common import params as native_params
+
+    with tempfile.TemporaryDirectory() as directory:
+      device = Path(directory) / "device-params"
+      create = native_params.params_create
+      requested = []
+
+      def isolated_create(path, size):
+        # Observe the real caller's device path; keep all native I/O private.
+        self.assertEqual(path, b"/data/params")
+        self.assertEqual(size, len(path))
+        requested.append(path)
+        target = os.fsencode(device)
+        return create(target, len(target))
+
+      reader = native_params.Params(str(device))
+      reader.put_bool("ControlsReady", True, block=True)
+      reader.put_bool("FirmwareQueryDone", True, block=True)
+      reader.put("CarParams", b"previous-route", block=True)
+      reader.put_bool("AlwaysOnLateral", True, block=True)
+      with patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "PARAMS_ROOT"}, clear=True), patch("os.path.isfile", return_value=True), \
+           patch.object(native_params, "params_create", side_effect=isolated_create):
+        writer = native_params.Params()
+      writer.clear_all(native_params.ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
+      self.assertEqual(requested, [b"/data/params"])
+      self.assertEqual(writer.get_param_path(), reader.get_param_path())
+      self.assertIsNone(reader.get("CarParams"))
+      self.assertFalse(reader.get_bool("ControlsReady"))
+      self.assertFalse(reader.get_bool("FirmwareQueryDone"))
+      self.assertTrue(reader.get_bool("AlwaysOnLateral"))
+      writer.put("GitCommit", "current-runtime", block=True)
+      self.assertEqual(reader.get("GitCommit"), "current-runtime")
+
   def test_pc_default_remains_native_default(self):
     with patch.dict(os.environ, {}, clear=True), patch("os.path.isfile", return_value=False):
       self.assertEqual(params_path(), "")
