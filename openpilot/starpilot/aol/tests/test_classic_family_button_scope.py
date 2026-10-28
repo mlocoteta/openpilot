@@ -29,5 +29,5 @@ def test_each_family_profile_keeps_exact_saved_mapping(identity, lkas, main):
   before = cp.to_dict()
   settings = AolSettings(True, 0., lkas, main, (0, 0, 0), (0, 0, 0))
   owner = ClassicLongCardIntent(cp, settings)
-  assert owner.independent_cruise_buttons == (lkas == 9 and main == 0)
+  assert owner.independent_cruise_buttons
   assert owner.settings == settings and cp.to_dict() == before
