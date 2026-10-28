@@ -339,7 +339,8 @@ class CarState(CarStateBase):
     if pedal_composite.configured(CP):
       parent = CarState.get_can_parsers(pedal_composite.parent_cp(CP))
       for bus in parent:
-        parent[bus] = pedal_composite.ParentPedalParser(parent[bus])
+        parent[bus] = pedal_composite.ParentPedalParser(parent[bus],
+          mirrored_pedal=CP.safetyConfigs[0].safetyParam in (0xE449, 0xE649))
       parent[Bus.alt] = pedal.PedalCANParser(DBC[CP.carFingerprint][Bus.pt], [('GAS_SENSOR', 50)], 0)
       return parent
     if dsu_bypass.configured(CP):

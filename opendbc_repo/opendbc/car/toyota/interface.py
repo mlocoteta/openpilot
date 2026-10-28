@@ -51,8 +51,9 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
-    from opendbc.car.toyota import pedal_composite
-    composite_pedal = pedal_composite.hardware_supported(candidate, fingerprint, car_fw)
+    from opendbc.car.toyota import pedal_composite, prius_legacy_pedal
+    legacy_prius_pedal = prius_legacy_pedal.hardware_supported(candidate, fingerprint, car_fw)
+    composite_pedal = legacy_prius_pedal or pedal_composite.hardware_supported(candidate, fingerprint, car_fw)
     if composite_pedal:
       fingerprint = pedal_composite.without_pedal(fingerprint)
     ret.brand = "toyota"
@@ -263,7 +264,9 @@ class CarInterface(CarInterfaceBase):
       ret.flags |= int(ToyotaFlags.GAS_INTERCEPTOR)
       ret.safetyConfigs[0].safetyParam = pedal.long_word(candidate)
     if composite_pedal:
-      assert pedal_composite.apply(ret)
+      if legacy_prius_pedal:
+        dsu_bypass.apply(ret)
+      assert pedal_composite.apply(ret, legacy_prius=legacy_prius_pedal)
     from opendbc.car.toyota import stock_aol
     if stock_aol.hardware_supported(candidate, fingerprint):
       stock_aol.apply(ret)
