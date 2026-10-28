@@ -1,19 +1,24 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <stdint.h>
+#include <string.h>
 
 typedef struct {
   PyObject *names[4];
 } ExtractState;
 
-static PyObject *get_raw_value(PyObject *self, PyObject *args) {
+static PyObject *get_raw_value(PyObject *self, PyObject *const *args, Py_ssize_t nargs) {
   ExtractState *state = PyModule_GetState(self);
   PyObject *signal, *payload, *expected;
   PyObject *msb_obj = NULL, *lsb_obj = NULL, *size_obj = NULL, *little_obj = NULL;
   const unsigned char *data;
   Py_ssize_t length;
   long msb, lsb, size, little, first, last;
-  if (!PyArg_UnpackTuple(args, "get_raw_value", 3, 3, &signal, &payload, &expected)) return NULL;
+  if (nargs != 3) {
+    PyErr_Format(PyExc_TypeError, "get_raw_value expected 3 arguments, got %zd", nargs);
+    return NULL;
+  }
+  signal = args[0]; payload = args[1]; expected = args[2];
   if (state == NULL || state->names[0] == NULL || state->names[1] == NULL ||
       state->names[2] == NULL || state->names[3] == NULL) goto unsupported;
   if (!PyType_Check(expected) || Py_TYPE(signal) != (PyTypeObject *)expected) goto unsupported;
@@ -54,21 +59,27 @@ static PyObject *get_raw_value(PyObject *self, PyObject *args) {
     if (size != 8 * (last - first) + msb % 8 - lsb % 8 + 1) goto unsupported;
   }
   if (first < 0 || first > last || last >= length) goto unsupported;
-  uint64_t result = 0;
-  long remaining = size;
-  for (long byte = msb / 8; remaining > 0; byte += little ? -1 : 1) {
-    if (byte < 0 || byte >= length) goto unsupported;
-    const long low = lsb / 8 == byte ? lsb : byte * 8;
-    const long high = msb / 8 == byte ? msb : (byte + 1) * 8 - 1;
-    const long width = high - low + 1;
-    const long bit_shift = low - byte * 8;
-    const long result_shift = remaining - width;
-    if (width <= 0 || width > 8 || bit_shift < 0 || bit_shift > 7 ||
-        result_shift < 0 || result_shift > 63) goto unsupported;
-    const unsigned int fragment = (data[byte] >> bit_shift) & ((1U << width) - 1U);
-    result |= (uint64_t)fragment << result_shift;
-    remaining -= width;
+  /* Contiguous signals need at most nine bytes, including an unaligned
+     64-bit field. memcpy permits unaligned payloads without aliasing UB. */
+  const unsigned count = (unsigned)(last - first + 1);
+  const unsigned shift = (unsigned)(lsb % 8);
+  uint64_t raw = 0;
+  memcpy(&raw, data + first, count > 8U ? 8U : count);
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  raw = __builtin_bswap64(raw);
+#elif __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error Unsupported byte order
+#endif
+  uint64_t result;
+  if (little) {
+    result = raw >> shift;
+    if (count == 9U) result |= (uint64_t)data[last] << (64U - shift);
+  } else {
+    raw = __builtin_bswap64(raw);
+    if (count == 9U) result = (raw << (8U - shift)) | ((uint64_t)data[last] >> shift);
+    else result = (raw >> (8U * (8U - count))) >> shift;
   }
+  if (size < 64) result &= (UINT64_C(1) << size) - 1U;
   Py_DECREF(msb_obj);
   Py_DECREF(lsb_obj);
   Py_DECREF(size_obj);
@@ -86,7 +97,7 @@ unsupported:
 }
 
 static PyMethodDef methods[] = {
-  {"get_raw_value", get_raw_value, METH_VARARGS, "Extract an exact complete <=64-bit CAN signal, or NotImplemented."},
+  {"get_raw_value", (PyCFunction)(void(*)(void))get_raw_value, METH_FASTCALL, "Extract an exact complete <=64-bit CAN signal, or NotImplemented."},
   {NULL, NULL, 0, NULL},
 };
 static int module_traverse(PyObject *self, visitproc visit, void *arg) {
