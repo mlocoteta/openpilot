@@ -122,7 +122,8 @@ def hardware_supported(candidate, fingerprint, car_fw):
   if prius_legacy_pedal.hardware_supported(candidate, fingerprint, car_fw):
     return True
   from opendbc.car.toyota import dsu_bypass, rav4h_filter, eps8_sdsu, legacy_sdsu, advert_filter, prius_sdsu, prius_advert_filter, radar_filter
-  if fingerprint.get(0, {}).get(0x201) != 6 or any(0x201 in frames for bus, frames in fingerprint.items() if bus != 0):
+  from opendbc.car.toyota.pedal import primary_pedal_hardware
+  if not primary_pedal_hardware(fingerprint):
     return False
   parent = without_pedal(fingerprint)
   for module in (dsu_bypass, prius_advert_filter, prius_sdsu, advert_filter, legacy_sdsu, eps8_sdsu, rav4h_filter):
@@ -205,8 +206,8 @@ class ParentPedalParser:
     return getattr(self.parent, name)
 
   def update(self, strings, sendcan=False):
-    # Only primary pedal RX supplies its lease. The exact legacy owner may
-    # ignore a CRC-valid camera copy; malformed/foreign input reaches the parent.
+    # Only primary pedal RX supplies its lease. A CRC-valid camera copy is
+    # ignored; malformed/foreign input still reaches the exact parent.
     from opendbc.car.toyota.pedal import checksum
 
     def enrolled(frame):

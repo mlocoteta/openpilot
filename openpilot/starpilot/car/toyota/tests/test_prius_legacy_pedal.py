@@ -21,8 +21,11 @@ def sources():
 
 
 @pytest.mark.parametrize('stock', (False, True))
-def test_exact_legacy_factory(stock):
+@pytest.mark.parametrize('mirror', (False, True))
+def test_exact_legacy_factory(stock, mirror):
   fp, fw = sources()
+  if not mirror:
+    del fp[2][0x201]
   cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, fp, fw, False, False, False)
   assert owner.hardware_supported(CAR.TOYOTA_PRIUS_RETROFIT, fp, fw)
   assert cp.openpilotLongitudinalControl and not cp.dashcamOnly

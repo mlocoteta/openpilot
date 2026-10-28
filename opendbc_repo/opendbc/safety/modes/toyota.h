@@ -219,14 +219,18 @@ static void toyota_hold_observe(const CANPacket_t *msg) {
 }
 
 static void toyota_optional_rx_hook(const CANPacket_t *msg) {
+  // Only bus0 pedal RX belongs to the required catalog. A CRC-valid camera
+  // copy must neither invalidate its parent nor refresh the primary lease.
+  if (toyota_pedal && msg_matches(msg, 0x201U, 2U) && (GET_LEN(msg) == 6U) &&
+      (msg->data[5] == toyota_pedal_checksum(msg))) {
+    return;
+  }
   if (toyota_dsu_bypass) {
     if (msg_matches(msg, 0x343U, 2U)) {
       // A malformed packet outside the required catalog cannot retain LONG.
       toyota_bypass_control = false;
     }
-    const bool legacy_pedal_mirror = ((current_safety_param == 0xE449U) || (current_safety_param == 0xE649U)) &&
-      msg_matches(msg, 0x201U, 2U) && (GET_LEN(msg) == 6U) && (msg->data[5] == toyota_pedal_checksum(msg));
-    if (((msg->addr == 0x201U) && !legacy_pedal_mirror) || (msg->addr == 0x2FFU) || (msg->addr == 0x2AAU)) {
+    if ((msg->addr == 0x201U) || (msg->addr == 0x2FFU) || (msg->addr == 0x2AAU)) {
       toyota_bypass_ambiguous = true;
     }
     if (msg_matches(msg, 0x283U, 2U)) {

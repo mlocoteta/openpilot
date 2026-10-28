@@ -13,11 +13,12 @@ WORDS = frozenset((LONG_WORD, STOCK_WORD))
 
 
 def hardware_supported(candidate, fingerprint, car_fw):
+  from opendbc.car.toyota.pedal import primary_pedal_hardware
   if (candidate != CAR.TOYOTA_PRIUS_RETROFIT or
       any(address in messages for messages in fingerprint.values() for address in (0x2FF, 0x2AA)) or
-      any(bus not in (0, 2) for bus, messages in fingerprint.items() if 0x201 in messages) or
+      not primary_pedal_hardware(fingerprint) or
       any(fingerprint.get(bus, {}).get(address) != size for bus in (0, 2)
-          for address, size in ((0x201, 6), (0x343, 8), (0x4CB, 8))) or
+          for address, size in ((0x343, 8), (0x4CB, 8))) or
       any(fingerprint.get(0, {}).get(address) != 8 for address in (0x1D3, 0x262))):
     return False
   from opendbc.car.toyota.fingerprints import FW_VERSIONS
