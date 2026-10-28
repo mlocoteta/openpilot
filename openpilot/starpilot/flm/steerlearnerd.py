@@ -16,7 +16,7 @@ from functools import partial
 from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
-from openpilot.starpilot.flm.fullrate_collector import FullrateCollector, drain_pair, ControlEvidence, AppliedEvidence
+from openpilot.starpilot.flm.fullrate_collector import FullrateCollector, PairedDrainState, drain_pair, ControlEvidence, AppliedEvidence
 from openpilot.starpilot.flm.learning_wire import read_control, read_applied, result_message, write_source_receipt
 from openpilot.starpilot.flm.runtime_adapter_registry import SOURCE_LEASE_NS
 
@@ -468,6 +468,7 @@ def run(
         collector.overrun()
 
   sink = Sink()
+  drain_state = PairedDrainState(control_socket, applied_socket)
   try:
     while True:
       state = (live_actor.ingress.optimizer.offer_state
@@ -645,7 +646,7 @@ def run(
               return
           _collect_applied_output(collector, applied, sm, CP, received_now)
 
-      drain_pair(control_socket, control, applied_socket, output, messaging.recv_one_or_none, sink, now)
+      drain_pair(control_socket, control, applied_socket, output, messaging.recv_one_or_none, sink, now, drain_state)
       if collector is not None:
         # Decoding queued frames may outlast the sampled shared inputs. Consume
         # real pending deliveries before pose/native checks; keep their original
@@ -981,7 +982,6 @@ def main():
     'deviceMotion',
     'extrinsicsCalibration',
     'carState',
-    'carControl',
     'pandaStates',
     'lateralDelay',
     'vehicleParameters',

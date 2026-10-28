@@ -918,7 +918,14 @@ class _DrainOverrun(Exception):
   pass
 
 
-def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns):
+class PairedDrainState:
+  """Run-owned FIFO lookahead, bounded to one original event per socket."""
+  def __init__(self, control_socket, applied_socket):
+    self.sockets = (control_socket, applied_socket)
+    self.heads: tuple = (None, None)
+
+
+def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns, state=None):
   """Merge two bounded FIFO tapes by their original publisher headers.
 
   Only the two queue heads compete; never sort a producer's own tape. A held
@@ -927,32 +934,45 @@ def drain_pair(control_socket, control, applied_socket, applied, receive, collec
   still decode the untouched event and resample source/native/receiver clocks.
   Equal headers put control first, matching the previous causal preference.
   Malformed input or either stream overrunning remains a maneuver boundary.
+  A persistent state retains only the two already-read heads at an overrun.
+  Their original wire and clocks are checked again on the next bounded drain.
   """
   sockets, callbacks = (control_socket, applied_socket), (control, applied)
+  if state is None:
+    state = PairedDrainState(*sockets)
+  pending = list(state.heads)
+  state.heads = (None, None)
   counts = [0, 0]
 
   def head(index):
-    event = receive(sockets[index])
+    event = pending[index][0] if pending[index] is not None else receive(sockets[index])
+    pending[index] = None
     if event is None:
       return None
-    # This is the same one-message bounded lookahead as the single-stream drain.
-    if counts[index] == MAX_DRAIN:
-      raise _DrainOverrun
     _check_evidence_wire(event)
     stamp = event.logMonoTime
     if type(stamp) is not int or stamp <= 0:
       raise ValueError('invalid_publisher_header')
-    return event, stamp
+    pending[index] = (event, stamp)
+    # Keep the bounded lookahead and the other FIFO's head, not another batch.
+    if counts[index] == MAX_DRAIN:
+      raise _DrainOverrun
+    return pending[index]
 
   try:
-    pending = [head(0), head(1)]
+    if any(a is not b for a, b in zip(state.sockets, sockets, strict=True)):
+      raise ValueError('changed_evidence_sockets')
+    head(0)
+    head(1)
     while pending[0] is not None or pending[1] is not None:
       index = 0 if pending[1] is None or (pending[0] is not None and pending[0][1] <= pending[1][1]) else 1
       event, _stamp = pending[index]
       callbacks[index](event, collector, now_ns)
       counts[index] += 1
-      pending[index] = head(index)
+      pending[index] = None
+      head(index)
   except _DrainOverrun:
+    state.heads = tuple(pending)
     collector.overrun()
     return False
   except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
