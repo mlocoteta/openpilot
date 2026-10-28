@@ -1241,16 +1241,23 @@ class TransportPauseFeedback:
     from opendbc.car.mazda.stock_aol import qualified as mazda_qualified, temporary_restriction as mazda_restriction
     from opendbc.car.subaru.stock_aol import temporary_restriction as subaru_restriction
 
+    from opendbc.car.hyundai.values import CAR
+
+    # Exact profile admission remains in the configured native receipt below.
+    ccnc_stop = bool((cs.standstill or 0 <= cs.vEgoRaw <= .3) and cp.openpilotLongitudinalControl and
+      cp.carFingerprint in (CAR.KIA_EV9, CAR.HYUNDAI_IONIQ_5_PE) and not cs.accFaulted and not cs.steeringDisengage)
+    combined_stop = bool(ccnc_stop and axis.desiredLongitudinal and axis.longitudinalActive)
     subaru_stop = cs.standstill and subaru_restriction(cp, cs)
-    if (not (qualified(cp, marked_only=True) or mazda_qualified(cp, marked_only=True) or subaru_stop) or cs.gearShifter != car.CarState.GearShifter.drive or
+    if (not (qualified(cp, marked_only=True) or mazda_qualified(cp, marked_only=True) or subaru_stop or ccnc_stop) or
+        cs.gearShifter != car.CarState.GearShifter.drive or
         not (temporary_restriction(cp, cs) or mazda_restriction(cp, cs) or subaru_stop) or cs.steerFaultTemporary or cs.steerFaultPermanent or
         not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
-        not self.lateral_only_baseline or not self.lateral_inventory or not self.lateral_baseline_ns or
+        not (self.lateral_only_baseline or ccnc_stop) or not self.lateral_inventory or not self.lateral_baseline_ns or
         not self.session or axis.sessionId != self.session or str(axis.faultReason) != 'none' or
         not producer or producer != self.availability_producer or
         axis.intentProducerSessionId != producer or axis.intentIntegrityEpoch != self.availability_epoch or
         not (axis.desiredLateral or subaru_stop and not axis.lateralActive) or not axis.nativeAcknowledged or
-        axis.desiredLongitudinal or axis.longitudinalActive or
+        (axis.desiredLongitudinal or axis.longitudinalActive) and not combined_stop or
         not 0 < axis.sourceCarStateMonoTime <= stamp <= now_ns or
         now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS):
       return False
@@ -1263,7 +1270,9 @@ class TransportPauseFeedback:
       return False
     native = _configured_transport_native(sm, cp, self.session, now_ns, allow_restricted_lateral=True)
     return bool(native is not None and native.pandaInventory and native.requestedLateral and
-      not native.lateralAllowed and not native.requestedLongitudinal and
+      not native.lateralAllowed and
+      (not native.requestedLongitudinal and not combined_stop or
+       combined_stop and native.requestedLongitudinal and native.longitudinalAllowed) and
       native.observedMonoTime >= self.lateral_native_ns and
       (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
 
