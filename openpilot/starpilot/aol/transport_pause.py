@@ -311,14 +311,19 @@ class TransportPauseFeedback:
   def _first_ford_gas_lateral_grant(self, sm, cp, cs, axis, now_ns, *, latched, producer):
     """Bind the first real LAT-only grant while gas independently vetoes LONG."""
     from opendbc.car import structs
+    from opendbc.car.ford.values import CAR
+    from opendbc.car.ford.aol import qualified as ford_qualified
     from openpilot.starpilot.car.ford.aol import early_native_long_withdrawal_supported
-    if (not early_native_long_withdrawal_supported(cp) or not latched or self.failed or self.paused or
+    first_long = early_native_long_withdrawal_supported(cp) or (ford_qualified(cp, marked_only=True) and
+      cp.openpilotLongitudinalControl and cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1)
+    pending_ack = str(axis.mode) == 'off' and not axis.lateralActive
+    if (not first_long or not latched or self.failed or self.paused or
         self.pending_event or self.retention_started_ns or self.source_retention_started_ns or
         self.lateral_baseline_ns or not self.session or str(axis.sessionId) != self.session or
         not producer or str(axis.intentProducerSessionId) != producer or int(axis.intentIntegrityEpoch) < 0 or
         self.signature is None or self.signature[14:16] != (producer, int(axis.intentIntegrityEpoch)) or
-        str(axis.faultReason) != 'none' or str(axis.mode) != 'lateralOnly' or not axis.nativeAcknowledged or
-        not axis.desiredLateral or not axis.lateralActive or not axis.desiredLongitudinal or axis.longitudinalActive or
+        str(axis.faultReason) != 'none' or not (pending_ack or str(axis.mode) == 'lateralOnly' and axis.lateralActive) or
+        not axis.nativeAcknowledged or not axis.desiredLateral or not axis.desiredLongitudinal or axis.longitudinalActive or
         not 0 < axis.sourceCarStateMonoTime <= axis.observedMonoTime <= now_ns <= axis.validUntilMonoTime or
         now_ns - axis.sourceCarStateMonoTime > AXIS_MAX_AGE_NS or
         not cs.gasPressed or cs.brakePressed or cs.regenBraking or not cs.cruiseState.available or
@@ -332,7 +337,11 @@ class TransportPauseFeedback:
         any(event.immediateDisable or event.softDisable or event.userDisable for event in sm['onroadEvents'])):
       return None
     native = independent_lateral_health(sm, cp, cs, self.session, now_ns)
-    if (native is None or not native.pandaInventory or not native.requestedLongitudinal or native.longitudinalAllowed or
+    # A 10Hz native grant can precede the next host-axis acknowledgment.
+    # Retain intent only from the newer actual LAT grant; never infer a grant
+    # from the requested but denied longitudinal axis.
+    if (native is None or pending_ack and native.observedMonoTime <= axis.observedMonoTime or
+        not native.pandaInventory or not native.requestedLongitudinal or native.longitudinalAllowed or
         self.healthy_inventory != (native.pandaSerial, tuple(slot.hardwareSerial for slot in native.pandaInventory))):
       return None
     return native
@@ -352,13 +361,19 @@ class TransportPauseFeedback:
     ev9 = cp.brand == 'hyundai' and ev9_qualified(cp, marked_only=True)
     from openpilot.starpilot.car.ford.aol import early_native_long_withdrawal_supported as ford_early_long
     from opendbc.car.ford.aol import qualified as ford_qualified
-    # Brake or cruise cancel can withdraw LONG before the next 10Hz request echo. This uses
+    from opendbc.car.ford.values import CAR
+    # A physical pedal or cruise cancel can withdraw LONG before the next 10Hz request echo. This uses
     # an actual independently granted LAT proof and retains intent only.
     ford_withdrawal = bool(cp.brand == 'ford' and ford_qualified(cp, marked_only=True) and cp.openpilotLongitudinalControl and
       (cs.brakePressed or not cs.cruiseState.enabled or physical_cancel(cs, cp)) and not cs.gasPressed and not cs.regenBraking and
       cs.cruiseState.available and not cs.doorOpen and not cs.seatbeltUnlatched and
       not cs.vehicleSensorsInvalid and cs.gearShifter == structs.CarState.GearShifter.drive)
-    early_long = gm or cp.brand == 'hyundai' and early_native_long_withdrawal_supported(cp) or ev9 or ford_early_long(cp) or ford_withdrawal
+    # Curvature Mach-E shares the same native independent-axis contract as angle.
+    # This retains intent across the 10Hz LONG withdrawal/recovery echo only;
+    # the fresh current LAT grant and all health/fault checks below stay required.
+    ford_mache_long = bool(ford_qualified(cp, marked_only=True) and cp.openpilotLongitudinalControl and
+      cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1)
+    early_long = gm or cp.brand == 'hyundai' and early_native_long_withdrawal_supported(cp) or ev9 or ford_early_long(cp) or ford_withdrawal or ford_mache_long
     from openpilot.starpilot.car.gm.aol import f1_conventional_lateral_owner, gm_physical_pedal_withdrawal
     gm_pedal = gm_physical_pedal_withdrawal(cp, cs) and not f1_conventional_lateral_owner(cp)
     event_ns = int(sm.logMonoTime['onroadEvents'])

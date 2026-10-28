@@ -9,7 +9,8 @@ from openpilot.starpilot.tests.ford_lifecycle_helpers import FORD_FACTORIES, for
 @pytest.fixture(autouse=True)
 def configuration_topology(monkeypatch, topology, request):
   monkeypatch.ford_topology = topology
-  if request.node.name.startswith(('test_brake_retains_lateral_with_native_first_feedback', 'test_cancel_retains_lateral_with_native_first_feedback')):
+  if request.node.name.startswith(('test_brake_retains_lateral_with_native_first_feedback',
+      'test_cancel_retains_lateral_with_native_first_feedback', 'test_gas_first_engagement_native_cadence')):
     monkeypatch.ford_native_10hz = True
     monkeypatch.ford_angle = request.node.callspec.params['angle']
   if request.node.name.startswith('test_recorded_radar_creep_enters_native_stopping'):
@@ -116,3 +117,12 @@ def test_recorded_radar_creep_enters_native_stopping(ford_joined, angle):
         assert stopping and output < 0.
         checked += 1
   assert checked > 500
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [False, True])
+@pytest.mark.parametrize('angle', [False, True])
+@pytest.mark.parametrize('topology', ['automatic', 'manual-multi'])
+def test_gas_first_engagement_native_cadence(ford_joined, monkeypatch, angle):
+  run_actual_producer(ford_joined, monkeypatch, scenario='route22')

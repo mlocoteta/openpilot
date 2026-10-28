@@ -487,7 +487,19 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
           for frame in published['sendcan'].sendcan:
             from opendbc.safety.tests.libsafety import libsafety_py
 
-            assert safety.safety_tx_hook(libsafety_py.make_CANPacket(frame.address, frame.src - joined.offset, frame.dat))
+            accepted = safety.safety_tx_hook(libsafety_py.make_CANPacket(frame.address, frame.src - joined.offset, frame.dat))
+            # A real native fault can precede the next 10Hz host receipt. Active
+            # requests in that gap must be rejected, never treated as accepted.
+            fault_before_receipt = (getattr(monkeypatch, 'ford_native_10hz', False) and
+              scenario == 'route22' and fault in ('heartbeat', 'source-loss') and permission == 0)
+            if fault_before_receipt and frame.address in (0x3D3, 0x3D6):
+              mode = ((frame.dat[4] >> 2) & 7) if frame.address == 0x3D3 else ((frame.dat[0] >> 4) & 7)
+              if mode:
+                assert not accepted, 'Native fault admitted active steering'
+            if not accepted:
+              assert fault_before_receipt and not safety.get_controls_allowed(), (
+                steps, fault, hex(frame.address), bytes(frame.dat).hex(), request, native_request, permission)
+              continue
             data, address = frame.dat, frame.address
             if address in (0x3CA, 0x3D3, 0x3D6):
               joined.last_lateral_packets.append((address, bytes(data)))
