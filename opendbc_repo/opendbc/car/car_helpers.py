@@ -10,7 +10,7 @@ from opendbc.car.fw_versions import (ObdCallback, get_fw_versions, get_fw_versio
                                      get_present_ecus, match_fw_to_car)
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.gm.pedal_capability import automatic_bolt_candidate
-from opendbc.car.gm.discovery import automatic_volt_candidate, pedal_normal_bus0_topology
+from opendbc.car.gm.discovery import automatic_volt_candidate, normal_bus0_topology as gm_normal_bus0_topology
 from opendbc.car.ford.discovery import (normal_bus0_selection as ford_normal_bus0_selection,
                                        normal_bus0_queries as ford_normal_bus0_queries, normal_bus_query_brand)
 from opendbc.car.hyundai.discovery import normal_bus_topology
@@ -148,7 +148,7 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
         ecu_rx_addrs = {(fw.responseAddress, fw.subAddress or None, fw.bus) for fw in car_fw if fw.responseAddress > 0}
       elif (normal_brand := normal_bus_query_brand(
           can_recv, normal_bus_topology,
-          gm_probe=pedal_normal_bus0_topology if _gm_fw_uses_normal_bus0() else None)) is not None:
+          gm_probe=gm_normal_bus0_topology if _gm_fw_uses_normal_bus0() else None)) is not None:
 
         set_obd_multiplexing(False)
         warmup_remaining = 0.1 - (time.monotonic() - start_time)
