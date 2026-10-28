@@ -271,7 +271,7 @@ class SelfdriveD:
     return update_big_model_status(self)
 
   def _update_steering_authority(self, CS):
-    if not monitored_profile(self.CP):
+    if self.CP.brand != 'gm' or not monitored_profile(self.CP):
       self.steering_authority_unavailable = False
       return
     companion = getattr(self, 'steering_companion', None)
