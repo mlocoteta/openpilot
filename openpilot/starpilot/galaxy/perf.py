@@ -30,10 +30,14 @@ STALE_AFTER_S = 1.0
 SOURCE_MAX_AGE_S = 0.3
 MAX_AGE_S = {'deviceState': 2.0, 'peripheralState': 2.0}
 CAN_MAX_AGE_NS = 250_000_000
-# pycapnp costs ~7 us per frame (~370 us per 50-frame batch on a desktop core), so CAN is decoded at 25 Hz.
-CAN_EVERY = 2
+# pycapnp costs ~2-7 us per frame (up to ~370 us per 50-frame batch on a desktop core), so CAN is scanned only
+# every ~35 ms (~25 Hz). 0x1E7 is 50 Hz, i.e. in every other 100 Hz batch, and a 50 Hz sampler of a conflated
+# socket keeps landing on the same parity (10-26 rlogs: always the batches without it). So the worker drains
+# the raw CAN queue, scans the newest batch, and looks for a still-missing frame in the batch before it.
+CAN_DECODE_NS = 35_000_000
+CAN_WANT_NS = 60_000_000
 PARAMS_RETRY_S = 10.0
-SERVICES = ('carState', 'can', 'deviceState', 'peripheralState')
+SERVICES = ('carState', 'deviceState', 'peripheralState')   # + a raw, non-conflated 'can' socket
 STATIC_SERVICES = ('carParams',)
 # One row per sample, in this order. t: carState logMonoTime (s); v, a: vEgo, aEgo (m/s, m/s^2);
 # ax, ay: VSA accelerometer long/lat (m/s^2, forward / left positive); yaw: VSA yaw rate (rad/s, left positive);
@@ -82,12 +86,41 @@ class CanLatest:
 
   def __init__(self):
     self.frames = {}
+    self.decoded_ns = None
 
-  def update(self, can, mono_ns):
+  def missing(self, mono_ns):
+    return [address for address in CAN_IDS if address not in self.frames or mono_ns - self.frames[address][1] > CAN_WANT_NS]
+
+  def offer(self, batches):
+    """batches: [(logMonoTime ns, frames)] oldest first, as drained. Returns the number of batches scanned."""
+    if not batches:
+      return 0
+    mono, frames = batches[-1]
+    if self.decoded_ns is not None and 0 <= mono - self.decoded_ns < CAN_DECODE_NS:
+      return 0
+    self.decoded_ns = mono
+    self.update(frames, mono)
+    scanned = 1
+    for older_mono, older in reversed(batches[:-1]):
+      want = self.missing(mono)
+      if not want:
+        break
+      self.update(older, older_mono, want)
+      scanned += 1
+    return scanned
+
+  def update(self, can, mono_ns, only=None):
+    """Keep the wanted frames of one batch; with `only`, just those addresses (stops once all are found)."""
+    wanted = CAN_IDS if only is None else tuple(only)
+    left = len(wanted)
     try:
       for frame in can:
-        if frame.address in CAN_IDS and frame.src == PT_BUS:
+        if frame.address in wanted and frame.src == PT_BUS:
           self.frames[frame.address] = (bytes(frame.dat), mono_ns)
+          if only is not None:
+            left -= 1
+            if left == 0:
+              break
     except (AttributeError, ValueError, RuntimeError, TypeError):
       pass
 
@@ -187,9 +220,8 @@ class MessagingPerfReader:
     self.started_ns = time.monotonic_ns()
     self.boot_offset_ns = paired_boot_offset_ns()
     self.sm = messaging.SubMaster(list(SERVICES))
+    self.can_sock = None   # opened once CarParams say the decodes apply
     self.can = CanLatest()
-    self.last_can_ns = 0
-    self.can_batches = 0
     self.last_row_ns = 0
     self.params = _read_params()
     self.is_metric = None
@@ -238,11 +270,16 @@ class MessagingPerfReader:
       )
     msgs = {key: sm[key] if fresh[key] else None for key in SERVICES}
     decodes = self._decodes(now)
-    if decodes and fresh['can'] and sm.logMonoTime['can'] != self.last_can_ns:
-      self.last_can_ns = sm.logMonoTime['can']
-      self.can_batches += 1
-      if self.can_batches % CAN_EVERY == 1 or CAN_EVERY == 1:
-        self.can.update(msgs['can'], self.last_can_ns)
+    if decodes:
+      if self.can_sock is None:
+        self.can_sock = self.messaging.sub_sock('can', conflate=False)
+      batches = []
+      for raw in self.messaging.drain_sock_raw(self.can_sock)[-3:]:
+        event = self.messaging.log_from_bytes(raw)
+        if event.logMonoTime > self.started_ns and 0 <= now - event.logMonoTime / 1e9 <= SOURCE_MAX_AGE_S:
+          batches.append((event.logMonoTime, event.can))
+      if clock_ok:
+        self.can.offer(batches)
     row = None
     car_ns = sm.logMonoTime['carState']
     if fresh['carState'] and car_ns != self.last_row_ns:
@@ -253,6 +290,7 @@ class MessagingPerfReader:
 
   def close(self):
     self.sm = None
+    self.can_sock = None
     self.params = None
 
 

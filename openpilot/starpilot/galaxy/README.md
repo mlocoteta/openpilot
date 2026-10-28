@@ -58,7 +58,7 @@ only while an authenticated client polls (4 Hz at most, gone 6 s after the last
 request) and reports missing or stale inputs as null. `tools/hud_replay_dump.py`
 replays route logs through the same projection on a host. `GET /api/perf?since=N` is
 the same kind of read-only worker for the head unit's Performance app: 50 Hz
-carState samples (plus 2017 Accord powertrain-bus decodes at 25 Hz: VSA yaw and
+carState samples (plus 2017 Accord powertrain-bus decodes at ~25 Hz: VSA yaw and
 accelerometers, pedal, RPM, brake pressure) in a 3 s ring buffer, returned as
 rows newer than `since`; `tools/perf_replay_dump.py` replays rlogs through it. An unknown API route returns an error;
 there is no arbitrary Params or shell-command endpoint. The retired

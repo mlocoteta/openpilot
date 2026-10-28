@@ -101,6 +101,27 @@ class PerfDecodeTest(unittest.TestCase):
     self.assertIsNone(can.decode(400_000_000)['yaw'])
     can.update(None, 0)   # bad input is ignored, not raised
     can.update([NS(src=0)], 0)
+    can.update([frame(BRAKE_PRESSURE, brake(150)), frame(VSA_KINEMATICS, vsa(1, 1, 1))], 5, only=[BRAKE_PRESSURE])
+    self.assertEqual(can.frames[VSA_KINEMATICS][1], 0)   # `only` leaves other addresses alone
+
+  def test_offer_finds_the_50hz_brake_frame_in_the_older_batch(self):
+    """100 Hz batches, 0x1E7 only in every other one; each 20 ms tick drains two and the newest never has it."""
+    can = CanLatest()
+    scans, ticks, brake_seen = 0, 0, 0
+
+    def batch(k):
+      frames = [frame(VSA_KINEMATICS, vsa(512, 512, 512)), frame(POWERTRAIN_DATA, powertrain(10, 900))]
+      if k % 2 == 0:
+        frames.append(frame(BRAKE_PRESSURE, brake(150)))
+      return (k * 10_000_000, frames)
+
+    for k in range(1, 400, 2):
+      ticks += 1
+      scans += can.offer([batch(k - 1), batch(k)])
+      brake_seen += can.decode(k * 10_000_000)['brake'] is not None
+    self.assertGreater(brake_seen, 0.95 * ticks)
+    self.assertLess(scans, 1.2 * ticks)        # ~25 Hz newest scans + partial older scans, not 2 per tick
+    self.assertEqual(can.offer([]), 0)
 
   def test_accord_9g_gate(self):
     self.assertTrue(accord_9g(accord_params()))

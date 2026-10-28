@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Replay real rlog segments through the /api/perf projection (host tool, never on the device).
 
-Feeds the newest CAN batch per tick into perf.CanLatest (every CAN_EVERY-th, as
-live) and takes the newest carState every 20 ms of log time (the live worker's 50 Hz), with the live
+Feeds the CAN batches of each 20 ms tick into perf.CanLatest.offer() (as the
+live worker drains them) and takes the newest carState every 20 ms of log time (the live worker's 50 Hz), with the live
 worker's age limits. Several consecutive segments can be given; they are joined
 in order. Output is JSONL: one {"t", "row"} per sample (t = seconds since the
 first event), plus "slow" (gear, 12 V, isMetric, onroad) once a second.
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from openpilot.cereal import log
-from openpilot.starpilot.galaxy.perf import CAN_EVERY, FIELDS, MAX_AGE_S, SAMPLE_INTERVAL_S, SOURCE_MAX_AGE_S, CanLatest, accord_9g, \
+from openpilot.starpilot.galaxy.perf import FIELDS, MAX_AGE_S, SAMPLE_INTERVAL_S, SOURCE_MAX_AGE_S, CanLatest, accord_9g, \
                                            sample_row, slow_values
 
 WANTED = {'carState', 'can', 'deviceState', 'peripheralState', 'carParams', 'initData'}
@@ -67,7 +67,7 @@ def replay(events, is_metric):
   decodes = accord_9g(car_params)
   can = CanLatest()
   latest, latest_ns = {}, {}
-  last_can_ns, can_batches, latest_can = 0, 0, None
+  pending = []   # CAN batches since the last tick, like the drained live socket
   start_ns = next(mono for mono, which, _ in events if which == 'carState')
   step_ns = int(SAMPLE_INTERVAL_S * 1e9)
   next_ns = start_ns
@@ -79,16 +79,14 @@ def replay(events, is_metric):
     while index < len(events) and events[index][0] <= next_ns:
       mono, which, event = events[index]
       if which == 'can':
-        latest_can = (mono, event.can)
+        pending.append((mono, event.can))
       elif which != 'initData':
         latest[which], latest_ns[which] = getattr(event, which), mono
       index += 1
-    # Like the live conflated subscriber: only the newest CAN batch per tick, every CAN_EVERY-th one decoded.
-    if decodes and latest_can is not None and latest_can[0] != last_can_ns and next_ns - latest_can[0] <= 300_000_000:
-      last_can_ns = latest_can[0]
-      can_batches += 1
-      if can_batches % CAN_EVERY == 1 or CAN_EVERY == 1:
-        can.update(latest_can[1], last_can_ns)
+    # Like the live worker: the batches drained this tick (newest 3), offered to CanLatest.
+    if decodes and pending:
+      can.offer([b for b in pending[-3:] if next_ns - b[0] <= 300_000_000])
+    pending = []
     fresh = {}
     for key in ('carState', 'deviceState', 'peripheralState'):
       age = (next_ns - latest_ns.get(key, -10**18)) / 1e9
