@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# Device Params must not depend on the platform used to compile native libraries.
+if [ -f /AGNOS ] && [ -z "${PARAMS_ROOT:-}" ]; then
+  export PARAMS_ROOT="/data/params"
+fi
+
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
