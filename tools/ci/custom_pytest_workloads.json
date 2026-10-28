@@ -10,7 +10,7 @@
       "basis": "Existing exact capability guard, preserved from8b9338a0; skipped remains unavailable, never passed",
       "guard": "real_xapk",
       "reason": "Skipped: the user's own Android Auto XAPK is not in .cache/",
-      "source_blob": "a58afe41442cdbd4fa42f40da6b7596b4bf0f900"
+      "source_blob": "b642d677dcabd4d51f8379dd05d9c72cdcf35f37"
     },
     "openpilot/starpilot/system/starport/tests/test_gpu_nv12.py::test_composed_car_frame_converts_to_the_same_picture[False-32-18-0-0]": {
       "basis": "Existing exact capability guard, preserved from8b9338a0; skipped remains unavailable, never passed",
