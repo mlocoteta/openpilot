@@ -207,6 +207,15 @@ jobs:
       if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: 5
       run: tools/op.sh test opendbc_repo/opendbc/car/gm/tests --json-output gm-test-results.json
+    - name: Test shared GM discovery, routing, and manual overrides
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      timeout-minutes: 2
+      run: >-
+        .venv/bin/python -m pytest -q --import-mode=importlib
+        opendbc_repo/opendbc/car/gm/tests/test_shared_discovery.py
+        opendbc_repo/opendbc/car/gm/tests/test_automatic_discovery.py
+        opendbc_repo/opendbc/car/gm/tests/test_bolt_vin_discovery.py
+        --junitxml=gm-discovery-results.xml
     - name: Test native independent-axis protocol
       if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       run: |
@@ -227,13 +236,14 @@ jobs:
         STARPILOT_PYTHON: ${{ github.workspace }}/.venv/bin/python
       run: go test -mod=readonly -race -run '^Test(MsgqNativeLayout|Shadow(GoPythonIPC|ExecutableHostGpsIPC))$' -count=1 -v
     - name: Save complete unit test results
-      if: ${{ always() && (hashFiles('unit-test-results.json') != '' || hashFiles('gm-test-results.json') != '' || hashFiles('ci-results/host-test-diagnostics/**') != '') }}
+      if: ${{ always() && (hashFiles('unit-test-results.json') != '' || hashFiles('gm-test-results.json') != '' || hashFiles('gm-discovery-results.xml') != '' || hashFiles('ci-results/host-test-diagnostics/**') != '') }}
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-results
         path: |
           unit-test-results.json
           gm-test-results.json
+          gm-discovery-results.xml
           ci-results/host-test-diagnostics/
         if-no-files-found: error
 
