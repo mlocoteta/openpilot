@@ -1,6 +1,7 @@
 """Bounded Galaxy HTTP connections and shared-source shutdown."""
 
 from contextlib import ExitStack
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from functools import lru_cache
 import gzip
@@ -10,6 +11,36 @@ import mimetypes
 from pathlib import Path
 import threading
 import time
+from urllib.parse import urlsplit
+
+
+@dataclass(frozen=True)
+class ReverseProxy:
+  peer: str
+  origin: str
+
+  @classmethod
+  def validated(cls, peer, origin):
+    try:
+      address = ip_address(peer)
+      url = urlsplit(origin)
+      if (address.is_unspecified or not url.hostname or url.scheme != 'https' or url.username is not None or
+          url.password is not None or url.path or url.query or url.fragment or
+          origin != f'https://{url.netloc}' or url.port == 0):
+        raise ValueError
+    except ValueError as error:
+      raise ValueError('Enter a literal proxy IP address and an HTTPS origin without a path or trailing slash') from error
+    return cls(str(address), origin)
+
+  def matches_peer(self, peer):
+    try:
+      return ip_address(peer) == ip_address(self.peer)
+    except ValueError:
+      return False
+
+  def allows(self, peer, host, origin, *, mutation=False):
+    return (self.matches_peer(peer) and host == urlsplit(self.origin).netloc and
+            (origin == self.origin or origin is None and not mutation))
 
 
 class _LocalHTTPServer(ThreadingHTTPServer):

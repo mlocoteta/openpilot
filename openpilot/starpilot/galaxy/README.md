@@ -59,6 +59,26 @@ access uses the same authenticated, same-origin HTTP API as local Wi-Fi.
 
 ## Access and operation rules
 
+### Optional reverse proxy
+
+While offroad, open **Toggles → Developer → Reverse proxy**. Enter the proxy IP
+address (for example `192.168.1.2`) and public HTTPS origin (for example
+`https://galaxy.example.com`), enable reverse proxy, and save with confirmation.
+Settings persist beside Galaxy's access credentials and apply immediately;
+no startup-script edits or restart are needed. Keep direct IP access available
+when changing or disabling a proxy you are currently using.
+
+The address must be the actual proxy socket peer as seen by the comma, not the
+browser address. The origin must be the exact external HTTPS origin (include
+a nonstandard port if used), without a trailing slash or path. The proxy must
+preserve the external Host and browser Origin headers and forward to Galaxy's
+HTTP port. Forwarded client-IP headers are not trusted. Only this peer and
+hostname gain the exception; all proxy requests require an existing Galaxy
+password-backed session, even without forwarding headers. Configure a Galaxy
+password through the existing device controls before using the proxy. Direct
+IP-and-port access from other clients remains unchanged. Proxy access is off
+by default. Invalid configuration never grants proxy access.
+
 The hotspot is off by default. While parked, open **Galaxy Access &
 Install → Galaxy Wi-Fi Hotspot**, enable automatic broadcast, and save a password
 (12–63 printable ASCII characters without spaces). Join `TheGalaxy-<last four
