@@ -76,6 +76,10 @@ def forecast_should_stop(cp, speeds, time_indices, action_t, fallback):
   if decision is not None:
     return decision
   decision = hyundai_forecast_should_stop(cp, speeds, time_indices, action_t)
+  if decision is not None:
+    return decision
+  from opendbc.car.hyundai.stinger_longitudinal import forecast_should_stop as stinger_forecast_stop
+  decision = stinger_forecast_stop(cp, speeds, time_indices, action_t)
   return fallback if decision is None else decision
 
 
