@@ -57,3 +57,6 @@ openpilot/selfdrive/pandad/panda_safety.o -text
 openpilot/selfdrive/pandad/panda_usb.o -text
 openpilot/selfdrive/pandad/pandad.o -text
 openpilot/selfdrive/pandad/spi.o -text
+
+# Compressed recorded regression fixture; retain exact binary bytes.
+openpilot/starpilot/tests/testdata/ford_mache_lead_departure.json.gz -text
