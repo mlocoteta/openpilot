@@ -55,6 +55,7 @@ def drive(**overrides):
                       hasCeiling=True, effectiveCap=26.8224, status='active'),
     'chestnutState': event('chestnutState', tempC=61.0, supplyVoltage=14100),
     'drivingModelData': event('drivingModelData', big=True),
+    'peripheralState': event('peripheralState', voltage=12_640),
   }
   lead = events['radarState'].radarState.leadOne
   lead.present, lead.dRel, lead.vRel, lead.vLead, lead.radar = True, 41.5, -1.25, 27.75, True
@@ -84,7 +85,15 @@ class HudProjectionTest(unittest.TestCase):
     self.assertEqual((out['slc']['source'], out['slc']['state'], out['slc']['pending']), ('map', 'active', None))
     self.assertEqual(out['egpu']['state'], 'active')
     self.assertEqual(out['egpu']['supplyVolts'], 14.1)
+    self.assertEqual(out['batteryVolts'], 12.64)
     json.dumps(out)
+
+  def test_battery_volts_bad_read_is_null(self):
+    msgs, fresh = drive(peripheralState=event('peripheralState', voltage=0))
+    self.assertIsNone(extract(msgs, fresh)['batteryVolts'])
+    msgs, fresh = drive()
+    fresh['peripheralState'] = False
+    self.assertIsNone(extract(msgs, fresh)['batteryVolts'])
 
   def test_null_on_missing_or_stale(self):
     msgs, fresh = drive()
