@@ -55,8 +55,16 @@ def source_receiver(services):
   # Wake on the actual motion/native/state delivery rather than waiting for
   # another CarState. All envelope, source-age and current authority checks
   # still run on the real received messages.
-  return messaging.SubMaster(services, ignore_alive=['aolSafetyWire'],
+  sm = messaging.SubMaster(services, ignore_alive=['aolSafetyWire'],
     ignore_valid=['aolSafetyWire'], ignore_avg_freq=['aolSafetyWire', 'carState'])
+  if 'deviceMotion' in services:
+    # Separate waiting from accounting: keep every original frequency tracker,
+    # health bit and socket, and still receive all incidental deliveries.
+    poller = messaging.Poller()
+    poller.registerSocket(sm.sock['deviceMotion'])
+    sm.poller = poller
+    sm.non_polled_services = set(services) - {'deviceMotion'}
+  return sm
 
 
 MAX_OBJECTIVES = 12
