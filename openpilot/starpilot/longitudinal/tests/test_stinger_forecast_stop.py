@@ -18,7 +18,7 @@ class TestStingerForecastStop(unittest.TestCase):
   def test_both_forecasts_strict_boundary_and_delay(self):
     cp = SimpleNamespace(carFingerprint=CAR.KIA_STINGER_2022, openpilotLongitudinalControl=True)
     times = (0., .5, 1., 1.5, 2.)
-    threshold = float(np.float32(.3))
+    threshold = float(np.float32(.5))
     for speeds, action, expected in (
       ((.2,) * 5, .5, True), ((.3,) * 5, .5, True),
       ((threshold,) * 5, .5, False),
@@ -34,7 +34,7 @@ class TestStingerForecastStop(unittest.TestCase):
         self.assertEqual(forecast_should_stop(cp, speeds, times, action, False), expected)
 
   def test_stock_and_other_cars_retain_actual_fallback(self):
-    for car, owned in ((CAR.KIA_STINGER_2022, False), (CAR.GENESIS_G80, True)):
+    for car, owned in ((CAR.KIA_STINGER_2022, False), ('TOYOTA_RAV4', True)):
       cp = SimpleNamespace(carFingerprint=car, openpilotLongitudinalControl=owned)
       for fallback in (False, True):
         self.assertEqual(forecast_should_stop(cp, (.7, .7), (0., 2.), .5, fallback), fallback)
