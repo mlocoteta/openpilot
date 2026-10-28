@@ -78,14 +78,14 @@ def test_native_stream_requests_realtime_before_starting():
   sd._ffi.cast = lambda *args: 0
   native = audio.NativePlayback.__new__(audio.NativePlayback)
   native.sd = sd
-  native.lib = NS(audio_callback_address=lambda: 0)
   native.handle = 1234
   native.rate, native.buffer = 48000, 4096
-  native.close = lambda: calls.append('destroy')
   def request(*args):
     calls.append('request')
     return True
-  with patch.object(audio, 'request_alsa_realtime', side_effect=request):
+  with patch.object(audio, 'request_alsa_realtime', side_effect=request), \
+       patch.object(native, 'lib', NS(audio_callback_address=lambda: 0), create=True), \
+       patch.object(native, 'close', side_effect=lambda: calls.append('destroy')):
     stream = native.stream()
     assert native.realtime_requested
     assert calls == ['open', 'request']
