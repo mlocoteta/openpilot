@@ -408,6 +408,34 @@ class DriveStatsTest(unittest.TestCase):
     owner.snapshot()
     self.assertEqual(self.completed(owner, scans=3)['totals']['drives'], 5)
 
+  def test_incomplete_recording_waits_for_changed_source_without_repeated_analysis(self):
+    for reason in drive_stats.SOURCE_LIMITATIONS:
+      with self.subTest(reason=reason):
+        analyzer = mock.Mock(side_effect=lambda *args, reason=reason, **kwargs: {
+          **analyzed(*args, **kwargs), 'complete': False, 'reason': reason})
+        owner = self.owner(analyzer=analyzer)
+        owner._start()
+        owner.snapshot()
+        result = self.completed(owner)
+        self.assertTrue(result['analysis']['failures'][0]['retryStopped'])
+        self.assertEqual(result['totals']['drives'], 0)
+        self.now[0] += 3600
+        owner._start()
+        owner.snapshot()
+        self.completed(owner, scans=self.history.scans)
+        self.assertEqual(analyzer.call_count, 1)
+        self.history.routes = [route('abc', number=self.history.scans)]
+        owner.analyzer = mock.Mock(wraps=analyzed)
+        self.now[0] += 61
+        owner._start()
+        owner.snapshot()
+        recovered = self.completed(owner, scans=self.history.scans)
+        owner.analyzer.assert_called_once()
+        self.assertEqual(recovered['analysis']['failed'], 0)
+        self.assertEqual(recovered['totals']['drives'], 1)
+        owner.close()
+        self.store.unlink()
+
   def test_incomplete_source_waits_for_retry_or_revision(self):
     calls = []
     def incomplete(root, selected, permitted):

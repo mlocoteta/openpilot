@@ -51,11 +51,7 @@ export function driveSummary(feed) {
   if (!data) return null
   const isMetric = data.isMetric
   const last = data.lastDrive
-  const analysisStatus = (drive) => {
-    const failure = data.analysis.failures?.find((item) => item.routeId === drive.routeId)
-    return { analysisLabel: failure?.retryStopped ? "Analysis paused" : failure ? "Retry scheduled" : "Analysis pending",
-      analysisError: failure?.reason || drive.reason || "" }
-  }
+  const analysisStatus = () => ({ analysisLabel: "Incomplete recording" })
   const maximum = Math.max(1, ...data.week.days.map((day) => day.distanceMeters ?? 0))
   const models = data.models.slice(0, 3)
   const modelTotal = models.reduce((sum, model) => sum + (model.distanceMeters ?? 0), 0)
@@ -189,7 +185,7 @@ export const Home = {
           <p v-else-if="!driving.last">No saved drives yet.</p>
           <template v-else>
             <p class="gx-home__date">{{ driving.last.date }}</p>
-            <p v-if="!driving.last.complete" class="gx-home__subtle">{{ driving.last.analysisLabel }}{{ driving.last.analysisError ? ": " + driving.last.analysisError : "" }}</p>
+            <p v-if="!driving.last.complete" class="gx-home__subtle">{{ driving.last.analysisLabel }}</p>
             <div class="gx-home__four"><div><strong>{{ driving.last.distance }}</strong><span>distance</span></div>
               <div><strong>{{ driving.last.duration }}</strong><span>duration</span></div>
               <div><strong>{{ driving.last.engaged }}</strong><span>engaged</span></div>
@@ -224,15 +220,12 @@ export const Home = {
               <div v-for="record in driving.records" :key="record.id" class="gx-home__record"><span class="gx-home__record-art" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path v-for="(path, index) in recordArt(record.id)" :key="index" :d="path" /></svg></span><span class="gx-home__record-label">{{ record.label }}</span><strong>{{ record.display }}</strong></div>
             </section>
           </div>
-          <GxNotice tone="danger" v-if="driving.analysis.failed">{{ driving.analysis.failed }} drive analysis failure{{ driving.analysis.failed === 1 ? '' : 's' }}{{ driving.analysis.quarantined ? ' · automatic retries paused for ' + driving.analysis.quarantined : '' }}.
-            <div v-for="failure in driving.analysis.failures" :key="failure.routeId">{{ failure.routeId }}: {{ failure.reason }}</div>
-          </GxNotice>
           <section class="gx-card gx-home__recent"><div class="gx-section__header"><i class="bi bi-clock-history"></i><h2 class="gx-section__title">Recent Drives</h2></div>
             <p v-if="!driving.recent.length" class="gx-home__subtle">No saved drives yet.</p>
             <div v-for="drive in driving.recent" :key="drive.routeId" class="gx-home__drive" :class="{ 'is-ignored': drive.ignored }">
               <div><strong>{{ drive.date }}</strong><small>{{ drive.model }}</small></div>
               <div><strong>{{ drive.complete ? drive.distance : drive.analysisLabel }}</strong><small>{{ drive.duration }} · {{ drive.engaged }} engaged</small><small>{{ drive.aol }} AOL steering only</small></div>
-              <div><small>{{ drive.ignored ? 'Excluded from totals' : drive.complete ? 'Included in totals' : drive.analysisError || drive.analysisLabel }}</small>
+              <div><small>{{ drive.ignored ? 'Excluded from totals' : drive.complete ? 'Included in totals' : drive.analysisLabel }}</small>
                 <button type="button" class="gx-home__link" :inert="drives.busy" :aria-busy="drives.busy || undefined" @click="ignoreDrive(drive)">
                   {{ drive.ignored ? 'Include in stats' : 'Ignore drive stats' }}</button></div>
             </div>
