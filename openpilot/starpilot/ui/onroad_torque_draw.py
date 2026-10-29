@@ -6,7 +6,7 @@ import pyray as rl
 from raylib import rl as native_rl
 
 from openpilot.system.ui.lib.application import GL_VERSION
-from openpilot.starpilot.ui.onroad_torque_geometry import MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT, MIN_OFFSET, RADIUS, TORQUE_ANGLE_SPAN
+from openpilot.starpilot.ui.onroad_torque_geometry import MAX_HEIGHT, MAX_OFFSET, MIN_HEIGHT, MIN_OFFSET, RADIUS, TORQUE_ANGLE_SPAN, arc_scale
 
 
 VERTEX_SHADER = GL_VERSION + """
@@ -85,7 +85,7 @@ class TorqueBarPainter:
     if alpha <= 0:
       return
     self.prepare()
-    scale = rect.height / 240.0 * (rect.width / screen_width)
+    scale = arc_scale(rect.width, rect.height, screen_width)
     strength = max(0.0, min(1.0, (abs(torque) - 0.5) * 2))
     torque_offset = MIN_OFFSET * scale + (MAX_OFFSET * scale - MIN_OFFSET * scale) * strength
     thickness = MIN_HEIGHT * scale + (MAX_HEIGHT * scale - MIN_HEIGHT * scale) * strength

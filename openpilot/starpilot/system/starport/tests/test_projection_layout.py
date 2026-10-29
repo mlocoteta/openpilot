@@ -19,6 +19,21 @@ SCREEN = {'version': 1, 'width': 1280, 'height': 720, 'margin_width': 0,
 
 
 class TestProjectionLayout(unittest.TestCase):
+  def test_square_screens_with_bottom_taskbar_keep_default_layout_inside_canvas(self):
+    for width, height, margin_width, margin_height in ((800, 480, 320, 0), (1280, 720, 560, 0),
+                                                     (1920, 1080, 840, 0), (1280, 720, 608, 48)):
+      screen = SCREEN | {'width': width, 'height': height, 'margin_width': margin_width, 'margin_height': margin_height}
+      with self.subTest(screen=screen):
+        document = default_layout(screen)
+        self.assertEqual(document['canvas'], {'width': 1860, 'height': 1860})
+        self.assertEqual(validate_layout(document, screen), document)
+        self.assertEqual(decode_layout(json.dumps(document).encode(), screen), document)
+        metadata = layout_metadata(screen)
+        placed, widget = document['widgets']['torque_bar'], metadata['widgets']['torque_bar']
+        for axis, extent in (('x', 'width'), ('y', 'height')):
+          self.assertGreaterEqual(placed[axis], metadata['bounds'][axis])
+          self.assertLessEqual(placed[axis] + widget[extent], metadata['bounds'][axis] + metadata['bounds'][extent])
+
   def test_sources_save_actual_attached_actions_inside_each_projection_screen(self):
     from openpilot.starpilot.ui.onroad_customization import default_document, placement
     for viewport in ((1860, 1080), (2880, 1080), (1920, 1440)):

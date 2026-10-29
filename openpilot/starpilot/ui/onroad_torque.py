@@ -24,7 +24,8 @@ class TorqueBarWidget:
     if drive_frame != self._drive_frame:
       self._torque_filter.x = self._alpha_filter.x = 0.0
       self._drive_frame = drive_frame
-    profile = 'large' if screen_width == 2160 else 'compact'
+    # Projected canvases use Large UI placements even when their width is 1860.
+    profile = 'large' if screen_width >= 1860 else 'compact'
     enabled = placement(state.customization, profile, 'torque_bar')['enabled']
     if not state.lateral_active or not getattr(state, 'torque_source_available', True):
       self._torque_filter.x = 0.0
@@ -35,7 +36,7 @@ class TorqueBarWidget:
     alpha = self._alpha_filter.update(1.0)
     if not enabled:
       return
-    cap_radius = LARGE_CAP_RADIUS if profile == 'large' else CAP_RADIUS
+    cap_radius = LARGE_CAP_RADIUS if screen_width == 2160 else CAP_RADIUS
     self._painter.render(rect, torque, alpha, screen_width, cap_radius, widget_offset(state.customization, profile, 'torque_bar'))
 
   def close(self) -> None:
