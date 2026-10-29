@@ -659,6 +659,10 @@ def main():
   if HARDWARE.get_device_type() in ("tici", "tizi", "mici"):
     set_core_affinity([6])
     os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+    try:
+      os.setpriority(os.PRIO_PROCESS, 0, -5)
+    except OSError:
+      cloudlog.warning("Controls normal scheduling preference unavailable")
   else:
     set_core_affinity([4, 5])
   controls.run()
