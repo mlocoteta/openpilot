@@ -296,6 +296,7 @@ class ModelManager:
     self.download_all = False
     self.job_id = ""
     self.checked: dict[str, tuple[tuple, bool]] = {}
+    self.snapshot_checked: dict[str, tuple[tuple, bool]] = {}
     self.verify_queue: deque[tuple[str, dict, tuple, str]] = deque()
     self.verifying: dict[str, tuple] = {}
     self.verify_worker: threading.Thread | None = None
@@ -417,6 +418,17 @@ class ModelManager:
       self.checked[key] = (signature, verified_artifact(mid, entries, self.root, variant) is not None)
     return self.checked[key][1]
 
+  def _verification_receipt(self, mid: str, variant: str) -> Path:
+    return self.root / ".verified" / f"{mid}-{variant}.json"
+
+  def _remember_verification(self, mid: str, variant: str, signature: tuple) -> None:
+    if len(signature) != 8:
+      return
+    try:
+      atomic_json(self._verification_receipt(mid, variant), {"version": 1, "signature": list(signature)})
+    except OSError:
+      logging.exception("Could not save model verification for %s", mid)
+
   def _snapshot_installed(self, mid: str, row: dict, variant: str = "standard") -> tuple[bool, bool]:
     if mid == DEFAULT_SMALL and variant == "standard" and self._signature(mid, row, variant) is None:
       row = {**row, "shipped": True, "artifact_sha256": DEFAULT_SMALL_SHA256, "artifact_size": DEFAULT_SMALL_SIZE}
@@ -430,6 +442,16 @@ class ModelManager:
     checked = self.checked.get(key)
     if checked is not None and checked[0] == signature:
       return checked[1], False
+    if len(signature) == 8:
+      if self.snapshot_checked.get(key, (None,))[0] != signature:
+        try:
+          receipt = read_json(self._verification_receipt(mid, variant), 4096)
+          valid = receipt == {"version": 1, "signature": list(signature)}
+        except (OSError, ValueError, TypeError):
+          valid = False
+        self.snapshot_checked[key] = (signature, valid)
+      if self.snapshot_checked[key][1]:
+        return True, False
     if self.verify_worker is not None and not self.verify_worker.is_alive():
       self.verify_worker = None
       self.verifying.clear()
@@ -462,6 +484,8 @@ class ModelManager:
           self.verifying.pop(key)
           if self._signature(mid, artifact_entry(mid, {mid: row}, variant), variant) == signature:
             self.checked[key] = (signature, valid)
+            if valid:
+              self._remember_verification(mid, variant, signature)
 
   def selected_gpu_status(self) -> tuple[bool, bool]:
     """Verify the selected download asynchronously, without starting a model or download job."""

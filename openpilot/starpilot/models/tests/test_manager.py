@@ -180,6 +180,68 @@ class ModelManagerTest(unittest.TestCase):
     self.assertFalse(self.model_status()['installed'])
     self.assertFalse(self.wait_for_check()['installed'])
 
+  def test_verification_survives_manager_restart_but_selection_still_hashes(self):
+    self.download()
+    self.assertTrue(self.wait_for_check()['installed'])
+    self.manager.close()
+    self.manager = ModelManager(root=self.root, parked=lambda: True, gpu_present=lambda: True)
+    self.addCleanup(self.manager.close)
+    with patch('openpilot.starpilot.models.manager.verified_artifact', return_value=None) as verify:
+      row = self.model_status()
+      self.assertTrue(row['selectable'])
+      self.assertFalse(row['checking'])
+      verify.assert_not_called()
+      with self.assertRaises(ModelError):
+        self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
+      verify.assert_called()
+
+  def test_persisted_verification_invalidates_file_and_catalog_changes(self):
+    self.download()
+    self.assertTrue(self.wait_for_check()['installed'])
+    self.manager.close()
+    path = self.root / 'gwm8223/gwm8223_driving_tinygrad.pkl'
+    original_stat = path.stat()
+    path.write_bytes(b'x' * len(self.data))
+    import os
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    self.manager = ModelManager(root=self.root, parked=lambda: True, gpu_present=lambda: True)
+    self.addCleanup(self.manager.close)
+    self.assertFalse(self.wait_for_check()['selectable'])
+    self.assertEqual(resolve_runtime(True, root=self.root).small_id, DEFAULT_SMALL)
+    row = catalog(self.root)['gwm8223']
+    row = {**row, 'artifact_sha256': '0' * 64}
+    installed, _ = self.manager._snapshot_installed('gwm8223', row)
+    self.assertFalse(installed)
+
+  def test_persisted_verification_rejects_changed_catalog_for_unchanged_file(self):
+    self.download()
+    self.assertTrue(self.wait_for_check()['installed'])
+    self.manager.close()
+    self.manager = ModelManager(root=self.root, parked=lambda: True, gpu_present=lambda: True)
+    self.addCleanup(self.manager.close)
+    row = {**catalog(self.root)['gwm8223'], 'artifact_sha256': '0' * 64}
+    with patch('openpilot.starpilot.models.manager.verified_artifact', return_value=None) as verify:
+      installed, _ = self.manager._snapshot_installed('gwm8223', row)
+      self.assertFalse(installed)
+      worker = self.manager.verify_worker
+      if worker is not None:
+        worker.join(2)
+        self.assertFalse(worker.is_alive())
+      self.manager.close()
+      verify.assert_called()
+
+  def test_invalid_verification_receipt_rehashes(self):
+    self.download()
+    self.assertTrue(self.wait_for_check()['installed'])
+    self.manager.close()
+    (self.root / '.verified/gwm8223-standard.json').write_text('{broken')
+    self.manager = ModelManager(root=self.root, parked=lambda: True, gpu_present=lambda: True)
+    self.addCleanup(self.manager.close)
+    from openpilot.starpilot.models.manager import verified_artifact
+    with patch('openpilot.starpilot.models.manager.verified_artifact', wraps=verified_artifact) as verify:
+      self.assertTrue(self.wait_for_check()['installed'])
+      verify.assert_called()
+
   def test_snapshot_does_not_wait_for_artifact_hash(self):
     self.download()
     self.manager.checked.clear()
