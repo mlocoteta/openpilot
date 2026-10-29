@@ -1,3 +1,4 @@
+import json
 import os
 import operator
 import platform
@@ -86,6 +87,14 @@ def jetlink_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
 def navigation(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and params.get_bool("NavigationEnabled")
 
+def commalink_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # Accord head-unit link (COMMALINK.md); off unless /data/starpilot/commalink.json says {"enabled": true}
+  try:
+    with open("/data/starpilot/commalink.json") as f:
+      return json.load(f).get("enabled") is True
+  except (OSError, ValueError, AttributeError):
+    return False
+
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
@@ -153,6 +162,8 @@ procs = [
                  restart_on_exit=True),
   PythonProcess("starportd", "openpilot.starpilot.system.starport.daemon", starport_enabled, enabled=COMMA_HARDWARE,
                 restart_on_exit=True),  # boot can race bluetoothd (NoSuchUnit)
+  PythonProcess("commalinkd", "openpilot.starpilot.commalink.daemon", commalink_enabled, enabled=COMMA_HARDWARE,
+                restart_on_exit=True),
   PythonProcess("spotifyd", "openpilot.starpilot.soloist.supervisor", spotify_enabled, enabled=COMMA_HARDWARE, restart_on_exit=True),
   # Boot can race the audio device; selfdrived blocks engagement while soundd is down.
   PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview, restart_on_exit=True),
