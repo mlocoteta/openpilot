@@ -53,7 +53,8 @@ SDP_PSM = 1
 RFCOMM_UUID16 = b"\x19\x00\x03"
 
 ALLOWED_PAGES = ("profiles", "conditional", "slc", "lane_change", "curve", "sounds", "sentry")
-NAV_ACTIONS = ("clear", "select", "selectRoute")
+# favourite edits = the skin 1.1 shared list; Galaxy's own owner/revision checks still decide
+NAV_ACTIONS = ("clear", "select", "selectRoute", "favorite", "removeFavorite", "labelFavorite", "removeRecent")
 
 
 def log(*a) -> None:
