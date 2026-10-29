@@ -1363,11 +1363,11 @@ class SelfdriveD:
 
       if (toyota_qualified(self.CP, marked_only=True) and CS.standstill or
           angle_qualified(self.CP, marked_only=True) or
-          self.CP.brand == 'hyundai' and CS.brakePressed and len(self.CP.safetyConfigs) == 1 and
+          self.CP.brand == 'hyundai' and len(self.CP.safetyConfigs) == 1 and
           stock_canfd_qualified(self.CP, marked_only=True)):
         native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
         if stock_lateral_role(self, CS, native, intent, allow_independent_cancel=True,
-                              allow_independent_brake=True, now_ns=now_ns):
+                              allow_independent_brake=True, allow_independent_gas=True, now_ns=now_ns):
           user_disable = False
     if user_disable and self.held_axis_override_wait(CS, proof, now_ns, fresh_successor=fresh_successor and qualified_gm(self.CP))[0]:
       # A fresh same-owner source can establish its own LAT permission after

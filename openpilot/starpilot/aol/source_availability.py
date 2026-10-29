@@ -13,7 +13,7 @@ EventName = log.OnroadEvent.EventName
 AlertLevel = log.DriverMonitoringState.AlertLevel
 
 
-def stock_lateral_role(self, CS, native, intent=None, *, allow_independent_cancel=False, allow_independent_brake=False, now_ns=0):
+def stock_lateral_role(self, CS, native, intent=None, *, allow_independent_cancel=False, allow_independent_brake=False, allow_independent_gas=False, now_ns=0):
   """Current stock USER role while an established independent LAT owner remains."""
   cancel_role = False
   if allow_independent_cancel:
@@ -40,6 +40,17 @@ def stock_lateral_role(self, CS, native, intent=None, *, allow_independent_cance
        len(self.CP.safetyConfigs) == 1 and stock_canfd_qualified(self.CP, marked_only=True) and
        CS.gearShifter == car.CarState.GearShifter.drive and isfinite(CS.vEgoRaw) and isfinite(CS.vEgo) and
        (settings.pause_brake_mps <= 0 or CS.vEgo >= settings.pause_brake_mps or CS.standstill)))
+  gas_role = False
+  if allow_independent_gas:
+    from opendbc.car.hyundai.canfd_stock_aol import qualified as stock_canfd_qualified
+
+    settings = getattr(self, 'aol_settings', None)
+    previous = getattr(self, 'aol_axis_decision', None)
+    gas_role = bool(self.CP.brand == 'hyundai' and len(self.CP.safetyConfigs) == 1 and
+      settings is not None and settings.enabled and CS.gasPressed and not CS.brakePressed and not CS.regenBraking and
+      previous is not None and previous.lateral_active and previous.native_acknowledged and not previous.longitudinal_active and
+      CS.gearShifter == car.CarState.GearShifter.drive and isfinite(CS.vEgoRaw) and isfinite(CS.vEgo) and
+      stock_canfd_qualified(self.CP, marked_only=True))
   rules = self.events.event_rules
   stock_user = stock_lateral_user_event(self.CP)
   users = [name for name in self.events.names if ET.USER_DISABLE in rules.get(name, {})]
@@ -58,7 +69,7 @@ def stock_lateral_role(self, CS, native, intent=None, *, allow_independent_cance
       self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
       not stock_lateral_off(self.CP, CS, native, allow_independent_cancel=cancel_role,
                             allow_independent_brake=brake_role,
-                            allow_independent_gas=brake_role and self.CP.brand == 'toyota' and CS.gasPressed)):
+                            allow_independent_gas=gas_role or brake_role and self.CP.brand == 'toyota' and CS.gasPressed)):
     return False
   accepted = intent if intent is not None else anchor[2]
   companion = getattr(self, 'aol_intent_companion', None)

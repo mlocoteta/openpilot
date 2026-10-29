@@ -138,7 +138,8 @@ def stock_lateral_off(cp, cs, native, *, allow_independent_cancel=False, allow_i
     not cs.accFaulted and not cs.doorOpen and not cs.seatbeltUnlatched and
     (not cs.brakePressed or independent_brake and allow_independent_brake) and
     not cs.regenBraking and (not cs.gasPressed or independent_angle or
-      allow_independent_gas and toyota_qualified(cp, marked_only=True)) and
+      allow_independent_gas and (toyota_qualified(cp, marked_only=True) or
+        cp.brand == 'hyundai' and stock_canfd_qualified(cp, marked_only=True))) and
     (not physical_cancel(cs, cp) or independent_angle and allow_independent_cancel) and
     native is not None and native.requestedLateral and native.lateralAllowed and not native.requestedLongitudinal)
 
