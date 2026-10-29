@@ -304,3 +304,12 @@ assert.equal(liveLink.manager.data.jetlink.state, "checking execution")
 liveLink.manager.stop()
 
 assert.ok(ModelsPage.template.includes('href="https://github.com/StarPilotHQ/StarPilot/blob/SecretGoodStarPilot/openpilot/starpilot/models/JETLINK.md"'), "Jetlink setup guide points at the branch that contains it")
+
+const refreshingCatalog = { ...managerPayload, downloading: true, refreshing: true }
+assert.equal(modelActionAllowed(refreshingCatalog, "select-small", small), true)
+assert.equal(modelActionAllowed(refreshingCatalog, "select-big", big), true)
+assert.equal(modelActionAllowed(refreshingCatalog, "select-big", missing), false)
+assert.equal(modelActionAllowed({ ...refreshingCatalog, isOnroad: true }, "select-big", big), false)
+assert.equal(modelActionAllowed({ ...refreshingCatalog, randomizer: true }, "select-big", big), false)
+assert.equal(modelActionAllowed({ ...refreshingCatalog, refreshing: false }, "select-big", big), false)
+assert.equal(modelActionAllowed(refreshingCatalog, "delete", small), false)

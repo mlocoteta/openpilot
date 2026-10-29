@@ -341,7 +341,8 @@ class ModelManager:
       if not busy and job.get("state") == "running":
         job.update(state="interrupted", progress="Previous model download was interrupted", model="", downloadAll=False, cancelRequested=False)
         atomic_json(self.root / ".download-job.json", job)
-      return {**job, "downloading": busy}
+      return {**job, "downloading": busy,
+              "refreshing": busy and job.get("state") == "running" and job.get("operation") == "refresh_manifest"}
 
   def _publish_job(self, *, progress: str | None = None, model: str | None = None) -> None:
     with state_lock(self.root):
@@ -495,7 +496,7 @@ class ModelManager:
               "jobId": job.get("jobId", ""), "cancelRequested": job.get("cancelRequested", False),
               "downloadVariant": job.get("variant", "standard"),
               "modelToDownload": job.get("model", ""), "downloadAll": job.get("downloadAll", False),
-              "downloading": job["downloading"], "progress": job.get("progress", ""),
+              "downloading": job["downloading"], "refreshing": job["refreshing"], "progress": job.get("progress", ""),
               "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": self.jetlink_owner().snapshot(),
               "capabilities": {"select": parked, "download": parked, "downloadAll": parked, "cancel": True,
                                "jetlink": parked, "refresh": parked, "favorites": True, "delete": parked, "randomizer": parked, "exclusions": parked}}
@@ -587,7 +588,7 @@ class ModelManager:
           try:
             atomic_json(self.root / ".download-job.json", {
               "schemaVersion": 1, "jobId": self.job_id, "state": "running", "model": self.downloading,
-              "progress": self.progress, "downloadAll": self.download_all, "cancelRequested": False, "variant": variant,
+              "progress": self.progress, "downloadAll": self.download_all, "cancelRequested": False, "variant": variant, "operation": action,
             })
           except BaseException:
             lock.close()
@@ -602,7 +603,8 @@ class ModelManager:
           raise
         return {"message": message}
       if action == "active":
-        if self._job_status()["downloading"]:
+        job = self._job_status()
+        if job["downloading"] and not job["refreshing"]:
           raise ModelError("Wait for the model download to finish before selecting a model")
         if (set(payload) != {"profile", "model"} or payload["profile"] not in ("small", "big") or
             not isinstance(payload["model"], str)):
@@ -620,7 +622,8 @@ class ModelManager:
           saved = preferences(self.root)
           if saved["randomizer"]:
             raise ModelError("Turn Model Randomizer off before choosing a model")
-          if self._job_busy():
+          job = self._read_job()
+          if self._job_busy() and not (job.get("state") == "running" and job.get("operation") == "refresh_manifest"):
             raise ModelError("Wait for the model download to finish before selecting a model")
           saved[profile] = mid
           atomic_json(self.root / "preferences.json", saved)

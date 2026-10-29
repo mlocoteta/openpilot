@@ -165,7 +165,7 @@ export function modelActionAllowed(data, action, model = null) {
   if (data.isOnroad !== false && !["favorite", "unfavorite", "cancel"].includes(action)) return false
   if (action === "jetlink") return data.jetlink !== undefined
   if (["select-small", "select-big"].includes(action)) {
-    if (data.downloading || data.randomizer === true) return false
+    if (data.downloading && data.refreshing !== true || data.randomizer === true) return false
     if (action === "select-big" && model === null) return true
     return model?.installed === true && model.selectable === true && fitsModelProfile(model, action === "select-big" ? "big" : "small")
   }

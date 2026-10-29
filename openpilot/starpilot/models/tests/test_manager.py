@@ -724,6 +724,68 @@ class ModelManagerTest(unittest.TestCase):
     self.assertEqual(self.urls, [])
     self.assertFalse((self.root / 'catalog.json').exists())
 
+  def test_offline_catalog_refresh_does_not_block_verified_local_selection(self):
+    self.install_fixture('gwm8223')
+    self.install_fixture('cinquev3')
+    self.manager.gpu_present = lambda: False
+    entered, release = threading.Event(), threading.Event()
+    def offline(url, timeout):
+      entered.set()
+      release.wait(5)
+      raise OSError('offline')
+    self.manager.opener = offline
+    self.manager.refresh_catalog = True
+    observer = ModelManager(root=self.root, parked=lambda: self.parked, gpu_present=lambda: False, opener=offline)
+    self.addCleanup(observer.close)
+    try:
+      self.manager.snapshot()
+      self.assertTrue(entered.wait(1))
+      for profile, mid in (('small', 'gwm8223'), ('big', 'cinquev3')):
+        observer.action('active', {'profile': profile, 'model': mid})
+        self.assertEqual(preferences(self.root)[profile], mid)
+      self.assertTrue(self.manager.worker.is_alive())
+      self.assertTrue(observer.snapshot()['refreshing'])
+      self.assertFalse(observer.snapshot()['gpuAvailable'])
+      with patch('openpilot.starpilot.models.manager.verified_artifact', side_effect=AssertionError('unchanged local file rehashed')):
+        observer.action('active', {'profile': 'big', 'model': 'cinquev3'})
+      self.parked = False
+      with self.assertRaises(ModelError):
+        observer.action('active', {'profile': 'big', 'model': 'cinquev3'})
+      self.parked = True
+      (self.root / 'cinquev3/cinquev3_driving_tinygrad.pkl').write_bytes(b'corrupt')
+      with self.assertRaisesRegex(ModelError, 'verify'):
+        observer.action('active', {'profile': 'big', 'model': 'cinquev3'})
+      self.assertTrue(self.manager.worker.is_alive())
+    finally:
+      release.set()
+      self.manager.worker.join(3)
+    observer.action('active', {'profile': 'small', 'model': 'gwm8223'})
+
+  def test_untagged_or_download_jobs_still_block_selection(self):
+    self.install_fixture('cinquev3')
+    entered, release = threading.Event(), threading.Event()
+    def offline(url, timeout):
+      entered.set()
+      release.wait(5)
+      raise OSError('offline')
+    self.manager.opener = offline
+    self.manager.action('refresh_manifest', {})
+    self.assertTrue(entered.wait(1))
+    try:
+      job = json.loads((self.root / '.download-job.json').read_text())
+      for operation in ('download', 'download_all', 'unknown', None):
+        row = dict(job)
+        if operation is None:
+          row.pop('operation', None)
+        else:
+          row['operation'] = operation
+        atomic_json(self.root / '.download-job.json', row)
+        with self.assertRaisesRegex(ModelError, 'download'):
+          self.manager.action('active', {'profile': 'big', 'model': 'cinquev3'})
+    finally:
+      release.set()
+      self.manager.worker.join(3)
+
 
 if __name__ == '__main__':
   unittest.main()

@@ -2118,7 +2118,9 @@ class StarMiciMainLayout(MiciMainLayout):
       return
     if destination == Destination.DRIVING_MODEL:
       from openpilot.starpilot.ui.models_compact import ModelsCompact
-      ModelsCompact(self.star).open()
+      if not hasattr(self, "_models_compact"):
+        self._models_compact = ModelsCompact(self.star)
+      self._models_compact.open()
       return
     if destination == Destination.DRIVING_CONTROLS:
       from openpilot.starpilot.ui.feature_settings_compact import FeatureSettingsCompact
