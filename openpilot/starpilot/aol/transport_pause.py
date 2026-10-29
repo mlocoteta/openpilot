@@ -343,14 +343,10 @@ class TransportPauseFeedback:
     return native
 
   def _native_long_withdrawal_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, producer):
-    """Retain existing LAT intent from a fresh independently granted LAT proof.
-
-    Requested but denied LONG is never an active combined-axis baseline. This
-    method neither grants outputs nor exempts any native or control fault.
-    """
+    """Retain LAT intent from a fresh native LAT grant; never grant LONG or bypass faults."""
     from openpilot.starpilot.nostalgia import physical_cancel
     from openpilot.starpilot.car.gm.aol import native_accepts_cp
-    from openpilot.starpilot.car.hyundai.aol import early_native_long_withdrawal_supported
+    from openpilot.starpilot.car.hyundai.aol import early_native_long_withdrawal_supported, classic_brake_withdrawal
     gm = cp.brand == 'gm' and native_accepts_cp(cp, int(cp.safetyConfigs[0].safetyModel.raw), int(cp.safetyConfigs[0].safetyParam))
     from openpilot.starpilot.car.hyundai.aol import qualified_ccnc_long_aol as ev9_qualified
     from opendbc.car import structs
@@ -370,12 +366,6 @@ class TransportPauseFeedback:
     early_long = gm or cp.brand == 'hyundai' and early_native_long_withdrawal_supported(cp) or ev9 or ford_early_long(cp) or ford_withdrawal or ford_mache_long
     from openpilot.starpilot.car.gm.aol import f1_conventional_lateral_owner, gm_physical_pedal_withdrawal
     gm_pedal = gm_physical_pedal_withdrawal(cp, cs) and not f1_conventional_lateral_owner(cp)
-    classic_brake = bool(cp.brand == 'hyundai' and early_long and
-      cp.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.hyundai and
-      cs.brakePressed and not cs.gasPressed and not cs.regenBraking and cs.cruiseState.available and
-      not cs.doorOpen and not cs.seatbeltUnlatched and not cs.vehicleSensorsInvalid and
-      cs.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport,
-                        structs.CarState.GearShifter.low, structs.CarState.GearShifter.brake))
     event_ns = int(sm.logMonoTime['onroadEvents'])
     main_off_recovery = bool(0 < event_ns <= self.ccnc_main_off_source_ns <= now_ns and
       now_ns - self.ccnc_main_off_source_ns <= AXIS_MAX_AGE_NS)
@@ -400,7 +390,7 @@ class TransportPauseFeedback:
         now_ns - int(sm.logMonoTime['onroadEvents']) > 1_500_000_000 or
         any(event.immediateDisable or event.softDisable or
             event.userDisable and not (ev9_main_off and event.name == log.OnroadEvent.EventName.wrongCarMode or
-              (gm_pedal or classic_brake) and event.name == log.OnroadEvent.EventName.pedalPressed or
+              (gm_pedal or classic_brake_withdrawal(cp, cs)) and event.name == log.OnroadEvent.EventName.pedalPressed or
               ford_withdrawal and event.name in (log.OnroadEvent.EventName.pedalPressed, log.OnroadEvent.EventName.pcmDisable,
                 log.OnroadEvent.EventName.buttonCancel))
             for event in sm['onroadEvents'])):
