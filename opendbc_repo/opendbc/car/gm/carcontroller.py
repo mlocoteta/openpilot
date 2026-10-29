@@ -16,7 +16,7 @@ from opendbc.car.gm import gmcan
 from opendbc.car.gm.startup_preferences import gateway_sources_current
 from opendbc.car.gm.silverado_cc import SilveradoPedalCommand
 from opendbc.car.gm.conventional_pedal_command import ConventionalPedalCommand
-from opendbc.car.gm.aol import lateral_request as aol_lateral_request
+from opendbc.car.gm.aol import lateral_request as aol_lateral_request, qualified_gm
 from opendbc.car.gm.conventional_pedal import (sources_current as conventional_pedal_sources_current,
                                                cancel_sources_current as conventional_pedal_cancel_sources_current)
 from opendbc.car.gm.ordinary_cc import PhysicalObservation, ButtonCadence, button_request as ordinary_button_request
@@ -362,6 +362,11 @@ class CarController(CarControllerBase):
     self.volt_cc_last_direction_frame = None
     self.volt_cc_consumed_source_ns = 0
 
+    # Match the normal full-ACC producer, not a model list: CC-only and standalone
+    # pedal owners never replace this stream. Qualify once from the final config.
+    self.startup_acc_keepalive = (qualified_gm(self.CP) and self.CP.openpilotLongitudinalControl and
+                                  not self.CP.flags & GMFlags.CC_LONG and
+                                  (not self.CP.flags & GMFlags.PEDAL_LONG or self.camera_pedal_profile is not None))
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint][Bus.chassis])
@@ -644,10 +649,9 @@ class CarController(CarControllerBase):
         _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
 
-    # Camera and ordinary SDGM Alpha-long intercept the stock ACC stream as soon as safety takes
-    # ownership. Keep its inactive gas/brake/status cadence alive through startup;
-    # CC was replaced with a disabled command and startup excludes auto hold.
-    if startup_keepalive and (not (self.ordinary_camera_long or self.ordinary_sdgm_long) or self.camera_pedal_profile is not None):
+    # Every full-ACC owner must service its replacement stream after safety takes
+    # ownership. CC was replaced with a disabled command and startup excludes hold.
+    if startup_keepalive and not self.startup_acc_keepalive:
       # Other profiles retain their steering-only startup path. Never run cruise-button, pedal,
       # brake, dashboard, or hold producers before normal controls are ready.
       new_actuators = actuators.as_builder()
@@ -1029,7 +1033,7 @@ class CarController(CarControllerBase):
         camera_pedal = 0.
         if self.camera_pedal_profile is not None:
           sources = CS.camera_pedal_sources
-          runtime_allowed = self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
+          runtime_allowed = not startup_keepalive and self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
           ready = (runtime_allowed and len(sources) == (8 if self.camera_pedal_profile.volt else 7) and
                    all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources) and
                    CS.pedal_sensor_healthy and 0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
@@ -1098,7 +1102,7 @@ class CarController(CarControllerBase):
             camera_fcw = 3
         dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_ascm_long or
                                 self.volt_camera_long or self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
-        if self.camera_pedal_profile is None or runtime_allowed:
+        if self.camera_pedal_profile is None or runtime_allowed or startup_keepalive:
           dashboard_enabled = CC.enabled and not (self.camera_pedal_profile is not None and
                                                   self.camera_pedal_profile.topology in ("ascm", "sdgm") and not ready)
           can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, dashboard_enabled,

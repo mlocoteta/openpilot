@@ -8,7 +8,7 @@ import pytest
 from opendbc.car import structs
 from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
-from opendbc.car.gm.values import DBC
+from opendbc.car.gm.values import DBC, is_volt_gateway_alternate_brake
 from openpilot.selfdrive.car.card import Car
 from openpilot.starpilot.aol.tests.test_gm import _configurations
 
@@ -75,16 +75,23 @@ def test_initializing_gm_output_is_inactive_and_profile_complete(cp):
         last_counter = (data[0] >> 4) & 3
         sent.append(now)
       else:
-        assert (controller.ordinary_camera_long or controller.ordinary_sdgm_long) and controller.camera_pedal_profile is None
-        brake_bus = 2 if controller.ordinary_sdgm_long else 0
+        assert controller.startup_acc_keepalive
+        brake_bus = (2 if controller.ordinary_sdgm_long or controller.volt_sdgm_long or
+                     cp.networkLocation == structs.CarParams.NetworkLocation.gateway and
+                     not is_volt_gateway_alternate_brake(cp) else 0)
+        if controller.camera_pedal_profile is not None and controller.camera_pedal_profile.topology == 'sdgm':
+          brake_bus = 2
         assert (address, bus) in ((0x2CB, 0), (0x315, brake_bus), (0x370, 0), (0x2CD, 0),
-                                  (0x184, 2), (0x409, 0), (0x40A, 0))
+                                 (0x184, 2), (0x409, 0), (0x40A, 0), (0x200, 0),
+                                 (0xA1, 1), (0x306, 1), (0x308, 1), (0x310, 1))
         if address == 0x2CB:
           assert not data[0] & 1 and not data[1] & 0x20
         elif address == 0x315:
           assert data[0] >> 4 == 1 and not (int.from_bytes(data[:2], 'big') & 0xFFF)
         elif address == 0x370:
-          assert not data[2] & 0x80 and data[1] & 7 == 2
+          assert not data[2] & 0x80
+        elif address == 0x200:
+          assert data[:4] == bytes(4) and not data[4] & 0x80
   assert sent and sent[0] <= 12_480_000_000
   assert max(b - a for a, b in zip(sent, sent[1:], strict=False)) <= 110_000_000
 
