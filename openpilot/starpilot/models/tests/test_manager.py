@@ -787,5 +787,58 @@ class ModelManagerTest(unittest.TestCase):
       self.manager.worker.join(3)
 
 
+  def test_dead_verifier_recovers_without_bypassing_the_checksum(self):
+    self.download()
+    self.assertTrue(self.wait_for_check()['installed'])
+    if self.manager.verify_worker is not None:
+      self.manager.verify_worker.join(3)
+    self.manager.checked.pop('gwm8223:standard')
+    signature = self.manager._signature('gwm8223', catalog(self.root)['gwm8223'])
+    assert signature is not None
+    worker = threading.Thread(target=lambda: None)
+    worker.start()
+    worker.join(1)
+    self.manager.verify_worker = worker
+    self.manager.verifying['gwm8223:standard'] = signature
+    from openpilot.starpilot.models import manager as module
+    with patch.object(module, 'verified_artifact', wraps=module.verified_artifact) as verify:
+      self.assertTrue(self.wait_for_check()['selectable'])
+      self.assertTrue(any(call.args[0] == 'gwm8223' for call in verify.call_args_list))
+    path = self.root / 'gwm8223/gwm8223_driving_tinygrad.pkl'
+    path.write_bytes(b'x' * len(self.data))
+    self.assertFalse(self.wait_for_check()['selectable'])
+
+  def test_one_verification_error_does_not_strand_other_models(self):
+    self.download()
+    other = next(row for row in self.manifest['models'] if row['id'] == 'pop223')
+    other.update({key: self.row[key] for key in ('artifact_format', 'artifact_sha256', 'artifact_size', 'artifact_chunk_count')})
+    atomic_json(self.root / 'catalog.json', self.manifest)
+    path = self.root / 'pop223/pop223_driving_tinygrad.pkl'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(self.data)
+    self.manager.checked.clear()
+    from openpilot.starpilot.models import manager as module
+    original = module.verified_artifact
+
+    def interrupted(mid, *args):
+      if mid == 'gwm8223':
+        raise RuntimeError('fixture verifier interrupted')
+      return original(mid, *args)
+
+    # Suppress the expected baseline thread exception; assertions check results.
+    with patch.object(module, 'verified_artifact', side_effect=interrupted), patch('threading.excepthook'), \
+         patch('logging.exception') as logged:
+      with self.manager.lock:
+        for mid in ('gwm8223', 'pop223'):
+          self.manager._snapshot_installed(mid, catalog(self.root)[mid])
+        worker = self.manager.verify_worker
+      self.assertIsNotNone(worker)
+      worker.join(3)
+      self.assertFalse(worker.is_alive())
+      self.assertEqual(self.manager._snapshot_installed('gwm8223', catalog(self.root)['gwm8223']), (False, False))
+      self.assertEqual(self.manager._snapshot_installed('pop223', catalog(self.root)['pop223']), (True, False))
+      logged.assert_called_once_with('Model verification failed for %s', 'gwm8223')
+
+
 if __name__ == '__main__':
   unittest.main()

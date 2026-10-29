@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -429,6 +430,10 @@ class ModelManager:
     checked = self.checked.get(key)
     if checked is not None and checked[0] == signature:
       return checked[1], False
+    if self.verify_worker is not None and not self.verify_worker.is_alive():
+      self.verify_worker = None
+      self.verifying.clear()
+      self.verify_queue.clear()
     if not self.verify_closed and self.verifying.get(key) != signature:
       self.verifying[key] = signature
       self.verify_queue.append((mid, row, signature, variant))
@@ -447,7 +452,11 @@ class ModelManager:
         key = f"{mid}:{variant}"
         if self.verifying.get(key) != signature:
           continue
-      valid = (shipped_default() if row.get("shipped") else verified_artifact(mid, {mid: row}, self.root, variant)) is not None
+      try:
+        valid = (shipped_default() if row.get("shipped") else verified_artifact(mid, {mid: row}, self.root, variant)) is not None
+      except Exception:
+        logging.exception("Model verification failed for %s", mid)
+        valid = False
       with self.lock:
         if self.verifying.get(key) == signature:
           self.verifying.pop(key)
