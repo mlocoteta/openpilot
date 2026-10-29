@@ -23,6 +23,8 @@ class CarInterface(CarInterfaceBase):
     platform = CAR(candidate).config
     c1 = isinstance(platform, VolvoC1PlatformConfig)
     safety_param = VolvoSafetyFlags.C1.value if c1 else VolvoSafetyFlags.SPA.value if isinstance(platform, VolvoSPAPlatformConfig) else 0
+    if candidate == CAR.POLESTAR_2:
+      safety_param |= VolvoSafetyFlags.LCA2_MOD15.value
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.volvo, safety_param)]
     ret.steerActuatorDelay = 0.2 if c1 else 0.3
     ret.steerLimitTimer = 0.1

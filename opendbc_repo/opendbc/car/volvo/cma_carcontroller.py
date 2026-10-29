@@ -6,6 +6,7 @@ from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.lateral import apply_std_steer_angle_limits
 from opendbc.car.volvo.helpers import LCA3CounterSync
+from opendbc.car.volvo.values import VolvoSafetyFlags
 from opendbc.car.volvo.cma_can import (create_lca_message,
                                         create_pscm_message, create_lca_3_message, create_lca_2_message, create_lca_4_message, create_lca_5_message,
                                         create_lca_6_message, create_lca_7_message, create_pscm_related_message)
@@ -17,6 +18,7 @@ class CarControllerCMA(CarControllerBase):
     super().__init__(dbc_names, CP)
     self.packer = CANPacker(dbc_names[Bus.party])
     self.apply_angle_last = 0.0  # Track last applied steering angle
+    self.lca_2_modulus = 15 if CP.safetyConfigs[0].safetyParam & VolvoSafetyFlags.LCA2_MOD15 else 16
 
     self.gear_acc = 60
     self.lca_4_acc = 0  # Bresenham accumulator for 29 Hz
@@ -235,9 +237,9 @@ class CarControllerCMA(CarControllerBase):
         self.lca_2_counter_1 = CS.msg_lca_2['COUNTER_1']
         self.lca_2_counter_2 = CS.msg_lca_2['COUNTER_2']
 
-      # Increment counters (COUNTER_1 by +2, COUNTER_2 by +4, both modulo 16)
-      self.lca_2_counter_1 = (self.lca_2_counter_1 + 2) % 16
-      self.lca_2_counter_2 = (self.lca_2_counter_2 + 4) % 16
+      # Polestar source counters wrap at15; preserve the other profiles' existing domain.
+      self.lca_2_counter_1 = (self.lca_2_counter_1 + 2) % self.lca_2_modulus
+      self.lca_2_counter_2 = (self.lca_2_counter_2 + 4) % self.lca_2_modulus
 
       can_sends.append(create_lca_2_message(self.packer, lat_active, CS.msg_lca_2,
                                             self.lca_2_counter_1, self.lca_2_counter_2))
