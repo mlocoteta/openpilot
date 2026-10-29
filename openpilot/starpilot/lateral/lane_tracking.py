@@ -100,6 +100,13 @@ class SingleLineTracker:
           raise ValueError
         self.width, self.width_at, self.width_travel = width, self.clock, self.travel
         self._clear_line()
+        left, right = valid_lines
+        shared = (left[0] >= right[0][0]) & (left[0] <= right[0][-1])
+        x = left[0][shared]
+        if len(x) < 2:
+          raise ValueError
+        # Both-line corrections must improve the observed center path too.
+        self.path = x, (left[1][shared] + np.interp(x, *right)) * 0.5
         self.blocked = False
         return TrackingTarget()
       if not any(good):
