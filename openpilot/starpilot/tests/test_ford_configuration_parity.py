@@ -137,3 +137,14 @@ def test_gas_first_engagement_native_cadence(ford_joined, monkeypatch, angle):
 def test_first_main_gas_native_cadence(ford_joined, monkeypatch, angle):
   monkeypatch.ford_main_off_warmup = True
   run_actual_producer(ford_joined, monkeypatch, scenario='route22')
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [False, True])
+@pytest.mark.parametrize('angle', [False, True])
+@pytest.mark.parametrize('topology', ['automatic', 'manual-multi'])
+def test_cancel_retains_lateral_with_native_first_feedback_while_gas_held(ford_joined, monkeypatch, angle, topology):
+  monkeypatch.ford_native_10hz = True
+  monkeypatch.ford_cancel_gas = True
+  run_actual_producer(ford_joined, monkeypatch, scenario='cancel-native-cadence')
