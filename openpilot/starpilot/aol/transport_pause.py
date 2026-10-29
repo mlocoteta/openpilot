@@ -440,9 +440,6 @@ class TransportPauseFeedback:
       return False
     warning = any(event.softDisable for event in events)
     recovering = bool(getattr(self, 'ordinary_warning_retained', False) and not warning)
-    if pending and (axis.faultEventMonoTime != self.pending_event or
-        not 0 < self.pending_event <= now_ns or now_ns - self.pending_event > AXIS_MAX_AGE_NS):
-      return False
     stock_user = stock_lateral_user_event(cp)
     # Family button/pedal latch clear: no rearm.
     if any(event.userDisable and event.name != stock_user and not (
@@ -452,6 +449,20 @@ class TransportPauseFeedback:
           now_ns - event_ns <= SAFETY_MAX_AGE_NS)) for event in events):
       return False
     prior = pending_baseline if pending else self.signature
+    repeated_join = bool(warning and self.ordinary_warning_retained and prior is not None and
+      prior[5] == 'availabilityPause' and not any((prior[9], prior[10], prior[12])) and
+      prior[14:16] == (producer, self.availability_epoch) and
+      str(axis.faultReason) == 'availabilityPause' and not axis.lateralActive and
+      not axis.longitudinalActive and not axis.desiredLongitudinal and
+      (axis.desiredLateral, axis.nativeAcknowledged) == (prior[11], prior[13]) and
+      0 < axis.faultEventMonoTime <= stamp and
+      0 < prior[6] == min(axis.faultEventMonoTime, event_ns) < max(axis.faultEventMonoTime, event_ns) <= now_ns and
+      now_ns - max(axis.faultEventMonoTime, event_ns) <= AXIS_MAX_AGE_NS)
+    if pending and (not 0 < self.pending_event <= now_ns or
+        now_ns - self.pending_event > AXIS_MAX_AGE_NS or
+        (max(axis.faultEventMonoTime, event_ns) != self.pending_event if repeated_join else
+         axis.faultEventMonoTime != self.pending_event)):
+      return False
     # Pre-event SOFT: intent only, fixed original 30ms join; no newer/duplicate withdrawal reanchoring.
     axis_first = bool(str(axis.faultReason) == 'availabilityPause' and
       not (axis.lateralActive or axis.longitudinalActive or axis.desiredLateral or
@@ -471,21 +482,21 @@ class TransportPauseFeedback:
       not axis.desiredLongitudinal and
       (warning and str(axis.faultReason) == 'availabilityPause' and axis.faultEventMonoTime == event_ns <= stamp or
        recovering and str(axis.faultReason) == 'none'))
-    if not active_join and not withdrawn and not axis_first:
+    if not active_join and not withdrawn and not axis_first and not repeated_join:
       return False
-    if pending and not axis_first and not (withdrawn and warning and event_ns == self.pending_event):
+    if pending and not axis_first and not repeated_join and not (withdrawn and warning and event_ns == self.pending_event):
       return False
     native = _configured_transport_native(sm, cp, self.session, now_ns,
-      allow_restricted_lateral=withdrawn or axis_first or bool(cs.steerFaultTemporary),
-      require_longitudinal=not (withdrawn or axis_first))
+      allow_restricted_lateral=withdrawn or axis_first or repeated_join or bool(cs.steerFaultTemporary),
+      require_longitudinal=not (withdrawn or axis_first or repeated_join))
     if (native is None or not native.pandaInventory or
         (native.pandaSerial, tuple(slot.hardwareSerial for slot in native.pandaInventory)) != self.lateral_inventory or
         native.observedMonoTime < self.lateral_native_ns or
         active_join and not (native.requestedLateral and native.lateralAllowed)):
       return False
-    if axis_first:
+    if axis_first or repeated_join:
       if not pending:
-        self.pending_event = int(axis.faultEventMonoTime)
+        self.pending_event = max(int(axis.faultEventMonoTime), event_ns)
         self.ordinary_warning_pending_baseline = prior
       self.awaiting = True
       return True

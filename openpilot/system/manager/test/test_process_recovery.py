@@ -173,6 +173,11 @@ class TestProcessRecovery(unittest.TestCase):
         self.assertTrue(old.joined)
       self.step(p, started=False)
       self.assertTrue(p.shutting_down)
+      stopping = p.proc
+      self.step(p, started=False)
+      self.assertIs(p.proc, stopping)
+      assert isinstance(stopping, Child)
+      stopping.exitcode = 0
       self.step(p, started=False)
       self.assertIsNone(p.proc)
       self.now += 60

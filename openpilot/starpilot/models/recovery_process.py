@@ -114,7 +114,7 @@ class ModeldProcess(PythonProcess):
     if not self.context_ready or self.recovery.phase in ('sigint', 'sigkill', 'failed'):
       return
     if self.shutting_down:
-      self.stop()
+      self.stop(block=False)
     if self.proc is not None:
       return
     self.proc = Process(name=self.name, target=modeld_launcher,
