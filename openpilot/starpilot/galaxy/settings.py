@@ -22,6 +22,7 @@ from openpilot.starpilot.ui.conditional_feature import confirmation_question as 
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner, LABELS as APPEARANCE_LABELS
 from openpilot.starpilot.ui.display_owner import AUTO_PREFIX as DISPLAY_AUTO_PREFIX, DisplayOwner, LABELS as DISPLAY_LABELS
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
+from openpilot.starpilot.ui.power_owner import PowerOwner, HOURS, VOLTS, POWER_KEYS, confirm_question as power_question
 from openpilot.starpilot.audio.alert_volume import SPECS as SOUND_SPECS
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.common.hardware import HARDWARE
@@ -40,7 +41,7 @@ from openpilot.starpilot.ui.vasm_owner import ANNOTATION as VASM_ANNOTATION, RES
 
 PAGES = frozenset(("hub", "localization", "developer", "vehicle", "slc", "lane", "lane_change", "profiles", "personalities",
                    "traffic", "aggressive", "standard", "relaxed",
-                   "curve", "torque", "aol", "wheel", "appearance", "display", "data", "sounds", "pip", "sentry", "vasm",
+                   "curve", "torque", "aol", "wheel", "appearance", "display", "data", "power", "sounds", "pip", "sentry", "vasm",
                    "conditional", "conditional/cem", "conditional/ccm",
                    *(f"{name}/{category}" for name in ("traffic", "aggressive", "standard", "relaxed")
                      for category in ("acceleration", "braking", "following"))))
@@ -61,6 +62,14 @@ CAR_CONTROL_SECTIONS = (
   ("localization", "Localization", ("localization",)),
   ("developer", "Developer", ("developer",)),
 )
+
+
+def _power_request(request: FeatureSettingsRequest) -> FeatureSettingsRequest:
+  if request.key == HOURS:
+    return replace(request, value=f"{float(request.value):.0f} h")
+  if request.key == VOLTS:
+    return replace(request, value=f"{float(request.value):.1f} V")
+  return request
 
 
 class SettingsUnavailable(Exception):
@@ -138,7 +147,7 @@ def _onroad_preference(page: str, key: str) -> bool:
   # Regular saved choices are consumed by their runtime owners. Only explicit
   # multi-key reset/repair operations need the offroad transaction boundary;
   # their owners independently recheck that requirement at commit time.
-  return bool(page != "developer" and key and key != SETUP_ACTION and key not in (
+  return bool(page not in ("developer", "power") and key and key != SETUP_ACTION and key not in (
     "IsRhdDetected", "AlphaLongitudinalEnabled", "reset_profiles", "curve_reset", "slc_adopt", "slc_reset",
     "conditional:reset", "conditional:manual_reset",
   ) and not is_long_confirm_action(key) and not key.startswith("torque_repair:"))
@@ -388,6 +397,8 @@ def _projection(row: FeatureRow) -> dict:
 
 def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
   key = request.key
+  if key in POWER_KEYS:
+    return power_question(_power_request(request))
   if key == "LaneCenteringStrength":
     raw = float(request.value)
     level = (1 + (raw - row.minimum) * 4 / (100 - row.minimum) if raw <= 100 else
@@ -552,6 +563,15 @@ class SettingsGateway:
       return fresh.cp_raw == ctx.cp_raw
     return SoundsOwner(self.params, authorized)
 
+  def _power_owner(self, ctx: AuthorityContext, *, live: bool = False,
+                   session_valid: Callable[[], bool] = lambda: True) -> PowerOwner:
+    def parked() -> bool:
+      if not session_valid():
+        return False
+      fresh = self.context.sample() if live else ctx
+      return fresh.parked and fresh.cp_raw == ctx.cp_raw
+    return PowerOwner(self.params, parked)
+
   def _display_owner(self, ctx: AuthorityContext, *, live: bool = False,
                      session_valid: Callable[[], bool] = lambda: True) -> DisplayOwner:
     def parked() -> bool:
@@ -607,6 +627,14 @@ class SettingsGateway:
       return self._appearance_owner(ctx).snapshot(Profile.COMPACT, include_large=True)
     if page == "sounds":
       return self._sounds_owner(ctx).snapshot()
+    if page == "power":
+      state = self._power_owner(ctx).snapshot()
+      rows = tuple(replace(row, value=row.value.removesuffix(" h").removesuffix(" V"), choices=(),
+                           default_value=row.default_value.removesuffix(" h").removesuffix(" V"),
+                           minimum=1 if row.key == HOURS else 11.8, maximum=30 if row.key == HOURS else 12.5,
+                           step=1 if row.key == HOURS else 0.1, unit="h" if row.key == HOURS else "V")
+                   if row.key in (HOURS, VOLTS) else row for row in state.rows)
+      return replace(state, rows=rows)
     if page == "display":
       return self._display_owner(ctx).snapshot(Profile.COMPACT if HARDWARE.get_device_type() == "mici" else Profile.LARGE)
     if page == "pip":
@@ -820,6 +848,8 @@ class SettingsGateway:
       return self._appearance_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     if intent.page == "sounds":
       return self._sounds_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
+    if intent.page == "power":
+      return self._power_owner(ctx, live=True, session_valid=session_valid).apply(_power_request(intent.request))
     if intent.page == "display":
       return self._display_owner(ctx, live=True, session_valid=session_valid).apply(intent.request)
     if intent.page == "sentry":
