@@ -593,7 +593,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=1669, wheelbase=2.63779, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
   CHEVROLET_BOLT_ACC_2022_2023 = GMPlatformConfig(
-    [GMCommunityCarDocs("Chevrolet Bolt (Camera Harness) 2022-23", "ACC; recognized camera layout required")],
+    [GMCommunityCarDocs("Chevrolet Bolt ACC 2022-23", "ACC; recognized camera layout required")],
     CHEVROLET_BOLT_EUV.specs,
   )
   CHEVROLET_BOLT_CC_2017 = GMPlatformConfig(
