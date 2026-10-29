@@ -1020,7 +1020,7 @@ def main():
   try:
     if hasattr(os, 'sched_setscheduler'):
       os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
-    os.nice(10)
+    os.setpriority(os.PRIO_PROCESS, 0, 0)
   except OSError:
     # An optional estimator must not inherit realtime scheduling on failure.
     return
