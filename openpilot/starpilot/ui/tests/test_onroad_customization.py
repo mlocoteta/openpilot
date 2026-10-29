@@ -17,7 +17,7 @@ from openpilot.starpilot.ui.onroad_customization import (
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
 from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, UnifiedSpeedWidget, SteeringWheelWidget
 from openpilot.starpilot.ui.onroad_state import (
-  AlertSize, ObservationKind, OnroadAlert, OnroadInput, OnroadRequest, OnroadState, SpeedLimitObservation, slc_controls)
+  AlertSize, ObservationKind, OnroadAlert, OnroadInput, OnroadRequest, OnroadState, SpeedLimitObservation, slc_controls, speed_limit_bounds)
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.tests.test_unified_speed_native import foreground_calls
 
@@ -482,59 +482,6 @@ def test_large_draw_origins_and_wheel_input_move_together():
   emit.assert_not_called()
 
 
-def test_speed_limit_actions_move_independently_of_cruise_card_and_keep_touch_priority():
-  document = default_document()
-  document["layouts"]["large"]["cruise_limits"].update(x=288, y=175)
-  document["layouts"]["large"]["speed_limit_actions"].update(x=388, y=600)
-  observation = SpeedLimitObservation(kind=ObservationKind.VALID, speed_limit_mps=20,
-                                     pending_speed_limit_mps=None, session_id="drive", decision_id=1,
-                                     presentation_id=2, action_enabled=True)
-  state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
-  controls = slc_controls(Profile.LARGE, state)
-  assert controls[0].bounds == (388, 600, 696, 768)
-  assert slc_controls(Profile.COMPACT, state)[0].bounds == (146, 44, 330, 164)
-  emit = Mock()
-  inputs = OnroadInput(emit)
-  from openpilot.starpilot.ui.tests.test_slc_ui_actions import tap_sign
-  tap_sign(inputs, state)
-  for x, y in ((400, 650), (300, 400)):
-    inputs.press(x, y, state)
-    inputs.release(x, y, state)
-  assert emit.call_count == 1
-  assert not slc_controls(Profile.LARGE, replace(state, alert=OnroadAlert(size=AlertSize.FULL)))
-  document["layouts"]["large"]["cruise_limits"]["enabled"] = False
-  assert slc_controls(Profile.LARGE, state) == controls
-  emit.reset_mock()
-  inputs.press(300, 400, state)
-  inputs.release(300, 400, state)
-  emit.assert_not_called()
-  document["layouts"]["large"]["speed_limit_actions"]["enabled"] = False
-  assert not slc_controls(Profile.LARGE, state)
-
-
-def test_moved_compact_actions_relocate_hitboxes_without_weakening_state_gate():
-  document = default_document()
-  document["layouts"]["compact"]["speed_limit_actions"].update(x=150, y=44)
-  document["layouts"]["compact"]["speed_limit"]["enabled"] = False
-  assert validate_document(document) == document
-  document["layouts"]["compact"]["speed_limit_actions"].update(x=160, y=44)
-  document = validate_document(document)
-  observation = SpeedLimitObservation(kind=ObservationKind.VALID, speed_limit_mps=20,
-                                     pending_speed_limit_mps=None, session_id="drive", decision_id=1,
-                                     presentation_id=2, action_enabled=True)
-  state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
-  assert slc_controls(Profile.COMPACT, state)[0].bounds == (160, 44, 344, 164)
-  emit = Mock()
-  inputs = OnroadInput(emit, Profile.COMPACT)
-  inputs.press(200, 80, state)
-  inputs.release(200, 80, state)
-  assert emit.call_count == 1
-  inputs.press(480, 200, state)
-  inputs.release(480, 200, state)
-  assert emit.call_count == 1
-  assert not slc_controls(Profile.COMPACT, replace(state, alert=OnroadAlert(size=AlertSize.FULL)))
-
-
 def test_frozen_default_draw_geometry_and_neutral_colors():
   state = road()
   fonts = NS(profile=Profile.LARGE, measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
@@ -734,31 +681,6 @@ def test_transparent_widget_frames_add_no_default_draw_calls():
     assert (color.r, color.g, color.b, color.a) == (171, 205, 239, 144)
 
 
-def test_colored_slc_controls_retain_requests_and_touch_bounds(monkeypatch):
-  from openpilot.starpilot.ui.onroad import OnroadView
-
-  document = default_document()
-  state = road(document, slc_system_long_available=True, longitudinal_active=True,
-               speed_limit=SpeedLimitObservation(kind=ObservationKind.VALID, speed_limit_mps=20,
-                 pending_speed_limit_mps=None, decision_id=1, presentation_id=2,
-                 session_id='session', action_enabled=True))
-  # Compare the actual owner-produced controls before and after presentation edits.
-  before = slc_controls(Profile.COMPACT, state)
-  document['widgetColors']['compact']['speed_limit_actions'] = {
-    'cardFill': '#12345678', 'cardBorder': '#ABCDEF90', 'text': '#FEDCBAFF'}
-  assert slc_controls(Profile.COMPACT, state) == before
-  assert before
-  fonts = NS(profile=Profile.COMPACT, measure=lambda *a, **k: NS(width=10, height=20), vertical_ink=lambda text, role, size: (0., size * .7),
-             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
-  view = OnroadView.__new__(OnroadView)
-  monkeypatch.setattr(view, 'fonts', fonts, raising=False)
-  with patch.object(rl, 'draw_rectangle_rounded') as fill, patch.object(rl, 'draw_rectangle_rounded_lines_ex'):
-    view._slc_actions(state)
-  fill.assert_not_called()
-  color = fonts.draw.call_args.args[-1]
-  assert (color.r, color.g, color.b, color.a) == (254, 220, 186, 255)
-
-
 def test_driver_frame_matches_native_preview_and_keeps_face_renderer_separate(monkeypatch):
   from openpilot.starpilot.ui.layout_preview_renderer import _DriverMonitorArt
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
@@ -797,53 +719,21 @@ def test_driver_frame_matches_native_preview_and_keeps_face_renderer_separate(mo
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-def test_intentional_small_sign_action_overlap_roundtrips_and_large_is_independent(enabled):
-  from openpilot.starpilot.ui.onroad_state import compact_sign_obscured_by_actions
+def test_small_sign_action_overlap_roundtrips_without_hiding_sign(enabled):
   document = default_document()
   large = json.loads(json.dumps(document["layouts"]["large"]))
   document["layouts"]["compact"]["speed_limit"].update(x=330, y=20, enabled=enabled)
-  assert decode_document(json.dumps(validate_document(document))) == document
   document["layouts"]["compact"]["speed_limit_actions"].update(x=150, y=44)
-  assert validate_document(document) == document
+  assert decode_document(json.dumps(validate_document(document))) == document
   assert document["layouts"]["large"] == large
   observation = SpeedLimitObservation(kind=ObservationKind.VALID, speed_limit_mps=20,
-                                     pending_speed_limit_mps=None, session_id="drive", decision_id=1,
-                                     presentation_id=2, action_enabled=True)
+                                     session_id="drive", decision_id=1, presentation_id=2, action_enabled=True)
   state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
-  assert compact_sign_obscured_by_actions(state)
-  # Recording a driver choice is still available without software longitudinal control.
-  assert compact_sign_obscured_by_actions(replace(state, longitudinal_active=False, slc_system_long_available=False))
-  for change in ({"alert": OnroadAlert(size=AlertSize.FULL)},
-                 {"speed_limit": replace(observation, action_enabled=False)},
-                 {"speed_limit": replace(observation, pending_speed_limit_mps=None, accepted_speed_limit_mps=20)}):
-    assert not compact_sign_obscured_by_actions(replace(state, **change))
+  assert (speed_limit_bounds(Profile.COMPACT, state) is not None) is enabled
+  assert slc_controls(Profile.COMPACT, state) == ()
 
 
-def test_saved_small_actions_near_top_have_no_heading_and_keep_labels_visible(monkeypatch):
-  from openpilot.starpilot.ui.onroad import OnroadView
-  document = default_document()
-  document["layouts"]["compact"]["speed_limit"]["enabled"] = False
-  document["layouts"]["compact"]["speed_limit_actions"].update(x=16, y=4)
-  document["layouts"]["compact"]["max_speed"].update(x=314, y=74)
-  document["layouts"]["compact"]["driver_monitor"].update(x=216, y=60)
-  assert decode_document(json.dumps(document)) == document
-  observation = SpeedLimitObservation(kind=ObservationKind.VALID, speed_limit_mps=20,
-                                     pending_speed_limit_mps=None, session_id="drive", decision_id=1,
-                                     presentation_id=2, action_enabled=True)
-  state = road(document, speed_limit=observation, longitudinal_active=True, slc_system_long_available=True)
-  view = OnroadView.__new__(OnroadView)
-  fonts = NS(profile=Profile.COMPACT, measure=lambda *a, **k: NS(width=10, height=20),
-             vertical_ink=lambda text, role, size: (0., size * .7),
-             horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
-  monkeypatch.setattr(view, 'fonts', fonts, raising=False)
-  with patch.object(rl, "draw_rectangle_rounded"), patch.object(rl, "draw_rectangle_rounded_lines_ex"):
-    view._slc_actions(state)
-  assert [call.args[0] for call in foreground_calls(view.fonts.draw)] == ['Use 45']
-  assert foreground_calls(view.fonts.draw)[0].args[4] >= 0
-  assert slc_controls(Profile.COMPACT, state)[0].bounds == (16, 4, 200, 124)
-
-
-def test_overlapping_recovery_sign_restores_after_adoption_and_chooser_keeps_exact_input():
+def test_overlapping_sign_stays_visible_and_chooser_keeps_exact_input():
   from openpilot.starpilot.ui.onroad_state import SlcActionKind
   from openpilot.starpilot.ui.tests.test_slc_ui_actions import tap_sign, tap_control
   document = default_document()
@@ -856,10 +746,8 @@ def test_overlapping_recovery_sign_restores_after_adoption_and_chooser_keeps_exa
              horizontal_ink=lambda text, role, size: (0., 10.), draw=Mock())
   hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(fonts)), Mock())
   recovery = replace(state, speed_limit=replace(observation, pending_speed_limit_mps=None))
-  hud._speed_limit_sign(recovery)
-  fonts.draw.assert_not_called()
   with patch.object(hud._speed_limit_widget.shapes, 'outline'):
-    hud._speed_limit_sign(replace(recovery, speed_limit=replace(recovery.speed_limit, accepted_speed_limit_mps=20)))
+    hud._speed_limit_sign(recovery)
   assert fonts.draw.called
   emit = Mock()
   inputs = OnroadInput(emit, Profile.COMPACT)

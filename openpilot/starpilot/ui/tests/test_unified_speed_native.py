@@ -220,18 +220,20 @@ def test_only_set_speed_override_draws_cross(profile, drawing):
 @pytest.mark.parametrize('vienna', [False, True])
 @pytest.mark.parametrize('latest_received', [False, True])
 @pytest.mark.parametrize('offset', [False, True])
-def test_retained_limits_are_marked_last_and_have_no_actions(profile, vienna, latest_received, offset, drawing):
+@pytest.mark.parametrize('source,heading', [('map', 'OSM'), ('vision', 'VISION'), ('dashboard', 'DASH'), ('mapbox', 'NAV')])
+def test_retained_limits_keep_original_source_and_have_no_actions(profile, vienna, latest_received, offset, source, heading, drawing):
   current = state(show_slc_offset=offset)
-  observation = replace(current.speed_limit, kind=ObservationKind.STALE, speed_limit_mps=None,
+  observation = replace(current.speed_limit, kind=ObservationKind.STALE, source='none', speed_limit_mps=None,
     pending_speed_limit_mps=None, last_received_speed_limit_mps=50/3.6 if latest_received else None,
+    last_received_source=source, accepted_source=source,
     last_received_adjusted_limit_mps=55/3.6 if latest_received else None, effective_cluster_target_mps=45/3.6)
   current = replace(current, speed_limit=observation, appearance=replace(current.appearance, use_vienna_sign=vienna))
   font = fonts(profile)
   render_sign(SpeedLimitWidget(font, profile), current)
   texts = [call.args[0] for call in font.draw.call_args_list]
-  assert texts.count('LAST') == 1
+  assert texts.count(heading) == 1
   assert ('50' if latest_received else '40') in texts
-  assert not {'SPEED', 'OSM', 'DASH', 'VISION', 'NAV'}.intersection(texts)
+  assert 'LAST' not in texts
   drawing['arrow'].assert_not_called()
   assert slc_controls(profile, current) == ()
 

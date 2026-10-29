@@ -199,7 +199,7 @@ class RetentionDrive:
 @pytest.mark.parametrize('answer', ['reject', 'timeout'])
 @pytest.mark.parametrize('metric', [False, True])
 @pytest.mark.parametrize('limit', [40, 50])
-def test_compact_rejection_or_timeout_keeps_set_speed_until_explicit_adoption(tmp_path, answer, metric, limit):
+def test_compact_rejection_or_timeout_keeps_set_speed_until_adoption(tmp_path, answer, metric, limit):
   from openpilot.starpilot.ui.tests.test_slc_ui_actions import tap_sign, tap_control
   drive = RetentionDrive(tmp_path, confirm=True)
   params = Params(str(tmp_path))
@@ -235,9 +235,7 @@ def test_compact_rejection_or_timeout_keeps_set_speed_until_explicit_adoption(tm
   assert candidate in rejected.result.state.acceptance.rejected
   assert view.alert.size == AlertSize.NONE
   assert view.speed_limit.kind == ObservationKind.VALID and view.speed_limit.action_enabled
-  control, = slc_controls(Profile.COMPACT, view)
-  assert control.request.kind == SlcActionKind.ADOPT
-  assert control.label == f'Use {round((limit + 5) * MPH * (3.6 if metric else 1 / MPH))}'
+  assert slc_controls(Profile.COMPACT, view) == ()
   assert target == pytest.approx(published_cruise_mph(50, metric=metric), rel=0, abs=1e-10)
 
   # The retired button position cannot claim a tap or adopt the rejected limit.
@@ -254,16 +252,16 @@ def test_compact_rejection_or_timeout_keeps_set_speed_until_explicit_adoption(tm
     assert candidate in output.result.state.acceptance.rejected
     assert not output.message.slcState.hasPending
     controls = slc_controls(Profile.COMPACT, view)
-    assert [control.request.kind for control in controls] == ([SlcActionKind.ADOPT] if status == 'matchedLimit' else [])
+    assert controls == ()
     assert target == pytest.approx(published_cruise_mph(50, metric=metric), rel=0, abs=1e-10)
     assert physical_actions.pending_confirmation(drive.ui.sm, NOW + (elapsed + delay) * 1_000_000,
                                                long_active=True) is None
-  # Only the visible Use action changes SET, with the same offset and unit handling.
-  emitted = []
-  touch = OnroadInput(emitted.append, Profile.COMPACT)
-  tap_control(touch, view, SlcActionKind.ADOPT)
-  adopt, = emitted
-  request = publish_request(output.message.slcState, adopt, NOW + (elapsed + 150) * 1_000_000)
+  # The independent adoption request retains its offset and unit handling.
+  from openpilot.starpilot.ui.onroad_state import SlcUiRequest
+  slc = output.message.slcState
+  adopt = SlcUiRequest(SlcActionKind.ADOPT, str(slc.sessionId), int(slc.decisionId),
+                       int(slc.presentationId), float(slc.speedLimit))
+  request = publish_request(slc, adopt, NOW + (elapsed + 150) * 1_000_000)
   output, view, target = drive.step(elapsed + 200, limit=limit, request=request)
   assert output.message.slcState.actionStatus == 'adopt'
   assert slc_controls(Profile.COMPACT, view) == ()

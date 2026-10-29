@@ -5,7 +5,7 @@ import pyray as rl
 import pytest
 
 from openpilot.starpilot.ui.large_speed_geometry import LARGE_SIGN_SCALE
-from openpilot.starpilot.ui.onroad_state import speed_limit_bounds, slc_controls, compact_sign_obscured_by_actions, SpeedLimitObservation, ObservationKind
+from openpilot.starpilot.ui.onroad_state import speed_limit_bounds, slc_controls, SpeedLimitObservation, ObservationKind
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.speed_limit_widget import SpeedLimitWidget
 from openpilot.starpilot.ui.tests.test_unified_speed_native import fonts, state as pending_state
@@ -90,9 +90,7 @@ def test_small_offset_layout_transitions_reuse_the_same_widget(historical_outlin
 def test_attached_compact_chooser_never_hides_its_own_sign(y):
   current = pending_state(slc_prompt_open=True)
   current.customization['layouts']['compact']['speed_limit'].update(x=280 if y == 108 else 330, y=y)
-  obscured = compact_sign_obscured_by_actions(current)
-  assert obscured is False
-  assert (speed_limit_bounds(Profile.COMPACT, current) is None) is obscured
+  assert speed_limit_bounds(Profile.COMPACT, current) is not None
   assert slc_controls(Profile.COMPACT, current)
 
 

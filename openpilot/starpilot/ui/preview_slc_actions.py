@@ -1,4 +1,4 @@
-"""Offline native captures for pending and adoptable SLC controls."""
+"""Offline native captures for SLC confirmation and limit states."""
 
 import argparse
 from dataclasses import replace

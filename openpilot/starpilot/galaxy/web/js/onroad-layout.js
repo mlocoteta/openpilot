@@ -224,7 +224,8 @@ export const LayoutWidgetPreview = {
             :y="profile === 'large' ? 72 : 24" text-anchor="middle" dominant-baseline="middle"
             :font-size="profile === 'large' ? 64 : 50" font-weight="500">{{ label }}</text>
         </template>
-        <text v-else-if="profile === 'large'" :x="widget.width / 2" y="72" text-anchor="middle" dominant-baseline="middle" font-size="64">Use limit 49</text>
+        <text v-else :x="widget.width / 2" :y="profile === 'large' ? 72 : 24" text-anchor="middle"
+          dominant-baseline="middle" :font-size="profile === 'large' ? 48 : 28">Toyota guidance</text>
       </template>
       <g v-else-if="widget.kind === 'torque_bar'" fill="none" stroke="white" stroke-linecap="round">
         <path :d="'M 12 ' + widget.height * .8 + ' Q ' + widget.width / 2 + ' ' + widget.height * .55 + ' ' + (widget.width - 12) + ' ' + widget.height * .8" :stroke-width="widget.height * .18" opacity=".3" />

@@ -31,14 +31,14 @@ from openpilot.starpilot.ui.onroad_large_widgets import CurrentSpeedHud, Unified
 from openpilot.starpilot.ui.onroad_cem_gauge import AetherGauge
 from openpilot.starpilot.ui.live_developer_sidebar import render_sidebar as render_live_sidebar
 from openpilot.starpilot.ui.layout_preview_sidebar import SIDEBAR_WIDTH
-from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, manual_slc_confirmation, slc_action_occludes, slc_controls
+from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, manual_slc_confirmation, slc_action_occludes
 from openpilot.starpilot.ui.onroad_stopped_timer import duration_color, duration_text, timer_size
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
 from openpilot.starpilot.ui.onroad_navigation import NavigationCard
 from openpilot.starpilot.ui.onroad_navigation_favorites import NavigationFavorites
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.large_speed_geometry import ACTION_TEXT_SIZE
-from openpilot.starpilot.ui.speed_limit_widget import INK, MUTED, draw_ink, draw_line, draw_text
+from openpilot.starpilot.ui.speed_limit_widget import INK, MUTED, draw_ink
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 
 
@@ -198,27 +198,10 @@ class OnroadView:
       a, b = self.fonts.vertical_ink(unit, FontRole.MEDIUM, secondary)
       draw_ink(self.fonts, unit, FontRole.MEDIUM, secondary, x + value_width + 8 - unit_left, y + value_height - (b - a), INK)
       return
-    controls = slc_controls(self.fonts.profile, state)
     feedback = state.speed_limit.action_feedback
     if (self.fonts.profile == Profile.LARGE and feedback and state.alert.size == AlertSize.NONE and
         placement(state.customization, self.fonts.profile, 'speed_limit_actions')['enabled']):
-      draw_ink(self.fonts, feedback, FontRole.MEDIUM, 30, bounds[0][0], bounds[-1][3] + 8 if controls else bounds[0][1] + 24, MUTED)
-    if not controls:
-      return
-    large = self.fonts.profile == Profile.LARGE
-    size = ACTION_TEXT_SIZE[self.fonts.profile]
-    role = FontRole.MEDIUM
-    a, b = self.fonts.vertical_ink('Use', role, size)
-    color = rl.Color(*rgba(state.customization, 'text', self.fonts.profile, 'speed_limit_actions'))
-    for control in controls:
-      left, top, right, bottom = control.bounds
-      cy = (top + bottom) / 2
-      measured = self.fonts.measure(control.label, role, size)
-      x = (left + right - measured.width) / 2
-      draw_text(self.fonts, control.label, role, size, x, cy - (b - a) / 2 - a, color)
-      if getattr(self, 'pressed_action', lambda: None)() == control.request:
-        y = cy + (b - a) / 2 + (8 if large else 4)
-        draw_line(self.fonts.profile, rl.Vector2(x, y), rl.Vector2(x + measured.width, y), 3 if large else 2, color)
+      draw_ink(self.fonts, feedback, FontRole.MEDIUM, 30, bounds[0][0], bounds[0][1] + 24, MUTED)
 
   def _preview_badge(self, state: OnroadState) -> None:
     """Keep synthetic replay visibly identified even over a full alert."""

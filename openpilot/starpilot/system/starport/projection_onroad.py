@@ -556,7 +556,7 @@ class ProjectionOnroad:
       self.favorites.touch(event.kind, x, y, self._state, self.native.ui_state.started_frame)
 
   def _slc_touch(self, kind, x, y) -> bool:
-    """Speed-limit Apply/Keep/Use-limit taps; True while one owns the touch."""
+    """Speed-limit confirmation taps; True while one owns the touch."""
     gesture = self._slc_input
     if gesture is None:
       return False

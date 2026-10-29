@@ -71,11 +71,7 @@ print(json.dumps(dict(native=native,projection=projection)))
           assert.equal(await page.getByRole('button', { name: `${name} is hidden in this scene. Choose General edit to arrange it.`, exact: true }).isDisabled(), true)
         }
         if (target !== 'large') assert.equal(state.visible.includes('stopped_timer'), ['general', 'stopped'].includes(scene.id))
-        if (['slc_max', 'slc_retained'].includes(scene.id)) {
-          assert.equal(state.visible.includes('speed_limit_actions'), true)
-          const actions = page.locator('.gx-layout__widget[aria-label^="Speed limit actions"]')
-          assert.equal(await actions.locator(`[data-preview-source="${nativeArt ? 'runtime' : 'placeholder'}"]`).count(), 1)
-        } else if (scene.id !== 'general') {
+        if (scene.id !== 'general') {
           assert.equal(state.visible.includes('speed_limit_actions'), false)
         }
         if (output) await page.locator('svg.gx-layout__preview').screenshot({ path: path.join(output, `${target}-${scene.id}.png`) })

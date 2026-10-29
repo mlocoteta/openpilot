@@ -456,12 +456,13 @@ def test_both_sign_styles_contain_text_and_arrows_at_each_profile_scale():
           if retained:
             current = replace(current, speed_limit=replace(current.speed_limit, kind=ObservationKind.STALE,
               speed_limit_mps=None, pending_speed_limit_mps=None, last_received_speed_limit_mps=posted/3.6,
-              last_received_adjusted_limit_mps=(posted+offset)/3.6))
+              last_received_source=source, last_received_adjusted_limit_mps=(posted+offset)/3.6))
           calls = []
           with patch.object(fonts, 'draw', lambda *args, sink=calls: sink.append(args)), \
                patch.object(widget.shapes, 'arrow') as arrow_draw:
             widget.render(current)
-          assert sum(call[0] == 'LAST' for call in calls) == int(retained), case
+          assert sum(call[0] == heading for call in calls) == 1, case
+          assert all(call[0] != 'LAST' for call in calls), case
           assert all(call[0] != 'LIMIT' for call in calls), case
           ink = []
           for text, role, size, left, top, color in calls:

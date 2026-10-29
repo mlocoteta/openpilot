@@ -412,7 +412,7 @@ def test_same_limit_adoption_recovers_cancelled_toyota_through_real_runtime(help
   assert helper.toyota.status == 'cancelled' and not helper.toyota.can_apply(25.)
   screen = OnroadState(True, False, 20., helper.v_cruise_cluster_kph, speed_limit_from_message(changed),
                        metric=True, longitudinal_active=True, slc_system_long_available=True, toyota_cruise_status=helper.toyota.status)
-  assert all(slc_controls(profile, screen)[0].label == 'Use 90' for profile in Profile)
+  assert all(slc_controls(profile, screen) == () for profile in Profile)
   adopted = tick(5_020_000_000, request=Action('drive', 1, 0, changed.presentationId, 'adopt')).message.slcState
   assert adopted.actionStatus == 'adopt' and not adopted.driverOverrideActive
   assert adopted.acceptedMonoTime == accepted.acceptedMonoTime
