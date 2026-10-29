@@ -148,6 +148,60 @@ def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, o
 
 
 class LaneRuntimeTests(unittest.TestCase):
+  def test_receive_queued_state_before_control_without_extending_old_input(self):
+    from openpilot.starpilot.lateral.tests.test_lane_centering import single
+    for queued in ('fresh', 'empty', 'override', 'fault', 'disabled'):
+      with self.subTest(queued=queued), OpenpilotPrefix(), \
+           mock.patch.dict(os.environ, {'AOL_REPLAY_RUNTIME': '0', 'REPLAY': '1'}), \
+           mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
+        params = Params()
+        publish_corolla_params(params)
+        params.put_bool('LaneCentering', True, block=True)
+        params.put('LaneCenteringE2EAuthority', 0., block=True)
+        controls = Controls()
+        with mock.patch(f'{__name__}.model', return_value=single(line=-1.4, edge=10.)):
+          for tick in range(100):
+            feed(controls, 1_000_000_000 + tick * 10_000_000, tick)
+            controls.state_control()
+          now = 2_030_000_000
+          held = dict(controls.sm.logMonoTime)
+
+          def receive(timeout, queued=queued, controls=controls, now=now):
+            self.assertEqual(timeout, 0)
+            if queued != 'empty':
+              feed(controls, now, 100, override=queued == 'override', fault=queued == 'fault',
+                   active=queued != 'disabled', enabled=queued != 'disabled')
+
+          with mock.patch.dict(os.environ, {'REPLAY': '0'}), \
+               mock.patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now), \
+               mock.patch.object(controls, 'update', side_effect=receive) as refresh:
+            command, _ = controls.state_control()
+          refresh.assert_called_once_with(0)
+          if queued == 'fresh':
+            self.assertIsNotNone(controls.last_lane_centering_result)
+            self.assertGreater(controls.lane_centering_applied, 0.)
+          else:
+            self.assertEqual(controls.lane_centering_applied, 0.)
+          if queued == 'empty':
+            self.assertEqual(controls.sm.logMonoTime, held)
+            self.assertEqual(controls.lane_centering_inactive_reason, 'host_carState_stale')
+          if queued in ('fault', 'disabled'):
+            self.assertFalse(command.latActive)
+
+  def test_input_refresh_stays_off_for_disabled_or_current_preferences(self):
+    from dataclasses import replace
+    with OpenpilotPrefix():
+      host = LaneCenteringHost(Params())
+      now = 1_000_000_000
+      frame = Frame(now - 30_000_000)
+      self.assertFalse(host.inputs_need_refresh(frame, now_ns=now))
+      host.settings = replace(host.settings, enabled=True)
+      self.assertTrue(host.inputs_need_refresh(frame, now_ns=now))
+      frame.logMonoTime = dict.fromkeys(host.REQUIRED, now)
+      self.assertFalse(host.inputs_need_refresh(frame, now_ns=now))
+      frame.logMonoTime['carState'] = now + 1
+      self.assertFalse(host.inputs_need_refresh(frame, now_ns=now))
+
   def test_single_line_recovers_between_brief_refusals_without_retaining_output(self):
     from openpilot.starpilot.lateral.tests.test_lane_centering import single
     for missing_right, sign in ((True, 1), (False, -1)):

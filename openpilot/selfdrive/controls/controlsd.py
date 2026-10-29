@@ -150,8 +150,8 @@ class Controls:
     assist_enabled = self.vehicle_startup_preferences.turn_assist and model_turn_assist_supported(self.CP)
     self.turn_assist_enabled = lambda: assist_enabled
 
-  def update(self):
-    self.sm.update(15)
+  def update(self, timeout: int = 15):
+    self.sm.update(timeout)
     if self.sm.updated["extrinsicsCalibration"]:
       self.pose_calibrator.feed_extrinsics_calibration(self.sm['extrinsicsCalibration'])
     if self.sm.updated["deviceMotion"]:
@@ -198,6 +198,9 @@ class Controls:
       late_gm_refresh = self.CP.brand == 'gm'
       if not late_gm_refresh:
         lateral_inputs_refreshed = refresh_expired_lateral_snapshot(self.sm, now_ns=refresh_now_ns)
+    if (self.lane_centering_host is not None and os.getenv('REPLAY') != '1' and
+        self.lane_centering_host.inputs_need_refresh(self.sm, now_ns=time.monotonic_ns())):
+      self.update(0)
     CS = self.sm['carState']
     self.flm_native_witness = None
     if self.lateral_gain_owner is not None:

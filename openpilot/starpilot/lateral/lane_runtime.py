@@ -60,6 +60,12 @@ class LaneCenteringHost:
     self.last_tick_ns: int | None = None
     self.last_refusal = 'inactive'
 
+  def inputs_need_refresh(self, sm, *, now_ns: int) -> bool:
+    """Leave time to receive queued state before checking its original age."""
+    return self.settings.enabled and any(
+      0 < int(sm.logMonoTime[name]) < now_ns - 15_000_000 for name in ('carState', 'selfdriveState')
+    )
+
   def sample(self, sm, *, now_ns: int, lateral_active: bool, longitudinal_active: bool) -> LaneCenteringRequest | None:
     self.last_refusal = 'inactive'
     previous = self.last_tick_ns
