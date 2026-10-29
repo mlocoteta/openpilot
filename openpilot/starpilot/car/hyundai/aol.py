@@ -322,7 +322,9 @@ def retain_on_native_denial(CP, native, state):
 def early_native_long_withdrawal_supported(CP) -> bool:
   """Exact LONG profiles whose native policy grants lateral independently."""
   return bool(CP.openpilotLongitudinalControl and
-              (qualified_ioniq6(CP) or qualified_canfd_long(CP, marked_only=True)))
+              (qualified_ioniq6(CP) or qualified_canfd_long(CP, marked_only=True) or
+               qualified_classic_long(CP, marked_only=True) and
+               CP.safetyConfigs[0].safetyModel == car.CarParams.SafetyModel.hyundai))
 
 
 def _source_deadline_supported_uncached(CP) -> bool:
