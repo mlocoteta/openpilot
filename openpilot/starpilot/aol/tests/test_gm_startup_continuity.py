@@ -41,13 +41,16 @@ def test_all_gm_initializing_steps_keep_servicing_handoff(cp):
 
 
 @pytest.mark.parametrize('cp', CONFIGURATIONS, ids=lambda cp: f'{cp.carFingerprint}-{cp.safetyConfigs[0].safetyParam:x}')
-def test_initializing_gm_output_is_neutral_steering_only(cp):
+def test_initializing_gm_output_is_inactive_and_profile_complete(cp):
   controller = CarController(DBC[cp.carFingerprint], cp)
   cs = CarState(cp)
   state = structs.CarState.new_message()
   state.canValid = True
   state.gearShifter = structs.CarState.GearShifter.reverse
   cs.out = state.as_reader()
+  cs.pscm_status = dict.fromkeys(('HandsOffSWDetectionMode', 'HandsOffSWlDetectionStatus',
+                                'LKATorqueDeliveredStatus', 'LKADriverAppldTrq', 'LKATorqueDelivered',
+                                'LKATotalTorqueDelivered', 'RollingCounter', 'PSCMStatusChecksum'), 0)
   # Even an incorrectly active caller cannot turn a keepalive into actuation.
   control = structs.CarControl.new_message()
   control.enabled = control.latActive = control.longActive = True
@@ -64,12 +67,23 @@ def test_initializing_gm_output_is_neutral_steering_only(cp):
     cs.cam_lka_steering_cmd_counter = last_counter
     output, frames = controller.update(control.as_reader(), cs, now, startup_keepalive=True)
     assert not output.torque and not output.torqueOutputCan and not output.accel
+    assert not output.brake
     for address, data, bus in frames:
-      assert (address, bus) == (0x180, 0)
-      assert not data[0] & 8 and not ((data[0] & 7) or data[1])
-      last_ns = now
-      last_counter = (data[0] >> 4) & 3
-      sent.append(now)
+      if address == 0x180:
+        assert bus == 0 and not data[0] & 8 and not ((data[0] & 7) or data[1])
+        last_ns = now
+        last_counter = (data[0] >> 4) & 3
+        sent.append(now)
+      else:
+        assert controller.ordinary_camera_long and controller.camera_pedal_profile is None
+        assert (address, bus) in ((0x2CB, 0), (0x315, 0), (0x370, 0), (0x2CD, 0),
+                                  (0x184, 2), (0x409, 0), (0x40A, 0))
+        if address == 0x2CB:
+          assert not data[0] & 1 and not data[1] & 0x20
+        elif address == 0x315:
+          assert data[0] >> 4 == 1 and not (int.from_bytes(data[:2], 'big') & 0xFFF)
+        elif address == 0x370:
+          assert not data[2] & 0x80 and data[1] & 7 == 2
   assert sent and sent[0] <= 12_480_000_000
   assert max(b - a for a, b in zip(sent, sent[1:], strict=False)) <= 110_000_000
 
