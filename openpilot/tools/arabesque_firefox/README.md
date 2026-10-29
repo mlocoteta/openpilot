@@ -49,7 +49,7 @@ The first-use download runs only after opening the tool. Closing the tool, sleep
 | **Address** | Focus Firefox's address bar with Ctrl+L and show the keyboard |
 | **Scroll** | Tap to click; drag vertically to scroll; long-press to right-click |
 | **Pointer** | Send ordinary press/move/release events for dragging and selection |
-| **View ↑ / View ↓** | Pan the visible browser area while the keyboard is open |
+| **Up / Down** | Pan the visible browser area while the keyboard is open |
 | **Desktop** | Close the browser session and return to the dock |
 
 The keyboard crops the visible browser area rather than shrinking the page. A page therefore retains the same readable scale while typing.
@@ -406,7 +406,7 @@ After both trial sets, temporary bundles, profiles, caches, sources and units we
 
 ### Host regression evidence
 
-- The latest focused run passed **145 tests**, with user namespaces, native Xvfb capture and actual Raylib texture checks enabled. It covers first-use directory permissions, preparation progress/cancellation, completed-runtime reuse, packet/FD bounds, frame ownership, authority gates, sleep/wake, rapid reentry, gestures, Unicode and teardown.
+- A focused run passed **145 tests**, with user namespaces, native Xvfb capture and actual Raylib texture checks enabled. It covers first-use directory permissions, preparation progress/cancellation, completed-runtime reuse, packet/FD bounds, frame ownership, authority gates, sleep/wake, rapid reentry, gestures, Unicode and teardown.
 - After first-use automation, a targeted run of UI startup, frame-loop, off-road authority and shared-render regressions passed **182 tests**.
 - Before first-use automation, the wider shared UI/authority run passed 2,988 tests. Two compact-keyboard compatibility failures reproduced from the exact committed implementation and tests.
 - Optional on-road-map EGL initialization also failed from committed code before importing Arabesque on that host. This remains a separate host graphics limitation; the browser's Xvfb/GPU tests passed.

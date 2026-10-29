@@ -299,6 +299,18 @@ def touch(view, x, y, *, pressed=False, released=False):
   Widget.render(view)
 
 
+def test_loading_status_and_pan_controls_have_readable_labels(tool):
+  view = tool.view
+  view.show_event()
+  tool.sessions[0].status = 'Downloading Firefox… 50%'
+  view._keyboard = True
+  view._update_layout_rects()
+  view._render(view.rect)
+  labels = [call.args[1] for call in browser.gui_label.call_args_list]
+  assert labels[0] == 'Downloading Firefox... 50%'
+  assert 'Up' in labels and 'Down' in labels
+
+
 def test_no_runtime_until_open_and_none_after_close_or_sleep(tool):
   view, sessions = tool.view, tool.sessions
   assert sessions == []
@@ -510,6 +522,55 @@ def test_commit_exact_unicode_without_terminal_normalization(tool):
   view.show_event()
   view._text('é€\u0301😀')
   assert [c.args[0]['a'] for c in tool.sessions[0].send.call_args_list] == [0xe9, 0x010020ac, 0x01000301, 0x0101f600]
+
+
+@pytest.mark.skipif(os.environ.get('ARABESQUE_GPU_TEST') != '1', reason='Needs a disposable Xvfb with GLX')
+def test_browser_status_and_pan_labels_have_actual_font_glyphs(monkeypatch):
+  from openpilot.system.ui.lib import text_measure
+  from openpilot.system.ui.lib.application import font_fallback, multilang
+
+  monkeypatch.setattr(text_measure, '_cache', text_measure.LRUCache(1024))
+  monkeypatch.setattr(gui_app, '_fonts', {})
+  monkeypatch.setattr(gui_app, '_fallback_fonts', {})
+  monkeypatch.setattr(rl, '_orig_draw_text_ex', rl.draw_text_ex, raising=False)
+  monkeypatch.setattr(rl, 'draw_text_ex', rl.draw_text_ex)
+  rl.init_window(1080, 488, 'Firefox status font check')
+  try:
+    gui_app._load_fonts()
+    gui_app._patch_text_functions()
+    view = browser.Browser(lambda: True)
+    view.set_rect(rl.Rectangle(0, 0, 1080, 488))
+    view._session = Mock(width=1440, height=650, error='', status='Downloading Firefox… 50%')
+    view._keyboard = True
+    view._update_layout_rects()
+    draw_label = browser.gui_label
+    labels = []
+
+    def record_label(rect, text, *args, **kwargs):
+      labels.append(text)
+      draw_label(rect, text, *args, **kwargs)
+
+    monkeypatch.setattr(browser, 'gui_label', record_label)
+    for language in ('en', 'ja', 'ko', 'th', 'zh-CHS', 'zh-CHT'):
+      monkeypatch.setattr(multilang, '_language', language)
+      labels.clear()
+      rl.begin_drawing()
+      try:
+        view._render(view.rect)
+      finally:
+        rl.end_drawing()
+      font = font_fallback(gui_app.font(browser.DEFAULT_THEME.font_weight))
+      for text in labels:
+        for character in set(text):
+          index = rl.get_glyph_index(font, ord(character))
+          assert font.glyphs[index].value == ord(character), f'{language}: missing {character!r} in {text!r}'
+      for bounds, text, key in view._buttons:
+        if key in ('pan-up', 'pan-down'):
+          assert text_measure.measure_text_cached(font, text, round(28 * view._scale)).x <= bounds.width
+  finally:
+    for font in (*gui_app._fonts.values(), *gui_app._fallback_fonts.values()):
+      rl.unload_font(font)
+    rl.close_window()
 
 
 @pytest.mark.skipif(os.environ.get('ARABESQUE_GPU_TEST') != '1', reason='Needs a disposable Xvfb with GLX')

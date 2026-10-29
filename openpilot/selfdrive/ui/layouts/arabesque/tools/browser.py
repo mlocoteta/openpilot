@@ -134,7 +134,7 @@ class Browser(Widget):
     self._pan = (rl.Rectangle(rect.x + rect.width - 280 * s, rect.y + 4 * s, 128 * s, 76 * s),
                  rl.Rectangle(rect.x + rect.width - 144 * s, rect.y + 4 * s, 128 * s, 76 * s))
     if self._keyboard:
-      self._buttons += [(self._pan[0], 'View ↑', 'pan-up'), (self._pan[1], 'View ↓', 'pan-down')]
+      self._buttons += [(self._pan[0], 'Up', 'pan-up'), (self._pan[1], 'Down', 'pan-down')]
       labels = {BACKSPACE_KEY: '<-', ENTER_KEY: 'Enter', SHIFT_INACTIVE_KEY: 'Shift', SHIFT_ACTIVE_KEY: 'Shift', ' ': 'Space'}
       for row, keys in enumerate(KEYBOARD_LAYOUTS[self._layout_name]):
         unit = rect.width / sum(3 if key == ' ' else 1 for key in keys)
@@ -309,7 +309,7 @@ class Browser(Widget):
     else:
       message = ((self._session.error or self._session.status) if self._session else
                  'Closing the previous Firefox session…' if self._resume_pending else 'Firefox is available off-road only.')
-      gui_label(self._screen, message, round(28 * s), theme.text, theme.font_weight, alignment=TextAlignment.CENTER)
+      gui_label(self._screen, message.replace('…', '...'), round(28 * s), theme.text, theme.font_weight, alignment=TextAlignment.CENTER)
     for bounds, label, key in self._buttons:
       pressed = self.enabled and key == self._pressed and self.is_pressed
       rl.draw_rectangle_rounded(bounds, 0.2, 8, theme.control if pressed else theme.surface)
