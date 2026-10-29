@@ -790,6 +790,14 @@ class TestBoltPedalStartupParser(unittest.TestCase):
               self.assertEqual(decoder.vl['ASCMLKASteeringCmd']['LKASteeringCmd'], 0)
               self.assertTrue(native.safety_tx_hook(libsafety_py.make_CANPacket(address, bus, raw)))
 
+  def test_gen2_drive_does_not_inherit_previous_alternative_experience(self):
+    from opendbc.safety.tests.libsafety import libsafety_py
+    for run in (self.test_gen2_pedal_drive_actual_parser_controller_and_native,
+                self.test_gen2_pedal_drive_withdraws_on_source_or_driver_change):
+      with self.subTest(contract=run.__name__):
+        libsafety_py.libsafety.set_alternative_experience(32)
+        run()
+
   def test_gen2_pedal_drive_actual_parser_controller_and_native(self):
     from opendbc.car.gm.bolt_cc import button_bytes
     from opendbc.safety.tests.libsafety import libsafety_py
@@ -806,6 +814,7 @@ class TestBoltPedalStartupParser(unittest.TestCase):
       with self.subTest(identity=identity, gear=gear, mode=mode):
         cp = params(identity, pedal=True, camera=True)
         native = libsafety_py.libsafety
+        native.set_alternative_experience(cp.alternativeExperience)
         self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
         native.init_tests()
         ci, _ = self.stream(cp, native=native)
@@ -851,6 +860,7 @@ class TestBoltPedalStartupParser(unittest.TestCase):
       with self.subTest(fault=fault):
         cp = params(CAR.CHEVROLET_BOLT_CC_2022_2023, pedal=True, camera=True)
         native = libsafety_py.libsafety
+        native.set_alternative_experience(cp.alternativeExperience)
         self.assertEqual(native.set_safety_hooks(cp.safetyConfigs[0].safetyModel.raw, cp.safetyConfigs[0].safetyParam), 0)
         native.init_tests()
         ci, _ = self.stream(cp, native=native)

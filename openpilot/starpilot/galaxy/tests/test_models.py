@@ -10,6 +10,7 @@ import unittest
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.server import make_server
 from openpilot.starpilot.models.manager import ModelManager, preferences
+from openpilot.starpilot.models.jetlink_settings import JetlinkSettings
 
 
 PAYLOAD = {"schemaVersion": 1, "catalog": [{"id": "bundled-current", "name": "Bundled driving model",
@@ -91,11 +92,14 @@ class LocalModelManagerHttpTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmp:
       root = Path(tmp)
       parked = [True]
-      class LinkSettings:
+      class LinkSettings(JetlinkSettings):
         mode = "off"
 
         def snapshot(self):
-          return {"mode": self.mode}
+          return {"mode": self.mode, "supported": True, "chestnut": False}
+
+        def pick(self):
+          return None
 
         def configure(self, payload):
           self.mode = payload["mode"]
@@ -132,6 +136,10 @@ class LocalModelManagerHttpTest(unittest.TestCase):
         self.assertFalse(snapshot['randomizer'])
         self.assertEqual(request('/api/models/jetlink', {'mode': 'usb'})[0], 200)
         self.assertEqual(link.mode, 'usb')
+        status, snapshot = request('/api/models/manager')
+        self.assertEqual(status, 200)
+        self.assertTrue(snapshot['jetlinkBig'])
+        self.assertEqual(snapshot['activeBigModel'], '')
         status, laboratory = request('/api/models/laboratory')
         self.assertEqual(status, 200)
         self.assertFalse(laboratory['runtimeSupported'])

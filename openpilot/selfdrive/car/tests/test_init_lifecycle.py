@@ -13,6 +13,34 @@ from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
 
 
 class CardInitLifecycleTest(unittest.TestCase):
+  def assert_inactive_gm_stream(self, sent, *, alpha, brake_bus, inactive_regen):
+    expected = {(0x180, 0)}
+    if alpha:
+      expected |= {(0x184, 2), (0x2CB, 0), (0x315, brake_bus), (0x370, 0)}
+    self.assertEqual({(address, bus) for address, _, bus in sent}, expected)
+    for address, data, _bus in sent:
+      if address == 0x180:
+        self.assertEqual(data[0] & 15, 0)
+        self.assertEqual(data[1], 0)
+      elif address == 0x184:
+        self.assertEqual(data, bytes.fromhex('0000200000200000'))
+      elif address == 0x2CB:
+        self.assertFalse(data[0] & 1)  # Gas/regen command inactive.
+        self.assertFalse(data[1] & 0x20)  # No full-stop request.
+        # DBC: 19-bit Motorola command, scale .125 and offset -22534.
+        raw = (inactive_regen + 22534) * 8
+        self.assertEqual(int.from_bytes(data[1:4], 'big') & 0x7FFFF, raw)
+        counter = data[0] >> 6
+        command = bytes((counter << 6, 0x40 | (raw >> 16), (raw >> 8) & 0xFF, raw & 0xFF))
+        # Inactive checksum bit, complemented bytes 1/2, then byte 3 + counter complement.
+        checksum = bytes((1, 0xFF - command[1], 0xFF - command[2], (-command[3] - counter) & 0xFF))
+        self.assertEqual(data, command + checksum)
+      elif address == 0x315:
+        self.assertEqual(data[0] >> 4, 1)  # Released friction-brake mode.
+        self.assertEqual(int.from_bytes(data[:2], 'big') & 0xFFF, 0)
+      elif address == 0x370:
+        self.assertEqual(data, bytes.fromhex('010200000100'))  # Inactive ACC, no speed or warning.
+
   def defer_radar_fixture(self, card):
     eager = card.state_update
     batch = []
@@ -213,10 +241,7 @@ class CardInitLifecycleTest(unittest.TestCase):
         self.assertFalse(cc.enabled or cc.latActive or cc.longActive)
         self.assertEqual((cc.actuators.torque, cc.actuators.accel), (0., 0.))
       self.assertTrue(sent)
-      for address, data, bus in sent:
-        self.assertEqual((address, bus), (0x180, 0))
-        self.assertEqual(data[0] & 15, 0)
-        self.assertEqual(data[1], 0)
+      self.assert_inactive_gm_stream(sent, alpha=True, brake_bus=2, inactive_regen=-500)
       panda.safetyParam = 0x5087
       card.step()
       self.assertEqual(apply.call_count, 30)
@@ -255,7 +280,9 @@ class CardInitLifecycleTest(unittest.TestCase):
       cp.safetyConfigs[0].safetyParam = word
     self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
     cadence = ((0x180, 110_000_000),)
-    ready_cadence = cadence + ((0x2CB, 50_000_000), (0x315, 50_000_000)) if alpha else cadence
+    if alpha:
+      cadence += ((0x2CB, 50_000_000), (0x315, 50_000_000), (0x370, 50_000_000))
+    ready_cadence = cadence
     cp.alternativeExperience = 32
     card = Car.__new__(Car)
     card.CP = cp
@@ -367,10 +394,7 @@ class CardInitLifecycleTest(unittest.TestCase):
         self.assertFalse(any(address in (0x2CB, 0x315) for address, _, _ in sent))
         self.assertTrue(card.CP.pcmCruise)
         self.assertFalse(card.CP.openpilotLongitudinalControl)
-      for address, data, bus in sent:
-        self.assertEqual((address, bus), (0x180, 0))
-        self.assertEqual(data[0] & 15, 0)
-        self.assertEqual(data[1], 0)
+      self.assert_inactive_gm_stream(sent, alpha=alpha, brake_bus=0, inactive_regen=-650)
       panda.safetyParam = word ^ 1
       card.step()
       self.assertEqual(apply.call_count, 601)
