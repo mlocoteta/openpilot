@@ -317,3 +317,10 @@ assert.equal(modelActionAllowed(refreshingCatalog, "delete", small), false)
 for (const value of ["spz_polaris_r3a", "spz_polaris_r3b"]) assert.equal(ModelsPage.methods.isPolaris({value}), true)
 for (const value of ["polaris", "spz_polaris_r3a_copy", "lightspeed", undefined]) assert.equal(ModelsPage.methods.isPolaris({value, label: "Polaris"}), false)
 assert.equal(ModelsPage.methods.isPolaris(null), false)
+
+for (const label of ["Polaris R3 A ⚠️🧪", "Polaris R3 B ⚠️🧪", "Polaris R3 A", "Polaris R3 B 🚀"]) {
+  const [text, emojis] = ModelsPage.methods.polarisTitleParts({label})
+  assert.equal(text + emojis, label)
+  assert.equal(/\p{Extended_Pictographic}/u.test(text), false)
+}
+assert.deepEqual(ModelsPage.methods.polarisTitleParts({value: "spz_polaris_r3a"}), ["spz_polaris_r3a", ""])

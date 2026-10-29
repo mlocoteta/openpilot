@@ -390,6 +390,11 @@ export const ModelsPage = {
   },
   methods: {
     isPolaris(model) { return ["spz_polaris_r3a", "spz_polaris_r3b"].includes(model?.value) },
+    polarisTitleParts(model) {
+      const label = model.label || model.value
+      const emoji = label.search(/\p{Extended_Pictographic}/u)
+      return emoji < 0 ? [label, ""] : [label.slice(0, emoji), label.slice(emoji)]
+    },
     hardwareLabel, fileSizeText,
     setHardwareFilter(value) { this.hardwareFilter = saveHardwareFilter(value) },
     toggleHardware(kind, checked) {
@@ -573,7 +578,8 @@ export const ModelsPage = {
             <section class="gx-card gx-model-card" :class="{'gx-model-card--polaris': isPolaris(m)}" v-for="m in sorted" :key="m.value">
               <div class="gx-panel">
                 <div class="gx-model-card__heading">
-                  <strong class="gx-model-card__title">{{ m.label || m.value }}</strong>
+                  <strong v-if="isPolaris(m)"><span class="gx-model-card__title">{{ polarisTitleParts(m)[0] }}</span><span>{{ polarisTitleParts(m)[1] }}</span></strong>
+                  <strong v-else>{{ m.label || m.value }}</strong>
                   <div class="gx-model-card__actions">
                     <button v-if="rowState(m) === 'available' && m.downloadAvailable" type="button" class="gx-icon-btn" :disabled="!actionAvailable('download', m)" :aria-label="'Download ' + m.label" :title="'Download ' + m.label" @click="runAction('download', m)"><i class="bi bi-download" aria-hidden="true"></i></button>
                     <button type="button" class="gx-icon-btn" :disabled="!actionAvailable(m.userFavorite ? 'unfavorite' : 'favorite', m)" :aria-label="(m.userFavorite ? 'Remove from your favorites: ' : 'Add to your favorites: ') + m.label" :title="m.userFavorite ? 'Remove from your favorites' : 'Add to your favorites'" @click="runAction(m.userFavorite ? 'unfavorite' : 'favorite', m)">

@@ -716,21 +716,24 @@ html.gx-maker-open, html.gx-maker-open body { touch-action: manipulation; }
 }
 .gx-model-card--polaris .gx-model-card__title {
   color: #bca0ff;
-  background: linear-gradient(110deg, #c4a0ff, #a8b8ff, #67d7ff, #c4a0ff);
-  background-size: 250% 100%;
+  background: linear-gradient(110deg, #b77aff 0%, #a494ff 25%, #38cfff 45%, #f0eaff 50%, #38cfff 55%, #a494ff 75%, #b77aff 100%);
+  background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: gx-polaris-flow 7s ease-in-out infinite alternate;
+  animation: gx-polaris-flow 1.8s linear infinite;
 }
 .gx-polaris-badge { color: #c4b5fd; border-color: #a78bfa70; background: #8b5cf618; gap: 6px; }
-.gx-polaris-badge__star { display: inline-block; animation: gx-polaris-star 4s ease-in-out infinite alternate; }
+.gx-polaris-badge__star { display: inline-block; animation: gx-polaris-star 1.8s ease-in-out infinite; }
 [data-theme="light"] .gx-model-card--polaris .gx-model-card__title {
-  background-image: linear-gradient(110deg, #7c3aed, #5b4bd8, #0369a1, #7c3aed);
+  background-image: linear-gradient(110deg, #7c3aed 0%, #5b4bd8 25%, #0369a1 45%, #a855f7 50%, #0369a1 55%, #5b4bd8 75%, #7c3aed 100%);
 }
 [data-theme="light"] .gx-polaris-badge { color: #6d28d9; }
-@keyframes gx-polaris-flow { to { background-position: 100% 50%; } }
-@keyframes gx-polaris-star { to { transform: rotate(25deg) scale(1.15); opacity: .65; } }
+@keyframes gx-polaris-flow { from { background-position: 200% 50%; } to { background-position: 0% 50%; } }
+@keyframes gx-polaris-star {
+  0%, 100% { transform: rotate(-15deg) scale(.85); opacity: .65; }
+  50% { transform: rotate(75deg) scale(1.3); opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
   .gx-model-card--polaris .gx-model-card__title, .gx-polaris-badge__star { animation: none; }
 }
