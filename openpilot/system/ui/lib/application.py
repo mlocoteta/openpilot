@@ -668,6 +668,8 @@ class GuiApplication:
         self._render_profiler.enable()
 
       while not (self._window_close_requested or rl.window_should_close()):
+        if self._frame % self._target_fps == 0:
+          multilang.refresh_language()
         frame_start = time.monotonic()
         collect_timing = self._frame_timing_enabled or frame_start < self._auto_timing_end
         self._collect_frame_timing = collect_timing

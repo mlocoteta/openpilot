@@ -23,7 +23,7 @@ def test_real_gateway_units_and_wheel_side_without_a_vehicle(tmp_path):
   def preview(index, value):
     page = gateway.page("localization", token, generation)
     assert page["title"] == "Localization" and not page["vehicleIdentified"]
-    assert [row["label"] for row in page["rows"]] == ["Use Kilometers (km/h)", "Right-Hand Drive"]
+    assert [row["label"] for row in page["rows"]] == ["Use Kilometers (km/h)", "Right-Hand Drive", "Language"]
     return gateway.preview(page["view"], index, 0, token, generation, value=value)["intent"]
 
   assert gateway.confirm(preview(0, "On"), token, generation)
@@ -94,3 +94,43 @@ def test_legacy_offsets_explain_the_one_time_park_requirement(tmp_path):
   assert not row.available and "Park once" in row.reason
   assert not owner.apply(FeatureSettingsRequest("IsMetric", None, "On"))
   assert not params.get_bool("IsMetric")
+
+
+@pytest.mark.parametrize("name,code", [("English", "en"), ("日本語", "ja"), ("한국어", "ko"),
+                                       ("Español", "es"), ("Français", "fr"), ("Deutsch", "de"), ("Tiếng Việt", "vi")])
+def test_language_uses_existing_persistent_setting(tmp_path, name, code):
+  params = Params(str(tmp_path))
+  owner = LocalizationSettingsOwner(params, lambda: True, lambda: True)
+  row = owner.snapshot().rows[2]
+  assert row.value == "English" and name in row.choices
+  assert owner.apply(FeatureSettingsRequest(row.key, row.source, name))
+  assert params.get("LanguageSetting") == code
+  assert owner.snapshot().rows[2].value == name
+  assert not owner.apply(FeatureSettingsRequest(row.key, b"stale", "English"))
+  assert params.get("LanguageSetting") == code
+
+
+@pytest.mark.parametrize("authorized,parked,value", [(False, True, "日本語"), (True, False, "日本語"),
+                                                      (True, True, "unsupported")])
+def test_language_rechecks_authority_and_parking(tmp_path, authorized, parked, value):
+  params = Params(str(tmp_path))
+  owner = LocalizationSettingsOwner(params, lambda: authorized, lambda: parked)
+  assert not owner.apply(FeatureSettingsRequest("LanguageSetting", None, value))
+  assert not Path(params.get_param_path("LanguageSetting")).exists()
+
+
+def test_language_dropdown_through_gateway_rechecks_session(tmp_path):
+  params = Params(str(tmp_path))
+  context = SimpleNamespace(sample=lambda: AuthorityContext(True, None, None))
+  gateway = SettingsGateway(params, cast(ContextSource, context))
+  token, generation = "language-session", b"generation"
+  page = gateway.page("localization", token, generation)
+  assert page["rows"][2]["choices"] == list(LocalizationSettingsOwner(params, lambda: True, lambda: True).snapshot().rows[2].choices)
+  pending = gateway.preview(page["view"], 2, 0, token, generation, value="日本語")["intent"]
+  with pytest.raises(SettingsChanged):
+    gateway.confirm(pending, token, generation, session_valid=lambda: False)
+  assert not Path(params.get_param_path("LanguageSetting")).exists()
+  page = gateway.page("localization", token, generation)
+  pending = gateway.preview(page["view"], 2, 0, token, generation, value="日本語")["intent"]
+  assert gateway.confirm(pending, token, generation)
+  assert params.get("LanguageSetting") == "ja"

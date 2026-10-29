@@ -41,6 +41,7 @@ PLURAL_SELECTORS = {
   'zh-CHS': lambda n: 0,
   'ko': lambda n: 0,
   'ja': lambda n: 0,
+  'vi': lambda n: 0,
 }
 
 
@@ -177,6 +178,15 @@ class Multilang:
       cloudlog.error(f"No translation file found for language: {self._language}, using default.")
       self._translations = {}
       self._plurals = {}
+
+  def refresh_language(self) -> None:
+    if self._params is None:
+      return
+    code = str(self._params.get("LanguageSetting")).removeprefix("main_")
+    code = code if code in self.codes else "en"
+    if code != self._language:
+      self._language = code
+      self.setup()
 
   def change_language(self, language_code: str) -> None:
     self._params.put("LanguageSetting", language_code, block=True)
