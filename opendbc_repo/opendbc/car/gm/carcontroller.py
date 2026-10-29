@@ -302,6 +302,7 @@ class CarController(CarControllerBase):
     self.bolt_acc_pedal_friction_release_frames = 0
     self.bolt_acc_pedal_friction_low_speed_active = False
     self.bolt_acc_pedal_stop_hold = False
+    self.bolt_acc_pedal_friction_unavailable = False
     self.bolt_acc_brake_clock = (BoltAccBrakeClock() if int(CP.safetyConfigs[0].safetyParam) == 0x1CD and
                                 CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and is_bolt_pedal_profile(CP) else None)
 
@@ -447,6 +448,12 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
+    if self.bolt_acc_brake_clock is not None and getattr(CS, "bolt_acc_pedal_friction_unavailable", False):
+      # Do not keep requesting a rejected secondary brake or retry after a flag flap.
+      # Only a new onroad controller can restore friction; pedal/regen keep their gates.
+      self.bolt_acc_pedal_friction_unavailable = True
+      self.apply_brake = 0
+      self.bolt_acc_pedal_friction_low_speed_active = False
     if startup_keepalive:
       CC = structs.CarControl.new_message().as_reader()
     _projection = self.learning_projection_observer
@@ -814,7 +821,7 @@ class CarController(CarControllerBase):
         friction_main_on = (friction_variant and CS.out.cruiseState.available and stock_ownership_clear and
                             main_ns > 0 and 0 <= now_nanos - main_ns <= 300_000_000)
         if friction_variant:
-          if active and friction_main_on:
+          if active and friction_main_on and not self.bolt_acc_pedal_friction_unavailable:
             self.apply_brake, self.bolt_acc_pedal_friction_low_speed_active = bolt_acc_pedal_friction_brake(
               actuators.accel, CS.out.vEgo, actuators.longControlState == LongCtrlState.stopping,
               self.bolt_acc_pedal_friction_low_speed_active, self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE, acc_tune=self.gm_acc_tune)
@@ -880,7 +887,7 @@ class CarController(CarControllerBase):
           if friction_main_on or self.bolt_acc_pedal_friction_release_frames > 0:
             if self.bolt_acc_brake_clock is not None:
               self.bolt_acc_brake_clock.prepare(
-                now_nanos, self.apply_brake, active and friction_main_on,
+                now_nanos, self.apply_brake, active and friction_main_on and not self.bolt_acc_pedal_friction_unavailable,
                 active and CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE,
                 active and CS.out.standstill and actuators.longControlState == LongCtrlState.stopping)
             else:
@@ -909,7 +916,8 @@ class CarController(CarControllerBase):
                       0 < main_ns <= now_nanos and now_nanos - main_ns <= 300_000_000)
         scheduled = self.bolt_acc_brake_clock.sample(
           now_nanos, getattr(CS, "bolt_acc_brake_clock_ns", 0), getattr(CS, "bolt_acc_brake_clock_counter", 0),
-          active=bool(active), main_ready=main_ready, source_valid=bool(CS.out.canValid and not CS.out.canTimeout))
+          active=bool(active and not self.bolt_acc_pedal_friction_unavailable), main_ready=main_ready,
+          source_valid=bool(CS.out.canValid and not CS.out.canTimeout))
         if scheduled is not None:
           brake, counter, enabled, near_stop, full_stop = scheduled
           can_sends.append(gmcan.create_friction_brake_command(
