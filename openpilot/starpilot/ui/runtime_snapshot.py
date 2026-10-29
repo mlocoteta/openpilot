@@ -684,7 +684,7 @@ class RuntimeSnapshotAdapter:
                          longitudinal_overridden=longitudinal_overridden,
                          driver_override_active=bool(display_car_valid and (
                            display_lat_active and getattr(display_car, 'steeringPressed', False) or
-                           (display_long_active or longitudinal_overridden) and getattr(display_car, 'gasPressed', False))),
+                           (display_long_active or longitudinal_overridden or stock_cruise) and getattr(display_car, 'gasPressed', False))),
                          stock_cruise_active=stock_cruise,
                          slc_system_long_available=system_long,
                          slc_wheel_confirmation_available=wheel_confirmation,

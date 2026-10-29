@@ -30,7 +30,7 @@ class TestSubaruStockAol(unittest.TestCase):
     return self.packer.make_can_msg_safety(name, bus, values)
 
   def feed(self, *, main=True, cruise=False, brake=False, gear=121, temporary=False, permanent=False,
-           gear_bus=None, omit_gear=False, host_mask=1, omit_main=False):
+           gear_bus=None, omit_gear=False, host_mask=1, omit_main=False, speed=54, acc_fault=False, omit_distance=False):
     self.now += 10_000
     self.safety.set_timer(self.now)
     alt = 1 if self.param & 1 else 0
@@ -41,12 +41,14 @@ class TestSubaruStockAol(unittest.TestCase):
       ('Throttle', {}, main_bus),
       ('Steering_Torque', {'Steer_Error_1': int(permanent), 'Steer_Warning': int(temporary)}, 0),
       ('Steering_2', {}, 0),
-      ('Wheel_Speeds', dict.fromkeys(('FL', 'FR', 'RL', 'RR'), 54), alt),
+      ('Wheel_Speeds', dict.fromkeys(('FL', 'FR', 'RL', 'RR'), speed), alt),
       ('Brake_Status', {'Brake': int(brake)}, alt),
       ('CruiseControl', {'Cruise_On': int(main), 'Cruise_Activated': int(cruise)}, alt),
       ('ES_Status', {'Cruise_Activated': int(cruise)}, 2 if self.param == 16 else 1),
       ('ES_DashStatus', {'Cruise_On': int(main)}, 2),
     ]
+    if not omit_distance and self.param == 17:
+      frames.append(('ES_Distance', {'Cruise_Fault': int(acc_fault)}, 1))
     if not omit_gear:
       frames.append(('Transmission', {'Gear': gear}, gear_bus))
     for name, fields, bus in frames:
@@ -77,7 +79,7 @@ class TestSubaruStockAol(unittest.TestCase):
         self.assertEqual(self.feed(temporary=True), 0)
         self.assertEqual(self.feed(), 1)
         self.assertEqual(self.feed(main=False), 0)
-        self.assertEqual(self.feed(main=True), 0)
+        self.assertEqual(self.feed(main=True), int(param == 17))
         self.assertEqual(self.feed(cruise=True), 1)
 
   def test_permanent_fault_and_rx_fault_require_fresh_ordinary_engagement(self):

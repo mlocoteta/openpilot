@@ -102,7 +102,7 @@ def axis_status_color(state: OnroadState) -> rl.Color:
       return rl.Color(218, 111, 37, 255)
     return rl.Color(22, 127, 64, 255)
   if state.lateral_active:
-    return rl.Color(10, 186, 181, 255)
+    return rl.Color(22, 127, 64, 255) if state.stock_cruise_active else rl.Color(10, 186, 181, 255)
   if state.longitudinal_active:
     return rl.Color(255, 105, 180, 255)
   return rl.Color(18, 40, 57, 255)

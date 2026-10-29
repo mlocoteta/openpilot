@@ -132,10 +132,12 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
   }
   if (subaru_lkas_angle && (msg->addr == MSG_SUBARU_ES_DashStatus) && (msg->bus == SUBARU_CAM_BUS)) {
     acc_main_on = GET_BIT(msg, 49U);
-    subaru_aol_main = acc_main_on;
-    subaru_aol_main_seen = true;
-    subaru_aol_main_ts = microsecond_timer_get();
-    if (!acc_main_on) {
+    subaru_aol_observe_main(acc_main_on);
+  }
+
+  if (subaru_aol_main_arm && msg_matches(msg, MSG_SUBARU_ES_Distance, SUBARU_ALT_BUS)) {
+    subaru_aol_acc_fault = GET_BIT(msg, 15U);
+    if (subaru_aol_acc_fault) {
       subaru_aol_clear();
     }
   }
@@ -401,6 +403,7 @@ static safety_config subaru_init(uint16_t param) {
   subaru_aol_enabled = ((unsigned int)alternative_experience == 32U) &&
     ((param == 209U) || (param == 465U) || (param == 16U) || (param == 0U) || (param == 1U) || (param == 17U) || (param == 145U) ||
      avh || (param == 177U) || (param == 401U) || (param == 8U) || (param == 520U) || (param == 512U) || (param == 2225U));
+  subaru_aol_main_arm = subaru_aol_enabled && (param == 17U);
   if (subaru_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = subaru_aol_reset,
@@ -413,39 +416,60 @@ static safety_config subaru_init(uint16_t param) {
   }
 
   safety_config ret;
+  // Only one Subaru profile is active; share its mutable RX workspace.
+  static RxCheck subaru_rx_workspace[8];
+  int rx_count;
   if (subaru_lkas_angle) {
-    static RxCheck subaru_gen2_angle_rx_checks[] = {
+    static const RxCheck subaru_gen2_angle_rx_checks[] = {
       SUBARU_GEN2_ANGLE_RX_CHECKS()
+      {.msg = {{MSG_SUBARU_ES_Distance, SUBARU_ALT_BUS, 8, 20U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     };
+    rx_count = sizeof(subaru_gen2_angle_rx_checks) / sizeof(subaru_gen2_angle_rx_checks[0]);
+    for (int i = 0; i < rx_count; i++) {
+      subaru_rx_workspace[i] = subaru_gen2_angle_rx_checks[i];
+    }
     // Only one Subaru angle profile is active. Rebind the complete topology
-    // on every init; the safety selector resets all seven RX statuses afterward.
-    subaru_gen2_angle_rx_checks[0].msg[0].bus = subaru_d_platform ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS;
-    subaru_gen2_angle_rx_checks[3].msg[0].bus = subaru_forester_angle ? SUBARU_MAIN_BUS : SUBARU_ALT_BUS;
-    subaru_gen2_angle_rx_checks[4].msg[0].bus = subaru_forester_angle ? SUBARU_MAIN_BUS : SUBARU_ALT_BUS;
-    subaru_gen2_angle_rx_checks[5].msg[0].bus = subaru_forester_angle ? SUBARU_CAM_BUS : SUBARU_ALT_BUS;
-    ret = subaru_d_platform ? (stop_start ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_OUTBACK_STOP_START_TX_MSGS) :
-                                          BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST)) :
-          subaru_forester_angle ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_FORESTER_ANGLE_TX_MSGS) :
-          avh ? (stop_start ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_AVH_STOP_START_TX_MSGS) :
-                              BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_AVH_TX_MSGS)) :
-          stop_start ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_STOP_START_TX_MSGS) :
-          ascent_alert ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ALERT_TX_MSGS) :
-          subaru_angle_main_bus ? BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST) :
-                                  BUILD_SAFETY_CFG(subaru_gen2_angle_rx_checks, SUBARU_GEN2_ANGLE_TX_MSGS_LIST);
+    // on every init; the safety selector resets every selected RX status afterward.
+    subaru_rx_workspace[0].msg[0].bus = subaru_d_platform ? SUBARU_ALT_BUS : SUBARU_MAIN_BUS;
+    subaru_rx_workspace[3].msg[0].bus = subaru_forester_angle ? SUBARU_MAIN_BUS : SUBARU_ALT_BUS;
+    subaru_rx_workspace[4].msg[0].bus = subaru_forester_angle ? SUBARU_MAIN_BUS : SUBARU_ALT_BUS;
+    subaru_rx_workspace[5].msg[0].bus = subaru_forester_angle ? SUBARU_CAM_BUS : SUBARU_ALT_BUS;
+    ret = subaru_d_platform ? (stop_start ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_OUTBACK_STOP_START_TX_MSGS) :
+                                          BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST)) :
+          subaru_forester_angle ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_FORESTER_ANGLE_TX_MSGS) :
+          avh ? (stop_start ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_AVH_STOP_START_TX_MSGS) :
+                              BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_AVH_TX_MSGS)) :
+          stop_start ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_STOP_START_TX_MSGS) :
+          ascent_alert ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_ASCENT_ALERT_TX_MSGS) :
+          subaru_angle_main_bus ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_ASCENT_ANGLE_TX_MSGS_LIST) :
+                                  BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_GEN2_ANGLE_TX_MSGS_LIST);
+    // Keep the original seven checks on other profiles; only MAIN arming needs ACC health.
+    if (!subaru_aol_main_arm) {
+      rx_count--;
+    }
   } else if (subaru_gen2) {
-    static RxCheck subaru_gen2_rx_checks[] = {
+    static const RxCheck subaru_gen2_rx_checks[] = {
       SUBARU_COMMON_RX_CHECKS(SUBARU_ALT_BUS)
     };
-    ret = BUILD_SAFETY_CFG(subaru_gen2_rx_checks, SUBARU_GEN2_TX_MSGS);
+    rx_count = sizeof(subaru_gen2_rx_checks) / sizeof(subaru_gen2_rx_checks[0]);
+    for (int i = 0; i < rx_count; i++) {
+      subaru_rx_workspace[i] = subaru_gen2_rx_checks[i];
+    }
+    ret = BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_GEN2_TX_MSGS);
   } else {
-    static RxCheck subaru_rx_checks[] = {
+    static const RxCheck subaru_rx_checks[] = {
       SUBARU_COMMON_RX_CHECKS(SUBARU_MAIN_BUS)
     };
+    rx_count = sizeof(subaru_rx_checks) / sizeof(subaru_rx_checks[0]);
+    for (int i = 0; i < rx_count; i++) {
+      subaru_rx_workspace[i] = subaru_rx_checks[i];
+    }
     ret = subaru_sng_enabled ? (subaru_software_enabled ?
-      BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_SNG_SOFTWARE_TX_MSGS) : BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_SNG_TX_MSGS)) :
-      subaru_software_enabled ? BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_SOFTWARE_TX_MSGS) :
-                                   BUILD_SAFETY_CFG(subaru_rx_checks, SUBARU_TX_MSGS);
+      BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_SNG_SOFTWARE_TX_MSGS) : BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_SNG_TX_MSGS)) :
+      subaru_software_enabled ? BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_SOFTWARE_TX_MSGS) :
+                                   BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_TX_MSGS);
   }
+  ret.rx_checks_len = rx_count;
   if (((unsigned int)alternative_experience == 32U) && !subaru_aol_enabled) {
     ret.tx_msgs = NULL;
     ret.tx_msgs_len = 0;

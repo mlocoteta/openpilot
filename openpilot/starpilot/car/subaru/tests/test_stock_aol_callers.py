@@ -23,7 +23,7 @@ from openpilot.starpilot.car.subaru.tests.native_fixture import subaru_native_pa
 
 @pytest.mark.parametrize('candidate', [CAR.SUBARU_ASCENT_2023, CAR.SUBARU_LEGACY_2025, CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_FORESTER, CAR.SUBARU_OUTBACK])
 def test_actual_full_engage_brake_reverse_temporary_recovery_mainoff(candidate, subaru_native_pair, tmp_path, aol=True, manual=False, stop_resume=False,
-                                                                      hard_stop_native_first=False):
+                                                                      hard_stop_native_first=False, main_only=False):
   fw = firmware_records(candidate, FW_VERSIONS, 'subaru')
   rows = []
   with actual_factory(candidate, gen_empty_fingerprint(), fw, '0' * 17, manual=manual, aol=aol) as (card, params, matches):
@@ -59,11 +59,11 @@ def test_actual_full_engage_brake_reverse_temporary_recovery_mainoff(candidate, 
                if hard_stop_native_first else range(460))
       for elapsed, tick in enumerate(ticks):
         now = base + elapsed * 10_000_000
-        cruise = 30 <= tick < 110 or tick >= 410
+        cruise = not main_only and (30 <= tick < 110 or tick >= 410)
         brake = 90 <= tick < 110
         reverse = 150 <= tick < 185
         temporary = 225 <= tick < 260
-        main = not 310 <= tick < 350
+        main = not 310 <= tick < 350 and (tick >= 30 or not main_only)
         stopped = stop_resume and (125 <= tick < 135 if hard_stop_native_first else 185 <= tick < 195)
         first_resume = 145 <= tick < 150 if hard_stop_native_first else 125 <= tick < 145
         values = {
@@ -227,8 +227,11 @@ def test_actual_full_engage_brake_reverse_temporary_recovery_mainoff(candidate, 
                 bool(intent and intent.lateralArmed) == aol and row['cardLatch'] == aol and row['permission'] == 0), row
         if 240 <= tick < 255:
           assert not command.latActive and bool(intent and intent.lateralArmed) == aol and row['cardLatch'] == aol and row['permission'] == 0, row
-        if 330 <= tick < 400:
+        main_rearm = aol and candidate == CAR.SUBARU_CROSSTREK_2025
+        if 330 <= tick < (350 if main_rearm else 400):
           assert not command.latActive and not bool(intent and intent.allowedLatch), row
+        if main_rearm and 375 <= tick < 400:
+          assert command.latActive and row['cardLatch'] and row['permission'] == 1 and not row['controls'], row
         if tick >= 440:
           assert command.latActive and bool(intent and intent.allowedLatch) == aol and row['permission'] == int(aol), row
       assert len(active_emissions) >= 4, rows[65:90]
@@ -313,3 +316,13 @@ def test_actual_native_first_hard_stop_retains_intent_and_resumes(candidate, sub
     assert all(not command['request'] or not command['nativeAccepted'] for command in stopped[0]['steering'])
     settled = [command for row in stopped if row['elapsed'] >= 127 for command in row['steering']]
     assert settled and all(not command['request'] and command['nativeAccepted'] for command in settled)
+
+
+def test_actual_main_without_set_retains_native_first_stop_intent(subaru_native_pair, tmp_path):
+  test_actual_full_engage_brake_reverse_temporary_recovery_mainoff(
+    CAR.SUBARU_CROSSTREK_2025, subaru_native_pair, tmp_path,
+    stop_resume=True, hard_stop_native_first=True, main_only=True)
+  rows = json.loads((tmp_path / (str(CAR.SUBARU_CROSSTREK_2025) + '-True-actual.json')).read_text())
+  assert all(not row['controls'] and not row['enabled'] and not row['long'] for row in rows)
+  assert all(row['lat'] and row['permission'] == 1 for row in rows if 65 <= row['tick'] < 90)
+  assert all(not row['lat'] and row['cardLatch'] and row['permission'] == 0 for row in rows if 125 <= row['tick'] < 135)
