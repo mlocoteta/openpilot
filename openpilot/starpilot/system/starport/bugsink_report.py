@@ -100,6 +100,9 @@ def video_summary(events: list[dict]) -> dict:
     "resolution": f"{mode['width']}x{mode['height']}" if mode.get("width") and mode.get("height") else None,
     "car_fps": mode.get("fps"),
     "margins": f"{mode.get('margin_width')}x{mode.get('margin_height')}" if mode else None,
+    "screen": f"{mode['width'] - (mode.get('margin_width') or 0)}x{mode['height'] - (mode.get('margin_height') or 0)}"
+              if mode.get("width") and mode.get("height") else None,
+    "density_dpi": mode.get("density") or None,
     "target_fps": pipeline.get("target_fps"),
     "encoder": pipeline.get("encoder"),
     "nv12": pipeline.get("nv12"),
@@ -418,6 +421,7 @@ def drive_event(sessions: list[dict]) -> dict:
     "fingerprint": ["starport-drive", summary["transport"] or "unknown", label] + (["failures"] if failures else []),
     "tags": {**software_tags(sessions), "aa.report": "drive", "aa.outcome": summary["outcome"], "aa.transport": summary["transport"] or "unknown",
              "aa.head_unit": label, "aa.car": _car_label(head_unit), "aa.resolution": video.get("resolution", "none"),
+             "aa.screen": video.get("screen", "none"),
              "aa.encoder": video.get("encoder", "unknown"),
              "aa.fps": str(summary["fps_avg"]) if summary["fps_avg"] is not None else "none",
              "aa.failures": str(len(failures)),

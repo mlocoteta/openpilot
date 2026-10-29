@@ -60,6 +60,7 @@ ENCODER_RECOVERIES = 3       # hardware encoder reopens allowed per window befor
 ENCODER_RECOVERY_WINDOW = 10.0
 CAR_LINK_HOLD = 10.0         # a hands-free connection from the car counts as "car present" this long
 HFP_FRESH = 3.0              # a hands-free link from the car this recent still means "the car is reaching out now"
+CAR_FIRST_WAIT = 8.0         # at ignition, give the car this long to open hands-free before the comma pages it
 NO_STARPORT_WAIT = 8.0    # a paired device must offer wireless projection within this long
 USB_HANDSHAKE_WAIT = 10.0    # the car connected but sent no AOA START this long -> present as an accessory directly
 USB_CONFIGURE_WAIT = 15.0    # slower receivers need time to enumerate after the AOA switch
@@ -125,6 +126,14 @@ def wired_blocker() -> str:
 
 class Cancelled(Exception):
   pass
+
+
+class StrayLinkError(RuntimeError):
+  """The controller holds a link to the car that the kernel lost; every new channel to the car fails with EALREADY."""
+
+
+def _stray_link(error: BaseException) -> bool:
+  return isinstance(error, OSError) and error.errno == errno.EALREADY
 
 
 class NoLease:
@@ -1072,6 +1081,32 @@ class Supervisor:
         return
       self._wait(min(0.1, remaining))
 
+  def _await_car_first(self) -> None:
+    """At ignition the car pages the comma for hands-free on its own. Paging it at the same moment crosses the two
+    connections, and the kernel can drop the one that won while the controller keeps it (see StrayLinkError)."""
+    if self._car_link_fresh():
+      return
+    self._hfp_link.clear()
+    deadline = time.monotonic() + CAR_FIRST_WAIT
+    while (remaining := deadline - time.monotonic()) > 0:
+      if self._hfp_link.is_set():
+        self.log("car_first_wait", outcome="hfp", waited_s=round(CAR_FIRST_WAIT - remaining, 1))
+        return
+      self._wait(min(0.1, remaining))
+    self.log("car_first_wait", outcome="timeout", waited_s=CAR_FIRST_WAIT)
+
+  def _clear_stray_link(self) -> None:
+    address = self.config["receiver_address"]
+    try:
+      bluez = self._phone()
+      device = bluez.device(address)
+      if device is not None and device["connected"]:
+        self.log("stray_link_skipped", reason="BlueZ reports the car connected")
+        return
+      bluez.disconnect_stray_link()
+    except Exception as error:
+      self.log("stray_link_failed", error=str(error))
+
   # ---------------------------------------------------------------- session
 
   def _run(self, generation: int, trigger: str = "manual") -> None:
@@ -1086,12 +1121,16 @@ class Supervisor:
              settings={key: self.config.get(key) for key in REPORTED_SETTINGS})
     lease = self._lease() if wireless else NoLease()
     attempt = 0
+    car_first = trigger == "onroad" and wireless
     try:
       while not self._stop.is_set():
         started = time.monotonic()
         peer_stopped = False
         self.log("attempt_start")
         try:
+          if car_first:
+            car_first = False
+            self._await_car_first()
           self._attempt(lease)
           self.log("session_ended")
         except Cancelled:
@@ -1107,6 +1146,9 @@ class Supervisor:
           message = self._describe_error(stage, error)
           self._set(error=message)
           self.log("attempt_failed", stage=stage, error=message, kind=type(error).__name__, where=_where(error))
+          if isinstance(error, StrayLinkError):
+            self._clear_stray_link()
+            car_first = True  # the car pages right back once its link drops; let it, rather than crossing it again
         finally:
           self._close_sockets()
           try:
@@ -1200,6 +1242,8 @@ class Supervisor:
       self._set(state="wifi_start")
       result = boot.run(lambda credentials: lease.acquire(credentials, cancelled=boot.join_is_cancelled), cancelled=self._stop.is_set)
     except Exception as error:
+      if _stray_link(error):
+        raise StrayLinkError(f"Bluetooth link to the car is stuck: {error}") from error  # says nothing about the cached channel
       if source == "cache" and not self._stop.is_set() and self._status["last_stage"] in ("rfcomm", "wifi_start") and car_never_answered(error):
         self._remember_channel(address, None)  # the car never answered there; ask it over SDP next time
         self.log("rfcomm_cache_dropped", channel=channel)
@@ -1226,6 +1270,8 @@ class Supervisor:
           self._wait(settle)
           return sdp.query_channel(sdp_sock)
       except (OSError, sdp.SdpError) as error:
+        if _stray_link(error):
+          raise StrayLinkError(f"Bluetooth link to the car is stuck: {error}") from error  # retrying cannot clear it
         last_error = error
         self.log("sdp_retry", error=str(error), settle=settle)
         self._wait(0.35)

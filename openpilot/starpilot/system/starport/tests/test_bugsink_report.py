@@ -26,7 +26,7 @@ STREAMED = [
   (0, 9, "stage", {"state": "authenticating"}),
   (0, 10, "discovered", {"head_unit": {"2": ["Honda"], "3": ["Civic"], "4": ["2022"], "7": ["Alpine"], "8": ["HU-1"],
                                        "14": ["Danny's Civic"]}, "channels": []}),
-  (0, 11, "projection_ready", {"mode": {"width": 1280, "height": 720, "fps": 30, "margin_width": 0, "margin_height": 0}}),
+  (0, 11, "projection_ready", {"mode": {"width": 1280, "height": 720, "fps": 30, "margin_width": 0, "margin_height": 240, "density": 160}}),
   (0, 11, "frame_pipeline", {"nv12": True, "async_readback": True, "target_fps": 30, "encoder": "v4l2"}),
   (0, 12, "stage", {"state": "streaming"}),
   (0, 12, "video_acknowledged", {}),
@@ -54,6 +54,7 @@ def test_session_record_reports_stages_resolution_and_fps(tmp_path):
   assert record["stages"][2]["at_s"] == 6.0
   video = record["video"]
   assert video["resolution"] == "1280x720" and video["car_fps"] == 30 and video["target_fps"] == 30 and video["encoder"] == "v4l2"
+  assert video["screen"] == "1280x480" and video["margins"] == "0x240" and video["density_dpi"] == 160
   assert video["samples"] == 2 and video["fps_avg"] == 25.0 and video["fps_min"] == 20.0  # the unfocused sample is left out
   assert video["encode_peak_ms"] == 15.0 and video["wifi_dbm_min"] == -70 and video["encoder_recoveries"] == 1
   assert record["head_unit"] == {"head_unit_make": "Alpine", "head_unit_model": "HU-1", "car_make": "Honda",
@@ -70,7 +71,7 @@ def test_drive_event_groups_sessions_by_head_unit_and_weights_fps(tmp_path):
   assert crumbs[1]["message"] == "Attempt 1: wifi_join_failed at joining_wifi: TimeoutError" and crumbs[1]["category"] == "session 2"
   assert crumbs[1]["timestamp"] == "2026-10-16T12:00:30+00:00"
   assert event["level"] == "error" and event["tags"]["aa.outcome"] == "failed"
-  assert event["tags"]["aa.resolution"] == "1280x720" and event["tags"]["aa.fps"] == "25.0"
+  assert event["tags"]["aa.resolution"] == "1280x720" and event["tags"]["aa.screen"] == "1280x480" and event["tags"]["aa.fps"] == "25.0"
   drive = event["contexts"]["starport_drive"]
   assert drive["sessions"] == 2 and drive["failures"] == 1 and drive["fps_avg"] == 25.0 and drive["resolutions"] == ["1280x720"]
   assert "_report" not in event["contexts"]["starport_session_1"]

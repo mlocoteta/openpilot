@@ -152,6 +152,7 @@ class VideoMode:
   margin_height: int
   content_left: int | None = None
   content_top: int | None = None
+  density: int = 0  # dpi the head unit reports; 0 when it does not say
 
   @property
   def content_width(self) -> int:
@@ -164,6 +165,7 @@ class VideoMode:
   def as_dict(self) -> dict:
     return {"channel": self.channel, "config_index": self.config_index, "width": self.width, "height": self.height,
             "fps": self.fps, "margin_width": self.margin_width, "margin_height": self.margin_height,
+            "density": self.density,
             **({"content_left": self.content_left, "content_top": self.content_top} if self.content_left is not None else {})}
 
 
@@ -212,7 +214,8 @@ def choose_video_mode(channels: list[dict]) -> VideoMode:
           if (all(type(value) is int and value >= 0 for value in (top_edge, bottom, left_edge, right)) and
               top_edge + bottom == margin_height and left_edge + right == margin_width):
             left, top = left_edge, top_edge
-      mode = VideoMode(int(channel["id"]), index, width, height, fps, margin_width, margin_height, left, top)
+      mode = VideoMode(int(channel["id"]), index, width, height, fps, margin_width, margin_height, left, top,
+                       int(one(config, 5, 0) or 0))
       candidates.append((RESOLUTION_PREFERENCE.index(resolution), fps != 30, index, mode))
   if not candidates:
     raise ValueError(f"Head unit did not advertise a supported H.264 video mode (offered {describe_video_configs(channels)})")

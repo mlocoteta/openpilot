@@ -402,9 +402,9 @@ def test_frame_consumer_rejects_torn_write(tmp_path):
 # ------------------------------------------------------------------- session
 
 def test_choose_video_mode_prefers_720p():
-  channels = [{"id": 3, "video_configs": [parse_fields(field(1, 1)), parse_fields(field(1, 2) + field(4, 240)),
+  channels = [{"id": 3, "video_configs": [parse_fields(field(1, 1)), parse_fields(field(1, 2) + field(4, 240) + field(5, 160)),
                                           parse_fields(field(1, 3))]}]
-  assert choose_video_mode(channels) == VideoMode(3, 1, 1280, 720, 30, 0, 240)
+  assert choose_video_mode(channels) == VideoMode(3, 1, 1280, 720, 30, 0, 240, density=160)
   with pytest.raises(ValueError):
     choose_video_mode([{"id": 3, "video_configs": [parse_fields(field(1, 2) + field(10, 7))]}])  # H.265 only
 
@@ -812,6 +812,10 @@ class FakeBluez:
 
   def connect_device(self, address):
     pass
+
+  def disconnect_stray_link(self):
+    self.stray_disconnects = getattr(self, "stray_disconnects", 0) + 1
+    return 7
 
 
 def test_supervisor_full_wireless_session(identity, tmp_path, monkeypatch):
