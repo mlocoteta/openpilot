@@ -644,10 +644,10 @@ class CarController(CarControllerBase):
         _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
 
-    # Camera Alpha-long intercepts the stock ACC stream as soon as safety takes
+    # Camera and ordinary SDGM Alpha-long intercept the stock ACC stream as soon as safety takes
     # ownership. Keep its inactive gas/brake/status cadence alive through startup;
     # CC was replaced with a disabled command and startup excludes auto hold.
-    if startup_keepalive and (not self.ordinary_camera_long or self.camera_pedal_profile is not None):
+    if startup_keepalive and (not (self.ordinary_camera_long or self.ordinary_sdgm_long) or self.camera_pedal_profile is not None):
       # Other profiles retain their steering-only startup path. Never run cruise-button, pedal,
       # brake, dashboard, or hold producers before normal controls are ready.
       new_actuators = actuators.as_builder()

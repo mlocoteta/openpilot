@@ -75,8 +75,9 @@ def test_initializing_gm_output_is_inactive_and_profile_complete(cp):
         last_counter = (data[0] >> 4) & 3
         sent.append(now)
       else:
-        assert controller.ordinary_camera_long and controller.camera_pedal_profile is None
-        assert (address, bus) in ((0x2CB, 0), (0x315, 0), (0x370, 0), (0x2CD, 0),
+        assert (controller.ordinary_camera_long or controller.ordinary_sdgm_long) and controller.camera_pedal_profile is None
+        brake_bus = 2 if controller.ordinary_sdgm_long else 0
+        assert (address, bus) in ((0x2CB, 0), (0x315, brake_bus), (0x370, 0), (0x2CD, 0),
                                   (0x184, 2), (0x409, 0), (0x40A, 0))
         if address == 0x2CB:
           assert not data[0] & 1 and not data[1] & 0x20
