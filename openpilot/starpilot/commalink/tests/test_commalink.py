@@ -133,6 +133,12 @@ class TestCommaLink(unittest.TestCase):
     self.assertLessEqual(n, 14)
     ping = c.wait("ping", timeout=7)
     c.send({"t": "pong", "ts": ping["ts"]})
+    t0 = time.monotonic()
+    while self.link.stats["pongs"] < 1 and time.monotonic() - t0 < 2.0:
+      time.sleep(0.05)
+    self.assertGreaterEqual(self.link.stats["pingsSent"], 1)
+    self.assertEqual(self.link.stats["pongs"], 1)
+    self.assertLess(self.link.stats["rttP95Ms"], 1000)
     c.s.close()
 
   def test_requests_allowlist(self):
