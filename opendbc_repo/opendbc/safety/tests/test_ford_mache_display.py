@@ -46,11 +46,16 @@ def acquire(owner):
 def stock_display(owner, *, relay=False):
   for address in (0x18A, 0x3D8):
     assert owner.safety.safety_fwd_hook(2, address) == (-1 if relay else 0)
-    assert not owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, bytes(8)))
+    active = bytearray(8)
+    if address == 0x18A:
+      active[5] = 7 << 2  # Hands-free/active status, never neutral Off.
+    else:
+      active[6] = 6 << 3  # Both active lane lines.
+    assert not owner.safety.safety_tx_hook(libsafety_py.make_CANPacket(address, 0, active))
 
 
 @pytest.mark.parametrize('first', ('none', 'inactive', 'rejected'))
-def test_display_needs_first_accepted_active_command(owner, first):
+def test_active_display_needs_first_accepted_active_command(owner, first):
   announce(owner)
   if first == 'inactive':
     assert owner.safety.safety_tx_hook(command(owner, active=False))

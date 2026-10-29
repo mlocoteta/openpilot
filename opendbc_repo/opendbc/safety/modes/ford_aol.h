@@ -5,6 +5,7 @@ static bool ford_aol_manual = false;
 static bool ford_aol_enabled = false;
 static bool ford_aol_token = false;
 static bool ford_aol_main_available = false;
+static bool ford_aol_main_off = false;
 static bool ford_aol_token_claimed = false;
 static uint32_t ford_aol_token_ts = 0U;
 static bool ford_aol_main_neutral = false;
@@ -28,6 +29,50 @@ static bool ford_aol_lka_ready = false;
 static uint8_t ford_aol_owned = 0U;
 static uint32_t ford_aol_accepted_ts = 0U;
 
+// An accepted inactive actuator plus a truthful OFF/standby display can own
+// cluster continuity without owning steering. Keep the original 200ms bound.
+#define FORD_AOL_NEUTRAL_STEERING_SEEN 0x80U
+static bool ford_aol_neutral_request_seen = false;
+static uint32_t ford_aol_neutral_steering_ts = 0U;
+static uint8_t ford_aol_neutral_display_mask = 0U;
+static uint32_t ford_aol_neutral_ui_ts = 0U;
+
+static void ford_aol_neutral_reset(void) {
+  ford_aol_neutral_steering_ts = 0U;
+  ford_aol_neutral_display_mask = 0U;
+  ford_aol_neutral_ui_ts = 0U;
+}
+
+static bool ford_aol_neutral_sources_current(void) {
+  return ford_aol_enabled && ford_aol_retained_display_profile() && ((ford_aol_param & 1U) != 0U) &&
+    !relay_malfunction && ford_aol_drive && (ford_aol_eps == 0U) && ford_aol_lka_ready &&
+    (ford_aol_main_available || ford_aol_main_off) &&
+    ((aol_host_axis_mask == 0U) || ford_aol_main_off || heartbeat_engaged) && ford_aol_neutral_request_seen &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) <= AOL_HOST_REQUEST_TIMEOUT_US) && aol_rx_healthy();
+}
+
+static bool ford_aol_neutral_steering_current(void) {
+  return ford_aol_neutral_sources_current() && ((ford_aol_neutral_display_mask & FORD_AOL_NEUTRAL_STEERING_SEEN) != 0U) &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_neutral_steering_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
+}
+
+static bool ford_aol_neutral_current(void) {
+  return ford_aol_neutral_steering_current() && ((ford_aol_neutral_display_mask & 3U) != 0U) &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_neutral_ui_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
+}
+
+static bool ford_aol_neutral_packet(const CANPacket_t *msg) {
+  bool neutral = false;
+  if (msg->addr == 0x18AU) {
+    neutral = ((msg->data[5] >> 2U) & 7U) <= 1U;  // TJA Off/Standby only
+  } else if (msg->addr == 0x3D8U) {
+    const unsigned int lines = msg->data[6] >> 3U;
+    neutral = ((lines == 0U) || (lines == 30U)) && (((msg->data[6] >> 1U) & 3U) == 0U);
+  }
+  return neutral;
+}
+
+
 static void ford_aol_clear(void) {
   // A revoked session stays revoked, but must not repeatedly erase neutral
   // physical input history needed for the next real driver activation.
@@ -40,7 +85,15 @@ static void ford_aol_clear(void) {
   ford_aol_owned = 0U;
 }
 
+static void ford_aol_rx_invalid(void) {
+  ford_aol_clear();
+  ford_aol_neutral_reset();
+}
+
 static void ford_aol_reset(void) {
+  ford_aol_neutral_request_seen = false;
+  ford_aol_neutral_reset();
+  ford_aol_main_off = false;
   ford_aol_clear();
   ford_aol_enabled = false;
   ford_aol_main_available = false;
@@ -67,6 +120,7 @@ static void ford_aol_arm(void) {
 }
 
 static void ford_aol_host_request(uint8_t mask) {
+  ford_aol_neutral_request_seen = true;
   ford_aol_request_seen |= mask != 0U;
   if (ford_aol_retained_display_profile() && ((mask & 1U) == 0U)) {
     ford_aol_owned &= FORD_AOL_STEERING_OWNED;
@@ -81,6 +135,7 @@ static uint8_t ford_aol_request_mask(void) {
     (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_token_ts) > AOL_HOST_REQUEST_TIMEOUT_US);
   const bool long_profile = (ford_aol_param & 1U) != 0U;
   const bool lost_session = ford_aol_session && !heartbeat_engaged;
+  if (lost_session && (aol_host_axis_mask != 0U) && !ford_aol_main_off) { ford_aol_neutral_reset(); }
   if (!aol_rx_healthy() || relay_malfunction || expired || lost_session) {
     // Ordinary LONG cannot revive solely because a stale source/host recovers.
     // A fresh real PCM cruise activation is required after this withdrawal.
@@ -133,6 +188,7 @@ static void ford_aol_rx(const CANPacket_t *msg) {
       const unsigned int state = msg->data[1] & 7U;
       const bool main_available = (state == 3U) || (state == 4U) || (state == 5U);
       ford_aol_main_available = main_available;
+      ford_aol_main_off = state == 0U;
       if (!main_available) {
         ford_aol_clear();
         ford_aol_main_neutral = true;
@@ -179,6 +235,10 @@ static void ford_aol_rx(const CANPacket_t *msg) {
       }
     } else {
       // Manual profiles consume only the dedicated reverse lamp source.
+    }
+    if (!ford_aol_drive || (ford_aol_eps != 0U) || !ford_aol_lka_ready ||
+        (!ford_aol_main_available && !ford_aol_main_off)) {
+      ford_aol_neutral_reset();
     }
     // A transient physical veto revokes only display ownership, even when a
     // healthy packet follows in the same RX batch. AOL intent is retained.
@@ -228,7 +288,7 @@ static void ford_aol_configure(uint16_t param) {
       .host_request = ford_aol_host_request,
       .request_mask = ford_aol_request_mask,
       .permission_mask = ford_aol_permission_mask,
-      .rx_invalid = ford_aol_clear,
+      .rx_invalid = ford_aol_rx_invalid,
     };
     aol_policy = &policy;
   }
@@ -244,6 +304,13 @@ static void ford_aol_tx(const CANPacket_t *msg, bool accepted) {
     const bool active = (msg->addr == 0x3CAU) ? (((msg->data[0] >> 5U) == 2U) || ((msg->data[0] >> 5U) == 4U)) :
                        ((msg->addr == 0x3D3U) ? (((msg->data[4] >> 2U) & 7U) != 0U) :
                                                (((msg->data[0] >> 4U) & 7U) != 0U));
+    if (accepted && !active && ford_aol_neutral_sources_current()) {
+      if (!ford_aol_neutral_steering_current()) { ford_aol_neutral_display_mask = 0U; }
+      ford_aol_neutral_steering_ts = microsecond_timer_get();
+      ford_aol_neutral_display_mask |= FORD_AOL_NEUTRAL_STEERING_SEEN;
+    } else {
+      ford_aol_neutral_reset();
+    }
     const bool retained_display = ford_aol_retained_display_profile() && ((ford_aol_owned & FORD_AOL_DISPLAY_OWNED) != 0U) &&
       (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_accepted_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
     const uint8_t permission = (accepted && (active || retained_display)) ? ford_aol_permission_mask() : 0U;
@@ -251,6 +318,14 @@ static void ford_aol_tx(const CANPacket_t *msg, bool accepted) {
     const bool display_owned = steering_owned || (accepted && retained_display && ((permission & 1U) != 0U) && !relay_malfunction);
     ford_aol_owned = (steering_owned ? FORD_AOL_STEERING_OWNED : 0U) | (display_owned ? FORD_AOL_DISPLAY_OWNED : 0U);
     ford_aol_accepted_ts = microsecond_timer_get();
+  }
+  if ((msg->bus == 0U) && ((msg->addr == 0x18AU) || (msg->addr == 0x3D8U))) {
+    if (accepted && ford_aol_neutral_steering_current() && ford_aol_neutral_packet(msg)) {
+      ford_aol_neutral_ui_ts = microsecond_timer_get();
+      ford_aol_neutral_display_mask |= (msg->addr == 0x18AU) ? 1U : 2U;
+    } else if (!accepted) {
+      ford_aol_neutral_reset();
+    }
   }
 }
 
@@ -262,17 +337,21 @@ static bool ford_aol_fwd(int bus, int addr) {
     blocked = (((ford_aol_owned & FORD_AOL_STEERING_OWNED) != 0U) && (addr == (int)ford_aol_replacement())) ||
       (((ford_aol_owned & FORD_AOL_DISPLAY_OWNED) != 0U) && display_permitted && ((addr == 0x3D8) || (addr == 0x18A)));
   }
+  if (ford_aol_neutral_current() && (bus == 2)) {
+    blocked |= ((addr == 0x18A) && ((ford_aol_neutral_display_mask & 1U) != 0U)) ||
+               ((addr == 0x3D8) && ((ford_aol_neutral_display_mask & 2U) != 0U));
+  }
   return blocked;
 }
 
 // An unowned extended CAN-FD display must remain stock, including a rejected first
 // steering command. This cannot grant steering or longitudinal permission.
-static bool ford_aol_display_tx_allowed(void) {
+static bool ford_aol_display_tx_allowed(const CANPacket_t *msg) {
   bool allowed = true;
   if (ford_aol_enabled && ford_aol_retained_display_profile()) {
     allowed = ((ford_aol_owned & FORD_AOL_DISPLAY_OWNED) != 0U) &&
       ((ford_aol_permission_mask() & 1U) != 0U) && !relay_malfunction &&
       (safety_get_ts_elapsed(microsecond_timer_get(), ford_aol_accepted_ts) <= AOL_HOST_REQUEST_TIMEOUT_US);
   }
-  return allowed;
+  return allowed || (ford_aol_neutral_steering_current() && ford_aol_neutral_packet(msg));
 }

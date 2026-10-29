@@ -189,6 +189,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
   nonzero_after_brake = 0
   brake_seen = False
   transition_trace = []
+  last_neutral_ui = {}
   long_parser = CANParser(DBC[host.CP.carFingerprint][Bus.pt], [('ACCDATA', 50)], 0)
 
   class ClockMappedSafety:
@@ -290,7 +291,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
             fields['CcStat_D_Actl'] = 0
           if scenario == 'route45' and refusal == 'cancel' and name == 'Steering_Data_FD1':
             fields['CcAslButtnCnclPress'] = 1
-          if scenario in ('route49', 'cancel-native-cadence') and name == 'Steering_Data_FD1':
+          if scenario in ('route49', 'cancel-native-cadence', 'neutral-main-cadence') and name == 'Steering_Data_FD1':
             fields['CcAslButtnCnclResPress'] = int(cancel)
           if scenario in ('route45', 'route49', 'route22') and name == 'EPAS_INFO':
             fields['SteeringColumnTorque'] = 2 if steering else 0
@@ -298,6 +299,11 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
             fields['LatCtlSte_D_Stat'] = 0 if fault in ('temporary-lkas', 'temporary-lkas-gas') else 1
           if scenario == 'route45' and fault == 'permanent-eps' and name == 'EPAS_INFO':
             fields['EPAS_Failure'] = 2
+          if getattr(joined, 'stationary', False):
+            if name == 'DesiredTorqBrk':
+              fields['VehStop_D_Stat'] = 1
+            if name == 'EngBrakeData':
+              fields['AccStopMde_D_Rq'] = 3 if engaged and not brake else 0
           if name == 'EngBrakeData' and brake:
             fields['BpedDrvAppl_D_Actl'] = 2
           if name == 'EngVehicleSpThrottle' and fault in ('gas', 'temporary-eps-gas', 'temporary-lkas-gas'):
@@ -324,7 +330,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
             gear=0 if park else 1 if reverse else 3,
             mask=request,
             heartbeat=heartbeat and fault != 'heartbeat',
-            speed=(3.1 + .12 * ((steps // 2) % 12) / 11 if getattr(monkeypatch, "ford_speed_window", False) else 15.0),
+            speed=(3.1 + .12 * ((steps // 2) % 12) / 11 if getattr(monkeypatch, "ford_speed_window", False) else getattr(joined, 'speed', 15.0)),
             eps=1 if fault in ('temporary-eps', 'temporary-eps-gas') else 0,
           )
         assert native.tick == steps
@@ -518,6 +524,13 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
               active = bool(long_parser.vl['ACCDATA']['Cmbb_B_Enbl'])
               assert active == bool(command.longActive)
               active_long_frames += int(active)
+            elif address in (0x18A, 0x3D8) and not command.latActive and host.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
+              assert host.CP.openpilotLongitudinalControl
+              if address == 0x18A:
+                assert ((data[5] >> 2) & 7) <= 1, 'Inactive UI claimed active or hands-free steering'
+              else:
+                assert data[6] >> 3 in (0, 30) and ((data[6] >> 1) & 3) == 0
+              last_neutral_ui[address] = now[0]
         if getattr(monkeypatch, 'ford_angle', False) or scenario in (
             'display', 'route24', 'route24-mixed-eps', 'route2a', 'route2a-main', 'route2a-main-fault'):
           ui = [f for f in published['sendcan'].sendcan if f.address in (0x3D8, 0x18A)]
@@ -539,8 +552,15 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
               display_parser.update([(now[0], [(frame.address, bytes(frame.dat), frame.src - joined.offset)])])
               assert display_parser.vl['ACCDATA_3']['Tja_D_Stat'] == (7 if joined.hands_free and host.CP.flags & FordFlags.CANFD else 2)
           if not command.latActive and host.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1:
-            assert not ui
-            assert all(safety.safety_fwd_hook(2, address) == 0 for address in (0x3D8, 0x18A))
+            if not host.CP.openpilotLongitudinalControl:
+              assert not ui
+              assert all(safety.safety_fwd_hook(2, address) == 0 for address in (0x3D8, 0x18A))
+            else:
+              for address in (0x18A, 0x3D8):
+                if safety.safety_fwd_hook(2, address) == -1:
+                  assert address in last_neutral_ui
+                  # IPMA is 1Hz; fresh accepted ACC Off/Standby refreshes the shared display heartbeat.
+                  assert 0 <= now[0] - max(last_neutral_ui.values()) <= 200_000_000
         assert bool(axis.longitudinalActive) == bool(command.longActive)
         if not joined.expected_long:
           assert not axis.longitudinalActive and not command.longActive
@@ -756,7 +776,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
           assert route45_mixed[0]
         joined.route45_trace = route45_trace
         return
-      if scenario == 'cancel-native-cadence':
+      if scenario in ('cancel-native-cadence', 'neutral-main-cadence'):
         for _ in range(41):
           state, axis, sd_state, command = step(engaged=True)
         assert command.latActive and host.aol_card_intent.allowed_latch
@@ -772,11 +792,28 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
         for _ in range(30):
           state, axis, sd_state, command = step(main_off=True)
         assert not host.aol_card_intent.allowed_latch and not command.latActive and not command.longActive
+        if scenario == 'neutral-main-cadence':
+          assert not native.safety.get_controls_allowed() and native.safety.aol_get_permission_mask() == 0
+          assert native.safety.safety_fwd_hook(2, 0x18A) == -1
+          assert native.safety.safety_fwd_hook(2, 0x3D8) == -1
+          assert native.safety.safety_fwd_hook(2, 0x3D6) == 0
+          for transition_tick in range(40):
+            state, axis, sd_state, command = step(engaged=True, availability_transition=transition_tick < 10)
+          assert command.latActive and command.longActive and host.aol_card_intent.allowed_latch
+          assert native.safety.aol_get_permission_mask() == 3
         return
       if scenario == 'brake-native-cadence':
         for _ in range(41):
           state, axis, sd_state, command = step(engaged=True)
         assert command.latActive and command.longActive and host.aol_card_intent.allowed_latch
+        if getattr(monkeypatch, 'ford_standstill_brake', False):
+          for slowing_tick in range(300):
+            joined.speed = max(0.0, 15.0 - (slowing_tick + 1) * .05)
+            joined.stationary = joined.speed == 0.0
+            state, axis, sd_state, command = step(engaged=True)
+          for _ in range(120):
+            state, axis, sd_state, command = step(engaged=True)
+          assert state.standstill and command.latActive and command.longActive
         for _ in range(35):
           state, axis, sd_state, command = step(brake=True)
           assert host.aol_card_intent.allowed_latch, (host.aol_card_intent.latch_clear_reason, transition_trace[-12:])

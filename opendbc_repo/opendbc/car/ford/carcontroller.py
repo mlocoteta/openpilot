@@ -132,7 +132,8 @@ class CarController(CarControllerBase):
         self.packer, self.CAN.camera, CS.buttons_stock_values, cancel=stock_cancel, resume=stock_resume))
       can_sends.append(fordcan.create_button_msg(
         self.packer, self.CAN.main, CS.buttons_stock_values, cancel=stock_cancel, resume=stock_resume))
-    elif CC.cruiseControl.resume and (self.frame % CarControllerParams.BUTTONS_STEP) == 0:
+    elif (CC.cruiseControl.resume and (not self.CP.openpilotLongitudinalControl or CC.longActive) and
+          (self.frame % CarControllerParams.BUTTONS_STEP) == 0):
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.camera, CS.buttons_stock_values, resume=True))
       can_sends.append(fordcan.create_button_msg(self.packer, self.CAN.main, CS.buttons_stock_values, resume=True))
     # if stock lane centering isn't off, send a button press to toggle it off
@@ -357,7 +358,12 @@ class CarController(CarControllerBase):
       s.safetyModel == structs.CarParams.SafetyModel.ford and (s.safetyParam & ~(1 | 128 | 256)) in (18, 66)
       for s in self.CP.safetyConfigs)
     ui_enabled = CC.latActive and (not aol_owned_ui or self.mache_ui_owned)
-    if not aol_owned_ui or ui_enabled:
+    neutral_ui = (aol_owned_ui and self.CP.openpilotLongitudinalControl and not CC.latActive and not steer_alert and
+                  CS.out.canValid and not CS.out.canTimeout and not CS.out.vehicleSensorsInvalid and
+                  not CS.out.steerFaultTemporary and not CS.out.steerFaultPermanent and not CS.out.accFaulted and
+                  not CS.out.doorOpen and not CS.out.seatbeltUnlatched and CS.out.gearShifter in
+                  (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport, structs.CarState.GearShifter.low))
+    if not aol_owned_ui or ui_enabled or neutral_ui:
       send_ui = (self.main_on_last != main_on) or (self.lkas_enabled_last != ui_enabled) or (self.steer_alert_last != steer_alert)
       # send lkas ui msg at 1Hz or if ui state changes
       if (self.frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
@@ -368,7 +374,8 @@ class CarController(CarControllerBase):
         send_ui = True
         self.distance_bar_frame = self.frame
 
-      if (self.frame % CarControllerParams.ACC_UI_STEP) == 0 or send_ui:
+      acc_ui_step = CarControllerParams.ACC_UI_STEP // 2 if neutral_ui else CarControllerParams.ACC_UI_STEP
+      if (self.frame % acc_ui_step) == 0 or send_ui:
         show_distance_bars = self.frame - self.distance_bar_frame < 400
         hands_free_cluster = bool(self.cluster_extended_announced and
                                   self.hands_free_cluster_input is not None and self.hands_free_cluster_input.enabled)
