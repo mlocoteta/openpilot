@@ -15,7 +15,7 @@ ONNX = "d" * 64
 
 class MemoryParams:
   def __init__(self):
-    self.values = {"JetlinkMode": 0, "JetlinkChargePhone": False}
+    self.values: dict[str, int | dict[str, str]] = {"JetlinkMode": 0, "JetlinkChargePhone": False}
 
   def get(self, key):
     return self.values.get(key)
