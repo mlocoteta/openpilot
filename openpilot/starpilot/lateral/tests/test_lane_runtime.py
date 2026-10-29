@@ -148,6 +148,53 @@ def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, o
 
 
 class LaneRuntimeTests(unittest.TestCase):
+  def test_single_line_recovers_between_brief_refusals_without_retaining_output(self):
+    from openpilot.starpilot.lateral.tests.test_lane_centering import single
+    for missing_right, sign in ((True, 1), (False, -1)):
+      with self.subTest(missing_right=missing_right), OpenpilotPrefix(), \
+           mock.patch.dict(os.environ, {'AOL_REPLAY_RUNTIME': '0', 'REPLAY': '1'}), \
+           mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
+        params = Params()
+        publish_corolla_params(params)
+        params.put_bool('LaneCentering', True, block=True)
+        params.put('LaneCenteringE2EAuthority', 0., block=True)
+        controls = Controls()
+        m = single(missing_right=missing_right, line=-1.5, edge=10.)
+        with mock.patch(f'{__name__}.model', return_value=m):
+          for tick in range(220):
+            phase = tick - 100
+            now = 1_000_000_000 + tick * 10_000_000
+            feed(controls, now, tick)
+            if phase >= 0 and phase % 12 == 0:
+              controls.sm.logMonoTime['selfdriveState'] = now - 25_000_001
+            controls.state_control()
+            if phase >= 0 and phase % 12 == 0:
+              self.assertIsNone(controls.last_lane_centering_result)
+              self.assertEqual(controls.lane_centering_applied, 0.)
+              self.assertEqual(controls.lane_centering_controller._correction, 0.)
+              self.assertIsNone(controls.lane_centering_controller._tracker.path)
+            elif phase >= 0 and phase % 12 == 11:
+              self.assertGreater(sign * controls.lane_centering_applied, 0.)
+
+  def test_precise_single_line_corrects_small_spacing_error_in_actual_controls(self):
+    from openpilot.starpilot.lateral.tests.test_lane_centering import single
+    for missing_right, sign in ((True, 1), (False, -1)):
+      with self.subTest(missing_right=missing_right), OpenpilotPrefix(), \
+           mock.patch.dict(os.environ, {'AOL_REPLAY_RUNTIME': '0', 'REPLAY': '1'}), \
+           mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
+        params = Params()
+        publish_corolla_params(params)
+        params.put_bool('LaneCentering', True, block=True)
+        params.put('LaneCenteringE2EAuthority', 0., block=True)
+        controls = Controls()
+        m = single(missing_right=missing_right, line=-1.64, edge=10.)
+        m.laneLineStds[1 if missing_right else 2] = .02
+        with mock.patch(f'{__name__}.model', return_value=m):
+          for tick in range(100):
+            feed(controls, 1_000_000_000 + tick * 10_000_000, tick)
+            controls.state_control()
+        self.assertGreater(sign * controls.lane_centering_applied, 0.)
+
   def test_body_profile_reaches_actual_controls_and_clearance_withdraws_only_added_curvature(self):
     from opendbc.car.hyundai.tests.test_lane_body import identity
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'LANE_CENTERING_REPLAY_RUNTIME': '0', 'REPLAY': '1',

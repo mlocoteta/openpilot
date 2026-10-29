@@ -13,7 +13,6 @@ class TrackingTarget:
 
 
 class SingleLineTracker:
-  ACQUIRE_SECONDS = 0.20
   DEFAULT_SPACING = 1.7
   MAX_SOURCE_GAP = 0.15
   WIDTH_MAX_AGE = 5.0
@@ -148,15 +147,10 @@ class SingleLineTracker:
           and self.travel - self.width_travel <= self.WIDTH_MAX_DISTANCE
         ):
           self.spacing = self.width * 0.5
-      elif self.spacing is None and self.clock - self.acquired_at >= self.ACQUIRE_SECONDS:
-        assert self.pending is not None
-        if abs(sorted(distances)[1] - self.pending) > 0.25:
-          self.acquired_at = self.clock
-          self.pending = max(self.MIN_CLEARANCE, sorted(distances)[1])
-        else:
-          # Pending spacing checks acquisition stability. It must not make
-          # the model's existing lateral position the tracking objective.
-          self.spacing = self.DEFAULT_SPACING
+      elif self.spacing is None and sample_id != previous_id:
+        # Confirm the line on a second distinct model frame. Its spacing target
+        # is already known, so model-path drift must not restart acquisition.
+        self.spacing = self.DEFAULT_SPACING
       self.last_good_at, self.last_near, self.last_slope = self.clock, near, slope
       self.blocked = jump
       if self.spacing is None:

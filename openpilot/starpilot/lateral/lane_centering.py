@@ -31,6 +31,7 @@ MAX_OFFSET = 0.3
 MIN_CENTER_TO_LINE = 1.1
 MAX_CORRECTION = 0.004 * 0.30
 CENTER_ERROR_DEADBAND = 0.08
+SINGLE_LINE_DEADBAND_MIN = 0.04
 E2E_MAX_PATH_STD = 0.35
 E2E_BREAK_IN_START = 0.15
 E2E_BREAK_IN_FULL = 0.50
@@ -225,7 +226,13 @@ def raw_correction(model: Any, speed_mps: float, offset_m: float, e2e_authority:
         return None
     error = target_y - model_y
     error_abs = abs(error)
-    error = math.copysign(max(0.0, error_abs - CENTER_ERROR_DEADBAND), error)
+    deadband = CENTER_ERROR_DEADBAND
+    if not all(qualified) and _single_target is not None:
+      # Keep a quiet zone while allowing a precise visible line to hold its
+      # spacing more closely than an uncertain line.
+      line_std = float(stds[1 if qualified[0] else 2])
+      deadband = clip_scalar(line_std, SINGLE_LINE_DEADBAND_MIN, CENTER_ERROR_DEADBAND)
+    error = math.copysign(max(0.0, error_abs - deadband), error)
 
     # Reduce lane authority only when path variance establishes confidence.
     try:
