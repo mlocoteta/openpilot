@@ -809,6 +809,7 @@ export const StarPortPage = {
         <h2>StarPort</h2>
         <p>Show the StarPilot driving view on your car’s screen. Choose your device, follow the setup steps, then connect.</p>
       </header>
+      <GxNotice tone="info" title="Supported setups">StarPort officially supports your car’s built-in Android Auto, the AAWireless and Motorola MA1 wireless adapters, and the Open Headunit and HeadunitPad tablet apps. Other adapters and apps may work, but they aren’t tested and may not connect reliably.</GxNotice>
       <GxNotice tone="warn" v-if="!wired && !app && runtime?.dedicated_wifi_interface === false">StarPort uses the comma’s Wi-Fi to connect to your car and disconnects it from your current Wi-Fi network. Use the Galaxy hotspot for local access during projection. Remote Galaxy access requires Internet on the comma.</GxNotice>
       <GxNotice tone="danger" v-if="error && setup">{{ error }}</GxNotice>
       <GxNotice v-if="!setup" :busy="!error" :tone="error ? 'danger' : 'info'">{{ error || "Checking StarPort setup… Reconnecting automatically…" }}</GxNotice>
@@ -935,7 +936,7 @@ export const StarPortPage = {
               <ul>
                 <li><strong>Keep this page open while pairing</strong> so the car’s PIN or code doesn’t time out.</li>
                 <li><strong>Cars with built-in wireless Android Auto:</strong> open the car’s phone pairing screen, then tap <strong>Find car</strong> above. Choose your car, then confirm the code on both screens.</li>
-                <li><strong>Wireless adapter</strong> (AAWireless, Motorola MA1, Carlinkit…): choose Wireless adapter above, put the adapter in pairing mode and pair it here Your car doesn’t need to be paired. Adapter names often look like AndroidAuto-XXXX.</li>
+                <li><strong>Wireless adapter</strong> (AAWireless or Motorola MA1): choose Wireless adapter above, put the adapter in pairing mode and pair it here Your car doesn’t need to be paired. Adapter names often look like AndroidAuto-XXXX.</li>
               </ul>
               <p><strong>Start fresh:</strong></p>
               <ol>
