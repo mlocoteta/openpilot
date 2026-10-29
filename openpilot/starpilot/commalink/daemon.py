@@ -34,6 +34,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit, unquote
 
@@ -304,6 +305,7 @@ class Session:
     self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="commalink-req")
     self.inflight, self.inflight_lock = 0, threading.Lock()
     self.route_gen = None
+    self.rtts: "deque[int]" = deque(maxlen=240)   # last ~20 min of 5 s pings
 
   def close(self) -> None:
     if not self.closed.is_set():
@@ -359,6 +361,13 @@ class Session:
       self.stats["huHello"] = {k: f.get(k) for k in ("role", "version", "proto")}
     elif t == "ping":
       self.queue_frame({"t": "pong", "ts": f.get("ts")})
+    elif t == "pong" and isinstance(f.get("ts"), int):
+      rtt = int(time.time() * 1000) - f["ts"]
+      if 0 <= rtt < 60000:
+        self.rtts.append(rtt)
+        r = sorted(self.rtts)
+        self.stats.update(pongs=self.stats["pongs"] + 1, rttLastMs=rtt, rttP50Ms=r[len(r) // 2],
+                          rttP95Ms=r[min(len(r) - 1, (len(r) * 95) // 100)])
     elif t == "req":
       rid, m, p, b = f.get("id"), f.get("m"), f.get("p"), f.get("b")
       why = self.allow.check(m, p, b) if isinstance(p, str) and m in ("GET", "POST") else "bad request"
@@ -440,6 +449,7 @@ class Session:
         if now - last_ping >= 5.0:          # the HU answers pong: proves the return path while hud frames flow
           last_ping = now
           self.queue_frame({"t": "ping", "ts": int(time.time() * 1000)})
+          self.stats["pingsSent"] += 1
         try:
           data = self.out.get(timeout=max(0.01, min(next_hud - time.monotonic(), 1.0)))
         except queue.Empty:
@@ -463,7 +473,8 @@ class CommaLink:
     self.galaxy, self.allow = Galaxy(cfg.get("galaxy", GALAXY)), Allow()
     self.incoming: "queue.Queue[tuple[socket.socket, str]]" = queue.Queue()
     self.stats = {"role": self.role, "sessions": 0, "hudFrames": 0, "bytesTx": 0, "dropped": 0, "connectFails": 0,
-                  "lastError": None, "state": "starting", "via": None, "since": None, "huHello": None}
+                  "lastError": None, "state": "starting", "via": None, "since": None, "huHello": None,
+                  "pingsSent": 0, "pongs": 0, "rttLastMs": None, "rttP50Ms": None, "rttP95Ms": None}
     self.version = self._version()
     self.dongle = self._dongle()
 
