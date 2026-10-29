@@ -10,7 +10,7 @@ STANDSTILL_MODEL_PREFIX_NOISE_M = 0.01
 
 def normalized_origin(distances: tuple) -> tuple:
   """Only remove sub-micrometre model-origin roundoff; callers validate all geometry."""
-  if distances and _finite(distances[0], low=-ORIGIN_ROUNDOFF_M, high=0.0) is not None and distances[0] < 0:
+  if distances and _finite(distances[0], low=-ORIGIN_ROUNDOFF_M, high=ORIGIN_ROUNDOFF_M) is not None and distances[0] != 0:
     return (0.0, *distances[1:])
   return distances
 
