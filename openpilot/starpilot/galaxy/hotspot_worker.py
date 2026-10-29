@@ -28,6 +28,21 @@ STATIONS = ('wlan0', 'aa0')
 # Android Auto drops and rejoins the car between attempts; stay put through those gaps.
 STANDALONE_SETTLE_S = 30.0
 NEGOTIATING = ('AUTHENTICATING', 'ASSOCIATING', 'ASSOCIATED', '4WAY_HANDSHAKE', 'GROUP_HANDSHAKE')
+ONROAD_PARAM = Path('/data/params/d/IsOnroad')
+# qcacld panics when wpa_supplicant still holds galaxy0 while hostapd runs on it: a later supplicant mode
+# change stops our AP from inside wlan0's join (route 00000070, 2026-10-29). NetworkManager hands every new
+# Wi-Fi device to the supplicant before `managed no` lands, so keep galaxy0 out of NetworkManager from the start.
+# A [device-*] managed=0 section beats netplan's type:wifi managed=1 (the last section wins, user-conf > udev);
+# /run keeps it runtime-only.
+NM_CONF = Path('/run/NetworkManager/conf.d/zz-starpilot-galaxy-hotspot.conf')
+NM_CONF_TEXT = (f'# Written by the StarPilot Galaxy hotspot worker: never hand {INTERFACE} to wpa_supplicant.\n'
+                f'[device-starpilot-galaxy-hotspot]\nmatch-device=interface-name:{INTERFACE}\nmanaged=0\n')
+SUPPLICANT = ('fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1', 'fi.w1.wpa_supplicant1')
+SUPPLICANT_SOCKETS = Path('/run/wpa_supplicant')
+# The supplicant grabbed a fresh galaxy0 within 0.3 s on route 00000070; require it absent for longer before hostapd.
+SUPPLICANT_QUIET_S = 1.5
+SUPPLICANT_WAIT_S = 5.0
+KEEP = 'keep'
 
 
 def radio_channel(status):
@@ -67,6 +82,15 @@ def choose_channel(results):
   return results[0] if results else None
 
 
+def steady_results(results):
+  """(station, result) pairs, wlan0 first, when wlan0 must not move a running AP: its joins still hold
+  the AP, its channel does not count."""
+  first, others = results[0][1], [result for station, result in results[1:]]
+  if first == HOLD:
+    return [HOLD] + others
+  return others if any(isinstance(result, tuple) and result != STANDALONE_CHANNEL for result in others) else [KEEP]
+
+
 def nm_activating(state):
   """NetworkManager device states 40-90 are the steps between disconnected and activated."""
   try:
@@ -97,8 +121,10 @@ def hostapd_config(config, channel):
 
 
 class HotspotBackend:
-  def __init__(self, root=RUNTIME, run=subprocess.run, interfaces=WirelessInterfaces, popen=subprocess.Popen):
+  def __init__(self, root=RUNTIME, run=subprocess.run, interfaces=WirelessInterfaces, popen=subprocess.Popen,
+               nm_conf=NM_CONF, sockets=SUPPLICANT_SOCKETS, clock=time.monotonic, sleep=time.sleep):
     self.root, self.run, self.interfaces, self.popen = root, run, interfaces, popen
+    self.nm_conf, self.sockets, self.clock, self.sleep = nm_conf, sockets, clock, sleep
     self.children = []
     self.owned = False
     self.firewall = shutil.which('iptables-legacy') or shutil.which('iptables')
@@ -108,7 +134,8 @@ class HotspotBackend:
   def command(self, args, check=True):
     return self.run(args, check=check, text=True, capture_output=True, timeout=5)
 
-  def channel(self):
+  def channel(self, steady=False):
+    """steady: wlan0 carries the car's Internet; its joins and channel changes must not restart the AP."""
     results, self.connected, self.idle = [], set(), []
     for station in STATIONS:
       if station == STATIONS[0]:
@@ -125,8 +152,10 @@ class HotspotBackend:
         self.idle.append(station)
       elif isinstance(result, tuple):
         self.connected.add(result[1])
-      results.append(result)
-    return choose_channel(results)
+      results.append((station, result))
+    if steady and results and results[0][0] == STATIONS[0]:
+      return choose_channel(steady_results(results))
+    return choose_channel([result for station, result in results])
 
   def activating(self):
     for station in self.idle:
@@ -152,6 +181,48 @@ class HotspotBackend:
     finally:
       client.close()
 
+  def keep_unmanaged(self):
+    """Install the NetworkManager rule once per boot; the reload only re-reads configuration. Best effort:
+    wait_supplicant_free still keeps hostapd off a supplicant-held galaxy0 without it."""
+    try:
+      if self.nm_conf.read_text() == NM_CONF_TEXT:
+        return
+    except OSError:
+      pass
+    try:
+      self.nm_conf.parent.mkdir(parents=True, exist_ok=True)
+      temporary = self.nm_conf.with_name('.' + self.nm_conf.name)
+      temporary.write_text(NM_CONF_TEXT)
+      os.replace(temporary, self.nm_conf)
+    except OSError:
+      return
+    self.command(['nmcli', 'general', 'reload', 'conf'], check=False)
+
+  def supplicant_path(self):
+    reply = self.command(['busctl', 'call', *SUPPLICANT, 'GetInterface', 's', INTERFACE], check=False)
+    if reply.returncode == 0 and reply.stdout.startswith('o '):
+      return reply.stdout.split(None, 1)[1].strip().strip('"')
+    return None
+
+  def supplicant_holds(self):
+    return (self.sockets / INTERFACE).exists() or self.supplicant_path() is not None
+
+  def wait_supplicant_free(self):
+    """Before hostapd: galaxy0 must stay out of wpa_supplicant for SUPPLICANT_QUIET_S. No AP runs yet, so
+    removing a supplicant interface here only changes the mode of an idle interface."""
+    start = last_held = self.clock()
+    released = False
+    while self.clock() - last_held < SUPPLICANT_QUIET_S:
+      if self.supplicant_holds():
+        last_held = self.clock()
+        if last_held - start >= SUPPLICANT_WAIT_S:
+          raise RuntimeError('wpa_supplicant holds the hotspot interface')
+        path = None if released else self.supplicant_path()
+        if path is not None and last_held - start >= SUPPLICANT_QUIET_S:
+          self.command(['busctl', 'call', *SUPPLICANT, 'RemoveInterface', 'o', path], check=False)
+          released = True
+      self.sleep(0.1)
+
   def stale_owned(self):
     return owned(INTERFACE, ALIAS)
 
@@ -168,6 +239,10 @@ class HotspotBackend:
     self.children.clear()
     owned = self.owned or self.stale_owned()
     if owned:
+      # Drop a supplicant hold before the netdev goes, or the supplicant re-grabs the next galaxy0 by name.
+      path = self.supplicant_path()
+      if path is not None:
+        self.command(['busctl', 'call', *SUPPLICANT, 'RemoveInterface', 'o', path], check=False)
       self._wireless('delete')
       self.owned = False
     if self.firewall:
@@ -185,6 +260,7 @@ class HotspotBackend:
       raise RuntimeError('Firewall helper unavailable')
     if overlapping_routes(json.loads(self.command(['ip', '-j', '-4', 'route', 'show', 'table', 'all']).stdout)):
       raise RuntimeError('Hotspot subnet conflicts with an existing network')
+    self.keep_unmanaged()
     self._wireless('create')
     self.owned = True
     try:
@@ -196,6 +272,7 @@ class HotspotBackend:
         self.command(self.firewall_rule('-I', direction))
       self.command(['ip', 'address', 'add', f'{ADDRESS}/24', 'dev', INTERFACE])
       self.command(['ip', 'link', 'set', 'dev', INTERFACE, 'up'])
+      self.wait_supplicant_free()
       ap = self.root / 'hostapd.conf'
       ap.write_text(hostapd_config(config, channel) + f'ctrl_interface={self.root / "control"}\n')
       ap.chmod(0o600)
@@ -212,9 +289,16 @@ class HotspotBackend:
       raise
 
 
+def read_onroad(path=ONROAD_PARAM):
+  try:
+    return path.read_bytes().strip() == b'1'
+  except OSError:
+    return False  # 7.0 removes IsOnroad while offroad
+
+
 class HotspotController:
-  def __init__(self, backend, clock=time.monotonic):
-    self.backend, self.clock = backend, clock
+  def __init__(self, backend, clock=time.monotonic, onroad=read_onroad):
+    self.backend, self.clock, self.onroad = backend, clock, onroad
     self.applied, self.retry_at, self.ready_deadline = None, 0.0, 0.0
     self.station_seen = float('-inf')
     self.attempted = None
@@ -226,15 +310,24 @@ class HotspotController:
       self.applied = None
       return {'active': False, 'state': 'disabled', 'reason': ''}
     try:
-      channel = self.backend.channel()
       running = self.applied is not None and self.backend.alive()
+      # Onroad a 2.4 GHz AP stays put: the HU needs it, and wlan0 (the phone hotspot) works beside it in MCC.
+      # Every AP restart is a fresh galaxy0 that NetworkManager and wpa_supplicant may race for.
+      steady = running and self.applied[1][0] == 'g' and self.onroad()
+      channel = self.backend.channel(steady=steady)
       status = self.backend.ap_status() if running else {'ready': False, 'channel': None}
-      if running and isinstance(channel, tuple) and self.applied[0] == config:
+      if running and (isinstance(channel, tuple) or channel == KEEP) and self.applied[0] == config:
         current = status['channel']
         # The driver moves the AP onto a station's channel by itself; restarting it there would only move it back.
-        if current is not None and (current == channel[1] or current in self.backend.connected):
+        if current is not None and (channel == KEEP or current == channel[1] or current in self.backend.connected):
           channel = band_channel(current)
           self.applied = (self.applied[0], channel)
+      if channel == KEEP:
+        channel = self.applied[1]
+      if running and channel != HOLD and self.backend.supplicant_holds():
+        # Not expected with the NetworkManager rule. A supplicant-held AP is what panicked: stop it while no
+        # station is joining, and start clean after the retry delay.
+        raise RuntimeError('wpa_supplicant holds the running hotspot interface')
       if channel == STANDALONE_CHANNEL:
         if self.clock() - self.station_seen < STANDALONE_SETTLE_S:
           channel = HOLD
