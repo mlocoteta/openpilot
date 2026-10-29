@@ -265,6 +265,12 @@ bool can_init(uint8_t can_number) {
     FDCAN_GlobalTypeDef *FDCANx = CANIF_FROM_CAN_NUM(can_number);
     ret &= can_set_speed(can_number);
     ret &= llcan_init(FDCANx);
+    #ifndef PANDA_BODY
+    // Reinitialization must not leave IRQs running on powered-down transceivers.
+    if (power_save_enabled) {
+      set_power_save_state(true);
+    }
+    #endif
     // in case there are queued up messages
     process_can(can_number);
   }
