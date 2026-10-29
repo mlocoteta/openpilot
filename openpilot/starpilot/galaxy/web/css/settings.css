@@ -709,3 +709,31 @@ html.gx-maker-open, html.gx-maker-open body { touch-action: manipulation; }
 .gx-layout__inspector .gx-select__button { min-height: 40px; padding-block: 7px; }
 .gx-layout__display .gx-row .gx-select__button { min-height: 36px; padding-block: 5px; }
 .gx-layout__display .gx-row .gx-field { min-height: 0; padding-block: 0; }
+
+.gx-model-card--polaris {
+  border-color: #9b7be8;
+  background-image: radial-gradient(ellipse at top left, #a855f71a, transparent 65%), linear-gradient(120deg, transparent 40%, #38bdf810);
+}
+.gx-model-card--polaris .gx-model-card__title {
+  color: #bca0ff;
+  background: linear-gradient(110deg, #c4a0ff, #a8b8ff, #67d7ff, #c4a0ff);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gx-polaris-flow 7s ease-in-out infinite alternate;
+}
+.gx-polaris-badge { color: #c4b5fd; border-color: #a78bfa70; background: #8b5cf618; gap: 6px; }
+.gx-polaris-badge__star { display: inline-block; animation: gx-polaris-star 4s ease-in-out infinite alternate; }
+[data-theme="light"] .gx-model-card--polaris .gx-model-card__title {
+  background-image: linear-gradient(110deg, #7c3aed, #5b4bd8, #0369a1, #7c3aed);
+}
+[data-theme="light"] .gx-polaris-badge { color: #6d28d9; }
+@keyframes gx-polaris-flow { to { background-position: 100% 50%; } }
+@keyframes gx-polaris-star { to { transform: rotate(25deg) scale(1.15); opacity: .65; } }
+@media (prefers-reduced-motion: reduce) {
+  .gx-model-card--polaris .gx-model-card__title, .gx-polaris-badge__star { animation: none; }
+}
+@media (forced-colors: active) {
+  .gx-model-card--polaris .gx-model-card__title { background: none; -webkit-text-fill-color: currentColor; color: CanvasText; }
+}

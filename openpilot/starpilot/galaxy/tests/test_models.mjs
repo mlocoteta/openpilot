@@ -313,3 +313,7 @@ assert.equal(modelActionAllowed({ ...refreshingCatalog, isOnroad: true }, "selec
 assert.equal(modelActionAllowed({ ...refreshingCatalog, randomizer: true }, "select-big", big), false)
 assert.equal(modelActionAllowed({ ...refreshingCatalog, refreshing: false }, "select-big", big), false)
 assert.equal(modelActionAllowed(refreshingCatalog, "delete", small), false)
+
+for (const value of ["spz_polaris_r3a", "spz_polaris_r3b"]) assert.equal(ModelsPage.methods.isPolaris({value}), true)
+for (const value of ["polaris", "spz_polaris_r3a_copy", "lightspeed", undefined]) assert.equal(ModelsPage.methods.isPolaris({value, label: "Polaris"}), false)
+assert.equal(ModelsPage.methods.isPolaris(null), false)
