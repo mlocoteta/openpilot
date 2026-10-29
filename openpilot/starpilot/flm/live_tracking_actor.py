@@ -13,6 +13,24 @@ from openpilot.starpilot.flm.live_tracking_ingress import LiveTrackingIngress
 from openpilot.starpilot.flm.live_tracking_response import certificate_from_dict, validate_certificate, validate_response_witness
 
 
+def _original_probe_history(collector, ingress, control):
+  """Native replay context is independent of scoring admission/warmup."""
+  history = ingress.control_history
+  if ingress.episodes.source_tracking:
+    from itertools import islice
+    from openpilot.starpilot.flm.original_context_receipts import OriginalContextReceipts
+
+    context = getattr(collector.adapter, 'original_context_receipts', None)
+    if context is not None:
+      if type(context) is not OriginalContextReceipts or context.failed:
+        raise ValueError('original probe context unavailable')
+      # Existing original observations only. Bound the scan, including newer
+      # lagged-response frames, and keep the same301-row checkpoint history.
+      rows = tuple(row for row in islice(reversed(context.controls.values()), 402) if row.control_ns <= control.control_ns)
+      return tuple(reversed(rows[:301]))
+  return tuple(row for row in history if row.control_ns <= control.control_ns)
+
+
 def _observed_probe_candidates(
   ready,
   prefix,
@@ -449,7 +467,7 @@ class LiveTrackingActor:
       witness = self.ingress.monitor.witness(now_ns)
       if witness is None:
         return
-      history = tuple(row for row in self.ingress.control_history if row.control_ns <= control.control_ns)
+      history = _original_probe_history(collector, self.ingress, control)
       checkpoints = [index for index, row in enumerate(history) if row.replay_snapshot]
       if not checkpoints:
         return

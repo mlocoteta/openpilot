@@ -31,6 +31,8 @@ class _SourceDelivery:
   def __init__(self):
     self.pending = False
     self.pose_header = 0
+    self.evidence_poller = None
+    self.evidence_sockets = ()
 
   def refresh(self, sm):
     sm.update(0)
@@ -38,9 +40,21 @@ class _SourceDelivery:
     if sm.updated['deviceMotion']:
       self.pose_header = int(sm.logMonoTime['deviceMotion'])
 
-  def next(self, sm):
+  def next(self, sm, *, pending_evidence=()):
     if not self.pending:
-      sm.update()
+      if pending_evidence:
+        # A received pose may still need a genuinely newer consumed state.
+        # Poll existing tapes without consuming/reordering their FIFO heads.
+        sockets = (sm.sock['deviceMotion'], *pending_evidence)
+        if len(sockets) != len(self.evidence_sockets) or any(a is not b for a, b in zip(sockets, self.evidence_sockets, strict=True)):
+          self.evidence_poller = messaging.Poller()
+          for socket in sockets:
+            self.evidence_poller.registerSocket(socket)
+          self.evidence_sockets = sockets
+        self.evidence_poller.poll(10)
+        sm.update(0)
+      else:
+        sm.update()
     header = self.pose_header or (int(sm.logMonoTime['deviceMotion']) if sm.updated['deviceMotion'] else 0)
     self.pending = False
     self.pose_header = 0
@@ -515,7 +529,15 @@ def run(
         trial_gc_deferred = False
       # Parent handles bounded primitive ingest and live receipts. Physical
       # calibration and native sensitivity execute in bounded separate children.
-      delivered_pose_header = source_delivery.next(sm)
+      pending_poses = cast(tuple[object, ...], getattr(collector, '_original_source_pose_queue', ()))
+      pending_fresh = False
+      if pending_poses:
+        from openpilot.starpilot.flm.original_source_capture import MAX_GAP_NS
+        pending_stamp = getattr(pending_poses[0], 'mono_ns', 0)
+        pending_now = clock()
+        pending_fresh = type(pending_stamp) is int and 0 < pending_stamp <= pending_now <= pending_stamp + MAX_GAP_NS
+      delivered_pose_header = (source_delivery.next(sm, pending_evidence=(control_socket, applied_socket))
+                               if pending_fresh else source_delivery.next(sm))
       source_rejected = False
       now = clock()
       # This is an ORIGINAL header from the real poll or an already consumed
