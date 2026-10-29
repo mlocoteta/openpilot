@@ -111,7 +111,12 @@ class Allow:
     self.intent_page: dict[str, str] = {}
 
   def check(self, method: str, path: str, body) -> str | None:
-    p = urlsplit(path).path
+    if not path.startswith("/") or path.startswith("//") or len(path) > 512 or any(c in path for c in "\r\n\\ "):
+      return "not a local Galaxy path"
+    parts = urlsplit(path)
+    p = parts.path
+    if parts.query and p != "/api/hud/route":
+      return "query only allowed on /api/hud/route"
     if method == "GET":
       if p.startswith("/api/settings/pages/"):
         return None if unquote(p[len("/api/settings/pages/"):]) in ALLOWED_PAGES else "page not on the CommaLink allowlist"
@@ -304,7 +309,7 @@ class Session:
     self.last_rx = time.monotonic()
     self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="commalink-req")
     self.inflight, self.inflight_lock = 0, threading.Lock()
-    self.route_gen = None
+    self.route_gen, self.route_retry = None, 0.0
     self.rtts: "deque[int]" = deque(maxlen=240)   # last ~20 min of 5 s pings
 
   def close(self) -> None:
@@ -317,11 +322,19 @@ class Session:
       self.sock.close()
       self.pool.shutdown(wait=False)
 
-  def queue_frame(self, obj: dict) -> None:
+  def queue_frame(self, obj: dict) -> bool:
+    return self.queue_line(json.dumps(obj, separators=(",", ":")).encode() + b"\n")
+
+  def queue_line(self, line: bytes) -> bool:
+    if len(line) > MAX_LINE:               # COMMALINK.md section 2: max 64 KiB per line, the HU drops longer ones
+      self.stats["oversize"] = self.stats.get("oversize", 0) + 1
+      return False
     try:
-      self.out.put_nowait(json.dumps(obj, separators=(",", ":")).encode() + b"\n")
+      self.out.put_nowait(line)
+      return True
     except queue.Full:
       self.stats["dropped"] += 1
+      return False
 
   def _write(self, data: bytes) -> None:
     self.sock.settimeout(3.0)              # peer stopped reading for 3 s = dead link
@@ -391,7 +404,12 @@ class Session:
       except ValueError:
         reply = {"error": "comma sent a non-JSON reply"}
       self.allow.saw(m, p, b, s, reply)
-      self.queue_frame({"t": "res", "id": rid, "s": s, "b": reply})
+      line = json.dumps({"t": "res", "id": rid, "s": s, "b": reply}, separators=(",", ":")).encode() + b"\n"
+      if len(line) > MAX_LINE:
+        self.stats["oversize"] = self.stats.get("oversize", 0) + 1
+        self.queue_frame({"t": "res", "id": rid, "s": 502, "b": {"error": "reply over the 64 KiB CommaLink line limit"}})
+      else:
+        self.queue_line(line)
     except Exception as e:  # noqa: BLE001
       self.queue_frame({"t": "res", "id": rid, "s": 502, "b": {"error": f"comma Galaxy unavailable: {type(e).__name__}"}})
     finally:
@@ -399,9 +417,12 @@ class Session:
         self.inflight -= 1
 
   def send_route(self, gen) -> None:
+    if time.monotonic() < self.route_retry:
+      return
     s, raw = self.g.call("GET", f"/api/hud/route?gen={gen}")
     if s != 200:
-      return                               # route endpoint not on this build yet: the HU just has no line
+      self.route_retry = time.monotonic() + 10.0   # route endpoint not on this build yet: the HU just has no line
+      return
     j = json.loads(raw)
     coords, cong = j.get("coords") or [], j.get("cong")
     n = max(1, -(-max(len(coords) - 1, 1) // (ROUTE_CHUNK - 1)))
@@ -418,7 +439,7 @@ class Session:
     rd = threading.Thread(target=self.reader, name="commalink-rx", daemon=True)
     rd.start()
     self.queue_frame({"t": "hello", "proto": 1, "role": "comma", "version": self.version, "dongle": self.dongle})
-    next_hud, last_ping, onroad = 0.0, 0.0, False
+    next_hud, last_ping, last_hud, onroad = 0.0, 0.0, time.monotonic(), False
     try:
       while not self.closed.is_set():
         now = time.monotonic()
@@ -433,11 +454,9 @@ class Session:
             body = raw.strip()
             if b"\n" in body:
               body = json.dumps(json.loads(body), separators=(",", ":")).encode()
-            try:
-              self.out.put_nowait(b'{"t":"hud","d":' + body + b"}\n")
+            if self.queue_line(b'{"t":"hud","d":' + body + b"}\n"):
               self.stats["hudFrames"] += 1
-            except queue.Full:
-              self.stats["dropped"] += 1
+              last_hud = now
             try:
               d = json.loads(body)
               onroad = bool(d.get("onroad"))
@@ -446,7 +465,9 @@ class Session:
                 self.send_route(nav.get("gen"))
             except (ValueError, AttributeError, OSError):
               pass
-        if now - last_ping >= 5.0:          # the HU answers pong: proves the return path while hud frames flow
+        # the HU answers pong: proves the return path while hud frames flow (every 5 s). Without hud frames
+        # (Galaxy down/slow) ping at 1 Hz so the HU's 3 s watchdog still sees the link (COMMALINK.md: >= 1 Hz).
+        if now - last_ping >= 5.0 or (now - last_hud >= 1.0 and now - last_ping >= 1.0):
           last_ping = now
           self.queue_frame({"t": "ping", "ts": int(time.time() * 1000)})
           self.stats["pingsSent"] += 1
