@@ -58,7 +58,7 @@ from openpilot.starpilot.conditional_mode.runtime_settings import (ConditionalSe
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.nostalgia import aol_no_entry, paddle_cancel, physical_cancel, saved_enabled as nostalgia_saved_enabled
-from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory
+from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory, advisory_eligible
 from openpilot.starpilot.lateral.lane_change_status_wire import alert_wording, decode as decode_lane_status, fresh_for_model
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -310,7 +310,10 @@ class SelfdriveD:
       device = self.sm['deviceState']
       drive_id = (int(device.startedMonoTime) if self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
                   self.sm.valid['deviceState'] and device.started else 0)
-      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed), drive_id=drive_id)
+      eligible = advisory_eligible(self.CP, CS, active=self.active,
+        intent=self.aol_last_intent if self.aol_replay else None)
+      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed),
+        drive_id=drive_id, eligible=eligible)
       self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
       if show_low_speed:
         self.events.add(EventName.belowSteerSpeed)
@@ -1076,6 +1079,11 @@ class SelfdriveD:
     return intent
 
   def update_alerts(self, CS):
+    # Engagement may change after car events; retire only the inactive advisory.
+    if (EventName.belowSteerSpeed in self.events.names or 'belowSteerSpeed/warning' in self.AM.alerts) and not advisory_eligible(
+        self.CP, CS, active=self.active, intent=self.aol_last_intent if self.aol_replay else None):
+      self.events.events = [event for event in self.events.names if event != EventName.belowSteerSpeed]
+      self.AM.alerts.pop('belowSteerSpeed/warning', None)
     clear_event_types = set()
     if ET.WARNING not in self.state_machine.current_alert_types:
       clear_event_types.add(ET.WARNING)
