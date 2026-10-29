@@ -8,8 +8,10 @@ import pytest
 
 from openpilot.starpilot.galaxy.hotspot import DEFAULT, HotspotSettings, atomic_json, hotspot_name, validate_config
 from openpilot.starpilot.galaxy.hotspot_netlink import WirelessInterfaces, attribute, attributes
-from openpilot.starpilot.galaxy.hotspot_worker import (HOLD, STANDALONE_SETTLE_S, HotspotBackend, HotspotController, choose_channel,
-                                                       hostapd_config, nm_activating, overlapping_routes, radio_channel)
+from openpilot.starpilot.galaxy.hotspot_worker import (HOLD, KEEP, NM_CONF_TEXT, STANDALONE_SETTLE_S, SUPPLICANT_QUIET_S,
+                                                       SUPPLICANT_WAIT_S, HotspotBackend, HotspotController, choose_channel,
+                                                       hostapd_config, nm_activating, overlapping_routes, radio_channel, read_onroad,
+                                                       steady_results)
 
 CONFIG = {'enabled': True, 'ssid': 'TheGalaxy-6b86', 'password': '1234567890123456'}
 DONGLE = 'b0c4a280b2f96b86'
@@ -20,8 +22,19 @@ def backend_mock(ready=True, ap_channel=None):
   backend.alive.return_value = True
   backend.ap_status.return_value = {'ready': ready, 'channel': ap_channel}
   backend.activating.return_value = False
+  backend.supplicant_holds.return_value = False
   backend.connected = set()
   return backend
+
+
+def quiet_backend(tmp_path, **kwargs):
+  """A backend whose NetworkManager rule, supplicant sockets and clock live in tmp_path."""
+  now = [0.]
+  def sleep(seconds):
+    now[0] += seconds
+  (tmp_path / 'sockets').mkdir(exist_ok=True)
+  return HotspotBackend(tmp_path, nm_conf=tmp_path / 'conf.d' / 'zz.conf', sockets=tmp_path / 'sockets',
+                        clock=lambda: now[0], sleep=sleep, **kwargs)
 
 
 @pytest.mark.parametrize('change', [{'enabled': 1}, {'ssid': 'bad\nssid'}, {'password': 'short'},
@@ -155,6 +168,15 @@ def test_join_leaves_running_ap_alone():
   now[0] += 2
   assert controller.tick(CONFIG)['state'] == 'starting'
   backend.start.assert_called_once_with(CONFIG, ('g', 6))
+
+
+def test_read_onroad(tmp_path):
+  param = tmp_path / 'IsOnroad'
+  assert not read_onroad(param)
+  param.write_bytes(b'1')
+  assert read_onroad(param)
+  param.write_bytes(b'0')
+  assert not read_onroad(param)
 
 
 def test_hold_does_not_start_ap():
@@ -300,7 +322,7 @@ def test_controller_readiness_and_failed_child():
 def test_backend_failure_rolls_back_only_owned_interface(tmp_path):
   run = Mock(return_value=Mock(stdout='[]'))
   interfaces = Mock()
-  backend = HotspotBackend(tmp_path, run=run, interfaces=interfaces)
+  backend = quiet_backend(tmp_path, run=run, interfaces=interfaces)
   backend.firewall = '/sbin/iptables-legacy'
   def command(args, **kwargs):
     if args[:3] == ['ip', 'address', 'add']:
@@ -352,3 +374,194 @@ def test_netlink_new_interface_payloads():
   wireless.create('aa0', iftype=2)
   station = attribute(1, struct.pack('I', 0)) + attribute(4, b'aa0\0') + attribute(5, struct.pack('I', 2))
   wireless.query.assert_called_with(22, 7, station, ack=True)
+
+
+def supplicant_run(holds):
+  """Fake commands; holds[0] says whether wpa_supplicant has galaxy0 (busctl GetInterface)."""
+  def command(args, **kwargs):
+    if args[:2] == ['busctl', 'call'] and args[5] == 'GetInterface':
+      if holds[0]:
+        return Mock(returncode=0, stdout='o "/fi/w1/wpa_supplicant1/Interfaces/7"\n')
+      return Mock(returncode=1, stdout='')
+    if args[:2] == ['busctl', 'call'] and args[5] == 'RemoveInterface':
+      holds[0] = False
+    return Mock(returncode=0, stdout='[]')
+  return Mock(side_effect=command)
+
+
+def commands(run):
+  return [call.args[0] for call in run.call_args_list]
+
+
+def test_networkmanager_rule_is_written_once_and_reloaded(tmp_path):
+  run = supplicant_run([False])
+  backend = quiet_backend(tmp_path, run=run, interfaces=Mock(), popen=Mock())
+  backend.firewall = '/sbin/iptables-legacy'
+  backend.start(CONFIG, ('g', 6))
+  assert backend.nm_conf.read_text() == NM_CONF_TEXT
+  assert 'match-device=interface-name:galaxy0\nmanaged=0\n' in NM_CONF_TEXT
+  assert commands(run).count(['nmcli', 'general', 'reload', 'conf']) == 1
+  ordered = commands(run)
+  assert ordered.index(['nmcli', 'general', 'reload', 'conf']) < ordered.index(['nmcli', 'device', 'set', 'galaxy0', 'managed', 'no'])
+  backend.stop()
+  backend.start(CONFIG, ('g', 6))
+  assert commands(run).count(['nmcli', 'general', 'reload', 'conf']) == 1  # unchanged rule, no second reload
+  assert all('wlan0' not in command for command in commands(run))
+
+
+def test_hostapd_waits_until_supplicant_lets_go(tmp_path):
+  holds = [True]
+  run = supplicant_run(holds)
+  popen = Mock()
+  backend = quiet_backend(tmp_path, run=run, interfaces=Mock(), popen=popen)
+  backend.firewall = '/sbin/iptables-legacy'
+  clock_at_start = backend.clock()
+  real_sleep = backend.sleep
+  def sleep(seconds):
+    real_sleep(seconds)
+    if backend.clock() - clock_at_start > 0.5:
+      holds[0] = False  # NetworkManager's `managed no` removed it on its own
+  backend.sleep = sleep
+  backend.start(CONFIG, ('g', 6))
+  assert popen.call_count == 2
+  assert not any(command[5:6] == ['RemoveInterface'] for command in commands(run) if command[0] == 'busctl')
+  assert backend.clock() - clock_at_start >= 0.5 + SUPPLICANT_QUIET_S
+
+
+def test_lingering_supplicant_interface_is_removed_before_hostapd(tmp_path):
+  holds = [True]
+  run = supplicant_run(holds)
+  popen = Mock(side_effect=lambda *args, **kwargs: (assert_free(holds), Mock())[1])
+  backend = quiet_backend(tmp_path, run=run, interfaces=Mock(), popen=popen)
+  backend.firewall = '/sbin/iptables-legacy'
+  backend.start(CONFIG, ('g', 6))
+  removes = [command for command in commands(run) if command[:2] == ['busctl', 'call'] and command[5] == 'RemoveInterface']
+  assert removes == [['busctl', 'call', 'fi.w1.wpa_supplicant1', '/fi/w1/wpa_supplicant1', 'fi.w1.wpa_supplicant1',
+                      'RemoveInterface', 'o', '/fi/w1/wpa_supplicant1/Interfaces/7']]
+  assert popen.call_count == 2
+
+
+def assert_free(holds):
+  assert not holds[0], 'hostapd started while wpa_supplicant held galaxy0'
+
+
+def test_supplicant_that_keeps_galaxy0_blocks_the_ap(tmp_path):
+  run = Mock(side_effect=lambda args, **kwargs: Mock(returncode=0, stdout='o "/x"\n' if args[0] == 'busctl' else '[]'))
+  popen, interfaces = Mock(), Mock()
+  backend = quiet_backend(tmp_path, run=run, interfaces=interfaces, popen=popen)
+  backend.firewall = '/sbin/iptables-legacy'
+  with pytest.raises(RuntimeError, match='wpa_supplicant'):
+    backend.start(CONFIG, ('g', 6))
+  popen.assert_not_called()
+  interfaces.return_value.delete.assert_called_once_with('galaxy0')
+  assert backend.clock() <= SUPPLICANT_WAIT_S + 0.2
+
+
+def test_socket_alone_counts_as_held(tmp_path):
+  backend = quiet_backend(tmp_path, run=supplicant_run([False]), interfaces=Mock())
+  assert not backend.supplicant_holds()
+  (backend.sockets / 'galaxy0').touch()
+  assert backend.supplicant_holds()
+
+
+def test_stop_drops_supplicant_hold_before_deleting_the_interface(tmp_path):
+  holds = [True]
+  run = supplicant_run(holds)
+  interfaces = Mock()
+  order = []
+  interfaces.return_value.delete.side_effect = lambda name: order.append(('delete', holds[0]))
+  backend = quiet_backend(tmp_path, run=run, interfaces=interfaces)
+  backend.owned = True
+  backend.stop()
+  assert order == [('delete', False)]
+
+
+@pytest.mark.parametrize('results,expected', [
+  ([('wlan0', ('g', 11))], [KEEP]), ([('wlan0', ('g', 6))], [KEEP]), ([('wlan0', HOLD)], [HOLD]),
+  ([('wlan0', None)], [KEEP]), ([('wlan0', ('g', 11)), ('aa0', ('a', 149))], [('a', 149)]),
+  ([('wlan0', ('g', 11)), ('aa0', ('g', 6))], [KEEP]), ([('wlan0', HOLD), ('aa0', ('a', 149))], [HOLD, ('a', 149)])])
+def test_steady_results(results, expected):
+  assert steady_results(results) == expected
+
+
+def test_backend_steady_channel_ignores_wlan0_but_not_its_joins(tmp_path):
+  statuses = {'wlan0': 'wpa_state=COMPLETED\nfreq=2462'}
+  backend = HotspotBackend(tmp_path, run=Mock(side_effect=lambda args, **kwargs: Mock(returncode=0, stdout=statuses[args[2]])),
+                           interfaces=Mock())
+  assert backend.channel() == ('g', 11)
+  assert backend.channel(steady=True) == KEEP and backend.connected == {11}
+  statuses['wlan0'] = 'wpa_state=ASSOCIATING'
+  assert backend.channel(steady=True) == HOLD
+
+
+def onroad_controller(ap_channel=6, start=('g', 6)):
+  now = [100.]
+  backend = backend_mock(ap_channel=ap_channel)
+  controller = HotspotController(backend, clock=lambda: now[0], onroad=lambda: True)
+  backend.channel.return_value = start
+  controller.tick(CONFIG)
+  assert controller.tick(CONFIG)['active']
+  backend.start.reset_mock()
+  backend.stop.reset_mock()
+  return controller, backend, now
+
+
+def test_onroad_phone_hotspot_joins_never_move_the_ap():
+  controller, backend, now = onroad_controller()
+  # 13:54:52 joins "Deco1" on ch11, 13:55:21 drops, 13:55:25 fails, 13:56:36 joins on ch1 (route 00000070).
+  for channel in (HOLD, KEEP, KEEP, HOLD, KEEP, KEEP, HOLD, KEEP):
+    backend.channel.return_value = channel
+    now[0] += 20
+    assert controller.tick(CONFIG) == {'active': True, 'state': 'active', 'reason': '', 'channel': 6}
+    assert backend.channel.call_args.kwargs == {'steady': True}
+  backend.start.assert_not_called()
+  backend.stop.assert_not_called()
+
+
+def test_onroad_ap_moved_by_the_driver_is_adopted():
+  controller, backend, now = onroad_controller()
+  backend.connected = {11}
+  backend.ap_status.return_value = {'ready': True, 'channel': 11}
+  backend.channel.return_value = KEEP
+  assert controller.tick(CONFIG)['channel'] == 11
+  assert controller.applied[1] == ('g', 11)
+  backend.start.assert_not_called()
+
+
+def test_offroad_and_5ghz_ap_keep_following_stations():
+  now = [100.]
+  backend = backend_mock(ap_channel=149)
+  onroad = [False]
+  controller = HotspotController(backend, clock=lambda: now[0], onroad=lambda: onroad[0])
+  backend.channel.return_value = ('a', 149)
+  controller.tick(CONFIG)
+  controller.tick(CONFIG)
+  assert backend.channel.call_args.kwargs == {'steady': False}
+  onroad[0] = True
+  controller.tick(CONFIG)
+  assert backend.channel.call_args.kwargs == {'steady': False}  # the HU cannot use 5 GHz; let it come back to 2.4
+
+
+def test_running_ap_held_by_supplicant_is_stopped_unless_a_station_joins():
+  controller, backend, now = onroad_controller()
+  backend.supplicant_holds.return_value = True
+  backend.channel.return_value = HOLD
+  assert controller.tick(CONFIG)['active']  # stopping the AP mid-join is the hazard itself
+  backend.stop.assert_not_called()
+  backend.channel.return_value = KEEP
+  assert controller.tick(CONFIG)['state'] == 'error'
+  backend.stop.assert_called_once()
+  assert controller.applied is None
+
+
+def test_unwritable_networkmanager_rule_does_not_block_the_ap(tmp_path):
+  run = supplicant_run([False])
+  popen = Mock()
+  blocker = tmp_path / 'not-a-dir'
+  blocker.write_text('')
+  backend = quiet_backend(tmp_path, run=run, interfaces=Mock(), popen=popen)
+  backend.nm_conf = blocker / 'zz.conf'
+  backend.firewall = '/sbin/iptables-legacy'
+  backend.start(CONFIG, ('g', 6))
+  assert popen.call_count == 2
+  assert ['nmcli', 'general', 'reload', 'conf'] not in commands(run)
