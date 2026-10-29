@@ -1054,6 +1054,8 @@ class FeatureSettingsOwner:
                              repair_value="0" if not threshold_valid and unit_valid else "", default_value="0"))
     elif page == FeaturePage.WHEEL:
       title = "Wheel Controls"
+      if self.show_cruise_intervals or toyota_cruise_capability(self.vehicle_params()) is not None:
+        rows.extend(self._cruise_rows(configurable))
       rows.extend(self.wheel.rows())
     elif page == FeaturePage.SLC:
       system_long = (system_long if self.vehicle_params() is None else self.longitudinal_available()) and self.authority("slc")
@@ -1130,8 +1132,6 @@ class FeatureSettingsOwner:
       rows.append(self._bool_row(PLANNER_SELECTION_KEY, "Use StarPilot Longitudinal Planner", self.authority("preferences"),
                                  reason="Off uses the upstream planner. Supported longitudinal control stays active. Changes apply on the next drive."))
       allowed = configurable and system_long
-      if self.show_cruise_intervals or toyota_cruise_capability(self.vehicle_params()) is not None:
-        rows.extend(self._cruise_rows(configurable))
       force_enabled, _, _ = self._value("ForceStops")
       rows.append(self._bool_row("ForceStops", "Force Stop", allowed or
                                  (force_enabled == "1" and self.authority("preferences")),
