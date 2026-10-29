@@ -157,8 +157,10 @@ class SettingsGatewayTest(unittest.TestCase):
     self.params.put('CustomCruise', 2.0, block=True)
     self.params.put('CustomCruiseLong', 8.0, block=True)
     before = {key: read_saved(self.params, key, 128)[0] for key in ('CustomCruise', 'CustomCruiseLong')}
+    self.assertFalse(any(row['label'] in ('Short press', 'Hold', 'Swap Toyota Cruise Steps')
+                         for row in self.page('profiles')['rows']))
     for value, enabled in (('On', True), ('Off', False)):
-      page = self.page('profiles')
+      page = self.page('wheel')
       self.assertFalse(any(row['label'] in ('Short press', 'Hold') for row in page['rows']))
       index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Swap Toyota Cruise Steps')
       self.assertTrue(page['rows'][index]['available'])
@@ -170,7 +172,7 @@ class SettingsGatewayTest(unittest.TestCase):
         self.gateway.confirm(intent['intent'], self.session, self.generation)
       self.assertEqual({key: read_saved(self.params, key, 128)[0] for key in before}, before)
     self.context.value.cp.brand = 'honda'
-    self.assertFalse(any(row['label'] == 'Swap Toyota Cruise Steps' for row in self.page('profiles')['rows']))
+    self.assertFalse(any(row['label'] == 'Swap Toyota Cruise Steps' for row in self.page('wheel')['rows']))
 
   def test_row_revision_is_stable_only_for_same_source_vehicle_and_session(self):
     first, second = self.page("lane"), self.page("lane")
@@ -192,8 +194,13 @@ class SettingsGatewayTest(unittest.TestCase):
       self.gateway.preview(changed_vehicle["revision"], 0, 1, self.session, self.generation)
 
   def test_direct_switch_and_slider_values_preserve_source_checks(self):
-    page = self.page("profiles")
-    page = self.page("profiles")
+    vehicle = ToyotaInterface.get_non_essential_params(ToyotaCar.TOYOTA_COROLLA_TSS2)
+    vehicle.pcmCruise = False
+    vehicle.openpilotLongitudinalControl = True
+    self.context.value = AuthorityContext(True, vehicle, vehicle.to_bytes())
+    self.assertFalse(any(row['label'] in ('Short press', 'Hold', 'Swap Toyota Cruise Steps')
+                         for row in self.page('profiles')['rows']))
+    page = self.page("wheel")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Short press")
     for invalid in (True, "nan", float("inf"), 0, 151, 2.5, "bogus"):
       with self.subTest(value=invalid), self.assertRaises(SettingsChanged):
@@ -203,7 +210,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertEqual(self.params.get("CustomCruise"), 7.0)
     with self.assertRaises(SettingsChanged):
       self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=9)
-    page = self.page("profiles")
+    page = self.page("wheel")
     intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=9)
     self.context.value = AuthorityContext(False, self.context.value.cp, self.context.value.cp_raw)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))

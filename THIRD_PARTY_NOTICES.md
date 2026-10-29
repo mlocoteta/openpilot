@@ -140,3 +140,7 @@ dbus-next 0.2.3 (MIT), ifaddr 0.2.0 (MIT) and Zeroconf 0.151.3
 `vendor/VENDOR.json` records each PyPI source file and its SHA-256. Zeroconf is
 kept as separate, unmodified source files that can be replaced with another
 compatible version, as the LGPL requires.
+
+## Subaru angle support from jacobw
+
+The Subaru angle implementation includes work from Jacob Waller's `jul-angle-based` openpilot/opendbc branches and their upstream contributors. See [CREDITS.md](CREDITS.md#subaru-angle-steering-from-jacob-wallers-fork) and `opendbc_repo/opendbc/car/subaru/ORIGIN_HISTORY.tsv` for pinned sources, original authors and titles. The source repositories publish the comma MIT license; the complete applicable notice remains in the project `LICENSE` and `opendbc_repo/LICENSE`. StarPilot's adaptations preserve additional native and caller safety guards.

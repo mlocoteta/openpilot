@@ -142,6 +142,8 @@ class CarInterface(CarInterfaceBase):
     radar_filter = radar_filter_supported(candidate, fingerprint)
     if radar_filter:
       ret.flags |= int(ToyotaFlags.RADAR_CAN_FILTER)
+      if fingerprint.get(0, {}).get(0x2FF) == 4 and ret.steerControlType == SteerControlType.torque:
+        ret.flags |= int(ToyotaFlags.FILTER_BUTTONS)
       ret.safetyConfigs[0].safetyParam |= int(ToyotaSafetyFlags.LONG_FILTER)
 
     # since we don't yet parse radar on TSS2 radar-based ACC cars, gate longitudinal behind alpha toggle

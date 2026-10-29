@@ -67,7 +67,7 @@ class TestSubaruGen2AnglePair(unittest.TestCase):
     command = structs.CarControl()
     command.enabled = True
     command.latActive = active
-    command.actuators.steeringAngleDeg = 1.0
+    command.actuators.steeringAngleDeg = 10.0
     _, sends = CarController(DBC[car], cp).update(command.as_reader(), state, 1_100_000_000)
     steer = next(frame for frame in sends if frame[0] == 0x124)
     self.assertEqual(steer[2], 0)
@@ -200,7 +200,7 @@ class TestSubaruGen2AnglePair(unittest.TestCase):
             # cutting a request on persistent driver input.
             command = structs.CarControl()
             command.enabled = command.latActive = True
-            command.actuators.steeringAngleDeg = 1.0
+            command.actuators.steeringAngleDeg = 10.0
             controller = CarController(DBC[car], cp)
             controller.update(command.as_reader(), state, 1_100_000_000)
             controller.update(command.as_reader(), state, 1_110_000_000)

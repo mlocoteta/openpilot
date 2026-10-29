@@ -1,6 +1,7 @@
-"""Subaru stock ACC retains independent lateral intent after full engagement."""
+"""Subaru physical cruise intent with independent lateral authority."""
 from opendbc.car import structs
 from opendbc.car.subaru.stock_aol import qualified, temporary_restriction
+from opendbc.car.subaru.values import CAR
 from openpilot.starpilot.aol.intent import AolCardIntent
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 
@@ -8,12 +9,47 @@ from openpilot.starpilot.aol.policy import AolVehiclePolicy
 class SubaruStockCardIntent(AolCardIntent):
   observe_stock_engagement = True
 
-  def __init__(self, settings):
+  def __init__(self, settings, *, main_arm=False):
     super().__init__(settings, explicit_latch=True, lkas_button_supported=False)
+    self.main_arm = main_arm
+    self._previous_main = None
+    self._main_observed_ns = 0
+    self._main_event_ns = 0
+    self._pending_main_ns = 0
+    self._pending_main_after_ns = 0
+
+  def observe_startup_readiness(self, sm, CS, *, now_ns, **kwargs):
+    if self.main_arm:
+      stamp = int(sm.logMonoTime['onroadEvents'])
+      self._main_event_ns = stamp if (sm.valid['onroadEvents'] and 0 < stamp <= now_ns and
+                                     now_ns - stamp <= 200_000_000) else 0
 
   def update(self, CS, **kwargs):
     super().update(CS, **kwargs)
-    if not CS.cruiseState.available:
+    now_ns = kwargs.get('now_ns', 0)
+    main = bool(CS.cruiseState.available)
+    fresh_main = self._previous_main is False and main
+    physical_safe = (self.settings.enabled and CS.canValid and not CS.canTimeout and
+                     not self._calibration_inhibit and not self._calibration_rearm_required and
+                     not CS.steerFaultPermanent and not CS.steerFaultTemporary and not CS.accFaulted and
+                     CS.gearShifter == structs.CarState.GearShifter.drive)
+    if self.main_arm and fresh_main and physical_safe:
+      self._pending_main_ns = now_ns
+      self._pending_main_after_ns = self._main_observed_ns
+    self._previous_main = main if CS.canValid and not CS.canTimeout else None
+    self._main_observed_ns = now_ns
+    if self._pending_main_ns:
+      if not main or not physical_safe or not 0 <= now_ns - self._pending_main_ns <= 200_000_000:
+        self._pending_main_ns = 0
+      elif self._main_event_ns > self._pending_main_after_ns and kwargs.get('fault_active') is not None:
+        # Wait for the event observation after MAIN; an earlier MAIN-off fault
+        # cannot decide this edge. A new fault still consumes it without arming.
+        if not kwargs['fault_active'] and not self._fault_inhibit:
+          self.allowed_latch = True
+          self.pause_lateral = False
+          self._last_latch_edge_ns = self._pending_main_ns
+        self._pending_main_ns = 0
+    if not main:
       self._record_latch_clear('subaru_main_off')
       self.allowed_latch = False
       self._withdraw_full_engagement()
@@ -50,7 +86,7 @@ def ordinary_axis_request_allowed(cp, state):
 
 
 def create_intent(cp, settings):
-  return SubaruStockCardIntent(settings)
+  return SubaruStockCardIntent(settings, main_arm=cp.carFingerprint == CAR.SUBARU_CROSSTREK_2025)
 
 
 def sng_standstill_lateral_inhibit(cp, state):

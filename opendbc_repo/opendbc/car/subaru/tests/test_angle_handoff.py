@@ -76,9 +76,10 @@ class TestIndependentAngleEnvelope(unittest.TestCase):
             _, decoded = step(controller, command, state)
           self.assertEqual(bool(decoded['LKAS_Request']), expected)
           if not expected:
-            self.assertAlmostEqual(decoded['LKAS_Output'], angle, places=2)
+            expected_angle = max(-190., min(190., angle)) if car == CAR.SUBARU_CROSSTREK_2025 else angle
+            self.assertAlmostEqual(decoded['LKAS_Output'], expected_angle, places=2)
 
-  def test_ordinary_engagement_keeps_existing_angle_behavior(self):
+  def test_ordinary_engagement_respects_crosstrek_bound_and_preserves_other_profiles(self):
     for car in (CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_LEGACY_2025, CAR.SUBARU_ASCENT_2023,
                 CAR.SUBARU_FORESTER_2022, CAR.SUBARU_OUTBACK_2023):
       for speed, angle in ((5., 200.), (.4, 10.)):
@@ -90,4 +91,7 @@ class TestIndependentAngleEnvelope(unittest.TestCase):
           state.out.standstill = False
           for _ in range(3):
             _, decoded = step(controller, command, state)
-          self.assertTrue(decoded['LKAS_Request'])
+          expected = car != CAR.SUBARU_CROSSTREK_2025 or abs(angle) <= 190.
+          self.assertEqual(bool(decoded['LKAS_Request']), expected)
+          if not expected:
+            self.assertEqual(abs(decoded['LKAS_Output']), 190.)

@@ -777,18 +777,32 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
         joined.route45_trace = route45_trace
         return
       if scenario in ('cancel-native-cadence', 'neutral-main-cadence'):
+        cancel_gas = 'gas' if getattr(monkeypatch, 'ford_cancel_gas', False) else None
         for _ in range(41):
           state, axis, sd_state, command = step(engaged=True)
         assert command.latActive and host.aol_card_intent.allowed_latch
+        if cancel_gas:
+          # Settle gas on a real 10Hz receipt before testing the later Cancel.
+          while steps % 10 != 9:
+            state, axis, sd_state, command = step(engaged=True)
+          for gas_tick in range(25):
+            state, axis, sd_state, command = step(engaged=True, fault=cancel_gas)
+            assert host.aol_card_intent.allowed_latch and command.latActive
+            if gas_tick >= 2:
+              assert not command.longActive
         for _ in range(12):
-          state, axis, sd_state, command = step(engaged=True, cancel=True)
+          state, axis, sd_state, command = step(engaged=True, cancel=True, fault=cancel_gas)
           assert host.aol_card_intent.allowed_latch, (host.aol_card_intent.latch_clear_reason, transition_trace[-12:])
           assert command.latActive
           if not joined.last_permission & 2:
             assert not command.longActive
         for _ in range(35):
-          state, axis, sd_state, command = step()
+          state, axis, sd_state, command = step(fault=cancel_gas)
           assert host.aol_card_intent.allowed_latch and command.latActive and not command.longActive, transition_trace[-12:]
+        if cancel_gas:
+          for _ in range(15):
+            state, axis, sd_state, command = step()
+            assert host.aol_card_intent.allowed_latch and command.latActive and not command.longActive
         for _ in range(30):
           state, axis, sd_state, command = step(main_off=True)
         assert not host.aol_card_intent.allowed_latch and not command.latActive and not command.longActive

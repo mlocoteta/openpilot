@@ -152,12 +152,13 @@ class TestControllerCruise(unittest.TestCase):
   def test_actual_settings_capability_dependency_and_runtime_refresh(self):
     with tempfile.TemporaryDirectory() as directory:
       params=Params(directory)
-      vehicle=cp(True,'toyota')
+      vehicle=car.CarParams.new_message(pcmCruise=True, brand='toyota', carFingerprint='TEST',
+                                       openpilotLongitudinalControl=True)
       owner=FeatureSettingsOwner(params,lambda group:group in ('long', 'toyota_cruise'),
                                  vehicle_fingerprint=lambda:vehicle.carFingerprint,
                                  vehicle_params=lambda:vehicle)
       def rows():
-        return {r.key:r for r in owner.snapshot(FeaturePage.PROFILES,parked=True,system_long=True,
+        return {r.key:r for r in owner.snapshot(FeaturePage.WHEEL,parked=True,system_long=True,
                                                lateral_context=False,metric=True).rows}
       self.assertNotIn('CustomCruise',rows())
       self.assertNotIn('CustomCruiseLong',rows())

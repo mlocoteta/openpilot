@@ -59,7 +59,7 @@ def model_action_allowed(data: dict, action: str, model: dict | None = None, pro
   if data.get("isOnroad") is not False and action not in ("preferences", "cancel"):
     return False
   if action == "active":
-    return (not data.get("randomizer") and not data.get("downloading") and profile in ("small", "big") and
+    return (not data.get("randomizer") and (not data.get("downloading") or data.get("refreshing") is True) and profile in ("small", "big") and
             ((model is None and profile == "big") or
              bool(model and model.get("installed") is True and model.get("selectable") is True and model_fits_profile(model, profile))))
   if action == "download":
@@ -114,7 +114,7 @@ def model_manager_rows(data: dict) -> tuple[FeatureRow, ...]:
     mid = data.get(field, "")
     label = next((m.get("label", mid) for m in data.get("models", ()) if m.get("value") == mid), mid or "None — always use Active Small")
     available = (data.get("capabilities", {}).get("select") is True and data.get("isOnroad") is False and
-                 not data.get("downloading") and not data.get("randomizer"))
+                 (not data.get("downloading") or data.get("refreshing") is True) and not data.get("randomizer"))
     rows.append(FeatureRow("", f"Active {profile.title()}", label, source=mid.encode(), available=available,
                            reason="Randomizer selects at the next start" if data.get("randomizer") else
                            "Change for next start" if available else "Turn the vehicle off to change models", page=f"models:{profile}"))

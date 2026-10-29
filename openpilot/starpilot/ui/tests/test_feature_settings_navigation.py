@@ -126,7 +126,7 @@ class FeatureNavigationTests(unittest.TestCase):
             self.assertTrue(session._feature_authority('long'))
             self.assertTrue(session._feature_authority('toyota_cruise'))
             for expected in (True, False):
-              state = session.feature_owner.snapshot('profiles', parked=True, system_long=False,
+              state = session.feature_owner.snapshot('wheel', parked=True, system_long=False,
                                                       lateral_context=False, metric=False)
               rows = {row.key: row for row in state.rows}
               self.assertNotIn('CustomCruise', rows)

@@ -145,13 +145,29 @@ def limit_tracking(path, base: float, correction: float, measured: float, speed:
   if np.count_nonzero(selected) < 4:
     return 0.0
   original = float(np.mean((y[selected] - np.interp(x[selected], *path)) ** 2))
-  for factor in (1.0, 0.75, 0.5, 0.25):
+  cx, cy, _ = _center_motion(base + correction, measured, speed, delay)
+  if not np.all((cx[selected] >= path[0][0]) & (cx[selected] <= path[0][-1])):
+    return 0.0
+  error = y[selected] - np.interp(x[selected], *path)
+  delta = cy[selected] - np.interp(cx[selected], *path) - error
+  sensitivity = float(delta @ delta)
+  if sensitivity <= 1e-24:
+    return 0.0
+  # Project onto the spacing objective instead of stepping between four fixed
+  # correction fractions. Check the resulting nonlinear motion before use.
+  factor = min(1.0, max(0.0, -float(error @ delta) / sensitivity))
+  if factor <= 0.0:
+    return 0.0
+  if factor == 1.0:
+    candidate = float(np.mean((error + delta) ** 2))
+    return correction if candidate <= original + 1e-12 else 0.0
+  for _ in range(3):
     cx, cy, _ = _center_motion(base + correction * factor, measured, speed, delay)
-    if not np.all((cx[selected] >= path[0][0]) & (cx[selected] <= path[0][-1])):
-      continue
-    candidate = float(np.mean((cy[selected] - np.interp(cx[selected], *path)) ** 2))
-    if candidate <= original + 1e-12:
-      return correction * factor
+    if np.all((cx[selected] >= path[0][0]) & (cx[selected] <= path[0][-1])):
+      candidate = float(np.mean((cy[selected] - np.interp(cx[selected], *path)) ** 2))
+      if candidate <= original + 1e-12:
+        return correction * factor
+    factor *= 0.5
   return 0.0
 
 

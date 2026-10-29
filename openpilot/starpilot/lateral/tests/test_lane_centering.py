@@ -477,6 +477,25 @@ class TestSingleBoundary(unittest.TestCase):
 
 
 class TestSingleLineTracking(unittest.TestCase):
+  def test_tracking_guard_has_continuous_small_corrections_near_the_objective(self):
+    from openpilot.starpilot.lateral.lane_clearance import _center_motion, limit_tracking
+    for sign in (1., -1.):
+      previous = 0.
+      for step in range(1, 51):
+        target = sign * step * 1e-6
+        x, y, _ = _center_motion(target, 0., 20., .1)
+        path = np.r_[0., x, 50.], np.r_[0., y, y[-1]]
+        allowed = limit_tracking(path, 0., sign * .0012, 0., 20., .1)
+        self.assertGreater(sign * allowed, 0.)
+        self.assertLess(abs(allowed - previous), 2e-6)
+        bx, by, _ = _center_motion(0., 0., 20., .1)
+        cx, cy, _ = _center_motion(allowed, 0., 20., .1)
+        selected = bx >= 2.
+        self.assertLess(np.mean((cy[selected] - np.interp(cx[selected], *path)) ** 2),
+                        np.mean((by[selected] - np.interp(bx[selected], *path)) ** 2))
+        previous = allowed
+      self.assertEqual(limit_tracking(path, 0., -sign * .0012, 0., 20., .1), 0.)
+
   def test_two_distinct_frames_confirm_line_without_learning_model_drift(self):
     from openpilot.starpilot.lateral.lane_tracking import SingleLineTracker
     tracker = SingleLineTracker()

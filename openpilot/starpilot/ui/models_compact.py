@@ -44,6 +44,7 @@ class ModelsCompact:
   def __init__(self, session: ModelSession, clock: Callable[[], float] = time.monotonic):
     self.session = session
     self.clock = clock
+    self.catalog_pages: dict[str, _ModelsPage] = {}
 
   def entry_button(self) -> BigButton:
     button = BigButton("driving model", "small, chestnut and downloads")
@@ -60,8 +61,14 @@ class ModelsCompact:
     return None
 
   def open(self, kind: str = "overview", profile: str = "", model_id: str = "") -> None:
-    page = _ModelsPage(self, kind, profile, model_id)
-    self._populate(page, self.session.model_snapshot(), self._snapshot())
+    page = self.catalog_pages.get(profile) if kind == "catalog" and profile else None
+    if page is None:
+      page = _ModelsPage(self, kind, profile, model_id)
+      if kind == "catalog" and profile:
+        self.catalog_pages[profile] = page
+    state, data = self.session.model_snapshot(), self._snapshot()
+    if state != page.current or data != page.manager:
+      self._populate(page, state, data)
     page.next_refresh = self.clock() + self.REFRESH_SECONDS
     gui_app.push_widget(page)
 

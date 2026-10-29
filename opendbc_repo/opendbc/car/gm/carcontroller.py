@@ -16,7 +16,7 @@ from opendbc.car.gm import gmcan
 from opendbc.car.gm.startup_preferences import gateway_sources_current
 from opendbc.car.gm.silverado_cc import SilveradoPedalCommand
 from opendbc.car.gm.conventional_pedal_command import ConventionalPedalCommand
-from opendbc.car.gm.aol import lateral_request as aol_lateral_request
+from opendbc.car.gm.aol import lateral_request as aol_lateral_request, qualified_gm
 from opendbc.car.gm.conventional_pedal import (sources_current as conventional_pedal_sources_current,
                                                cancel_sources_current as conventional_pedal_cancel_sources_current)
 from opendbc.car.gm.ordinary_cc import PhysicalObservation, ButtonCadence, button_request as ordinary_button_request
@@ -302,6 +302,7 @@ class CarController(CarControllerBase):
     self.bolt_acc_pedal_friction_release_frames = 0
     self.bolt_acc_pedal_friction_low_speed_active = False
     self.bolt_acc_pedal_stop_hold = False
+    self.bolt_acc_pedal_friction_unavailable = False
     self.bolt_acc_brake_clock = (BoltAccBrakeClock() if int(CP.safetyConfigs[0].safetyParam) == 0x1CD and
                                 CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and is_bolt_pedal_profile(CP) else None)
 
@@ -361,6 +362,11 @@ class CarController(CarControllerBase):
     self.volt_cc_last_direction_frame = None
     self.volt_cc_consumed_source_ns = 0
 
+    # Match the normal full-ACC producer, not a model list: CC-only and standalone
+    # pedal owners never replace this stream. Qualify once from the final config.
+    self.startup_acc_keepalive = (qualified_gm(self.CP) and self.CP.openpilotLongitudinalControl and
+                                  not self.CP.flags & GMFlags.CC_LONG and
+                                  (not self.CP.flags & GMFlags.PEDAL_LONG or self.camera_pedal_profile is not None))
     self.packer_pt = CANPacker(DBC[self.CP.carFingerprint][Bus.pt])
     self.packer_obj = CANPacker(DBC[self.CP.carFingerprint][Bus.radar])
     self.packer_ch = CANPacker(DBC[self.CP.carFingerprint][Bus.chassis])
@@ -378,7 +384,10 @@ class CarController(CarControllerBase):
                    (CS.stock_acc_status_ts_nanos > 0 and 0 <= stock_age <= STOCK_ACC_STATUS_TIMEOUT_NS and
                     not CS.out.cruiseState.enabled and removed_stock_current and
                     (not self.bolt_pedal_removed or not CS.bolt_pedal_removed_acc_active)))
-    in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low
+    gen2_drive = (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2022_2023 and
+                  int(self.CP.safetyConfigs[0].safetyParam) == 0x19D and
+                  CS.out.gearShifter == structs.CarState.GearShifter.drive)
+    in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low or gen2_drive
     drive_ready = in_regen_gear or (stock_acc and CS.out.gearShifter == structs.CarState.GearShifter.drive)
     # Panda requires current physical gear for every Bolt pedal generation.
     gear_ns = getattr(CS, "bolt_pedal_gear_ts_nanos", 0)
@@ -447,6 +456,12 @@ class CarController(CarControllerBase):
     return self.regen_paddle_pressed
 
   def update(self, CC, CS, now_nanos, *, startup_keepalive=False):
+    if self.bolt_acc_brake_clock is not None and getattr(CS, "bolt_acc_pedal_friction_unavailable", False):
+      # Do not keep requesting a rejected secondary brake or retry after a flag flap.
+      # Only a new onroad controller can restore friction; pedal/regen keep their gates.
+      self.bolt_acc_pedal_friction_unavailable = True
+      self.apply_brake = 0
+      self.bolt_acc_pedal_friction_low_speed_active = False
     if startup_keepalive:
       CC = structs.CarControl.new_message().as_reader()
     _projection = self.learning_projection_observer
@@ -637,10 +652,9 @@ class CarController(CarControllerBase):
         _projection.emit('gm.ASCMLKASteeringCmd', apply_torque, lat_active, can_sends[-1])
       CS.steering_authority.command(now_nanos, lat_active)
 
-    # Camera Alpha-long intercepts the stock ACC stream as soon as safety takes
-    # ownership. Keep its inactive gas/brake/status cadence alive through startup;
-    # CC was replaced with a disabled command and startup excludes auto hold.
-    if startup_keepalive and (not self.ordinary_camera_long or self.camera_pedal_profile is not None):
+    # Every full-ACC owner must service its replacement stream after safety takes
+    # ownership. CC was replaced with a disabled command and startup excludes hold.
+    if startup_keepalive and not self.startup_acc_keepalive:
       # Other profiles retain their steering-only startup path. Never run cruise-button, pedal,
       # brake, dashboard, or hold producers before normal controls are ready.
       new_actuators = actuators.as_builder()
@@ -814,7 +828,7 @@ class CarController(CarControllerBase):
         friction_main_on = (friction_variant and CS.out.cruiseState.available and stock_ownership_clear and
                             main_ns > 0 and 0 <= now_nanos - main_ns <= 300_000_000)
         if friction_variant:
-          if active and friction_main_on:
+          if active and friction_main_on and not self.bolt_acc_pedal_friction_unavailable:
             self.apply_brake, self.bolt_acc_pedal_friction_low_speed_active = bolt_acc_pedal_friction_brake(
               actuators.accel, CS.out.vEgo, actuators.longControlState == LongCtrlState.stopping,
               self.bolt_acc_pedal_friction_low_speed_active, self.CP.mass, self.CP.wheelbase, self.params.MAX_BRAKE, acc_tune=self.gm_acc_tune)
@@ -867,7 +881,8 @@ class CarController(CarControllerBase):
         if (CC.enabled or feed_release) and in_regen_gear and not CS.out.regenBraking:
           spoof_pressed = paddle_pressed and CS.out.vEgo > 2.68
           gen2 = self.CP.carFingerprint in (CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
-          can_sends.append(gmcan.create_bolt_regen_gear(self.packer_pt, spoof_pressed, gen2))
+          can_sends.append(gmcan.create_bolt_regen_gear(self.packer_pt, spoof_pressed, gen2,
+                                                       drive=CS.out.gearShifter == structs.CarState.GearShifter.drive))
           can_sends.append(gmcan.create_bolt_regen_paddle(self.packer_pt, spoof_pressed))
         self.apply_gas = pedal
         if friction_variant:
@@ -880,7 +895,7 @@ class CarController(CarControllerBase):
           if friction_main_on or self.bolt_acc_pedal_friction_release_frames > 0:
             if self.bolt_acc_brake_clock is not None:
               self.bolt_acc_brake_clock.prepare(
-                now_nanos, self.apply_brake, active and friction_main_on,
+                now_nanos, self.apply_brake, active and friction_main_on and not self.bolt_acc_pedal_friction_unavailable,
                 active and CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE,
                 active and CS.out.standstill and actuators.longControlState == LongCtrlState.stopping)
             else:
@@ -909,7 +924,8 @@ class CarController(CarControllerBase):
                       0 < main_ns <= now_nanos and now_nanos - main_ns <= 300_000_000)
         scheduled = self.bolt_acc_brake_clock.sample(
           now_nanos, getattr(CS, "bolt_acc_brake_clock_ns", 0), getattr(CS, "bolt_acc_brake_clock_counter", 0),
-          active=bool(active), main_ready=main_ready, source_valid=bool(CS.out.canValid and not CS.out.canTimeout))
+          active=bool(active and not self.bolt_acc_pedal_friction_unavailable), main_ready=main_ready,
+          source_valid=bool(CS.out.canValid and not CS.out.canTimeout))
         if scheduled is not None:
           brake, counter, enabled, near_stop, full_stop = scheduled
           can_sends.append(gmcan.create_friction_brake_command(
@@ -1021,7 +1037,7 @@ class CarController(CarControllerBase):
         camera_pedal = 0.
         if self.camera_pedal_profile is not None:
           sources = CS.camera_pedal_sources
-          runtime_allowed = self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
+          runtime_allowed = not startup_keepalive and self.camera_pedal_input is not None and self.camera_pedal_input.update(now_nanos)
           ready = (runtime_allowed and len(sources) == (8 if self.camera_pedal_profile.volt else 7) and
                    all(stamp > 0 and 0 <= now_nanos - stamp <= limit for stamp, limit in sources) and
                    CS.pedal_sensor_healthy and 0 <= now_nanos - CS.pedal_sensor_ts_nanos <= PEDAL_SENSOR_TIMEOUT_NS and
@@ -1090,7 +1106,7 @@ class CarController(CarControllerBase):
             camera_fcw = 3
         dashboard_state = 2 if (self.ordinary_camera_long or self.ordinary_ascm_long or self.ordinary_sdgm_long or self.volt_ascm_long or
                                 self.volt_camera_long or self.volt_sdgm_long or self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN) else None
-        if self.camera_pedal_profile is None or runtime_allowed:
+        if self.camera_pedal_profile is None or runtime_allowed or startup_keepalive:
           dashboard_enabled = CC.enabled and not (self.camera_pedal_profile is not None and
                                                   self.camera_pedal_profile.topology in ("ascm", "sdgm") and not ready)
           can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, dashboard_enabled,

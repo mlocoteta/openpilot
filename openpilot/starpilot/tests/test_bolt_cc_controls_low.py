@@ -13,7 +13,7 @@ from opendbc.car import structs
 from opendbc.car.gm.bolt_cc import button_bytes
 from opendbc.car.gm.gmcan import pedal_crc
 from opendbc.car.gm.tests.test_bolt_cc import feed, fixture, native, setup
-from opendbc.car.gm.values import CAR
+from opendbc.car.gm.values import AccState, CAR
 from opendbc.safety.tests.libsafety import libsafety_py
 
 
@@ -71,7 +71,8 @@ class TestBoltCcControlsLow(unittest.TestCase):
             packer.make_can_msg('ECMPRDNL2', 0, {'PRNDL2': 4 if (stock_acc and tick < 180) or 180 <= tick < 220 else 6}),
             packer.make_can_msg('ECMEngineStatus', 0, {'CruiseMainOn': int(not stock_acc or tick < 330)}),
             packer.make_can_msg('ECMCruiseControl', 0, {'CruiseActive': int(tick >= 42), 'CruiseSetSpeed': 54}),
-            packer.make_can_msg('AcceleratorPedal2', 0, {'AcceleratorPedal2': 30 if gas else 0, 'CruiseState': int(stock_acc and 240 <= tick < 260)}),
+            packer.make_can_msg('AcceleratorPedal2', 0, {'AcceleratorPedal2': 30 if gas else 0,
+              'CruiseState': AccState.FAULTED if stock_acc and 310 <= tick < 315 else int(stock_acc and 240 <= tick < 260)}),
             (0x1E1, button_bytes(button, tick % 4), 0),
           ]
           if stock_acc:
@@ -289,3 +290,4 @@ class TestBoltCcControlsLow(unittest.TestCase):
         self.assertEqual(maximum_mismatch, 200)
         self.assertTrue(mismatch_observed)
         self.assertFalse(sd.enabled)
+

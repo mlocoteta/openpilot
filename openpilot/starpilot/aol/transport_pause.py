@@ -357,7 +357,8 @@ class TransportPauseFeedback:
     from opendbc.car.ford.values import CAR
     # Before 10Hz LONG echo: physical pedal/cancel retains only real independent LAT intent.
     ford_withdrawal = bool(cp.brand == 'ford' and ford_qualified(cp, marked_only=True) and cp.openpilotLongitudinalControl and
-      (cs.brakePressed or not cs.cruiseState.enabled or physical_cancel(cs, cp)) and not cs.gasPressed and not cs.regenBraking and
+      (cs.brakePressed or not cs.cruiseState.enabled or physical_cancel(cs, cp) or
+       not axis.desiredLongitudinal and not axis.longitudinalActive) and not (cs.brakePressed and cs.gasPressed) and not cs.regenBraking and
       cs.cruiseState.available and not cs.doorOpen and not cs.seatbeltUnlatched and
       not cs.vehicleSensorsInvalid and cs.gearShifter == structs.CarState.GearShifter.drive)
     # Mach-E angle/curvature share native independent axes: intent-only 10Hz LONG withdrawal/recovery echo join.

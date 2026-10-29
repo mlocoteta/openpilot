@@ -374,7 +374,7 @@ int main() {
     forte.safety_mode = HYUNDAI_AOL_PROFILE.mode;
     assert(!aol_capable(forte, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
-  for (const uint16_t word : {0U, 16U, 0xC161U, 0xC162U, 0x80U,
+  for (const uint16_t word : {0U, 16U, 0xC161U, 0xC162U, 0xC163U, 0x80U,
                             0xE100U, 0xE101U, 0xE102U, 0xE103U,
                             0xE110U, 0xE111U, 0xE112U, 0xE113U,
                             0xE200U, 0xE201U, 0xE202U, 0xE203U,
@@ -414,6 +414,7 @@ int main() {
     gateway.safety_mode = GM_AOL_PROFILE.mode;
     gateway.safety_param = word;
     assert(gm_aol_param(word));
+    assert(aol_runtime_enabled(false, gateway, VEHICLE_REGISTRY));
     queue(transport, gateway, gateway);
     const auto first = run(negotiator, transport, axis("gateway"), NOW, GM_AOL_PROFILE.mode);
     assert(first.plan.capable && first.plan.request_mask == 0U && first.outcome.compatible);
@@ -451,6 +452,7 @@ int main() {
     gm.safety_param = static_cast<uint16_t>(word);
     const auto decoded = parse_aol_status(bytes(gm).data(), sizeof(gm));
     assert(aol_capable(decoded, GM_AOL_PROFILE.mode, VEHICLE_REGISTRY) == gm_aol_param(gm.safety_param));
+    assert(aol_runtime_enabled(false, decoded, VEHICLE_REGISTRY) == gm_aol_param(gm.safety_param));
     gm.capability_flags = 0U;
     const auto absent = parse_aol_status(bytes(gm).data(), sizeof(gm));
     assert(!aol_capable(absent, GM_AOL_PROFILE.mode, VEHICLE_REGISTRY));

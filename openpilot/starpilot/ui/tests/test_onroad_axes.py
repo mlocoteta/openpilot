@@ -393,6 +393,27 @@ class TestOnroadAxes(unittest.TestCase):
     self.assertEqual(clock_text(midnight, use_24_hour=True), "00:00")
 
 
+
+  def test_stock_acc_green_keeps_system_long_inactive_and_aol_cyan(self):
+    from opendbc.car.subaru.interface import CarInterface
+    from opendbc.car.subaru.values import CAR
+
+    self.ui.CP = CarInterface.get_non_essential_params(CAR.SUBARU_CROSSTREK_2025)
+    self.ui.sm['carState'].cruiseState.enabled = True
+    state = self.state(True, False)
+    self.assertTrue(state.stock_cruise_active)
+    self.assertFalse(state.longitudinal_active)
+    self.assertEqual(rgba(axis_status_color(state)), (22, 127, 64, 255))
+    self.assertEqual(rgba(axis_status_color(replace(state, experimental_enabled=True))), (22, 127, 64, 255))
+    self.ui.sm['carState'].gasPressed = True
+    self.assertEqual(rgba(axis_status_color(self.state(True, False))), (145, 155, 149, 255))
+    self.ui.sm['carState'].gasPressed = False
+    self.ui.sm['carState'].cruiseState.enabled = False
+    self.assertEqual(rgba(axis_status_color(self.state(True, False))), (10, 186, 181, 255))
+    self.ui.sm['carState'].cruiseState.enabled = True
+    self.ui.sm.logMonoTime['carState'] = NOW - 300_000_000
+    self.assertFalse(self.state(True, False).stock_cruise_active)
+
+
 if __name__ == "__main__":
   unittest.main()
-

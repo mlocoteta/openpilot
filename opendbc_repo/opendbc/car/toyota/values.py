@@ -83,6 +83,7 @@ class ToyotaFlags(IntFlag):
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
   AUTO_BRAKE_HOLD = 4096
+  FILTER_BUTTONS = 1 << 20  # Auxiliary inputs from a discovered primary four-byte radar filter
   RADAR_CAN_FILTER = 1 << 18  # Exact radar adapter; includes four-byte 2FF, distinct from legacy SDSU status
   GAS_INTERCEPTOR = 1 << 17  # Exact paired pedal owner
   DSU_BYPASS = 1 << 19  # Camera-bus DSU adapter; independent of smartDSU/filter

@@ -230,6 +230,43 @@ class TestModelManager(unittest.TestCase):
       owner._action(page, "preferences", "small")
       session.model_manager_action.assert_called_with("preferences", {"userFavorites": ["big", "small"]})
 
+  def test_catalog_refresh_preserves_offline_selection_guards(self):
+    data = self.data | {"downloading": True, "refreshing": True}
+    self.assertTrue(model_action_allowed(data, "active", self.small, "small"))
+    self.assertTrue(model_action_allowed(data, "active", self.big, "big"))
+    self.assertFalse(model_action_allowed(data, "active", self.pending, "small"))
+    self.assertFalse(model_action_allowed(data | {"isOnroad": True}, "active", self.big, "big"))
+    self.assertFalse(model_action_allowed(data | {"randomizer": True}, "active", self.big, "big"))
+    self.assertFalse(model_action_allowed(data | {"refreshing": False}, "active", self.big, "big"))
+    self.assertFalse(model_action_allowed(data, "delete", self.small))
+    state = model_page(ModelStatus(BUNDLED_CURRENT, None, None, ModelHealth.UNAVAILABLE, False, None, None), data)
+    self.assertTrue(state.rows[1].available)
+    self.assertTrue(state.rows[2].available)
+
+  def test_reopening_selector_reuses_rows_but_rechecks_current_state(self):
+    session = mock.Mock()
+    session.model_manager_snapshot.return_value = self.data
+    session.model_snapshot.return_value = model_page(ModelStatus(BUNDLED_CURRENT, None, None, ModelHealth.UNAVAILABLE, False, None, None))
+    owner = ModelsCompact(session)
+    def new_page(*args):
+      return SimpleNamespace(current=None, manager=None)
+    def populate(page, state, data):
+      page.current, page.manager = state, data
+    with mock.patch("openpilot.starpilot.ui.models_compact._ModelsPage", side_effect=new_page) as constructor, \
+         mock.patch("openpilot.starpilot.ui.models_compact.gui_app.push_widget") as push, \
+         mock.patch.object(owner, "_populate", side_effect=populate) as rebuild:
+      owner.open("catalog", "small")
+      first = push.call_args.args[0]
+      owner.open("catalog", "big")
+      owner.open("catalog", "small")
+      self.assertIs(push.call_args.args[0], first)
+      self.assertEqual(constructor.call_count, 2)
+      self.assertEqual(rebuild.call_count, 2)
+      session.model_manager_snapshot.return_value = self.data | {"isOnroad": True}
+      owner.open("catalog", "small")
+      self.assertEqual(rebuild.call_count, 3)
+      self.assertTrue(push.call_args.args[0].manager['isOnroad'])
+
 
 if __name__ == "__main__":
   unittest.main()

@@ -79,7 +79,7 @@ def radar_filter_qualified(cp, *, marked_only=False):
   required = ToyotaFlags.NO_DSU | ToyotaFlags.RADAR_CAN_FILTER
   if cp.carFingerprint in (CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_CHR_TSS2):
     required |= ToyotaFlags.TSS2 | ToyotaFlags.RADAR_ACC | ToyotaFlags.RAISED_ACCEL_LIMIT
-  allowed = required | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM
+  allowed = required | ToyotaFlags.HYBRID | ToyotaFlags.HAS_BSM | ToyotaFlags.FILTER_BUTTONS
   if cp.carFingerprint == CAR.TOYOTA_RAV4_TSS2_2022:
     allowed |= ToyotaFlags.ARS510_RADAR | ToyotaFlags.ARS510_FUSED
   return bool(cp.flags & required == required and not int(cp.flags) & ~int(allowed) and

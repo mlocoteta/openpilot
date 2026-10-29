@@ -179,7 +179,7 @@ class ValueEditorTests(unittest.TestCase):
   def test_cruise_interval_editor_keeps_the_owners_required_confirmation(self):
     self.owner.show_cruise_intervals = True
     self.owner.vehicle_params().pcmCruise = False
-    self.session.feature_page = FeaturePage.PROFILES
+    self.session.feature_page = FeaturePage.WHEEL
     editor = self.open_feature("CustomCruise")
     dialogs = []
     with patch("openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog", side_effect=lambda *args, **kw: NS(callback=kw["callback"])), \
