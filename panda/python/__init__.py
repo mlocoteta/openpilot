@@ -275,7 +275,7 @@ class Panda:
 
   @classmethod
   def usb_connect(cls, serial, claim=True, no_error=False):
-    handle, usb_serial, bootstub = None, None, None
+    handle, usb_serial, bootstub, bootstub_hw_type = None, None, None, None
     context = usb1.USBContext()
     context.open()
     try:
@@ -301,13 +301,17 @@ class Panda:
               handle.claimInterface(0)
               # handle.setInterfaceAltSetting(0, 0)  # Issue in USB stack
 
+            if bootstub:
+              bcd = device.getbcdDevice()
+              if type(bcd) is int and 0 <= bcd <= 0xffff and bcd != 0x2300:
+                bootstub_hw_type = bytes([bcd >> 8])
             break
     except Exception:
       logger.exception("USB connect error")
 
     usb_handle = None
     if handle is not None:
-      usb_handle = PandaUsbHandle(handle)
+      usb_handle = PandaUsbHandle(handle, bootstub_hw_type=bootstub_hw_type)
     else:
       context.close()
 
@@ -616,7 +620,14 @@ class Panda:
     return bytes(part_1 + part_2)
 
   def get_type(self):
-    return self._handle.controlRead(Panda.REQUEST_IN, 0xc1, 0, 0, 0x40)
+    result = self._handle.controlRead(Panda.REQUEST_IN, 0xc1, 0, 0, 0x40)
+    # Older USB bootstubs identify the board in bcdDevice instead of endpoint C1.
+    # Accept that identity only for the exact legacy unsupported-request response.
+    if (self.bootstub and isinstance(self._handle, PandaUsbHandle) and result is not None and
+        result.startswith(b"\xff\x00\xc1\x3e\xde\xad\xd0\x0d") and
+        self._handle.bootstub_hw_type in self.SUPPORTED_DEVICES):
+      return self._handle.bootstub_hw_type
+    return result
 
   def get_packets_versions(self):
     dat = self._handle.controlRead(Panda.REQUEST_IN, 0xdd, 0, 0, 8)
