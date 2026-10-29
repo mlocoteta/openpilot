@@ -1777,9 +1777,10 @@ class SelfdriveD:
         proof[5] != companion.integrity_epoch or not ((intent.allowedLatch and intent.lateralArmed) or ordinary_ford) or
         not native.requestedLateral or not native.lateralAllowed or
         not native.requestedLongitudinal or native.longitudinalAllowed or not native.pandaInventory or
-        CS.brakePressed or CS.regenBraking or CS.gasPressed or CS.steeringPressed or
+        CS.brakePressed or CS.regenBraking or CS.gasPressed or CS.steeringPressed and not ordinary_ford or
         any(self.events.contains(kind) for kind in (ET.IMMEDIATE_DISABLE, ET.SOFT_DISABLE, ET.USER_DISABLE,
-                                                  ET.OVERRIDE_LATERAL, ET.OVERRIDE_LONGITUDINAL))):
+                                                  ET.OVERRIDE_LONGITUDINAL)) or
+        not ordinary_ford and self.events.contains(ET.OVERRIDE_LATERAL)):
       return False
     def identity(state):
       return (state.axisSessionId, state.pandaSerial, state.safetyModel, state.safetyParam,
