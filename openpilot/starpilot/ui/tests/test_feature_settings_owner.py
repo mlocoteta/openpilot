@@ -441,8 +441,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
   def test_corrupt_bytes_remain_visible_and_untouched(self):
     for key, page, raw in (("LaneCenterOffset", "lane", b"nan"),
-                           ("SpeedLimitController", "slc", b"maybe"),
-                           ("SLCFallback", "slc", b"broken")):
+                           ("SpeedLimitController", "slc", b"maybe")):
       with self.subTest(key=key):
         path = Path(self.params.get_param_path(key))
         path.write_bytes(raw)
@@ -532,6 +531,17 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIn("invalid saved units", offset.label)
     self.assertEqual(Path(self.params.get_param_path("IsMetric")).read_bytes(), b"bad")
 
+  def test_retired_fallback_is_hidden_and_cannot_be_written(self):
+    path = Path(self.params.get_param_path('SLCFallback'))
+    for raw in (b'0', b'1', b'2', b'broken'):
+      with self.subTest(raw=raw):
+        path.write_bytes(raw)
+        rows = self.owner.snapshot('slc', parked=True, system_long=True, lateral_context=True, metric=False).rows
+        self.assertFalse(any(row.key == 'SLCFallback' for row in rows))
+        self.assertFalse(self.owner.apply(FeatureSettingsRequest('SLCFallback', raw, 'Off',
+                                                                  vehicle_fingerprint=self.fingerprint)))
+        self.assertEqual(path.read_bytes(), raw)
+
   def test_limit_sign_preference_needs_parked_authority_not_long_control_or_vehicle(self):
     self.fingerprint = None
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.allowed and group == "preferences",
@@ -545,7 +555,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     sign = next(row for row in page.rows if row.key == "ShowSpeedLimits")
     self.assertTrue(sign.available)
     self.assertIsNone(sign.vehicle_fingerprint)
-    for key in ("SpeedLimitController", "SLCConfirmation", "SLCPriority1", "SLCFallback"):
+    for key in ("SpeedLimitController", "SLCConfirmation", "SLCPriority1"):
       self.assertFalse(next(row for row in page.rows if row.key == key).available)
     request = required_change(sign)
     self.allowed = False

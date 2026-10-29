@@ -11,7 +11,7 @@ from openpilot.starpilot.speed_limits import speed_domain as sd
 
 SESSION = "composed-drive"
 ACTIVE = acc.Authority(acc.Mode.LONGITUDINAL_ONLY, acc.LongitudinalOwner.SYSTEM, False, True, False, False)
-POLICY = acc.Policy(confirm_lower=False, confirm_higher=False, fallback_previous=True)
+POLICY = acc.Policy(confirm_lower=False, confirm_higher=False)
 SELECT = sel.SelectionPolicy(sel.SelectionMode.ORDERED, (sel.Source.DASHBOARD, sel.Source.MAP), False)
 OFFSET = sd.OffsetSchedule((sd.OffsetBand(0.0, None, 2.0),))
 HOST = comp.HostState(True, True, True, False, False, 100.0, 100.0)
@@ -63,19 +63,17 @@ class CompositionTests(unittest.TestCase):
     self.assertIsNone(result.ceiling)
     self.assertEqual(result.state.control_generation, 1)
 
-  def test_all_source_gaps_use_only_qualified_previous_limit(self):
+  def test_source_gaps_keep_history_without_a_control_target_or_ceiling(self):
     self.run_frame(frame(0))
-    absent = self.run_frame(frame(1, source_kind=acc.ObservationKind.ABSENT))
-    self.assertEqual(absent.acceptance.basis, "previous_accepted")
-    self.assertIsNone(absent.ceiling)
-    self.assertEqual(absent.domain.context.effective_cluster_mps, 17.0)
-    for now, kind in ((2, acc.ObservationKind.UNKNOWN), (3, acc.ObservationKind.STALE)):
+    accepted = self.state.acceptance.accepted
+    for now, kind in enumerate((acc.ObservationKind.ABSENT, acc.ObservationKind.UNKNOWN, acc.ObservationKind.STALE), 1):
       result = self.run_frame(frame(now, source_kind=kind))
-      self.assertEqual(result.domain.context.effective_cluster_mps, 17.0)
+      self.assertEqual(result.acceptance.basis, kind.value)
+      self.assertIsNone(result.acceptance.control_target_mps)
+      self.assertEqual(result.state.acceptance.accepted, accepted)
+      self.assertIsNone(result.domain.context)
+      self.assertIsNone(result.coordinate)
       self.assertIsNone(result.ceiling)
-      self.assertEqual(result.acceptance.state.observation.kind, kind)
-      disabled = self.run_frame(frame(now + 1, source_kind=kind, policy=replace(POLICY, fallback_previous=False)))
-      self.assertIsNone(disabled.ceiling)
 
   def test_uninitialized_driver_and_missing_coordinates_suppress(self):
     unset = self.run_frame(frame(0, host=replace(HOST, driver_v_cruise_kph=255.0)))
@@ -133,7 +131,7 @@ class CompositionTests(unittest.TestCase):
     self.assertEqual(failed.acceptance.state.accepted.candidate.speed_mps, 15.0)
     self.assertEqual(failed.state.acceptance, failed.acceptance.state)
 
-  def test_rejected_lower_limit_survives_absent_fallback_and_reconnect(self):
+  def test_rejected_lower_limit_survives_source_loss_and_reconnect(self):
     confirmation = replace(POLICY, confirm_lower=True)
     initial = self.run_frame(frame(0, speed=25.0, policy=confirmation))
     self.assertIsNone(initial.ceiling)
@@ -146,12 +144,15 @@ class CompositionTests(unittest.TestCase):
     absent = self.run_frame(frame(3, source_kind=acc.ObservationKind.ABSENT, policy=confirmation))
     reconnected = self.run_frame(frame(4, speed=15.0, policy=confirmation))
     self.assertTrue(rejected.acceptance.action_receipt.consumed)
-    self.assertEqual(absent.acceptance.basis, "previous_accepted")
+    self.assertEqual(absent.acceptance.basis, "absent")
     self.assertEqual(reconnected.acceptance.basis, "rejected")
     for result in (rejected, absent, reconnected):
       self.assertFalse(result.errors)
       self.assertEqual(result.acceptance.state.accepted.candidate.speed_mps, 25.0)
-      self.assertEqual(result.domain.context.accepted_raw_mps, 25.0)
+      if result is absent:
+        self.assertIsNone(result.domain.context)
+      else:
+        self.assertEqual(result.domain.context.accepted_raw_mps, 25.0)
       self.assertIsNone(result.ceiling)
 
   def test_reversed_monotonic_clock_latches_without_ceiling(self):

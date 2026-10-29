@@ -115,8 +115,7 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
             FeatureRow("repair", "Repair saved preference", "Invalid saved choice", choices=("Off", "On"),
                        available=True, reason="Choose Off to repair", repair_value="Off"),
             FeatureRow("unreadable", "Saved preference", "Unreadable", reason="Saved source cannot be read"),
-            FeatureRow("SLCFallback", "Previous accepted limit", "Off (saved mode 0 or 1)", b"1",
-                       ("Off", "On"), available=True), FeatureRow("", "Following", ""), number, reset,
+            FeatureRow("", "Following", ""), number, reset,
             FeatureRow("", "Child settings", "Saved settings", page="lane", available=True),
             FeatureRow("stock", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
             boolean("last_off", "Off"), boolean("last_on", "On"))

@@ -262,14 +262,13 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
           self.assertNotIn(service, subscriber.call_args.kwargs[check])
       self.assertIsNone(plannerd.SavedSlcLifecycle(params, cp, {}).refresh(1_000_000_000)[0])
 
-  def test_automatic_chill_joins_native_mpc_radar_and_disabled_slc(self):
+  def test_automatic_chill_ignores_retired_slc_modes_but_keeps_native_radar_veto(self):
     cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
     planner = LongitudinalPlanner(cp, init_v=25.0)
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
       params.put(DOCUMENT_KEY, json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.CCM))), block=True)
-      owner = ConditionalPlannerHost(params, slc_runtime_enabled=False)
-      missing_slc = ConditionalPlannerHost(params, slc_runtime_enabled=True)
+      owner = ConditionalPlannerHost(params)
       stamp = MONO
       radar = RadarD(adjacent_enabled=True, radar_available=True,
                      clock_pair_fn=lambda: (stamp + 1_000_000, BOOT + stamp - MONO + 1_000_000, 1000))
@@ -295,7 +294,10 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
         def all_checks(self, service_list=None):
           return all(self.valid[service] for service in ('modelV2', 'carState', 'radarTracks'))
 
+      legacy = Path(params.get_param_path('SLCFallback'))
+      saved_modes = (b'0', b'1', b'2', b'broken')
       for index in range(31):
+        legacy.write_bytes(saved_modes[index % len(saved_modes)])
         stamp = MONO + index * 50_000_000
         payloads = serialized_scene(stamp=BOOT + stamp - MONO, speed=25.0, horizon=300.0,
                                     lead_present=False, experimental_mode=True)
@@ -336,23 +338,14 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
         current, _ = owner.sample(sm, cp, planner, now_mono_ns=stamp + 2_000_000,
                                    now_boot_ns=BOOT + stamp - MONO + 2_000_000, sample_skew_ns=1000,
                                    drive_id=MONO - 1_000_000_000, native_plan_valid=True)
-        unavailable, _ = missing_slc.sample(sm, cp, planner, now_mono_ns=stamp + 2_000_000,
-                                             now_boot_ns=BOOT + stamp - MONO + 2_000_000, sample_skew_ns=1000,
-                                             drive_id=MONO - 1_000_000_000, native_plan_valid=True)
-        if index == 29:
+        self.assertEqual(legacy.read_bytes(), saved_modes[index % len(saved_modes)])
+        if 20 <= index < 30:
           self.assertIs(current.projected.scene.adjacent_lead_ambiguous, False)
           self.assertEqual(current.decision.reason.value, 'ccm_speed')
           self.assertIs(current.override_experimental, False)
-          self.assertIsNone(unavailable.projected.scene.slc_experimental)
-          self.assertEqual(unavailable.decision.reason.value, 'scene_unavailable')
-          self.assertIs(unavailable.override_experimental, True)
-      self.assertIs(current.projected.scene.slc_experimental, False)
       self.assertIs(current.projected.scene.adjacent_lead_ambiguous, True)
       self.assertEqual(current.decision.reason.value, 'ccm_veto')
       self.assertIs(current.override_experimental, True)  # Real adjacent radar veto exits Chill immediately.
-      self.assertIsNone(unavailable.projected.scene.slc_experimental)
-      self.assertEqual(unavailable.decision.reason.value, 'ccm_veto')
-      self.assertIs(unavailable.override_experimental, True)
 
   def test_current_build_disabled_scenes_make_chill_launch_known(self):
     cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

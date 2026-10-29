@@ -35,7 +35,6 @@ def scene(now: float, speed: float = 20.0, **changes) -> SceneEvidence:
     curve_detected=False,
     slow_lead_detected=False,
     stop_light_detected=False,
-    slc_experimental=False,
     standstill=False,
     traffic_mode=False,
     stop_sign_confirmed=False,
@@ -151,16 +150,16 @@ class ConditionalModePolicyTest(unittest.TestCase):
       ModeChoice.CEM,
       ManualIntent.NONE,
       AUTHORITY,
-      scene(4.0, curve_detected=True, slow_lead_detected=True, stop_light_detected=True, slc_experimental=True),
+      scene(4.0, curve_detected=True, slow_lead_detected=True, stop_light_detected=True),
       settings,
     )
     self.assertEqual((selected.reason, selected.status_code), (Reason.CEM_CURVE, 3))
     policy.reset()
-    selected = policy.step(4.1, ModeChoice.CEM, ManualIntent.NONE, AUTHORITY, scene(4.1, stop_light_detected=True, slc_experimental=True), settings)
+    selected = policy.step(4.1, ModeChoice.CEM, ManualIntent.NONE, AUTHORITY, scene(4.1, stop_light_detected=True), settings)
     self.assertEqual((selected.reason, selected.status_code), (Reason.CEM_STOP, 8))
     policy.reset()
-    selected = policy.step(4.2, ModeChoice.CEM, ManualIntent.NONE, AUTHORITY, scene(4.2, slc_experimental=True), settings)
-    self.assertEqual((selected.reason, selected.status_code), (Reason.CEM_SPEED_LIMIT, 7))
+    selected = policy.step(4.2, ModeChoice.CEM, ManualIntent.NONE, AUTHORITY, scene(4.2), settings)
+    self.assertEqual((selected.reason, selected.status_code), (Reason.NO_TRIGGER, 0))
 
   def test_cem_slow_lead_hold_requires_credible_current_lead(self):
     lead = LeadEvidence(True, True, False, 45.0, 15.0, 0.0, 0.9)
@@ -282,7 +281,7 @@ class ConditionalModePolicyTest(unittest.TestCase):
     self.assertTrue(policy.step(20.9, ModeChoice.CCM, ManualIntent.NONE, AUTHORITY, followed(20.9)).requested_experimental)
     entered = policy.step(21.01, ModeChoice.CCM, ManualIntent.NONE, AUTHORITY, followed(21.01))
     self.assertEqual((entered.reason, entered.status_code, entered.requested_experimental), (Reason.CCM_LEAD, 4, False))
-    veto = policy.step(21.02, ModeChoice.CCM, ManualIntent.NONE, AUTHORITY, replace(followed(21.02), slc_experimental=True))
+    veto = policy.step(21.02, ModeChoice.CCM, ManualIntent.NONE, AUTHORITY, replace(followed(21.02), left_blinker=True))
     self.assertEqual((veto.reason, veto.requested_experimental), (Reason.CCM_VETO, True))
 
   def test_ccm_qualified_launch_and_missing_launch_proof(self):

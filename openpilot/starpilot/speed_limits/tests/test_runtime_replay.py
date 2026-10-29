@@ -1120,7 +1120,6 @@ class RuntimeReplayTests(unittest.TestCase):
       restored = read_params(params)
       self.assertTrue(restored.enabled)
       self.assertTrue(restored.acceptance.confirm_lower)
-      self.assertTrue(restored.acceptance.fallback_previous)
       self.assertEqual(restored.selection.slots[0], Source.MAP)
       self.assertEqual(restored.selection.slots[1], Source.DASHBOARD)
       self.assertFalse(restored.errors)
@@ -1180,7 +1179,7 @@ class RuntimeReplayTests(unittest.TestCase):
     self.assertEqual(runtime._observations(self.sm, self.cp, 9_100_000_000)[Source.DASHBOARD].kind, ObservationKind.STALE)
     self.assertEqual(stale.message.slcState.observationKind, 'stale')  # both configured slots use the expired dashboard
     self.assertFalse(stale.message.slcState.hasCeiling)
-    self.assertEqual(stale.result.acceptance.basis, 'previous_accepted')
+    self.assertEqual(stale.result.acceptance.basis, 'stale')
     self.assertEqual(stale.result.override.contribution_mps, 105 / 3.6)
     planner.update(self.sm, cruise_ceiling=stale.result.ceiling)
     self.assertEqual(planner.last_cruise_ceiling_status, 'absent')

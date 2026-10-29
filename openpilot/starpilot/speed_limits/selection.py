@@ -96,7 +96,7 @@ def select_limit(observations: Mapping[Source, Observation], policy: SelectionPo
     observation = observations[selected]
   else:
     kinds = {kind for _, kind in unavailable}
-    # Preserve source availability; acceptance independently owns previous-limit fallback.
+    # Preserve availability; a remembered limit cannot make a missing source current.
     kind = (ObservationKind.UNKNOWN if ObservationKind.UNKNOWN in kinds else
             ObservationKind.STALE if ObservationKind.STALE in kinds else ObservationKind.ABSENT)
     observation = Observation(kind)

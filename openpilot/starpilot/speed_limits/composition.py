@@ -126,7 +126,6 @@ def step(state: State, frame: Frame) -> Result:
       not isinstance(frame.acceptance_policy, acc.Policy) or
       any(type(value) is not bool for value in (frame.acceptance_policy.confirm_lower,
                                                 frame.acceptance_policy.confirm_higher,
-                                                frame.acceptance_policy.fallback_previous,
                                                 frame.acceptance_policy.display_only)) or
       not isinstance(frame.selected_kind, sd.DomainStatus) or not isinstance(frame.ego_pair, sd.SpeedPair) or
       (frame.is_metric is not None and type(frame.is_metric) is not bool) or type(frame.set_speed_ready) is not bool):

@@ -11,7 +11,7 @@ from openpilot.starpilot.speed_limits import speed_domain as sd
 
 SESSION = "coordinates"
 ACTIVE = acc.Authority(acc.Mode.LONGITUDINAL_ONLY, acc.LongitudinalOwner.SYSTEM, False, True, False, False)
-POLICY = acc.Policy(confirm_lower=False, confirm_higher=False, fallback_previous=True)
+POLICY = acc.Policy(confirm_lower=False, confirm_higher=False)
 SCHEDULE = sd.OffsetSchedule((sd.OffsetBand(0.0, None, 2.0),))
 PEDAL_OFF = ov.PedalEvidence(ov.EvidenceKind.VALID, False)
 
@@ -175,7 +175,7 @@ class SpeedDomainTests(unittest.TestCase):
                                            accepted=acc.AcceptedLimit(cast(Any, "bad"), SESSION, 0))),
       replace(self.accepted, state=replace(self.accepted.state, observation="bad")),
       replace(self.accepted, policy=replace(POLICY, display_only=True)),
-      replace(self.accepted, policy=replace(POLICY, fallback_previous="bad")),
+      replace(self.accepted, policy=replace(POLICY, confirm_lower="bad")),
       replace(self.accepted, state=replace(self.accepted.state, observation=acc.Observation(acc.ObservationKind.STALE))),
     )
     for decision in cases:
@@ -184,21 +184,17 @@ class SpeedDomainTests(unittest.TestCase):
         self.assertEqual(result.status, sd.DomainStatus.INVALID)
         self.assertIsNone(result.context)
 
-  def test_retained_target_requires_enabled_policy_and_matching_accepted_history(self):
+  def test_source_loss_cannot_forge_a_retained_control_target(self):
     self.decision(1, source=acc.ObservationKind.UNKNOWN)
     pair = sd.SpeedPair(sd.DomainStatus.VALID, 20.0, 20.0, SESSION, 1)
-    self.assertEqual(sd.resolve(self.accepted, SCHEDULE, pair, pair).status, sd.DomainStatus.VALID)
-    for forged in (replace(self.accepted, basis='accepted'),
-                   replace(self.accepted, policy=replace(POLICY, fallback_previous=False)),
-                   replace(self.accepted, control_target_mps=21.0),
-                   replace(self.accepted, state=replace(self.accepted.state, accepted=None))):
-      with self.subTest(forged=forged):
-        self.assertEqual(sd.resolve(forged, SCHEDULE, pair, pair).status, sd.DomainStatus.INVALID)
-        assert forged.policy is not None
-        override = ov.step(ov.new_session(SESSION), forged, ACTIVE, forged.policy,
-                           ov.SelectedEvidence(ov.EvidenceKind.VALID, 20.0), PEDAL_OFF, now_ns=1)
-        self.assertTrue(override.errors)
-        self.assertIsNone(override.contribution_mps)
+    self.assertEqual(sd.resolve(self.accepted, SCHEDULE, pair, pair).status, sd.DomainStatus.UNAVAILABLE)
+    for target in (20.0, 21.0):
+      forged = replace(self.accepted, control_target_mps=target)
+      self.assertEqual(sd.resolve(forged, SCHEDULE, pair, pair).status, sd.DomainStatus.INVALID)
+      override = ov.step(ov.new_session(SESSION), forged, ACTIVE, POLICY,
+                         ov.SelectedEvidence(ov.EvidenceKind.VALID, 20.0), PEDAL_OFF, now_ns=1)
+      self.assertTrue(override.errors)
+      self.assertIsNone(override.contribution_mps)
 
   def test_cluster_measurements_below_raw_clamp_both_deltas_to_zero(self):
     _, coordinate = self.frame(0, selected_raw=20.0, selected_cluster=19.0,
@@ -258,12 +254,13 @@ class SpeedDomainTests(unittest.TestCase):
     self.assertEqual(reduced.state.persistent_selected_mps, 24.)
     self.assertEqual(coordinate.cap_mps, 24.)
 
-  def test_absent_fallback_and_unavailable_pair(self):
+  def test_source_loss_and_unavailable_pair_suppress_coordinates(self):
     self.frame(0)
     self.decision(1, source=acc.ObservationKind.ABSENT)
-    fallback, coordinate = self.frame(1)
-    self.assertEqual(fallback.state.accepted_mps, 20.0)
-    self.assertEqual(coordinate.cap_mps, 22.0)
+    pair = sd.SpeedPair(sd.DomainStatus.VALID, 20.0, 20.0, SESSION, 1)
+    missing = sd.resolve(self.accepted, SCHEDULE, pair, pair)
+    self.assertEqual(missing.status, sd.DomainStatus.UNAVAILABLE)
+    self.assertIsNone(missing.context)
     self.decision(2)
     unavailable = sd.resolve(self.accepted, SCHEDULE, sd.SpeedPair(sd.DomainStatus.STALE),
                              sd.SpeedPair(sd.DomainStatus.VALID, 20.0, 20.0, SESSION, 2))

@@ -319,7 +319,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SLCConfirmation", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationHigher", {PERSISTENT, BOOL, "0"}},
     {"SLCConfirmationLower", {PERSISTENT, BOOL, "0"}},
-    {"SLCFallback", {PERSISTENT, INT, "2"}},
+    {"SLCFallback", {PERSISTENT, INT}},  // Retired; preserve saved bytes for older versions.
     {"SLCOverride", {PERSISTENT, INT, "1"}},
     {"SLCQualifiedHistory", {PERSISTENT, JSON}},
     {"ConditionalModeConfig", {PERSISTENT | DONT_LOG, JSON}},

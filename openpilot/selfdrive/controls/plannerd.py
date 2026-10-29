@@ -375,7 +375,6 @@ def starpilot_main():
   nudge_preferences = NudgePreferences(params)
   # Saved-on features start only for a finalized, supported driving owner. Their
   # current-source and longitudinal authority checks still run every frame.
-  slc_replay = feature_enabled(params, CP, 'slc', os.environ)
   slc_available = slc_transport_capable(CP, os.environ)
   profile_replay = feature_enabled(params, CP, 'profile', os.environ)
   curve_replay = feature_enabled(params, CP, 'curve', os.environ)
@@ -397,8 +396,8 @@ def starpilot_main():
   takeoff_preferences = TakeoffPreferences(params) if CP.openpilotLongitudinalControl else None
   stop_resume_sock = messaging.sub_sock("carState", conflate=False) if force_stop_owner is not None else None
   conditional_host = (ConditionalPlannerHost(params, enabled_scene_owners=(frozenset({'traffic_mode'}) if traffic_capable else frozenset()) |
-                                                                        frozenset({'forcing_stop', 'plan_forcing_stop'}),
-                                             slc_runtime_enabled=slc_replay) if conditional_replay else None)
+                                                                        frozenset({'forcing_stop', 'plan_forcing_stop'}))
+                      if conditional_replay else None)
   traffic_owner = TrafficOwner() if traffic_capable else None
   mode_owner = ModeActionOwner() if not CP.passive and not CP.dashcamOnly and not CP.notCar else None
   mode_session, mode_sequence = secrets.token_hex(16), 0
@@ -456,8 +455,6 @@ def starpilot_main():
         if 'REPLAY' in os.environ:
           slc_runtime, _ = slc_lifecycle.refresh(now_ns, pending_actions=pending_slc_actions,
                                                  pending_cruise=pending_slc_cruise)
-        if conditional_host is not None:
-          conditional_host.slc_runtime_enabled = slc_runtime is not None
         current_start_ns = (int(sm['deviceState'].startedMonoTime)
                             if 'deviceState' in subscribed_services and sm.valid['deviceState'] and
                             sm.alive['deviceState'] and 0 < sm.logMonoTime['deviceState'] <= now_ns else 0)
@@ -466,7 +463,6 @@ def starpilot_main():
                          now_ns=now_ns, drive_id=current_start_ns,
                          receive_clock=time.monotonic_ns if 'REPLAY' not in os.environ else None)
         planner_status = None
-        slc_output = None
         drive_changed = current_start_ns > 0 and drive_start_ns > 0 and current_start_ns != drive_start_ns
         if slc_cruise_sock is not None:
           for _ in range(8):
@@ -522,7 +518,6 @@ def starpilot_main():
           request = (pending_slc_actions.popleft()[1] if cruise_event is None and pending_slc_actions and
                      pending_slc_actions[0][0] <= now_ns else None)
           output = slc_runtime.step(sm, CP, now_ns=now_ns, request=request, cruise_event=cruise_event)
-          slc_output = output
           planner_status = output.message
           if output.command is not None:
             pm.send('slcCruiseCommand', output.command)
@@ -637,7 +632,6 @@ def starpilot_main():
                                                  owner_present=traffic_owner is not None),
                 forcing_stop=ObservedBool(longitudinal_planner.force_stop_plan.forcing, int(sm.logMonoTime['modelV2'])),
                 plan_forcing_stop=ObservedBool(longitudinal_planner.force_stop_plan.forcing, int(sm.logMonoTime['modelV2']))),
-              slc_runtime=slc_runtime, slc_output=slc_output,
               native_plan_valid=bool(sm.all_checks(native_plan_checks)),
               manual_event=current_manual_event(pending_conditional_events, conditional_now_ns,
                                                 int(sm.logMonoTime['carState'])),

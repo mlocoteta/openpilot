@@ -175,7 +175,7 @@ def resolve(decision: acc.Decision, schedule: OffsetSchedule, selected: SpeedPai
       not isinstance(decision.authority, acc.Authority) or
       not acc.authority_is_valid(decision.authority) or not isinstance(decision.policy, acc.Policy) or
       any(type(value) is not bool for value in (decision.policy.confirm_lower, decision.policy.confirm_higher,
-                                                decision.policy.fallback_previous, decision.policy.display_only)) or
+                                                decision.policy.display_only)) or
       not acc.observation_is_valid(decision.state.observation, session_id=decision.state.session_id)):
     return DomainResolution(DomainStatus.INVALID, reason="invalid acceptance, schedule or speed pair")
   accepted = decision.state.accepted
@@ -198,7 +198,7 @@ def resolve(decision: acc.Decision, schedule: OffsetSchedule, selected: SpeedPai
   if (not _number(target, positive=True) or accepted is None or
       accepted.candidate.speed_mps != target or not decision.authority.can_control or
       decision.policy.display_only or
-      (decision.state.observation.kind is not acc.ObservationKind.VALID and not acc.previous_limit_is_qualified(decision))):
+      decision.state.observation.kind is not acc.ObservationKind.VALID):
     return DomainResolution(DomainStatus.INVALID, reason="accepted target mismatch")
   assert selected.raw_mps is not None and selected.cluster_mps is not None
   assert ego.raw_mps is not None and ego.cluster_mps is not None

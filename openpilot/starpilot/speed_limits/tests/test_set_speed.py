@@ -491,7 +491,7 @@ def test_manual_override_compares_against_the_applied_rounded_set_speed(drive, m
   assert helper.v_cruise_kph == pytest.approx(baseline, abs=1e-6)
 
 
-@pytest.mark.parametrize('fallback', [0, 2])
+@pytest.mark.parametrize('fallback', [0, 1, 2, None])
 def test_source_loss_preserves_latest_received_limit_and_offset_without_actions(drive, fallback):
   from openpilot.starpilot.ui.onroad_state import OnroadState, speed_limit_from_message, slc_controls
   from openpilot.starpilot.ui.presentation import Profile

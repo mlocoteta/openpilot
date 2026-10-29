@@ -489,9 +489,6 @@ class FeatureVisualTests(unittest.TestCase):
                     {"value": "Invalid saved choice"}, {"choices": ()}):
       with self.subTest(changes=changes):
         self.assertIsNone(view._boolean_value(replace(row, **changes)))
-    special = replace(row, key="SLCFallback", value="Off (saved mode 0 or 1)")
-    self.assertIs(view._boolean_value(special), False)
-    self.assertIsNone(view._boolean_value(replace(special, key="other")))
 
   def test_parent_toggle_and_open_have_separate_targets_and_navigation_stays_available(self):
     self.drawing()

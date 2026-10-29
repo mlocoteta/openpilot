@@ -105,7 +105,6 @@ FLOAT_SPECS = {
      for name in ("Aggressive", "Standard", "Relaxed")
      for suffix in ("JerkAcceleration", "JerkDeceleration", "JerkDanger", "JerkSpeedDecrease", "JerkSpeed")},
 }
-SLC_FALLBACK = "SLCFallback"
 SLC_PRIORITY = "SLCPriority1"
 SLC_SECONDARY = "SLCPriority2"
 LONG_PREFIX = "profile:"
@@ -618,8 +617,6 @@ class FeatureSettingsOwner:
       return "1" if BOOL_DEFAULTS[key] else "0"
     if key in ("CustomCruise", "CustomCruiseLong"):
       return "1.0" if key == "CustomCruise" else "5.0"
-    if key == SLC_FALLBACK:
-      return "2"
     if key == SLC_PRIORITY:
       return "Vision"
     if key == "IsMetric":
@@ -1102,11 +1099,6 @@ class FeatureSettingsOwner:
           (source, *choices) if valid and source not in choices else choices,
           available=source_allowed and valid and readable and (vision_dev or maps_available or source != "Dashboard"),
           reason=reason, capability=source_capability))
-      fallback, raw, valid = self._value(SLC_FALLBACK)
-      rows.append(FeatureRow(SLC_FALLBACK, "Previous accepted limit", "On" if fallback == "2" else
-                             "Off (saved mode 0 or 1)" if fallback in ("0", "1") else "Invalid saved value", raw,
-                             ("Off", "On") if valid and fallback in ("0", "1", "2") else (),
-                             available=allowed and valid and fallback in ("0", "1", "2"), default_value="On"))
       rows.extend(offset_rows)
       title = "Speed Limit Controller"
     elif page == FeaturePage.LANE:
@@ -1431,7 +1423,7 @@ class FeatureSettingsOwner:
     elif key.startswith(LONG_PREFIX):
       source_key = PERSONALITY_PROFILES_PARAM
       group = "long"
-    elif key in BOOL_DEFAULTS or key in FLOAT_SPECS or key in (SLC_FALLBACK, SLC_PRIORITY, SLC_SECONDARY):
+    elif key in BOOL_DEFAULTS or key in FLOAT_SPECS or key in (SLC_PRIORITY, SLC_SECONDARY):
       source_key = key
       long_key = (key in ("CustomPersonalities", "ForceStops", "ForceStopDistanceOffset") or "Personality" in key or
                   key.endswith(("Follow", "FollowHigh")) or "Jerk" in key)
@@ -1583,11 +1575,6 @@ class FeatureSettingsOwner:
         if key == "ForceStopDistanceOffset" and not number.is_integer():
           return False
         encoded = str(int(number)) if key == "ForceStopDistanceOffset" else str(round(number, 4))
-      elif key == SLC_FALLBACK:
-        current, _, valid = self._value(key)
-        if not valid or current not in ("0", "1", "2") or request.value not in ("On", "Off"):
-          return False
-        encoded = "2" if request.value == "On" else "0"
       else:
         if request.value not in self._source_choices():
           return False
@@ -1688,8 +1675,6 @@ class FeatureSettingsOwner:
         self.params.put(source_key, encoded, block=True)
       elif source_key in FLOAT_SPECS:
         self.params.put(source_key, int(encoded) if source_key == "ForceStopDistanceOffset" else float(encoded), block=True)
-      elif source_key == SLC_FALLBACK:
-        self.params.put(source_key, int(encoded), block=True)
       elif source_key == PERSONALITY_PROFILES_PARAM:
         return self._save_profile_document(request, str(encoded).encode(), request.expected, profile_master_source,
                                            require_capability=key.startswith("profile:traffic:"),

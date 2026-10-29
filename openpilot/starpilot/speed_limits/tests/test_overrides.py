@@ -134,18 +134,15 @@ class OverrideTests(unittest.TestCase):
     self.decision(5, policy=display)
     self.assertIsNone(self.reduce(5, policy=display, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps)
 
-  def test_source_gaps_preserve_the_manual_choice_independently_of_fallback(self):
+  def test_source_gaps_preserve_the_manual_choice(self):
     for kind in (acc.ObservationKind.ABSENT, acc.ObservationKind.UNKNOWN, acc.ObservationKind.STALE):
       with self.subTest(kind=kind):
         self.setUp()
         self.arm()
-        fallback = acc.Policy(confirm_lower=False, confirm_higher=False, fallback_previous=True)
-        self.decision(3, source=kind, policy=fallback)
-        result = self.reduce(3, policy=fallback, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0))
+        self.decision(3, source=kind)
+        result = self.reduce(3, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0))
         self.assertEqual(result.contribution_mps, 25.0)
         self.assertEqual(result.context, self.first.context)
-        self.decision(4, source=kind)
-        self.assertEqual(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.)
 
   def test_delayed_acceptance_consumed_effect_cannot_arm_after_release(self):
     pending_policy = acc.Policy(confirm_lower=True, confirm_higher=True)
@@ -179,7 +176,7 @@ class OverrideTests(unittest.TestCase):
   def test_mismatched_snapshot_and_inactive_origin_fail_closed(self):
     change = self.classified()
     self.decision(2)
-    mismatch = self.reduce(2, policy=replace(POLICY, fallback_previous=True), change=change)
+    mismatch = self.reduce(2, policy=replace(POLICY, confirm_lower=True), change=change)
     self.assertTrue(mismatch.errors)
     self.assertEqual(mismatch.state.last_effect_id, 1)
     self.assertTrue(mismatch.state.reset_required)
@@ -217,14 +214,14 @@ class OverrideTests(unittest.TestCase):
     self.decision(4)
     self.assertEqual(self.reduce(4, selected=ov.SelectedEvidence(ov.EvidenceKind.VALID, 25.0)).contribution_mps, 25.)
 
-  def test_previous_session_history_can_supply_explicit_absent_fallback(self):
+  def test_previous_session_history_does_not_arm_overrides_without_a_live_limit(self):
     prior = acc.AcceptedLimit(acc.Candidate("map", acc.ObservationIdentity(acc.IdentityKind.GEOGRAPHIC, value="road"), 20.0),
                               "prior-drive", 0)
-    fallback = acc.Policy(fallback_previous=True)
-    decision = acc.step(acc.new_session(SESSION, prior), acc.Observation(acc.ObservationKind.ABSENT), ACTIVE, fallback, now_ns=1)
-    result = ov.step(ov.new_session(SESSION), decision, ACTIVE, fallback, self.selected, PEDAL_OFF, now_ns=1)
+    policy = acc.Policy()
+    decision = acc.step(acc.new_session(SESSION, prior), acc.Observation(acc.ObservationKind.ABSENT), ACTIVE, policy, now_ns=1)
+    result = ov.step(ov.new_session(SESSION), decision, ACTIVE, policy, self.selected, PEDAL_OFF, now_ns=1)
     self.assertFalse(result.errors)
-    self.assertIsNotNone(result.context)
+    self.assertIsNone(result.context)
 
   def test_automatic_foreign_and_completed_effects_are_watermarked_without_intent(self):
     self.decision(2)

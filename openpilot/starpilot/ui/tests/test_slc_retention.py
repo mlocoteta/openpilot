@@ -274,6 +274,39 @@ def test_compact_rejection_or_timeout_keeps_set_speed_until_adoption(tmp_path, a
   assert target == pytest.approx(published_cruise_mph(limit + 5, metric=metric), rel=0, abs=1e-10)
 
 
+@pytest.mark.parametrize('raw', [None, b'0', b'1', b'2', b'broken'])
+def test_retired_fallback_cannot_reset_session_or_change_set_speed_sign_and_recovery(tmp_path, raw):
+  drive = RetentionDrive(tmp_path)
+  params = Params(str(tmp_path))
+  path = Path(params.get_param_path('SLCFallback'))
+  path.unlink()
+  lifecycle = SavedSlcLifecycle(params, drive.cp, {'SLC_REPLAY_RUNTIME': '1'})
+  drive.runtime, _ = lifecycle.refresh(NOW)
+  runtime = drive.runtime
+  drive.step(0)
+  session = runtime.session_id
+  # Simulate a normal manual + adjustment after accepting 45 mph.
+  from openpilot.starpilot.speed_limits.runtime import CruiseEvent
+  stamp = NOW + 50_000_000
+  drive.sm['carState'].vCruise = drive.sm['carState'].vCruiseCluster = 50 * MPH * 3.6
+  drive.sm.advance(stamp)
+  runtime.step(drive.sm, drive.cp, now_ns=stamp, now_boot_ns=BOOT+50_000_000,
+    cruise_event=CruiseEvent(1, stamp, 45*MPH, 50*MPH, 'accel', 'card-producer', stamp))
+  if raw is not None:
+    path.write_bytes(raw)
+  refreshed, changed = lifecycle.refresh(NOW+1_000_000_000)
+  assert not changed and refreshed is runtime and runtime.session_id == session
+  _, view, target = drive.step(1000, status='noCoverage')
+  shown = resolve_unified_speed(view)
+  assert target == pytest.approx(published_cruise_mph(50, software_target=False))
+  assert (shown.max_text, shown.posted_text, shown.source, shown.status) == ('50', '45', 'map', 'Unavailable')
+  assert view.speed_limit.driver_override_active
+  recovered, view, target = drive.step(1100)
+  assert recovered.command is None and view.speed_limit.driver_override_active
+  assert target == pytest.approx(published_cruise_mph(50, software_target=False))
+  assert (path.read_bytes() if path.exists() else None) == raw
+
+
 @pytest.mark.parametrize('keep', [False, True])
 @pytest.mark.parametrize('loss', ['noCoverage', 'noMatch', 'noGps', 'matchedNoLimit', 'missingTile',
                                  'lookahead', 'stopped', 'deadTransport', 'externalGpsStale'])

@@ -6,6 +6,12 @@ CEM selects Experimental mode for configured speed, road, signal, curve, lead, s
 
 `ConditionalPlannerHost` joins the current native MPC result, current model/car/radar observations, saved preferences, and qualified wheel-button events. It produces a short-lived proposal on `slcState.conditionalMode`; it does not own the effective driving mode. `selfdrived` independently checks the current vehicle capability, longitudinal axis, drive, saved configuration, and input freshness before accepting that proposal. Its ordinary `ExperimentalMode` request remains the fallback. The UI displays an active conditional reason only from a fresh selfdrived acknowledgment matching the exact current `selfdriveState` frame and active longitudinal axis; the saved family is displayed separately.
 
+Speed-limit availability is independent of mode selection. The retired `SLCFallback=1`
+preference cannot request Experimental or veto Chill, including when Maps or Vision
+becomes unknown or stale. Other scene triggers, manual mode choices and committed
+stop handling retain their existing behavior. Historical speed-limit reason labels
+remain readable in recorded routes.
+
 On an exact tagged Ioniq 6 system-longitudinal session, a valid saved v1 configuration with SafeMode off starts the normal runtime; Stock selection still yields stock behavior. `CONDITIONAL_MODE_REPLAY_RUNTIME=1` retains the explicit developer path. Saved settings never substitute for fresh current CAN, axis, model, radar, or paired MONOTONIC/BOOTTIME clock evidence. Explicit `REPLAY` lacks a qualified recorded clock pair and cannot activate the normal CEM path.
 
 `ConditionalModeConfig` is a strict, versioned SI document; readable absence selects factory CEM without writing a document. An explicitly saved Stock choice and Restore Stock reset select Stock. Native UI and Galaxy share the parked settings editor. Invalid documents stay intact until an explicit reset. Legacy settings are not adopted automatically. `SafeMode` disables conditional authority. Settings refresh at most once per second; cached owner revisions are affirmed per frame, while live vehicle and axis authority are checked independently.

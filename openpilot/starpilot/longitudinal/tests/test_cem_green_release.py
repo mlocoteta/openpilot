@@ -109,7 +109,7 @@ class CemGreenCallerTests(unittest.TestCase):
     self.params.put(DOCUMENT_KEY, json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.CEM))), block=True)
     self.cp = CarInterface.get_non_essential_params(CAR.HYUNDAI_IONIQ_6)
     self.cp.openpilotLongitudinalControl = True
-    self.owner = ConditionalPlannerHost(self.params, slc_runtime_enabled=False)
+    self.owner = ConditionalPlannerHost(self.params)
     self.addCleanup(self.owner.close)
     self.consumer = ModeConsumer()
     self.planner = LongitudinalPlanner(self.cp, init_v=4.27)

@@ -189,7 +189,7 @@ def _acceptance_valid(decision: object, authority: object, policy: object, sessi
   if (accepted is None or not _token(accepted.session_id) or not _speed(accepted.candidate.speed_mps) or
       decision.control_target_mps != accepted.candidate.speed_mps):
     return False
-  return decision.state.observation.kind is acc.ObservationKind.VALID or acc.previous_limit_is_qualified(decision)
+  return decision.state.observation.kind is acc.ObservationKind.VALID
 
 
 def step(state: State, acceptance: acc.Decision, authority: acc.Authority, policy: acc.Policy,

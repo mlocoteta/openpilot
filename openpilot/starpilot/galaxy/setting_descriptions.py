@@ -63,7 +63,6 @@ DESCRIPTIONS = {
   'SLCConfirmation': 'Auto adopts new limits immediately. With Automatic adoption off, + accepts and − declines within 10 seconds.',
   'SLCPriority1': 'Chooses the first source checked for a fresh speed limit.',
   'SLCPriority2': 'Chooses the source used when the primary source has no fresh speed limit.',
-  'SLCFallback': 'Keeps the previously accepted speed limit when sources are unavailable, until another limit is accepted.',
   'slc_adopt': 'Keeps the current speed-limit offset schedule fixed when display units change.',
   'slc_reset': 'Resets saved speed-limit offsets while retaining valid configured speed ranges.',
   'reset_driver_monitoring': 'Clear saved wheel-side detection. Automatic detection restarts on the next drive.',

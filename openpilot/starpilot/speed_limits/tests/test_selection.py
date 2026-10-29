@@ -154,7 +154,7 @@ class TestSourceSelection(unittest.TestCase):
     for mode in (Mode.LONGITUDINAL_ONLY, Mode.COMBINED):
       with self.subTest(mode=mode):
         authority = Authority(mode, LongitudinalOwner.SYSTEM, mode == Mode.COMBINED, True, False, False)
-        acceptance_policy = Policy(confirm_lower=True, confirm_higher=False, fallback_previous=True)
+        acceptance_policy = Policy(confirm_lower=True, confirm_higher=False)
         source_policy = policy(slots=(Source.DASHBOARD, None), online=False)
         candidate = observations(dashboard=29.0576)[Source.DASHBOARD].candidate
         state = replace(new_session("selection-regression", AcceptedLimit(candidate, "selection-regression", 0)), received_speed_mps=29.0576)
@@ -164,7 +164,7 @@ class TestSourceSelection(unittest.TestCase):
           action = DriverAction(state.session_id, 1, state.pending.decision_id, ActionKind.REJECT) if reject else None
           decision = step(state, chosen.observation, authority, acceptance_policy, now_ns=index * 50_000_000, action=action)
           self.assertFalse(decision.errors)
-          self.assertEqual(decision.control_target_mps, 29.0576)
+          self.assertEqual(decision.control_target_mps, 29.0576 if speed is not None else None)
           self.assertEqual(decision.state.accepted.candidate.speed_mps, 29.0576)
           self.assertEqual(decision.state.pending is not None, index == 1)
           if index > 0:
@@ -179,7 +179,7 @@ class TestSourceSelection(unittest.TestCase):
 
   def test_uncertainty_and_axis_ownership_survive_composition(self):
     system = Authority(Mode.LONGITUDINAL_ONLY, LongitudinalOwner.SYSTEM, False, True, False, False)
-    acceptance_policy = Policy(confirm_higher=False, fallback_previous=True)
+    acceptance_policy = Policy(confirm_higher=False)
     source_policy = policy(slots=(Source.MAP, None), online=False)
     history = AcceptedLimit(observations(map=20)[Source.MAP].candidate, "uncertainty", 0)
     state = replace(new_session("uncertainty", history), received_speed_mps=20)
@@ -191,7 +191,7 @@ class TestSourceSelection(unittest.TestCase):
       selected = select_limit(supplied, source_policy)
       decision = step(accepted.state, selected.observation, system, acceptance_policy, now_ns=1)
       self.assertEqual(decision.state.accepted, accepted.state.accepted)
-      self.assertEqual(decision.control_target_mps, 20)
+      self.assertIsNone(decision.control_target_mps)
       self.assertEqual(decision.state.observation.kind, kind)
     for authority in (Authority(Mode.LATERAL_ONLY, LongitudinalOwner.NONE, True, False, False, False),
                       Authority(Mode.LATERAL_ONLY, LongitudinalOwner.STOCK, True, False, True, False),
@@ -226,7 +226,7 @@ class TestSourceSelection(unittest.TestCase):
 
   def test_dashboard_session_value_rejection_and_adopt_through_selection(self):
     authority = Authority(Mode.LONGITUDINAL_ONLY, LongitudinalOwner.SYSTEM, False, True, False, False)
-    acceptance_policy = Policy(confirm_higher=False, fallback_previous=True)
+    acceptance_policy = Policy(confirm_higher=False)
     selection_policy = policy(slots=(Source.DASHBOARD, None), online=False)
     candidate = Candidate("dashboard", ObservationIdentity(IdentityKind.SESSION_VALUE, session_id="drive"), 29.0576)
     state = replace(new_session("drive", AcceptedLimit(candidate, "drive", 0)), received_speed_mps=29.0576)
@@ -239,7 +239,7 @@ class TestSourceSelection(unittest.TestCase):
       action = DriverAction("drive", 0, state.pending.decision_id, ActionKind.REJECT) if index == 2 else None
       decision = step(state, selected.observation, authority, acceptance_policy, now_ns=index, action=action)
       self.assertEqual(decision.errors, ())
-      self.assertEqual(decision.control_target_mps, 29.0576)
+      self.assertEqual(decision.control_target_mps, 29.0576 if speed is not None else None)
       state = decision.state
     self.assertEqual(decision.basis, "rejected")
     shown = state.presentation

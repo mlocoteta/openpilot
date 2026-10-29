@@ -162,7 +162,6 @@ class TestStopCommitTransport(unittest.TestCase):
       stop_sign_confirmed=ObservedBool(stop_sign, now-2_000_000),
       forcing_stop=ObservedBool(forcing, now-2_000_000),
       dashboard_stop_sign=ObservedBool(False, now-2_000_000),
-      slc_experimental=ObservedBool(False, now-2_000_000),
       previous_experimental=ObservedBool(False, now-2_000_000),
       red_light=ObservedBool(False, now-2_000_000),
       plan_forcing_stop=ObservedBool(forcing, now-2_000_000),

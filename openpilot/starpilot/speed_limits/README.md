@@ -58,10 +58,18 @@ this policy. No new saved preference or dependency is needed.
 Only a finite positive source observation can propose a limit. Missing, stale and
 unknown observations stay distinct. Source loss clears a pending choice; it cannot
 change set speed. While the publisher remains fresh, the widget retains the latest
-received limit and offset with an unavailable status, independently of accepted
-history and the previous-limit fallback preference. The remembered number and
-original source display identically with Previous accepted limit on or off;
-the preference controls accepted-limit fallback, not display retention.
+received limit, offset and original source with an unavailable status, independently
+of accepted history. Cruise continues using its current SET, including a driver's
+manual adjustment. Source loss creates no speed target and cannot select a
+different Conditional Experimental or Conditional Chill mode. Normal mode triggers
+and live braking safeguards remain with their existing owners.
+
+Previous accepted limit and its legacy Experimental fallback are retired.
+`SLCFallback` remains registered without a default solely to preserve existing
+saved bytes for older versions; current code neither reads nor writes it.
+Missing, 0, 1, 2 and malformed old values all use the same behavior above.
+Old Quick Select assignments remain saved but unavailable.
+
 Offset-only edits preserve accepted and
 rejected state and renew action identities. A changed offset can update the set
 speed of the accepted current limit; source loss defers this command until that

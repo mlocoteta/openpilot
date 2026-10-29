@@ -285,8 +285,6 @@ def boolean_value(row: FeatureRow) -> bool | None:
     return None
   if row.value in ("Off", "On"):
     return row.value == "On"
-  if row.key == "SLCFallback" and row.value == "Off (saved mode 0 or 1)":
-    return False
   return None
 
 
@@ -538,12 +536,9 @@ def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | 
   if row.repair_value:
     value = row.repair_value
   elif row.choices and not (row.choices == ("Auto",) and row.step and row.value != "Auto"):
-    if row.key == "SLCFallback":
-      value = "Off" if row.value == "On" else "On"
-    else:
-      if row.value not in row.choices:
-        return None
-      value = row.choices[(row.choices.index(row.value) + direction) % len(row.choices)]
+    if row.value not in row.choices:
+      return None
+    value = row.choices[(row.choices.index(row.value) + direction) % len(row.choices)]
   elif row.step:
     try:
       current = float(row.value)

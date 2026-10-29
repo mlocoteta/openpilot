@@ -77,7 +77,6 @@ class Authority:
 class Policy:
   confirm_lower: bool = True
   confirm_higher: bool = True
-  fallback_previous: bool = False
   display_only: bool = False
 
 
@@ -172,16 +171,6 @@ class Decision:
   adoption: AdoptionProposal | None = None
   authority: Authority | None = None
   policy: Policy | None = None
-
-
-def previous_limit_is_qualified(decision: Decision) -> bool:
-  """Recognize retained control after the caller validates the decision structure."""
-  accepted = decision.state.accepted
-  return (not decision.errors and decision.basis == "previous_accepted" and
-          decision.policy is not None and decision.policy.fallback_previous is True and not decision.policy.display_only and
-          decision.authority is not None and decision.authority.can_control and
-          decision.state.observation.kind is not ObservationKind.VALID and accepted is not None and
-          decision.control_target_mps is not None and decision.control_target_mps == accepted.candidate.speed_mps)
 
 
 def _token(value: object) -> bool:
@@ -350,7 +339,7 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
   if not observation_is_valid(observation, session_id=state.session_id):
     errors.append("invalid observation")
   if not isinstance(policy, Policy) or any(type(v) is not bool for v in (
-      policy.confirm_lower, policy.confirm_higher, policy.fallback_previous, policy.display_only)):
+      policy.confirm_lower, policy.confirm_higher, policy.display_only)):
     errors.append("invalid policy")
   if not _integer(now_ns) or (state.last_timestamp_ns is not None and now_ns < state.last_timestamp_ns):
     errors.append("invalid or reversed monotonic clock")
@@ -401,8 +390,7 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     return finish("display_only")
   if observation.kind is not ObservationKind.VALID:
     state = replace(state, pending=None, timer_running=False)
-    target = previous_target() if policy.fallback_previous else None
-    return finish("previous_accepted" if target is not None else observation.kind.value, target=target)
+    return finish(observation.kind.value)
 
   assert candidate is not None
   new_limit = state.received_speed_mps != candidate.speed_mps
