@@ -56,7 +56,7 @@ class TestGmBoltPedalSafety(unittest.TestCase):
       result.append((packet.addr, packet.bus, bytes(packet.data[0:7 if packet.addr == 0xBD else 8])))
     return result
 
-  def test_actual_parser_acc_drive_admission_keeps_paddle_low_only(self):
+  def test_actual_parser_drive_admission_by_bolt_generation(self):
     from opendbc.car.gm.interface import CarInterface
     for candidate in PEDAL_BOLT_CAR:
       cp = params(candidate, True, True)
@@ -79,9 +79,9 @@ class TestGmBoltPedalSafety(unittest.TestCase):
           frames[0] = (0x201, bytes(raw), 0)
           cs.out = ci.update([(now, frames)])
           active, _, low = controller.bolt_pedal_admission(cc, cs, now + 1)
-          expected = not manual and (gear == 6 or (candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and gear == 4))
+          expected = not manual and (gear == 6 or (candidate in (CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL) and gear == 4))
           self.assertEqual(active, expected)
-          self.assertEqual(low, not manual and gear == 6)
+          self.assertEqual(low, not manual and (gear == 6 or (candidate == CAR.CHEVROLET_BOLT_CC_2022_2023 and gear == 4)))
           self.assertFalse(controller.bolt_pedal_admission(cc, cs, now + 100_000_001)[0])
           raw[4] = (tick + 8) % 16
           raw[5] = pedal_crc(raw)
@@ -101,7 +101,7 @@ class TestGmBoltPedalSafety(unittest.TestCase):
             self.assertTrue(cs.out.cruiseState.available)
             self.assertFalse(controller.bolt_pedal_admission(cc, cs, now + 420_000_001)[0])
 
-  def test_acc_pedal_forward_gear_preserves_low_only_spoofing(self):
+  def test_pedal_forward_gear_and_spoofing_by_bolt_generation(self):
     variants = (GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_2017,
                 GMSafetyFlags.NO_ACC,
                 GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_GEN2,
@@ -120,13 +120,13 @@ class TestGmBoltPedalSafety(unittest.TestCase):
           raw[5] = pedal_crc(raw)
           self.safety.safety_rx_hook(self.packet((0x201, bytes(raw), 0)))
           self.safety.set_controls_allowed(True)
-          allowed = not manual and (gear == 6 or (acc and gear == 4))
+          allowed = not manual and (gear == 6 or ((acc or gen2) and gear == 4))
           self.assertEqual(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 1))), allowed)
           self.assertFalse(self.safety.safety_tx_hook(self.packet(create_bolt_regen_paddle(self.packer, True))))
           self.assertFalse(self.safety.safety_tx_hook(self.packet(create_bolt_regen_gear(self.packer, True, gen2))))
           self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 0}))
           self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": gear, "ManualMode": manual}))
-          self.assertEqual(bool(self.recorded()), not manual and gear == 6)
+          self.assertEqual(bool(self.recorded()), not manual and (gear == 6 or (gen2 and not acc and gear == 4)))
           self.safety.safety_rx_hook(self.stock("EBCMRegenPaddle", {"RegenPaddle": 1}))
           self.safety.set_controls_allowed(True)
           self.assertFalse(self.safety.safety_tx_hook(self.packet(create_pedal_command(self.packer, .2, 2))))
@@ -610,7 +610,6 @@ class TestGmBoltPedalSafety(unittest.TestCase):
         self.safety.safety_rx_hook(self.packet(packer.make_can_msg("ECMPRDNL2", 0, {"PRNDL2": 6})))
         self.safety.safety_rx_hook(self.packet(packer.make_can_msg("EBCMRegenPaddle", 0, {"RegenPaddle": 0})))
         self.assertEqual(self.recorded(), [(0x1F5, 0, released[1][1]), (0xBD, 0, released[2][1])])
-
 
   def test_equipped_acc_friction_uses_real_parser_clock_and_native_acceptance(self):
     from opendbc.car.gm.tests.test_bolt_pedal import TestBoltPedalStartupParser
@@ -1117,3 +1116,14 @@ class TestGmBoltPedalSafety(unittest.TestCase):
           self.assertEqual(self.safety.safety_fwd_hook(0, 0x3D1), 2)
           self.assertTrue(self.safety.safety_rx_hook(raw))
           self.assertEqual(len(self.recorded()), counter)
+
+  def test_gen2_drive_release_never_replays_over_changed_physical_gear(self):
+    self.init_mode(GMSafetyFlags.NO_ACC | GMSafetyFlags.BOLT_GEN2)
+    self.safety.set_timer(1_000_000)
+    for current, following in ((4, 6), (6, 4)):
+      self.safety.reset_recorded_can()
+      self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": current, "ManualMode": 0}))
+      release = create_bolt_regen_gear(self.packer, False, True, drive=current == 4)
+      self.assertFalse(self.safety.safety_tx_hook(self.packet(release)))
+      self.safety.safety_rx_hook(self.stock("ECMPRDNL2", {"PRNDL2": following, "ManualMode": 0}))
+      self.assertEqual(self.recorded(), [])

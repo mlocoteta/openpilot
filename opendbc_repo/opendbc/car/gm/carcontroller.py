@@ -384,7 +384,10 @@ class CarController(CarControllerBase):
                    (CS.stock_acc_status_ts_nanos > 0 and 0 <= stock_age <= STOCK_ACC_STATUS_TIMEOUT_NS and
                     not CS.out.cruiseState.enabled and removed_stock_current and
                     (not self.bolt_pedal_removed or not CS.bolt_pedal_removed_acc_active)))
-    in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low
+    gen2_drive = (self.CP.carFingerprint == CAR.CHEVROLET_BOLT_CC_2022_2023 and
+                  int(self.CP.safetyConfigs[0].safetyParam) == 0x19D and
+                  CS.out.gearShifter == structs.CarState.GearShifter.drive)
+    in_regen_gear = CS.out.gearShifter == structs.CarState.GearShifter.low or gen2_drive
     drive_ready = in_regen_gear or (stock_acc and CS.out.gearShifter == structs.CarState.GearShifter.drive)
     # Panda requires current physical gear for every Bolt pedal generation.
     gear_ns = getattr(CS, "bolt_pedal_gear_ts_nanos", 0)
@@ -878,7 +881,8 @@ class CarController(CarControllerBase):
         if (CC.enabled or feed_release) and in_regen_gear and not CS.out.regenBraking:
           spoof_pressed = paddle_pressed and CS.out.vEgo > 2.68
           gen2 = self.CP.carFingerprint in (CAR.CHEVROLET_BOLT_CC_2022_2023, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
-          can_sends.append(gmcan.create_bolt_regen_gear(self.packer_pt, spoof_pressed, gen2))
+          can_sends.append(gmcan.create_bolt_regen_gear(self.packer_pt, spoof_pressed, gen2,
+                                                       drive=CS.out.gearShifter == structs.CarState.GearShifter.drive))
           can_sends.append(gmcan.create_bolt_regen_paddle(self.packer_pt, spoof_pressed))
         self.apply_gas = pedal
         if friction_variant:
