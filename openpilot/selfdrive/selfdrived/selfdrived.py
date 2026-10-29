@@ -1369,6 +1369,16 @@ class SelfdriveD:
         if stock_lateral_role(self, CS, native, intent, allow_independent_cancel=True,
                               allow_independent_brake=True, allow_independent_gas=True, now_ns=now_ns):
           user_disable = False
+    if (user_disable and fresh_successor and proof[6] and not proof[7] and proof[8] and not proof[9] and
+        decision.desired_lateral and not decision.desired_longitudinal and not decision.longitudinal_active and
+        not self.enabled and not self.active and self.CP.brand == 'toyota' and toyota_qualified(self.CP, marked_only=True) and
+        CS.cruiseState.available and not CS.cruiseState.enabled and
+        self.CS_prev.cruiseState.available and not self.CS_prev.cruiseState.enabled and
+        all(valid and sample.cruiseState.available and not sample.cruiseState.enabled
+            for sample, valid in getattr(self, 'car_state_samples', ()))):
+      # An already-off PCM is not a new cruise cancellation. Only a fresh,
+      # independently checked LAT source may replace the expired LAT-only proof.
+      user_disable = any(event.userDisable and event.name != EventName.pcmDisable for event in self.events.to_msg())
     if user_disable and self.held_axis_override_wait(CS, proof, now_ns, fresh_successor=fresh_successor and qualified_gm(self.CP))[0]:
       # A fresh same-owner source can establish its own LAT permission after
       # an old output expires. Held-brake continuity does not renew that output;
