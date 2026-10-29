@@ -28,6 +28,7 @@ STATIONS = ('wlan0', 'aa0')
 # Android Auto drops and rejoins the car between attempts; stay put through those gaps.
 STANDALONE_SETTLE_S = 30.0
 NEGOTIATING = ('AUTHENTICATING', 'ASSOCIATING', 'ASSOCIATED', '4WAY_HANDSHAKE', 'GROUP_HANDSHAKE')
+ONROAD_PARAM = Path('/data/params/d/IsOnroad')
 
 
 def radio_channel(status):
@@ -212,6 +213,42 @@ class HotspotBackend:
       raise
 
 
+def read_onroad(path=ONROAD_PARAM):
+  try:
+    return path.read_bytes().strip() == b'1'
+  except OSError:
+    return False  # 7.0 removes IsOnroad while offroad
+
+
+class StationGuard:
+  """Keeps wlan0 from joining networks while onroad and the AP is up.
+
+  qcacld panics (NULL deref in hdd_association_completion_handler) when a station join forces the
+  driver to restart our SAP for SCC, e.g. a phone hotspot sharing the home SSID at highway speed
+  (route 00000070, 2026-10-29). wlan0 has nothing to join on the road; it reconnects offroad.
+  """
+  def __init__(self, run=subprocess.run, onroad=read_onroad, station=STATIONS[0]):
+    self.run, self.onroad, self.station = run, onroad, station
+    self.frozen = None  # unknown: a killed worker may have left autoconnect off, so the first offroad tick restores it
+
+  def nmcli(self, *args):
+    self.run(['nmcli', 'device', *args], check=False, text=True, capture_output=True, timeout=5)
+
+  def update(self, enabled):
+    if enabled and self.onroad():
+      if not self.frozen:
+        self.nmcli('set', self.station, 'autoconnect', 'no')
+        self.nmcli('disconnect', self.station)
+        self.frozen = True
+    else:
+      self.release()
+
+  def release(self):
+    if self.frozen is not False:
+      self.nmcli('set', self.station, 'autoconnect', 'yes')
+      self.frozen = False
+
+
 class HotspotController:
   def __init__(self, backend, clock=time.monotonic):
     self.backend, self.clock = backend, clock
@@ -287,6 +324,7 @@ def main():
   fd = claim(RUNTIME, 'Hotspot worker')
   backend = HotspotBackend()
   controller = HotspotController(backend)
+  guard = StationGuard()
   stop = stop_event()
   config, buffer, last = None, b'', time.monotonic()
   try:
@@ -304,8 +342,10 @@ def main():
           config = validate_config(json.loads(line))
           last = time.monotonic()
       if config is not None:
+        guard.update(config['enabled'])
         print(json.dumps({**controller.tick(config), 'revision': HotspotSettings.revision(config)}), flush=True)
   finally:
+    guard.release()
     backend.stop()
     os.close(fd)
 

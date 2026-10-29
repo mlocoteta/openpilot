@@ -8,8 +8,9 @@ import pytest
 
 from openpilot.starpilot.galaxy.hotspot import DEFAULT, HotspotSettings, atomic_json, hotspot_name, validate_config
 from openpilot.starpilot.galaxy.hotspot_netlink import WirelessInterfaces, attribute, attributes
-from openpilot.starpilot.galaxy.hotspot_worker import (HOLD, STANDALONE_SETTLE_S, HotspotBackend, HotspotController, choose_channel,
-                                                       hostapd_config, nm_activating, overlapping_routes, radio_channel)
+from openpilot.starpilot.galaxy.hotspot_worker import (HOLD, STANDALONE_SETTLE_S, HotspotBackend, HotspotController, StationGuard,
+                                                       choose_channel, hostapd_config, nm_activating, overlapping_routes, radio_channel,
+                                                       read_onroad)
 
 CONFIG = {'enabled': True, 'ssid': 'TheGalaxy-6b86', 'password': '1234567890123456'}
 DONGLE = 'b0c4a280b2f96b86'
@@ -155,6 +156,57 @@ def test_join_leaves_running_ap_alone():
   now[0] += 2
   assert controller.tick(CONFIG)['state'] == 'starting'
   backend.start.assert_called_once_with(CONFIG, ('g', 6))
+
+
+def test_read_onroad(tmp_path):
+  param = tmp_path / 'IsOnroad'
+  assert not read_onroad(param)
+  param.write_bytes(b'1')
+  assert read_onroad(param)
+  param.write_bytes(b'0')
+  assert not read_onroad(param)
+
+
+def nm_calls(run):
+  return [call.args[0][2:] for call in run.call_args_list]
+
+
+def test_station_guard_freezes_wlan0_onroad_and_restores_offroad():
+  onroad = [False]
+  run = Mock()
+  guard = StationGuard(run=run, onroad=lambda: onroad[0])
+  guard.update(True)  # first offroad tick undoes whatever a killed worker left behind
+  assert nm_calls(run) == [['set', 'wlan0', 'autoconnect', 'yes']]
+  run.reset_mock()
+  guard.update(True)
+  run.assert_not_called()
+  onroad[0] = True
+  for _ in range(3):
+    guard.update(True)
+  assert nm_calls(run) == [['set', 'wlan0', 'autoconnect', 'no'], ['disconnect', 'wlan0']]
+  run.reset_mock()
+  onroad[0] = False
+  guard.update(True)
+  guard.update(True)
+  assert nm_calls(run) == [['set', 'wlan0', 'autoconnect', 'yes']]
+
+
+def test_station_guard_leaves_wlan0_alone_without_hotspot_and_releases_on_exit():
+  run = Mock()
+  guard = StationGuard(run=run, onroad=lambda: True)
+  guard.update(True)
+  run.reset_mock()
+  guard.update(False)  # hotspot turned off: no SAP, nothing to protect
+  assert nm_calls(run) == [['set', 'wlan0', 'autoconnect', 'yes']]
+  run.reset_mock()
+  guard.update(False)
+  guard.release()
+  run.assert_not_called()
+  guard.update(True)
+  run.reset_mock()
+  guard.release()
+  assert nm_calls(run) == [['set', 'wlan0', 'autoconnect', 'yes']]
+  assert all(call.kwargs['check'] is False for call in run.call_args_list)
 
 
 def test_hold_does_not_start_ap():
