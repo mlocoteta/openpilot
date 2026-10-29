@@ -5,7 +5,7 @@ import time
 from typing import Protocol
 
 from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsState
-from openpilot.starpilot.ui.models_state import model_action_allowed, model_catalog_rows, model_display_text as _display_text
+from openpilot.starpilot.ui.models_state import big_none_label, model_action_allowed, model_catalog_rows, model_display_text as _display_text
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
@@ -107,7 +107,8 @@ class ModelsCompact:
              _grey_card("model selection", "takes effect at the next start")]
     for profile, field in (("small", "activeSmallModel"), ("big", "activeBigModel")):
       mid = data.get(field, "")
-      label = next((m.get("label", mid) for m in data["models"] if m["value"] == mid), mid or "none — always use small")
+      label = next((m.get("label", mid) for m in data["models"] if m["value"] == mid),
+                   mid or (big_none_label(data).lower() if profile == "big" else "none — always use small"))
       cards.append(self._button(f"active {profile}", label, lambda p=profile: self.open("catalog", p),
                                 data.get("capabilities", {}).get("select") is True and not data.get("randomizer")))
     cards.append(self._button("model randomizer", "on · choose at each start" if data.get("randomizer") else "off",
@@ -127,13 +128,15 @@ class ModelsCompact:
     profile = page.profile
     cards = [_grey_card(f"active {profile}" if profile else "models", "choose a model" if profile else "browse the catalog")]
     cards.append(self._button("sort and filter", self.SORTS[page.sort_mode], lambda: self._next_sort(page)))
+    jetlink = profile == "big" and data.get("jetlinkBig") is True
     if profile == "big":
-      cards.append(self._button("none", "always use active small", lambda: self._action(page, "active", profile="big"),
-                                model_action_allowed(data, "active", profile="big")))
+      cards.append(self._button("none", big_none_label(data).lower() if jetlink else "always use active small",
+                                lambda: self._action(page, "active", profile="big"), model_action_allowed(data, "active", profile="big")))
     rows = model_catalog_rows(data, page.sort_mode, profile, installed_only=bool(profile))
     for model in rows:
       mid = model["value"]
-      tags = ["installed" if model.get("installed") else model.get("unavailableReason", "download required")]
+      tags = ["runs over jetlink" if jetlink else "installed" if model.get("installed") else
+              model.get("unavailableReason", "download required")]
       if model.get("blacklisted"):
         tags.append("excluded from randomizer")
       tags.append("chestnut" if model.get("requiresGpu") else "small")

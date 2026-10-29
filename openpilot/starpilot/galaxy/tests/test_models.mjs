@@ -96,7 +96,11 @@ globalThis.document = priorDocument
 
 assert.match(ModelsPage.template, /offline preview/)
 assert.match(ModelsPage.template, /Active Small/)
-assert.match(ModelsPage.template, /None — always use Active Small/)
+assert.match(ModelsPage.template, /\{\{ bigNoneLabel \}\}/)
+// the manager words no Active Big; under Jetlink, the Jetlink app's choice
+const noneLabel = (status) => ModelsPage.computed.bigNoneLabel.call({ status })
+assert.equal(noneLabel({}), "None — always use Active Small")
+assert.equal(noneLabel({ bigNoneLabel: "Jetlink app's choice" }), "Jetlink app's choice")
 console.log("Model status client lifecycle checks passed")
 
 const expanded = fixture()
@@ -129,8 +133,10 @@ const managerPayload = { schemaVersion: 1, models: [small, big, pending, missing
 assert.equal(modelActionAllowed(managerPayload, "select-small", small), true)
 assert.equal(modelActionAllowed(managerPayload, "select-big", small), false)
 assert.equal(modelActionAllowed(managerPayload, "select-small", { ...small, selectable: false }), false)
-assert.equal(modelActionAllowed(managerPayload, "select-small", { ...small, installed: false }), false)
 assert.equal(modelActionAllowed(managerPayload, "select-big"), true)
+// what the manager marks selectable, downloaded or not: under Jetlink, a big model with an ONNX
+assert.equal(modelActionAllowed(managerPayload, "select-big", { ...missing, selectable: true }), true)
+assert.equal(modelActionAllowed(managerPayload, "select-big", { ...big, selectable: false }), false)
 assert.equal(modelActionAllowed(managerPayload, "download", pending), false)
 assert.equal(modelActionAllowed(managerPayload, "download", missing), true)
 assert.equal(modelActionAllowed(managerPayload, "delete", big), false)

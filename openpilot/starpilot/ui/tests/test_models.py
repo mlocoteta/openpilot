@@ -10,8 +10,8 @@ from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID
 from openpilot.starpilot.models.status import ModelHealth, ModelStatus, ModelVariant
 from openpilot.starpilot.ui.feature_settings_state import feature_row_top, FeatureInput
 from openpilot.starpilot.ui.models_compact import ModelsCompact, _ModelsPage, _display_text
-from openpilot.starpilot.ui.models_state import (model_page, model_action_allowed, model_catalog_rows, model_profile_choices, model_profile_request,
-                                                home_model_label)
+from openpilot.starpilot.ui.models_state import (model_page, model_action_allowed, model_catalog_rows, model_manager_rows, model_profile_choices,
+                                                model_profile_request, home_model_label)
 from openpilot.starpilot.ui.presentation import Profile
 from openpilot.starpilot.ui.settings_state import Destination
 from openpilot.starpilot.ui.shell import ShellMode, ShellView
@@ -137,6 +137,19 @@ class TestModelManager(unittest.TestCase):
     self.assertTrue(model_action_allowed(self.data, "download", self.missing))
     self.assertEqual([m["value"] for m in model_catalog_rows(self.data, "community")], ["pending"])
     self.assertEqual([m["value"] for m in model_catalog_rows(self.data, "favorites")], ["big"])
+
+  def test_jetlink_chooses_active_big_by_its_onnx(self):
+    # under Jetlink the manager marks the big models with an ONNX selectable, downloaded or not, and words none
+    onnx = {**self.missing, "value": "onnx", "label": "Onnx", "selectable": True}
+    data = {**self.data, "models": [self.small, {**self.big, "selectable": False}, onnx], "jetlinkBig": True,
+            "activeBigModel": "onnx", "bigNoneLabel": "Jetlink app's choice"}
+    self.assertEqual(model_profile_choices(data, "big"), (("Jetlink app's choice", ""), ("Onnx", "onnx")))
+    self.assertEqual(model_profile_request(data, "big", "onnx"), {"profile": "big", "model": "onnx"})
+    self.assertIsNone(model_profile_request(data, "big", "big"))
+    self.assertEqual(model_profile_choices(data, "small"), (("Small", "small"),))
+    # a model chosen in the Jetlink app that StarPilot does not list is named as the app's
+    app = {**data, "activeBigModel": "", "bigNoneLabel": "Cinque Terre V3 Model · from the Jetlink app"}
+    self.assertEqual(model_manager_rows(app)[2].value, "Cinque Terre V3 Model · from the Jetlink app")
 
   def test_parked_and_protected_guards(self):
     self.assertFalse(model_action_allowed(self.data, "delete", self.big))

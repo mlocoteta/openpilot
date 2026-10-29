@@ -167,7 +167,8 @@ export function modelActionAllowed(data, action, model = null) {
   if (["select-small", "select-big"].includes(action)) {
     if (data.downloading && data.refreshing !== true || data.randomizer === true) return false
     if (action === "select-big" && model === null) return true
-    return model?.installed === true && model.selectable === true && fitsModelProfile(model, action === "select-big" ? "big" : "small")
+    // the manager marks what each Active can take: installed models, or under Jetlink a big one with an ONNX
+    return model?.selectable === true && fitsModelProfile(model, action === "select-big" ? "big" : "small")
   }
   if (action === "download") return !data.downloading && !!model && !model.installed && model.downloadAvailable === true
   if (action === "downloadAll") return !data.downloading && data.models.some(m => !m.installed && m.downloadAvailable === true)
@@ -339,8 +340,10 @@ export const ModelsPage = {
       if (!model.loadedId) return model.health === "loading" ? "Loading…" : "Identity unverified"
       return model.catalog.find(item => item.id === model.loadedId)?.name || model.loadedId
     },
-    installedSmallModels() { return this.models.filter(m => (m.value === this.activeSmallModel || m.installed && m.selectable) && fitsModelProfile(m, "small")) },
-    installedBigModels() { return this.models.filter(m => (m.value === this.activeBigModel || m.installed && m.selectable) && fitsModelProfile(m, "big")) },
+    installedSmallModels() { return this.models.filter(m => (m.value === this.activeSmallModel || m.selectable) && fitsModelProfile(m, "small")) },
+    installedBigModels() { return this.models.filter(m => (m.value === this.activeBigModel || m.selectable) && fitsModelProfile(m, "big")) },
+    // the manager words it: under Jetlink, the Jetlink app's choice
+    bigNoneLabel() { return this.status.bigNoneLabel || "None — always use Active Small" },
     sorted() {
       return this.models.filter(m => matchesHardware(m, this.hardwareFilter))
         .filter(m => this.userFilter === "all" || !!m.userFavorite === (this.userFilter === "yes"))
@@ -533,20 +536,21 @@ export const ModelsPage = {
               <label class="gx-switch"><input type="checkbox" role="switch" aria-label="Model Randomizer" :checked="status.randomizer === true" :disabled="!actionAvailable(status.randomizer ? 'disable-randomizer' : 'enable-randomizer')" @change="toggleRandomizer($event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
             </div>
             <p v-if="status.randomizer" class="gx-model-reason">A different verified model is chosen each start. {{ status.gpuAvailable && activeBigModel ? 'Big GPU' : 'Small on-device' }} models are used. {{ (status.blacklistedModels || []).length }} excluded. Favorites only mark your preferred models.</p>
-            <p v-if="!status.gpuAvailable" class="gx-model-reason">An external GPU is not detected. Active Small is used; your Big selection is saved for later.</p>
+            <p v-if="status.jetlinkBig === true" class="gx-model-reason">Jetlink runs Active Big on its host, which downloads the model itself. A model chosen in the Jetlink app shows here once the comma connects.</p>
+            <p v-else-if="!status.gpuAvailable" class="gx-model-reason">An external GPU is not detected. Active Small is used; your Big selection is saved for later.</p>
 
             <div class="gx-model-control">
               <label class="gx-row__label" for="gx-model-small">Active Small · On-device</label>
               <GalaxySelect id="gx-model-small" class="gx-field" :value="pendingChoice?.action === 'select-small' ? pendingChoice.value : activeSmallModel" :disabled="selectionUncertain || capabilities.select !== true || status.isOnroad || status.randomizer" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
-                <option v-for="m in installedSmallModels" :key="m.value" :value="m.value" :disabled="!m.installed || !m.selectable">{{ m.label || m.value }}</option>
+                <option v-for="m in installedSmallModels" :key="m.value" :value="m.value" :disabled="!m.selectable">{{ m.label || m.value }}</option>
               </GalaxySelect>
             </div>
 
             <div class="gx-model-control">
               <label class="gx-row__label" for="gx-model-big">Active Big · GPU</label>
               <GalaxySelect id="gx-model-big" class="gx-field" :value="pendingChoice?.action === 'select-big' ? pendingChoice.value : activeBigModel" :disabled="selectionUncertain || capabilities.select !== true || status.isOnroad || status.randomizer" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
-                <option value="">None — always use Active Small</option>
-                <option v-for="m in installedBigModels" :key="m.value" :value="m.value" :disabled="!m.installed || !m.selectable">{{ m.label || m.value }}</option>
+                <option value="">{{ bigNoneLabel }}</option>
+                <option v-for="m in installedBigModels" :key="m.value" :value="m.value" :disabled="!m.selectable">{{ m.label || m.value }}</option>
               </GalaxySelect>
             </div>
 

@@ -51,6 +51,11 @@ def model_fits_profile(model: dict, profile: str) -> bool:
   return profile in profiles if isinstance(profiles, list) else model.get("requiresGpu") is (profile == "big")
 
 
+def big_none_label(data: dict) -> str:
+  """Active Big with no model of its own, as the manager words it: under Jetlink, the Jetlink app's choice."""
+  return str(data.get("bigNoneLabel") or "None — always use Active Small")
+
+
 def model_action_allowed(data: dict, action: str, model: dict | None = None, profile: str = "") -> bool:
   capability = {"active": "select", "preferences": "favorites", "download_all": "downloadAll", "refresh_manifest": "refresh",
                 "exclusion": "exclusions"}.get(action, action)
@@ -61,7 +66,7 @@ def model_action_allowed(data: dict, action: str, model: dict | None = None, pro
   if action == "active":
     return (not data.get("randomizer") and (not data.get("downloading") or data.get("refreshing") is True) and profile in ("small", "big") and
             ((model is None and profile == "big") or
-             bool(model and model.get("installed") is True and model.get("selectable") is True and model_fits_profile(model, profile))))
+             bool(model and model.get("selectable") is True and model_fits_profile(model, profile))))
   if action == "download":
     return not data.get("downloading") and bool(model and not model.get("installed") and model.get("downloadAvailable") is True)
   if action == "download_all":
@@ -82,7 +87,7 @@ def model_action_allowed(data: dict, action: str, model: dict | None = None, pro
 def model_catalog_rows(data: dict, sort_mode: str = "date", profile: str = "", installed_only: bool = False) -> list[dict]:
   rows = [m for m in data.get("models", ()) if isinstance(m, dict) and isinstance(m.get("value"), str) and
           (not profile or model_fits_profile(m, profile)) and
-          (not installed_only or m.get("installed") is True and m.get("selectable") is True)]
+          (not installed_only or m.get("selectable") is True)]
   if sort_mode == "favorites":
     rows = [m for m in rows if m.get("userFavorite")]
   elif sort_mode == "community":
@@ -97,7 +102,7 @@ def model_catalog_rows(data: dict, sort_mode: str = "date", profile: str = "", i
 def model_profile_choices(data: dict, profile: str) -> tuple[tuple[str, str], ...]:
   rows = model_catalog_rows(data, "name", profile, installed_only=True)
   choices = tuple((m.get("label", m["value"]), m["value"]) for m in rows)
-  return (("None — always use Active Small", ""),) + choices if profile == "big" else choices
+  return ((big_none_label(data), ""),) + choices if profile == "big" else choices
 
 
 def model_profile_request(data: dict, profile: str, model_id: str) -> dict | None:
@@ -112,7 +117,7 @@ def model_manager_rows(data: dict) -> tuple[FeatureRow, ...]:
   rows = [FeatureRow("", "Model catalog", f"{summary.get('installed', 0)} installed / {summary.get('total', 0)} total")]
   for profile, field in (("small", "activeSmallModel"), ("big", "activeBigModel")):
     mid = data.get(field, "")
-    label = next((m.get("label", mid) for m in data.get("models", ()) if m.get("value") == mid), mid or "None — always use Active Small")
+    label = next((m.get("label", mid) for m in data.get("models", ()) if m.get("value") == mid), mid or big_none_label(data))
     available = (data.get("capabilities", {}).get("select") is True and data.get("isOnroad") is False and
                  (not data.get("downloading") or data.get("refreshing") is True) and not data.get("randomizer"))
     rows.append(FeatureRow("", f"Active {profile.title()}", label, source=mid.encode(), available=available,
