@@ -5,6 +5,7 @@ from opendbc.car.lateral import (apply_driver_steer_torque_limits, apply_std_ste
                                 apply_steer_angle_limits_vm, common_fault_avoidance)
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.subaru import subarucan
+from opendbc.car.subaru.jacobw_angle import limit_angle as jacobw_limit_angle
 from opendbc.car.subaru.stock_aol import qualified as subaru_aol_qualified
 from opendbc.car.subaru.values import CAR, DBC, GLOBAL_ES_ADDR, CanBus, CarControllerParams, SubaruFlags
 from opendbc.car.vehicle_model import VehicleModel
@@ -137,6 +138,11 @@ class CarController(CarControllerBase):
           apply_angle = apply_std_steer_angle_limits(actuators.steeringAngleDeg, self.apply_angle_last,
                                                      CS.out.vEgoRaw, CS.out.steeringAngleDeg, angle_active,
                                                      self.p.FIXED_ANGLE_LIMITS)
+        elif self.CP.carFingerprint == CAR.SUBARU_CROSSTREK_2025:
+          assert self.VM is not None
+          apply_angle, angle_active = jacobw_limit_angle(
+            actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw,
+            CS.out.steeringAngleDeg, angle_active, self.p, self.VM)
         else:
           assert self.VM is not None
           apply_angle = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last,
