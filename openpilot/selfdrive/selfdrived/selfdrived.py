@@ -2135,7 +2135,7 @@ class SelfdriveD:
       if ET.WARNING not in self.state_machine.current_alert_types:
         self.state_machine.current_alert_types.append(ET.WARNING)
     if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
-        (self.CP.brand != 'ford' or self.enabled or intent is not None and intent.allowedLatch) and
+        (self.enabled or intent is not None and intent.allowedLatch) and
         ET.WARNING not in self.state_machine.current_alert_types):
       self.state_machine.current_alert_types.append(ET.WARNING)
     axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
