@@ -376,6 +376,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ChestnutLoading", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION | CLEAR_ON_IGNITION_ON, BOOL}},
     {"JetlinkMode", {PERSISTENT, INT, "0"}},
     {"JetlinkChargePhone", {PERSISTENT, BOOL, "0"}},
+    {"JetlinkModel", {PERSISTENT, JSON}},
     {"JetlinkSpec", {PERSISTENT | DONT_LOG, JSON}},
     {"JetlinkPointers", {PERSISTENT | DONT_LOG, JSON}},
     {"JetlinkProgress", {CLEAR_ON_MANAGER_START | DONT_LOG, JSON}},

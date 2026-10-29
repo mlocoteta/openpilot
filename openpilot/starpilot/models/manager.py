@@ -207,6 +207,24 @@ def verified_artifact(model_id: str, entries: dict[str, dict], root: Path = ROOT
     return None
 
 
+def onnx_sha256(row: dict) -> str | None:
+  """The ONNX a big model was built from, by the hash the catalog gives it: what Jetlink runs. None without one."""
+  digests = row.get("source_sha256")
+  if not isinstance(digests, dict) or len(digests) != 1:
+    return None
+  digest = next(iter(digests.values()))
+  return digest if isinstance(digest, str) and SHA.fullmatch(digest) else None
+
+
+def jetlink_active_big(entries: dict[str, dict], pick: dict | None) -> tuple[str, str]:
+  """Active Big while Jetlink runs the big model: the model whose ONNX Jetlink was told to run, and what none
+  means, the Jetlink app's choice, named when it is one StarPilot does not list."""
+  sha = pick["sha256"] if pick else None
+  mid = next((mid for mid, row in entries.items() if row.get("uses_external_gpu") and onnx_sha256(row) == sha), "") if sha else ""
+  name = pick.get("displayName") if pick and not mid else None
+  return mid, f"{name} · from the Jetlink app" if isinstance(name, str) and name else "Jetlink app's choice"
+
+
 def shipped_default() -> Path | None:
   from openpilot.common.file_chunker import materialize_file_chunked
 
@@ -507,6 +525,12 @@ class ModelManager:
       entries, prefs = catalog(self.root), preferences(self.root)
       parked, gpu = self.parked(), self.gpu_present()
       job = self._job_status()
+      owner = self.jetlink_owner()
+      jetlink = owner.snapshot()
+      # with Jetlink running the big model, Active Big is its choice: a model whose ONNX the catalog names
+      jetlink_big = owner.chooses_big(jetlink)
+      active_big, big_none = (jetlink_active_big(entries, owner.pick()) if jetlink_big else
+                              (prefs["big"], "None — always use Active Small"))
       models = []
       for mid, row in entries.items():
         installed, checking = self._snapshot_installed(mid, row)
@@ -518,11 +542,13 @@ class ModelManager:
                        "installed": installed, "checking": checking,
                        "builtin": mid == DEFAULT_SMALL,
                        "requiresGpu": requires_gpu, "gpuAvailable": gpu or not requires_gpu, "small": not requires_gpu,
-                       "selectable": installed, "downloadAvailable": published, "artifactSize": row.get("artifact_size", 0),
+                       "selectable": onnx_sha256(row) is not None if requires_gpu and jetlink_big else installed,
+                       "downloadAvailable": published, "artifactSize": row.get("artifact_size", 0),
                        "unavailableReason": "" if installed else "Checking artifact" if checking else
                        "Download required" if published else f"{GENERATION} download not published"})
       count = sum(bool(row["installed"]) for row in models)
-      return {"schemaVersion": 1, "models": models, "activeSmallModel": prefs["small"], "activeBigModel": prefs["big"],
+      return {"schemaVersion": 1, "models": models, "activeSmallModel": prefs["small"], "activeBigModel": active_big,
+              "jetlinkBig": jetlink_big, "bigNoneLabel": big_none,
               "currentModel": prefs["big"] if gpu and prefs["big"] else prefs["small"], "userFavorites": prefs["userFavorites"],
               "sortMode": prefs["sortMode"], "randomizer": prefs["randomizer"], "blacklistedModels": prefs["blacklistedModels"],
               "summary": {"total": len(models), "installed": count, "missing": len(models)-count},
@@ -530,7 +556,7 @@ class ModelManager:
               "downloadVariant": job.get("variant", "standard"),
               "modelToDownload": job.get("model", ""), "downloadAll": job.get("downloadAll", False),
               "downloading": job["downloading"], "refreshing": job["refreshing"], "progress": job.get("progress", ""),
-              "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": self.jetlink_owner().snapshot(),
+              "isOnroad": not parked, "gpuAvailable": gpu, "jetlink": jetlink,
               "capabilities": {"select": parked, "download": parked, "downloadAll": parked, "cancel": True,
                                "jetlink": parked, "refresh": parked, "favorites": True, "delete": parked, "randomizer": parked, "exclusions": parked}}
 
@@ -644,11 +670,16 @@ class ModelManager:
           raise ModelError("Invalid model selection")
         if preferences(self.root)["randomizer"]:
           raise ModelError("Turn Model Randomizer off before choosing a model")
-        mid, profile = payload["model"], payload["profile"]
+        mid, profile, entries = payload["model"], payload["profile"], catalog(self.root)
+        # Jetlink runs a big model's ONNX, so it needs no download here, only the catalog's hash for it
+        jetlink = profile == "big" and self.jetlink_owner().chooses_big()
         if mid != BUNDLED_CURRENT and not (profile == "big" and mid == ""):
-          if mid not in catalog(self.root) or catalog(self.root)[mid].get("uses_external_gpu", False) != (profile == "big"):
+          if mid not in entries or entries[mid].get("uses_external_gpu", False) != (profile == "big"):
             raise ModelError("Model does not match the selected hardware profile")
-          if not self._installed(mid, catalog(self.root)):
+          if jetlink:
+            if onnx_sha256(entries[mid]) is None:
+              raise ModelError("Jetlink cannot run this model yet: its catalog entry names no ONNX")
+          elif not self._installed(mid, entries):
             raise ModelError("Download and verify this model first")
         with state_lock(self.root):
           self._require_parked()
@@ -658,6 +689,11 @@ class ModelManager:
           job = self._read_job()
           if self._job_busy() and not (job.get("state") == "running" and job.get("operation") == "refresh_manifest"):
             raise ModelError("Wait for the model download to finish before selecting a model")
+          if jetlink:
+            # Chestnut's choice stays as it was; none leaves the model to the Jetlink app
+            row = entries.get(mid, {})
+            self.jetlink_owner().choose(onnx_sha256(row), row.get("name", ""))
+            return {"message": "Model selected for Jetlink"}
           saved[profile] = mid
           atomic_json(self.root / "preferences.json", saved)
         return {"message": "Model selected for the next drive"}
