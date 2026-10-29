@@ -76,8 +76,8 @@ static void subaru_aol_grant(bool cruise) {
 
 // MAIN authorizes intent, never output. Joining still needs a new bounded host
 // request, heartbeat, healthy physical ACC/steering sources and moving Drive.
-static void subaru_aol_observe_main(bool main) {
-  if (!main) {
+static void subaru_aol_observe_main(bool main_on) {
+  if (!main_on) {
     subaru_aol_clear();
     subaru_aol_main_low_seen = true;
   } else if (subaru_aol_main_arm && subaru_aol_main_low_seen && !subaru_aol_main &&
@@ -86,8 +86,10 @@ static void subaru_aol_observe_main(bool main) {
              !subaru_aol_permanent && !subaru_aol_temporary && !subaru_aol_acc_fault &&
              !relay_malfunction && !safety_rx_checks_invalid && aol_rx_healthy()) {
     subaru_aol_main_epoch = true;
+  } else {
+    // No qualified MAIN edge; retain epoch.
   }
-  subaru_aol_main = main;
+  subaru_aol_main = main_on;
   subaru_aol_main_seen = true;
   subaru_aol_main_ts = microsecond_timer_get();
 }
