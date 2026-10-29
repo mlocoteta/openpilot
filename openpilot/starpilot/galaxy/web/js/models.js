@@ -322,7 +322,7 @@ export const ModelsPage = {
   components: { GxDialog, GxState, GxSummary, GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data() {
-    return { loading: true, error: "", message: "", trackingProgress: false, busy: "", selectionUncertain: true, disposed: false,
+    return { polarisAbout: false, loading: true, error: "", message: "", trackingProgress: false, busy: "", selectionUncertain: true, disposed: false,
       sortMode: "release_date", userFilter: "all", communityFilter: "all", hardwareFilter: readHardwareFilter(),
       models: [], currentModel: "", activeSmallModel: "", activeBigModel: "", capabilities: {},
       summary: { installed: 0, missing: 0, total: 0 }, status: { isOnroad: true },
@@ -589,6 +589,7 @@ export const ModelsPage = {
                 </div>
                 <div class="gx-actions gx-tags">
                   <span v-if="isPolaris(m)" class="gx-chip gx-polaris-badge"><span class="gx-polaris-badge__star" aria-hidden="true">✦</span> StarPilot Custom</span>
+                  <button v-if="isPolaris(m)" type="button" class="gx-icon-btn" aria-label="About Polaris models" title="About Polaris models" @click="polarisAbout = true"><i class="bi bi-question-circle" aria-hidden="true"></i></button>
                   <span v-if="m.communityFavorite" class="gx-chip">Community Favorite</span>
                   <span v-if="rowState(m) === 'active'" class="gx-chip gx-chip--selected">Selected</span>
                   <span class="gx-chip">{{ m.value }}</span>
@@ -620,6 +621,14 @@ export const ModelsPage = {
           </div>
         </template>
       </template>
+      <GxDialog v-if="polarisAbout" labelledby="gx-polaris-about-title" @close="polarisAbout = false">
+        <h3 id="gx-polaris-about-title">About Polaris models</h3>
+        <p>Polaris models aren't made or endorsed by comma. They're community fine-tunes of comma's RDFv4.</p>
+        <p>Turns, everyday steering, gas and brake are each taught by whichever comma model handles them best, with real human drives where none do.</p>
+        <p>They're experimental. Stay alert and ready to take over.</p>
+        <p>Tell us how they drive at <a href="https://submit.firestar.link" target="_blank" rel="noopener noreferrer">submit.firestar.link</a>.</p>
+        <div class="gx-settings__controls gx-actions"><button type="button" class="gx-btn" @click="polarisAbout = false">Got it</button></div>
+      </GxDialog>
       <GxDialog v-if="dialog" labelledby="gx-model-dialog-title" @close="finishDialog(false)">
           <h3 id="gx-model-dialog-title">{{ dialog.title }}</h3><p>{{ dialog.message }}</p>
           <div class="gx-settings__controls gx-actions"><button class="gx-btn gx-btn--tonal" type="button" @click="finishDialog(false)">Cancel</button><button ref="confirmButton" class="gx-btn" :class="{'gx-btn--danger': dialog.danger}" type="button" @click="finishDialog(true)">{{ dialog.confirmLabel }}</button></div>
