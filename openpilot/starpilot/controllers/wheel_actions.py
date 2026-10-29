@@ -56,10 +56,10 @@ def button_reported(cp, key):
     if key in KEYS[2:5] and bool(cp.flags & ToyotaFlags.RADAR_CAN_FILTER) and camera_2aa_filter.configured(cp):
       return False  # No verified FD_BUTTON receiver is implied by a 2AA discriminator.
     if key == 'LKASButtonControl':
-      return bool(cp.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER) or
+      return bool(cp.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER | ToyotaFlags.FILTER_BUTTONS) or
                   cp.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT or legacy_advert)
     return bool(cp.flags & ToyotaFlags.TSS2 and not cp.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC) or
-                cp.flags & ToyotaFlags.LONG_FILTER or legacy_advert or cp.carFingerprint in
+                cp.flags & (ToyotaFlags.LONG_FILTER | ToyotaFlags.FILTER_BUTTONS) or legacy_advert or cp.carFingerprint in
                 (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT, CAR.TOYOTA_SIENNA_4TH_GEN))
   if brand == 'tesla':
     from opendbc.car.tesla.values import CAR, TeslaFlags
