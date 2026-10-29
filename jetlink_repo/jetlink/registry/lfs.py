@@ -294,6 +294,36 @@ def lfs_resolve(endpoint: str, pointer: Pointer, timeout: float = CONNECT_TIMEOU
   return None
 
 
+def lfs_hrefs(endpoints, pointer: Pointer, timeout: float = CONNECT_TIMEOUT, opener=None):
+  """Each of `endpoints` that has the object, in order, with its download href."""
+  for endpoint in endpoints:
+    href = lfs_resolve(endpoint, pointer, timeout=timeout, opener=opener)
+    if href is not None:
+      yield endpoint, href
+
+
+def fetch_size(oid: str, endpoints=LFS_ENDPOINTS, timeout: float = POINTER_TIMEOUT, opener=None) -> Pointer:
+  """The pointer for an ONNX known by its oid alone, as a fork whose catalog
+  names a model by its hash knows it (StarPilot's). comma's LFS servers hand
+  out a download address for any oid they hold, whatever size the batch asks
+  for, and the first byte of that download says how many there are. No
+  server with it is NotFound; one that would not say, a NetworkError."""
+  opener = opener or urllib.request.urlopen
+  for endpoint, href in lfs_hrefs(endpoints, Pointer(oid, 1), timeout=timeout, opener=opener):
+    request = urllib.request.Request(href, headers={'Range': 'bytes=0-0'})
+    try:
+      with opener(request, timeout=timeout) as response:
+        # a server that ignores the range answers 200 with the whole length
+        total = (response.headers.get('Content-Range') or '').rpartition('/')[2] \
+          if response.status == 206 else response.headers.get('Content-Length')
+    except (OSError, ValueError) as e:
+      raise NetworkError(f"could not size {oid[:16]} at {endpoint}: {e}") from e
+    if not str(total).isdigit() or int(total) <= 0:
+      raise NetworkError(f"{endpoint} did not say how big {oid[:16]} is")
+    return Pointer(oid, int(total))
+  raise NotFound(f"no LFS server has {oid[:16]}")
+
+
 def lfs_download(href: str, pointer: Pointer, dest: Path, progress: ProgressFn | None = None,
                  should_stop: StopFn | None = None, opener=None) -> Path:
   """Stream to a .part file, hashing as we go, and only then take the name.

@@ -16,16 +16,25 @@ export, and jetlink's registry follows that to comma's model repo; see
 jetlink.registry.lfs.
 
 Without a model manager (Keys.big_model and Keys.catalog None) there is no
-pick and no catalog, and the large model is jetlink's own default, named by its
-ref: its pointer resolves from the ref as any pick's does.
+pick and no catalog, and the large model is the one picked on the server, else
+jetlink's own default, named by its ref: its pointer resolves from the ref as
+any pick's does.
+
+A fork with a picker of its own but no catalog jetlink reads (Keys.big_model
+without Keys.catalog, StarPilot's) may name its pick by the ONNX's sha256
+instead of a ref, which is all its catalog knows of a model. Its size is looked
+up from comma's LFS servers once (resolve_size). With no catalog no model
+manager owns the slot either, so jetlink writes a newer pick from the server
+into it itself, and the fork's picker shows what drives.
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from pathlib import Path
 
-from jetlink.registry.catalog import DEFAULT_BIG_MODEL_NAME, DEFAULT_BIG_MODEL_REF
+from jetlink.registry.catalog import DEFAULT_BIG_MODEL_NAME, DEFAULT_BIG_MODEL_REF, is_ref, is_sha256
 
 POINTER_TIMEOUT = 10.0
 _REF = re.compile(r'[0-9a-f]{40}')
@@ -39,13 +48,32 @@ INDEX_TTL = 2.0
 # on from the .part the last left, so a stall costs the wait, not the bytes
 # (lfs.lfs_download)
 DOWNLOAD_RETRY_DELAYS = (5.0, 15.0, 30.0, 60.0, 120.0)
+# server_pick() before this process has heard a hello
+_UNHEARD = object()
+
+
+def _dated(pick) -> dict | None:
+  """A server's pick as its hello carries it, dated by this clock:
+  {ref, sha256, nbytes, name, at}. None for none, or one naming no model."""
+  if not isinstance(pick, dict) or not isinstance(pick.get('age_s'), (int, float)):
+    return None
+  ref = pick['ref'] if is_ref(pick.get('ref')) else None
+  sha256 = pick['sha256'] if is_sha256(pick.get('sha256')) else None
+  if ref is None and sha256 is None:
+    return None
+  return {'ref': ref, 'sha256': sha256, 'nbytes': pick.get('nbytes'), 'name': pick.get('name'),
+          'at': time.time() - float(pick['age_s'])}
 
 
 class Models:
   def __init__(self, op):
     self.op = op
     self._index_cache: tuple[float, list[dict], dict[str, dict]] | None = None
-    self._slot_cache: tuple[float, dict | None] | None = None
+    self._slot_cache: tuple[float, dict | None, float | None] | None = None
+    # the pick of the last hello this process heard, and the owner's record
+    # of the last hello any process heard
+    self._heard: dict | None | object = _UNHEARD
+    self._record_cache: tuple[float, dict | None] | None = None
 
   def catalog(self) -> list[dict]:
     """sunnypilot's big-model bundles as {name, ref}, newest first, as the model
@@ -77,13 +105,28 @@ class Models:
 
   def resolve_pointer(self, ref: str) -> tuple[str, int]:
     """The oid and size behind a catalog model, fetched the first time and kept for good."""
+    return self._resolve(ref, self.fetch_pointer)
+
+  def fetch_size(self, sha256: str) -> tuple[str, int]:
+    """The ONNX with this hash and its byte count, from the LFS servers a
+    download asks."""
+    from jetlink.registry.lfs import fetch_size as registry_fetch_size
+    pointer = registry_fetch_size(sha256, self.lfs_endpoints(), timeout=POINTER_TIMEOUT)
+    return pointer.oid, pointer.size
+
+  def resolve_size(self, sha256: str) -> tuple[str, int]:
+    """A model picked by its hash, sized the first time and kept for good with
+    the catalog's pointers, under the hash."""
+    return self._resolve(sha256, self.fetch_size)
+
+  def _resolve(self, key: str, fetch) -> tuple[str, int]:
     known = self.pointers()
-    if ref in known:
-      return known[ref]['oid'], int(known[ref]['size'])
-    oid, size = self.fetch_pointer(ref)
-    known[ref] = {'oid': oid, 'size': size}
+    if key in known:
+      return known[key]['oid'], int(known[key]['size'])
+    oid, size = fetch(key)
+    known[key] = {'oid': oid, 'size': size}
     self._keep_pointers(known)
-    self.op.log.warning("jetlink: %s is %s, %d MB", ref[:10], oid[:16], size >> 20)
+    self.op.log.warning("jetlink: %s is %s, %d MB", key[:10], oid[:16], size >> 20)
     return oid, size
 
   def _keep_pointers(self, known: dict[str, dict]) -> None:
@@ -92,9 +135,11 @@ class Models:
     self._index_cache = None
 
   @staticmethod
-  def _row(name: str, ref: str, known: dict[str, dict]) -> dict:
-    p = known.get(ref) or {}
-    return {'name': name, 'ref': ref, 'oid': p.get('oid'), 'size': int(p['size']) if p.get('size') else None}
+  def _row(name: str, ref: str | None, known: dict[str, dict], sha256: str | None = None) -> dict:
+    """A model as a catalog row, by its ref's pointer, else by its hash, sized
+    once resolve_size has looked it up."""
+    p = known.get(ref) or known.get(sha256) or {}
+    return {'name': name, 'ref': ref, 'oid': p.get('oid') or sha256, 'size': int(p['size']) if p.get('size') else None}
 
   def _index(self) -> tuple[list[dict], dict[str, dict]]:
     """The catalog's rows and the pointers behind them, read together once per INDEX_TTL."""
@@ -110,18 +155,27 @@ class Models:
     return self._index()[0]
 
   def selected_slot(self) -> dict | None:
-    """The big-model slot's pick as {name, ref}, from the raw param rather than a
-    parsed bundle, and memoised: the UI asks every frame."""
+    """The big-model slot's pick as {name, ref, sha256}, from the raw param
+    rather than a parsed bundle, and memoised with when it was made
+    (picked_at): the UI asks every frame. It names its model by the catalog's
+    ref, by the ONNX's sha256 (a fork whose catalog knows only that), or by
+    both; the one it lacks is None."""
     now = time.monotonic()
     if self._slot_cache is not None and now - self._slot_cache[0] < INDEX_TTL:
       return self._slot_cache[1]
     key = self.op.keys.big_model
     slot = self.op.get(key) if key else None
-    ref = slot.get('ref') if isinstance(slot, dict) else None
-    pick = None
-    if isinstance(ref, str) and ref:
-      pick = {'name': str(slot.get('displayName') or ref[:10]), 'ref': ref}
-    self._slot_cache = (now, pick)
+    slot = slot if isinstance(slot, dict) else {}
+    ref = slot['ref'] if isinstance(slot.get('ref'), str) and slot['ref'] else None
+    sha256 = slot['sha256'] if is_sha256(slot.get('sha256')) else None
+    pick, at = None, None
+    if ref or sha256:
+      pick = {'name': str(slot.get('displayName') or (ref or sha256)[:10]), 'ref': ref, 'sha256': sha256}
+      try:
+        at = os.stat(Path(self.op.params_dir()) / key).st_mtime
+      except OSError:
+        pass
+    self._slot_cache = (now, pick, at)
     return pick
 
   def default_model(self) -> dict | None:
@@ -142,11 +196,128 @@ class Models:
     return _TRAILING_DATE.sub('', model['name']) if model else None
 
   def selected_model(self) -> dict | None:
-    """The slot's pick, listed in the catalog or not: a ref is enough to find its
-    pointer. With no pick, default_model()."""
-    if (pick := self.selected_slot()) is not None:
-      return self._row(pick['name'], pick['ref'], self._index()[1])
+    """The model picked last, here or on the server: the slot's pick, listed
+    in the catalog or not (a ref is enough to find its pointer), unless the
+    server's last hello named a newer one. With neither, default_model()."""
+    if (theirs := self._newer_server_pick()) is not None:
+      return self._server_row(theirs)
+    if (own := self.selected_slot()) is not None:
+      return self._own_row(own)
     return self.default_model()
+
+  def _own_row(self, own: dict) -> dict:
+    return self._row(own['name'], own['ref'], self._index()[1], own['sha256'])
+
+  # -- picks on both ends -----------------------------------------------------
+  # A pick is made on either end: in the comma's list, or on the server (its
+  # web page, an app's Use Model). Each hello carries the comma's own pick and
+  # how long ago it was made, and the server answers with the newer of that
+  # and its own (PickStore in JetlinkServer). The answer is kept with the rest
+  # of the hello (gadget.SERVER, through the owner), dated by this clock, and
+  # selected_model() takes whichever pick is newer; so a model picked on the
+  # server drives without being picked here too, and one picked here goes to
+  # the server at the next hello.
+
+  def picked_at(self) -> float | None:
+    """When the slot was last written, by this clock: when the pick was made.
+    None with no pick of our own, or no date for it."""
+    return self._slot_cache[2] if self.selected_slot() is not None and self._slot_cache else None
+
+  def hello_pick(self) -> dict | None:
+    """Our own pick, for the hello: {ref, sha256, nbytes, name, age_s}, the
+    pointer where it is resolved already (no network here). None with nothing
+    picked here, or no date for it: the server's pick, if any, stands."""
+    own, at = self.selected_slot(), self.picked_at()
+    if own is None or at is None:
+      return None
+    row = self._own_row(own)
+    return {'ref': row['ref'], 'sha256': row['oid'], 'nbytes': row['size'], 'name': row['name'],
+            'age_s': round(max(0.0, time.time() - at), 1)}
+
+  def heard(self, hello: dict) -> dict:
+    """The server's hello with its `pick` dated by this clock (_dated), which
+    is how the owner keeps it (lending.SERVER_FIELDS) and server_pick() reads
+    it. This process goes by it at once, whatever the owner does with it."""
+    self._heard = _dated(hello.get('pick'))
+    return {**hello, 'pick': self._heard} if self._heard is not None else hello
+
+  def server_pick(self) -> dict | None:
+    """The pick the server last answered a hello with, {ref, sha256, nbytes,
+    name, at}, or None: a server too old to say, or one with no pick. What
+    this process heard last, else the owner's record of the last hello: the
+    UI says no hello, and reads it every frame."""
+    if self._heard is not _UNHEARD:
+      return self._heard
+    now = time.monotonic()
+    if self._record_cache is None or now - self._record_cache[0] >= INDEX_TTL:
+      from jetlink.comma import gadget
+      pick = (gadget.read_record(gadget.SERVER) or {}).get('pick')
+      self._record_cache = (now, pick if isinstance(pick, dict) and isinstance(pick.get('at'), (int, float)) else None)
+    return self._record_cache[1]
+
+  def _newer_server_pick(self) -> dict | None:
+    """The server's last pick, when it is another model than ours and was
+    picked after it, or we have none."""
+    theirs, own = self.server_pick(), self.selected_slot()
+    if theirs is None or (own is not None and (self._same(theirs, self._own_row(own)) or
+                                               theirs['at'] <= (self.picked_at() or 0.0))):
+      return None
+    return theirs
+
+  @staticmethod
+  def _same(pick: dict, row: dict) -> bool:
+    """One model: by the catalog ref where both have one, since two refs can
+    share one export, else by the hash. The server's PickStore.sameModel."""
+    if pick['ref'] and row['ref']:
+      return pick['ref'] == row['ref']
+    return bool(pick['sha256']) and pick['sha256'] == row['oid']
+
+  def _server_row(self, pick: dict) -> dict:
+    """The server's pick as a catalog row: ours where we list it, with the
+    server's oid and size, which name the bytes it has."""
+    listed = next((m for m in self.model_index() if pick['ref'] and m['ref'] == pick['ref']), None)
+    row = self._row(listed['name'] if listed else pick.get('name') or (pick['ref'] or pick['sha256'])[:16],
+                    pick['ref'], self._index()[1], pick['sha256'])
+    if pick['sha256'] and pick.get('nbytes'):
+      row['oid'], row['size'] = pick['sha256'], int(pick['nbytes'])
+    return row
+
+  def adopt(self) -> None:
+    """Keep the server's pointer for its pick, by ref and by hash, so naming
+    the model here needs no lookup; and make a newer pick from the server
+    ours. With a catalog, ask the model manager for it (Keys.select), so the
+    comma's own list shows what drives: only a model the catalog lists, which
+    is all the model manager takes; any other drives all the same
+    (selected_model). Without one, no model manager owns the slot, so the
+    pick is written into it, whatever the model. Never raises."""
+    try:
+      if (theirs := self.server_pick()) is None:
+        return
+      known = self.pointers()
+      if theirs['sha256'] and theirs.get('nbytes'):
+        pointer = {'oid': theirs['sha256'], 'size': int(theirs['nbytes'])}
+        missing = {k: pointer for k in (theirs['ref'], theirs['sha256']) if k and k not in known}
+        if missing:
+          self._keep_pointers({**known, **missing})
+      if self._newer_server_pick() is None:
+        return
+      model, keys = self._server_row(theirs), self.op.keys
+      if keys.catalog is None:
+        if keys.big_model:
+          self.op.log.warning("jetlink: %s was picked on the server, picking it here too", model['name'])
+          slot = {k: v for k, v in (('displayName', model['name']), ('ref', model['ref']), ('sha256', model['oid'])) if v}
+          self.op.put(keys.big_model, slot, block=True)
+          self._slot_cache = None
+        return
+      # a download the user asked for that the model manager has not taken
+      # yet is left alone: the next hello asks again
+      key = keys.select
+      if key and model['ref'] and self.op.get(key) is None and any(m['ref'] == model['ref'] for m in self.model_index()):
+        self.op.log.warning("jetlink: %s was picked on the server, picking it here too", model['name'])
+        self.op.put(key, model['ref'])
+        self._slot_cache = None
+    except Exception:
+      self.op.log.exception("jetlink: could not take the server's pick")
 
   def selected_model_name(self) -> str | None:
     selected = self.selected_model()
@@ -227,11 +398,8 @@ class Models:
 
   def _fetch_once(self, pointer, dest: Path, progress, should_stop) -> Path:
     from jetlink.registry.catalog import NetworkError
-    from jetlink.registry.lfs import lfs_download, lfs_resolve
-    for endpoint in self.lfs_endpoints():
-      href = lfs_resolve(endpoint, pointer)
-      if href is None:
-        continue
+    from jetlink.registry.lfs import lfs_download, lfs_hrefs
+    for endpoint, href in lfs_hrefs(self.lfs_endpoints(), pointer):
       self.op.log.warning("jetlink: fetching the large model (%d MB) from %s", pointer.size >> 20, endpoint)
       return lfs_download(href, pointer, dest, progress=progress, should_stop=should_stop)
     raise NetworkError(f"no LFS server has {pointer.oid[:16]}")
