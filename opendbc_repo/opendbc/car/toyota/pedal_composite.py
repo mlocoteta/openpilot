@@ -5,6 +5,7 @@ A valid pedal source supplements that parent; it cannot replace it.
 """
 
 from opendbc.car import structs
+from opendbc.car.toyota.config_cache import cached_config
 from opendbc.car.toyota.values import CAR, ToyotaFlags
 
 PARENT_WORDS = {
@@ -113,6 +114,7 @@ def parent_modules():
   return (dsu_bypass, prius_longitudinal, advert_filter, rav4h_filter, radar_filter)
 
 
+@cached_config
 def configured(cp):
   return marked(cp) and not cp.secOcRequired and any(module.configured(parent_cp(cp)) for module in parent_modules())
 

@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 from opendbc.car import structs
+from opendbc.car.toyota.config_cache import cached_config
 from opendbc.car.toyota.values import CAR, ToyotaFlags, ToyotaSafetyFlags, EPS_SCALE, uses_toyota_auto_hold_aeb
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
 from openpilot.starpilot.aol.intent import AolCardIntent, AOL_TOGGLE
@@ -112,6 +113,7 @@ def stock_prius_retrofit_qualified(cp, *, marked_only=False):
   return config.safetyModel == structs.CarParams.SafetyModel.toyota and config.safetyParam == 585
 
 
+@cached_config
 def qualified(cp, *, marked_only=False):
   from opendbc.car.toyota import stock_aol
   if stock_aol.configured(cp):
