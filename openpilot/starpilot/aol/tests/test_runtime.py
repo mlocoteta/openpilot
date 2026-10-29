@@ -1429,6 +1429,26 @@ class IpcAxisContractTests(unittest.TestCase):
     self.addCleanup(lambda: self.assertEqual(radar.call_count, calls[0]))
     return mock.patch.object(card, 'state_update', side_effect=state_update)
 
+  def test_gm_startup_has_no_prepublication_transaction_owner(self):
+    from opendbc.car.gm.interface import CarInterface
+    from openpilot.starpilot.aol.tests.test_gm import _configurations
+    from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+
+    # GM's real factory has no HKG-style prepublication transaction. Injecting
+    # an arbitrary owner into an already constructed GM Card is not this path.
+    self.assertIsNone(getattr(CarInterface, 'startup_owner', None))
+    for cp in _configurations():
+      with self.subTest(identity=cp.carFingerprint, safety=cp.safetyConfigs[0].safetyParam):
+        holder = VehicleStartupOwner()
+        recv, send, admission = mock.Mock(), mock.Mock(), mock.Mock()
+        result = holder.prepare(cp, CarInterface, (recv, send), requested=True,
+                                admission=admission, defer_until_controls=True)
+        self.assertIs(result, cp)
+        self.assertIsNone(holder.owner)
+        recv.assert_not_called()
+        send.assert_not_called()
+        admission.assert_not_called()
+
   def test_initialization_waits_for_current_matching_native_receipt(self):
     from dataclasses import replace
     from opendbc.car import gen_empty_fingerprint
@@ -1455,16 +1475,16 @@ class IpcAxisContractTests(unittest.TestCase):
       boot_events.add(log.OnroadEvent.EventName.selfdriveInitializing)
 
       class BootstrapSM(dict):
-        seen = {'onroadEvents': True, 'carControl': True}
-        valid = {'carControl': True}
-        alive = {'carControl': True}
-        logMonoTime = {'carControl': now}
-        recv_time = {'carControl': now / 1e9}
+        seen = {'onroadEvents': True, 'carControl': True, 'pandaStates': False}
+        valid = {'carControl': True, 'pandaStates': False}
+        alive = {'carControl': True, 'pandaStates': False}
+        logMonoTime = {'carControl': now, 'pandaStates': 0}
+        recv_time = {'carControl': now / 1e9, 'pandaStates': 0.0}
 
         def all_alive(self, _services):
           return self.alive['carControl']
 
-      boot_sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc)
+      boot_sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc, pandaStates=[])
       physical = car_state()
       with (mock.patch.object(selected, 'sm', boot_sm),
             self._deferred_step(selected, lambda: (physical, None)),
@@ -1494,12 +1514,12 @@ class IpcAxisContractTests(unittest.TestCase):
         physical.canValid, physical.canTimeout = True, False
         cc.enabled = cc.latActive = cc.longActive = False
         cc.actuators.torque = cc.actuators.accel = 0.0
-        for excluded in ('passive', 'other_startup_owner', 'volt_transport'):
+        self.assertIsNone(selected.vehicle_startup.owner)
+        for excluded in ('passive', 'volt_transport'):
           with (self.subTest(bootstrap_excluded=excluded),
                 mock.patch.object(selected, 'startup_panda_configured', return_value=False),
                 mock.patch('openpilot.selfdrive.car.card.clock_pair_ns', return_value=None)):
             selected.CP.passive = excluded == 'passive'
-            selected.vehicle_startup.owner = mock.Mock() if excluded == 'other_startup_owner' else None
             selected.volt_cc_selected = excluded == 'volt_transport'
             selected.step()
             self.assertFalse(settings.get_bool('ControlsReady'))
@@ -1654,11 +1674,11 @@ class IpcAxisContractTests(unittest.TestCase):
       def all_alive(self, services):
         return all(self.alive[s] for s in services)
 
-    sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc, deviceState=device)
-    sm.seen = {'onroadEvents': True, 'carControl': True, 'deviceState': True}
-    sm.valid = {'carControl': True, 'deviceState': True}
+    sm = BootstrapSM(onroadEvents=boot_events.to_msg(), carControl=cc, deviceState=device, pandaStates=[])
+    sm.seen = {'onroadEvents': True, 'carControl': True, 'deviceState': True, 'pandaStates': False}
+    sm.valid = {'carControl': True, 'deviceState': True, 'pandaStates': False}
     sm.alive = dict(sm.valid)
-    sm.logMonoTime, sm.recv_time = {}, {}
+    sm.logMonoTime, sm.recv_time = {'pandaStates': 0}, {'pandaStates': 0.0}
 
     def refresh():
       # IPC receipt follows production by 1us; float seconds need not round-trip ns.

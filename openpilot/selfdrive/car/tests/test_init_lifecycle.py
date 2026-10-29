@@ -79,8 +79,8 @@ class CardInitLifecycleTest(unittest.TestCase):
       valid = {'carControl': False}
       alive = {'carControl': False}
       seen = {'onroadEvents': False, 'carControl': True}
-      logMonoTime = {}
-      recv_time = {}
+      logMonoTime = {'carControl': 0}
+      recv_time = {'carControl': 0.0}
       events = []
 
       def __getitem__(self, key):
@@ -213,14 +213,10 @@ class CardInitLifecycleTest(unittest.TestCase):
         self.assertFalse(cc.enabled or cc.latActive or cc.longActive)
         self.assertEqual((cc.actuators.torque, cc.actuators.accel), (0., 0.))
       self.assertTrue(sent)
-      for address, data, _ in sent:
-        if address == 0x180:
-          self.assertEqual(data[0] & 15, 0)
-          self.assertEqual(data[1], 0)
-        elif address == 0x315:
-          self.assertEqual(((data[0] & 15) << 8) | data[1], 0)
-        elif address == 0x2CB:
-          self.assertEqual(data[0] & 1, 0)
+      for address, data, bus in sent:
+        self.assertEqual((address, bus), (0x180, 0))
+        self.assertEqual(data[0] & 15, 0)
+        self.assertEqual(data[1], 0)
       panda.safetyParam = 0x5087
       card.step()
       self.assertEqual(apply.call_count, 30)
@@ -258,7 +254,8 @@ class CardInitLifecycleTest(unittest.TestCase):
     if alpha:
       cp.safetyConfigs[0].safetyParam = word
     self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
-    cadence = ((0x180, 110_000_000), (0x2CB, 50_000_000), (0x315, 50_000_000)) if alpha else ((0x180, 110_000_000),)
+    cadence = ((0x180, 110_000_000),)
+    ready_cadence = cadence + ((0x2CB, 50_000_000), (0x315, 50_000_000)) if alpha else cadence
     cp.alternativeExperience = 32
     card = Car.__new__(Car)
     card.CP = cp
@@ -370,16 +367,10 @@ class CardInitLifecycleTest(unittest.TestCase):
         self.assertFalse(any(address in (0x2CB, 0x315) for address, _, _ in sent))
         self.assertTrue(card.CP.pcmCruise)
         self.assertFalse(card.CP.openpilotLongitudinalControl)
-      for address, data, _ in sent:
-        if address == 0x180:
-          self.assertEqual(data[0] & 15, 0)
-          self.assertEqual(data[1], 0)
-        elif address == 0x315:
-          self.assertEqual(((data[0] & 15) << 8) | data[1], 0)
-        elif address == 0x2CB:
-          self.assertEqual(data[0] & 1, 0)
-          self.assertEqual(data[1] & 0x20, 0)
-          self.assertEqual((((data[1] & 7) << 16) | (data[2] << 8) | data[3]) * .125 - 22534, -650)
+      for address, data, bus in sent:
+        self.assertEqual((address, bus), (0x180, 0))
+        self.assertEqual(data[0] & 15, 0)
+        self.assertEqual(data[1], 0)
       panda.safetyParam = word ^ 1
       card.step()
       self.assertEqual(apply.call_count, 601)
@@ -417,7 +408,7 @@ class CardInitLifecycleTest(unittest.TestCase):
       self.assertGreaterEqual((boot - mono) & ((1 << 64) - 1), 1_000_000_000)
       for before, after in zip(apply.call_args_list, apply.call_args_list[1:], strict=False):
         self.assertEqual(after.args[1] - before.args[1], 10_000_000)
-      for address, max_gap in cadence:
+      for address, max_gap in ready_cadence:
         times = timestamps[address]
         self.assertGreaterEqual(times[-1], 28_060_000_000)
         self.assertLessEqual(max(b - a for a, b in zip(times, times[1:], strict=False)), max_gap)
