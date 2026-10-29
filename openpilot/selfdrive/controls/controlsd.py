@@ -190,6 +190,7 @@ class Controls:
     diagnostic_initial_lateral = diagnostic_onset = True
     lateral_inputs_refreshed = False
     late_gm_refresh = False
+    refresh_combined_long = False
     if (self.aol_replay and os.getenv('REPLAY') != '1' and
         getattr(self, 'aol_previous_lateral_active', False)):
       refresh_now_ns = time.monotonic_ns()
@@ -245,7 +246,9 @@ class Controls:
       if late_gm_refresh:
         # Use the authority check's clock sample: a proof can expire after the
         # earlier preparation/qualification work, even when it was fresh on entry.
-        lateral_inputs_refreshed = refresh_expired_lateral_snapshot(self.sm, now_ns=now_ns)
+        previous_axis = self.sm['aolAxisState']
+        refresh_combined_long = bool(CC.longActive and previous_axis.longitudinalActive and previous_axis.desiredLongitudinal)
+        lateral_inputs_refreshed = refresh_expired_lateral_snapshot(self.sm, now_ns=now_ns, allow_combined=True)
         if lateral_inputs_refreshed:
           CS = self.sm['carState']
           CC.enabled = self.sm['selfdriveState'].enabled
@@ -283,10 +286,10 @@ class Controls:
                             on_validated_native=lambda native: setattr(self, 'flm_native_witness', native)))
 
     if lateral_inputs_refreshed:
-      # A newly received physical veto wins over an older admitted axis. This
-      # LAT-only refresh cannot enable ordinary LONG; its next normal cycle owns that transition.
+      # Fresh receipts can continue a requested GM LONG axis. A LAT-only refresh
+      # cannot start LONG, and a newly received physical veto still wins.
       CC.latActive = bool(CC.latActive and CS.canValid and not CS.canTimeout)
-      CC.longActive = False
+      CC.longActive = bool(refresh_combined_long and CC.enabled and CC.longActive and CS.canValid and not CS.canTimeout)
 
     fault_latch = getattr(self, 'hyundai_lateral_fault', None)
     if fault_latch is not None:
