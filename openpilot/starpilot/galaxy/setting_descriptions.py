@@ -109,6 +109,9 @@ DESCRIPTIONS = {
   'ScreenTimeoutOnroad': 'Sets the wait after interaction before returning to the driving view or turning off the screen if configured.',
   'KeepScreenOnGpuLoading': 'Keeps the driving screen visible while an eGPU model loads. Manual Screen Off still works.',
   'TurnOffCommaScreen': 'Pauses comma UI rendering to reduce CPU and GPU use. Tap once to wake the screen.',
+  'LoudBlindspotAlert': 'Uses the soft-warning sound when a lane change is blocked by a detected blind-spot vehicle.',
+  'LoudBlindspotAlertWhenDisengaged': ('Warns when signaling toward a detected blind-spot vehicle with steering assistance off or paused. ' +
+                                      'Independent of Loud Blindspot Alert. Hazards do not trigger it.'),
   'SoundPack': 'Chooses the sounds used for driving alerts and chimes.',
   'WarningImmediateVolume': 'Sets the starting volume of immediate warnings. These warnings still ramp to full volume.',
   'WarningSoftVolume': 'Sets the starting volume of soft warnings. Warning volume keeps its required minimum.',
