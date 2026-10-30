@@ -271,7 +271,8 @@ class SoftwareOperations:
          status["updater"]["lastSuccessAt"] != self._baseline[0]:
       if request["action"] in SOURCE_ACTIONS:
         if status["updater"]["lastFetchAt"] != self._baseline[1]:
-          restarting = self._flag("DoReboot") is True or status["installed"]["commit"] != self._fast_commit
+          installed = self.git_identity(self.installed)
+          restarting = self._flag("DoReboot") is True or installed is not None and installed[1] != self._fast_commit
           if request['action'] == 'versions':
             request.update(state='complete', error=None)
           else:
@@ -453,12 +454,11 @@ class SoftwareOperations:
           (branch != view["selectedTarget"] or not view["canDownload"])):
         raise SoftwareOperationError("Selected updater target changed", 409)
       if action in SOURCE_ACTIONS:
-        installed = self.status.snapshot()["installed"]
         identity = self.git_identity(self.installed)
-        if (not view["canFastUpdate"] or identity is None or identity != (installed["branch"], installed["commit"]) or
-            (action in ("update", "fast", "versions", "version") and branch != installed["branch"] and branch not in view["availableBranches"]) or
-            (action == "rollback" and (branch != installed["branch"] or not view["canRollback"]))):
-          raise SoftwareOperationError("Installed branch changed; refresh before updating", 409)
+        if (identity is None or not self._valid_branch(identity[0]) or
+            (action in ("update", "fast", "versions", "version") and branch != identity[0] and branch not in view["availableBranches"]) or
+            (action == "rollback" and (branch != identity[0] or not view["canRollback"]))):
+          raise SoftwareOperationError("Installed checkout or update target is unavailable", 409)
       if action == 'version':
         target = payload['selectedCommit']
         recent = view['history']['recent']
@@ -472,8 +472,7 @@ class SoftwareOperations:
       current = self.status.snapshot()
       if (current["updater"]["state"] != "idle" or self._flag("DisableUpdates") is not False or
           self._flag("DoReboot") is not False or not self.process.available() or
-          (action not in SOURCE_ACTIONS and branch is not None and branch not in self._branches()) or
-          (action == "rollback" and current["installed"]["branch"] != branch)):
+          (action not in SOURCE_ACTIONS and branch is not None and branch not in self._branches())):
         raise SoftwareOperationError("Updater state changed", 409)
       if action == "select":
         self.params.put("UpdaterTargetBranch", branch, block=True)
@@ -494,12 +493,12 @@ class SoftwareOperations:
         if not authorized() or not self._parked():
           raise SoftwareOperationError("Session or parked state changed", 403)
         if action in SOURCE_ACTIONS:
-          identity = self.git_identity(self.installed)
-          if identity is None or identity != (status["installed"]["branch"], status["installed"]["commit"]):
-            raise SoftwareOperationError("Installed branch changed; refresh before updating", 409)
+          latest_identity = self.git_identity(self.installed)
+          if latest_identity is None or latest_identity != identity:
+            raise SoftwareOperationError("Installed checkout changed while preparing the update; retry when it finishes", 409)
           if action == 'version' and identity[1] != payload['expectedCommit']:
             raise SoftwareOperationError('Installed revision changed before version request; refresh and try again', 409)
-          self._fast_commit = status["installed"]["commit"]
+          self._fast_commit = identity[1]
         if action in SOURCE_ACTIONS:
           if action == 'version':
             accepted_owner = self.process.send(action, branch=branch, commit=identity[1], selected_commit=payload['selectedCommit'])

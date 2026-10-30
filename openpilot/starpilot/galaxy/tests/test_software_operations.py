@@ -481,13 +481,59 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.act("fast", "main")
     self.assertEqual(self.process.sent, ["fast"])
 
-  def test_fast_rejects_stale_installed_identity(self):
+  def test_fast_refreshes_stale_cached_identity_without_rewriting_running_metadata(self):
     self.git[self.installed] = ("main", "b" * 40)
-    self.denied("fast", 409, "main")
-    self.git[self.installed] = ("release", "a" * 40)
-    self.denied("fast", 409, "main")
-    self.assertEqual(self.process.sent, [])
+    self.act("fast", "main")
+    self.assertEqual(self.process.fast_requests, [{"branch": "main", "commit": "b" * 40}])
+    self.assertEqual(self.params.get("GitCommit"), "a" * 40)
+    self.assertEqual(self.owner._fast_commit, "b" * 40)
+    self.params.put("LastUpdateTime", datetime(2026, 10, 30, 12), block=True)
+    self.params.put("UpdaterLastFetchTime", datetime(2026, 10, 30, 12), block=True)
+    self.assertEqual(self.owner.snapshot()["request"]["outcome"], "up_to_date")
     self.assertFalse(self.params.get_bool("DoReboot"))
+
+  def test_changed_cached_branch_does_not_block_requested_live_branch(self):
+    self.git[self.installed] = ("release", "b" * 40)
+    self.params.remove("UpdaterAvailableBranches")
+    self.act("update", "release")
+    self.assertEqual(self.process.fast_requests, [{"branch": "release", "commit": "b" * 40}])
+    self.assertEqual(self.params.get("GitBranch"), "main")
+
+  def test_real_git_commit_after_manager_start_can_update(self):
+    import subprocess
+    from openpilot.starpilot.galaxy.software_operations import _git_identity
+    def git(*args):
+      return subprocess.check_output(["git", "-c", "user.name=Updater Test", "-c", "user.email=test@example.invalid",
+                                      "-c", "core.hooksPath=/dev/null", "-C", str(self.installed), *args], text=True).strip()
+    git("init", "-b", "main")
+    git("commit", "--allow-empty", "-m", "First")
+    previous = git("rev-parse", "HEAD")
+    self.params.put("GitCommit", previous, block=True)
+    git("commit", "--allow-empty", "-m", "Hotfix")
+    current = git("rev-parse", "HEAD")
+    self.owner.git_identity = _git_identity
+    self.act("fast", "main")
+    self.assertEqual(self.process.fast_requests, [{"branch": "main", "commit": current}])
+    self.assertEqual(self.params.get("GitCommit"), previous)
+
+  def test_actual_checkout_race_still_prevents_dispatch(self):
+    calls = 0
+    def authorized():
+      nonlocal calls
+      calls += 1
+      if calls == 3:
+        self.git[self.installed] = ("main", "b" * 40)
+      return True
+    with self.assertRaises(SoftwareOperationError):
+      self.owner.action("fast", {"action": "fast", "branch": "main"}, authorized=authorized)
+    self.assertEqual(self.process.sent, [])
+
+  def test_missing_live_checkout_and_unknown_target_still_reject(self):
+    self.git[self.installed] = None
+    self.denied("fast", 409, "main")
+    self.git[self.installed] = ("main", "b" * 40)
+    self.denied("fast", 409, "unknown-branch")
+    self.assertEqual(self.process.sent, [])
 
   def test_fast_keeps_existing_admission_and_observes_failure(self):
     for key in ("DisableUpdates", "DoReboot"):
