@@ -89,7 +89,7 @@ def ordinary_axis_request_allowed(cp, state):
 
 def create_intent(cp, settings):
   main_arm = (cp.carFingerprint == CAR.SUBARU_CROSSTREK_2025 or
-              (cp.carFingerprint == CAR.SUBARU_IMPREZA_2020 and qualified(cp)))
+              (cp.carFingerprint in (CAR.SUBARU_IMPREZA_2020, CAR.SUBARU_OUTBACK_2023) and qualified(cp)))
   return SubaruStockCardIntent(settings, main_arm=main_arm)
 
 

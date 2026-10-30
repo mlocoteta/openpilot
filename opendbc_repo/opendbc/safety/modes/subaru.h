@@ -403,7 +403,7 @@ static safety_config subaru_init(uint16_t raw_param) {
   subaru_aol_enabled = ((unsigned int)alternative_experience == 32U) &&
     ((param == 209U) || (param == 465U) || (param == 16U) || (param == 0U) || (param == 1U) || (param == 17U) || (param == 145U) ||
      avh || (param == 177U) || (param == 401U) || (param == 8U) || (param == 520U) || (param == 512U) || (param == 2225U));
-  subaru_aol_main_arm = subaru_aol_enabled && ((param == 17U) || impreza_main);
+  subaru_aol_main_arm = subaru_aol_enabled && ((param == 17U) || impreza_main || subaru_d_platform);
   if (subaru_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = subaru_aol_reset,

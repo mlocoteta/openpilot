@@ -5,7 +5,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.safety.tests import test_subaru_stock_aol as stock_module
 
 
-@pytest.fixture(params=(17, 4096, 4104, 4608, 4616))
+@pytest.fixture(params=(17, 209, 465, 4096, 4104, 4608, 4616))
 def owner(request):
   item = stock_module.TestSubaruStockAol(methodName='runTest')
   item.setUp()
@@ -71,7 +71,7 @@ def test_new_physical_acc_source_is_required_before_main_edge(owner):
 def test_acc_wire_checksum_and_counter_cannot_be_faked_by_host(owner):
   neutral(owner)
   assert owner.feed() == 1
-  bus = 1 if owner.param == 17 else 2
+  bus = 1 if owner.param in (17, 209, 465) else 2
   bad = owner.frame('ES_Distance', {}, bus)
   raw = bytearray(bytes(bad.data))
   raw[0] ^= 1
@@ -97,9 +97,9 @@ def test_acc_fault_cannot_be_bypassed_by_stock_enable_packets(owner):
   assert owner.feed() == 1
   assert owner.feed(acc_fault=True) == 0
   for enabled in (0, 1):
-    name = 'ES_Status' if owner.param == 17 else 'CruiseControl'
+    name = 'ES_Status' if owner.param in (17, 209, 465) else 'CruiseControl'
     values = {'Cruise_Activated': enabled, 'Cruise_On': 1} if name == 'CruiseControl' else {'Cruise_Activated': enabled}
-    assert owner.safety.safety_rx_hook(owner.frame(name, values, 1 if owner.param == 17 else 0))
+    assert owner.safety.safety_rx_hook(owner.frame(name, values, 1 if owner.param in (17, 209, 465) else 0))
     owner.safety.aol_set_host_request(1)
     assert owner.safety.aol_get_permission_mask() == 0
 

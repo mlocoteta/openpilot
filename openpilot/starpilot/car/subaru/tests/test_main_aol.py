@@ -97,3 +97,26 @@ def test_impreza_main_setting_is_exact_and_preserves_stock_assist_selection():
   cp.alternativeExperience = 32
   cp.safetyConfigs[0].safetyParam |= IMPREZA_MAIN_AOL
   assert not qualified(cp) and not sng.eligible(cp)
+
+
+def test_outback_main_intent_uses_only_existing_exact_native_profiles():
+  from opendbc.car.subaru.interface import CarInterface
+  from opendbc.car.subaru.values import CAR, SubaruFlags
+  from opendbc.car.subaru.stock_aol import qualified
+  from openpilot.starpilot.car.subaru.aol import create_intent
+
+  for stopped_start in (False, True):
+    cp = CarInterface.get_non_essential_params(CAR.SUBARU_OUTBACK_2023)
+    if stopped_start:
+      cp.flags = int(cp.flags) | int(SubaruFlags.STOP_START_OFF)
+      cp.safetyConfigs[0].safetyParam |= 256
+    assert qualified(cp)
+    assert create_intent(cp, owner().settings).main_arm
+    cp.alternativeExperience = 32
+    assert qualified(cp, marked_only=True)
+    cp.safetyConfigs[0].safetyParam |= 2
+    assert not qualified(cp) and not create_intent(cp, owner().settings).main_arm
+  for candidate in (CAR.SUBARU_OUTBACK, CAR.SUBARU_LEGACY_2025):
+    cp = CarInterface.get_non_essential_params(candidate)
+    cp.alternativeExperience = 32
+    assert qualified(cp) and not create_intent(cp, owner().settings).main_arm
