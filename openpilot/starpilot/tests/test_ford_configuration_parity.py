@@ -9,6 +9,7 @@ from openpilot.starpilot.tests.ford_lifecycle_helpers import FORD_FACTORIES, for
 @pytest.fixture(autouse=True)
 def configuration_topology(monkeypatch, topology, request):
   monkeypatch.ford_topology = topology
+  monkeypatch.ford_pinion = request.node.callspec.params.get('pinion', False)
   if request.node.name.startswith(('test_brake_retains_lateral_with_native_first_feedback',
       'test_cancel_retains_lateral_with_native_first_feedback', 'test_gas_first_engagement_native_cadence',
       'test_first_main_gas_native_cadence', 'test_native_rejected_ui_cannot_replace_stock_cluster')):
@@ -186,3 +187,36 @@ def test_native_rejected_ui_cannot_replace_stock_cluster(ford_joined, monkeypatc
   run_actual_producer(ford_joined, monkeypatch, scenario='route22')
   assert ford_joined.rejected_ui_packets
   assert all(address in (0x18A, 0x3D8) for _, address in ford_joined.rejected_ui_packets)
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [True])
+@pytest.mark.parametrize('angle', [True])
+@pytest.mark.parametrize('pinion', [True])
+@pytest.mark.parametrize('topology', ['automatic'])
+def test_brake_retains_lateral_with_native_first_feedback_pinion_route1f(ford_joined, monkeypatch, angle, pinion):
+  run_actual_producer(ford_joined, monkeypatch, scenario='brake-native-cadence')
+  assert ford_joined.pedal_cancel_active_packets > 0
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [True])
+@pytest.mark.parametrize('angle', [True])
+@pytest.mark.parametrize('pinion', [True])
+@pytest.mark.parametrize('topology', ['automatic'])
+def test_cancel_retains_lateral_with_native_first_feedback_pinion_route1f(ford_joined, monkeypatch, angle, pinion):
+  run_actual_producer(ford_joined, monkeypatch, scenario='cancel-native-cadence')
+  assert ford_joined.pedal_cancel_active_packets > 0
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [True])
+@pytest.mark.parametrize('angle', [True])
+@pytest.mark.parametrize('pinion', [True])
+@pytest.mark.parametrize('topology', ['automatic'])
+def test_gas_first_engagement_native_cadence_pinion_route1f(ford_joined, monkeypatch, angle, pinion):
+  run_actual_producer(ford_joined, monkeypatch, scenario='route22')
+  assert ford_joined.pedal_cancel_active_packets > 0

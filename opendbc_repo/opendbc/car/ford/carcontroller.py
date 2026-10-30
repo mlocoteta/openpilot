@@ -6,7 +6,7 @@ from opendbc.bluepilot_lateral.hosts.starpilot import qualified as angle_qualifi
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, apply_hysteresis, structs
 from opendbc.car.ford import fordcan
 from opendbc.car.ford.manual_turn import ManualTurnLatch
-from opendbc.car.ford.aol import qualified as qualified_aol
+from opendbc.car.ford.aol import qualified as qualified_aol, base_safety_param
 from opendbc.car.ford.stock_cruise import FordStockCruiseButton, qualified as stock_switch_qualified
 from opendbc.car.ford.curvature_preview import blend_curvature
 from opendbc.car.ford import mache_can
@@ -354,9 +354,7 @@ class CarController(CarControllerBase):
     ### ui ###
     # Acquire the display after the first active replacement, then retain it while
     # AOL stays active, including a manual-turn steering handoff (as on Dom).
-    aol_owned_ui = qualified_aol(self.CP, marked_only=True) and any(
-      s.safetyModel == structs.CarParams.SafetyModel.ford and (s.safetyParam & ~(1 | 128 | 256)) in (18, 66)
-      for s in self.CP.safetyConfigs)
+    aol_owned_ui = qualified_aol(self.CP, marked_only=True) and base_safety_param(self.CP) in (18, 19, 66, 67)
     ui_enabled = CC.latActive and (not aol_owned_ui or self.mache_ui_owned)
     neutral_ui = (aol_owned_ui and self.CP.openpilotLongitudinalControl and not CC.latActive and not steer_alert and
                   CS.out.canValid and not CS.out.canTimeout and not CS.out.vehicleSensorsInvalid and

@@ -90,6 +90,7 @@ def ford_joined(identity, alpha, hands_free, monkeypatch, record_property):
       ('AlphaLongitudinalEnabled', alpha),
       ('IsReleaseBranch', release),
       ('FordHumanTurnDetection', False),
+      ('FordPrefSteerAngleCurvature', getattr(monkeypatch, 'ford_pinion', False)),
     ):
       saved.put_bool(key, value, block=True)
     from pathlib import Path
@@ -121,6 +122,9 @@ def ford_joined(identity, alpha, hands_free, monkeypatch, record_property):
       expected_long = bool(alpha)
       assert host.CP.openpilotLongitudinalControl == expected_long
       expected_word = base | int(expected_long) | (256 if manual else 0) | (128 if getattr(monkeypatch, 'ford_angle', False) else 0)
+      if getattr(monkeypatch, 'ford_pinion', False):
+        from opendbc.car.ford.pinion import ENABLE, SHIFT, GEOMETRY
+        expected_word |= ENABLE | GEOMETRY[name] << SHIFT
       assert host.CP.safetyConfigs[-1].safetyParam == expected_word
       record_property('ford_factory_identity', str(name))
       record_property('ford_saved_alpha', alpha)
@@ -128,7 +132,16 @@ def ford_joined(identity, alpha, hands_free, monkeypatch, record_property):
       record_property('ford_longitudinal', expected_long)
       record_property('ford_safety_word', int(host.CP.safetyConfigs[-1].safetyParam))
       native.reset(host.CP.safetyConfigs[-1].safetyParam)
-      native.word &= ~(1 | 128)
+      from opendbc.car.ford.pinion import base_word
+      native.word = base_word(native.word) & ~(1 | 128)
+      if getattr(monkeypatch, 'ford_pinion', False):
+        pump = native.pump
+        def pinion_pump(count, **kwargs):
+          for _ in range(count):
+            pump(1, **kwargs)
+            native.rx('SteeringPinion_Data', {'StePinComp_An_Est': 0., 'StePinCompAnEst_D_Qf': 3, 'StePinAn_No_Cnt': native.tick % 16})
+        monkeypatch.setattr(native, 'pump', pinion_pump)
+
       # Real empty update registers lazily accessed parser messages before RX.
       # Card.controls_update owns CI initialization; no flag is assigned here.
       host.CI.update([])
@@ -145,7 +158,7 @@ def ford_joined(identity, alpha, hands_free, monkeypatch, record_property):
         with patch.object(native, 'rx', side_effect=pre_rx):
           native.pump(1, main=0 if getattr(monkeypatch, 'ford_first_main', False) else 3, mask=0, heartbeat=False, speed=15.0)
         extras: list[tuple[str, int, dict[str, float]]] = [
-          ('SteeringPinion_Data', 0, {'StePinCompAnEst_D_Qf': 3}),
+          ('SteeringPinion_Data', 0, {'StePinComp_An_Est': 0., 'StePinCompAnEst_D_Qf': 3}),
           ('Cluster_Info1_FD1', 0, {'AccEnbl_B_RqDrv': 1}),
           ('BodyInfo_3_FD1', 0, {}),
           ('RCMStatusMessage2_FD1', 0, {'FirstRowBuckleDriver': 1}),
@@ -344,7 +357,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
           assert request == native_request == permission == 0
         assert permission & 1 == 0 or heartbeat and request & 1 and native_request & 1
         extras = [
-          ('SteeringPinion_Data', 0, {'StePinCompAnEst_D_Qf': 3}),
+          ('SteeringPinion_Data', 0, {'StePinComp_An_Est': 0., 'StePinCompAnEst_D_Qf': 3}),
           ('Cluster_Info1_FD1', 0, {'AccEnbl_B_RqDrv': 1}),
           ('BodyInfo_3_FD1', 0, {}),
           ('RCMStatusMessage2_FD1', 0, {'FirstRowBuckleDriver': 1}),
@@ -498,6 +511,11 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
             from opendbc.safety.tests.libsafety import libsafety_py
 
             accepted = safety.safety_tx_hook(libsafety_py.make_CANPacket(frame.address, frame.src - joined.offset, frame.dat))
+            if (getattr(monkeypatch, 'ford_pinion', False) and (brake or cancel) and command.latActive and
+                frame.address in (0x3D3, 0x3D6)):
+              mode = ((frame.dat[4] >> 2) & 7) if frame.address == 0x3D3 else ((frame.dat[0] >> 4) & 7)
+              assert accepted and mode == 1, 'AOL flag stayed on while the steering packet withdrew'
+              joined.pedal_cancel_active_packets = getattr(joined, 'pedal_cancel_active_packets', 0) + 1
             # A real native fault can precede the next 10Hz host receipt. Active
             # requests in that gap must be rejected, never treated as accepted.
             fault_before_receipt = (getattr(monkeypatch, 'ford_native_10hz', False) and

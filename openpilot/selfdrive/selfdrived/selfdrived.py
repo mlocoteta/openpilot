@@ -817,11 +817,11 @@ class SelfdriveD:
     return CS
 
   def ford_source_deadline_supported(self):
-    from opendbc.car.ford.aol import qualified
+    from opendbc.car.ford.aol import qualified, base_safety_param
     from opendbc.car.ford.values import CAR
     return (qualified(self.CP, marked_only=True) and
             self.CP.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
-            len(self.CP.safetyConfigs) == 1 and self.CP.safetyConfigs[0].safetyParam == 19)
+            len(self.CP.safetyConfigs) == 1 and base_safety_param(self.CP) == 19)
 
   def source_deadline_deferral_supported(self):
     from openpilot.starpilot.car.hyundai.aol import source_deadline_supported
@@ -849,7 +849,9 @@ class SelfdriveD:
       (previous.brakePressed or previous.regenBraking) and
       all(valid and sample.brakePressed == previous.brakePressed and sample.regenBraking == previous.regenBraking
           and not sample.gasPressed and not sample.buttonEvents for sample, valid in samples))
-    held_gas = bool(proof[9] and self.enabled and self.active and previous.gasPressed and
+    ford_lateral_gas = bool(self.ford_source_deadline_supported() and proof[8] and not proof[9] and
+      not self.enabled and not self.active and not CS.cruiseState.enabled)
+    held_gas = bool((proof[9] and self.enabled and self.active or ford_lateral_gas) and previous.gasPressed and
       self.events.contains(ET.OVERRIDE_LONGITUDINAL) and
       all(valid and sample.gasPressed and not sample.brakePressed and not sample.regenBraking
           and not sample.buttonEvents for sample, valid in samples))
@@ -881,7 +883,7 @@ class SelfdriveD:
     stock_cruise_off = bool(proof is not None and proof[8] and not proof[9] and
       not self.enabled and not self.active and not CS.cruiseState.enabled and
       (qualified_stock_hkg(self.CP, marked_only=True) or
-       (self.ford_source_deadline_supported() and held_brake) or
+       (self.ford_source_deadline_supported() and (held_brake or held_gas)) or
        qualified_angle_aol(self.CP, marked_only=True) and self.CP.pcmCruise and not self.CP.openpilotLongitudinalControl) and
       EventName.pcmDisable in self.events_prev and self.events.names == self.events_prev)
     user_disable = any(event.userDisable and
@@ -1399,7 +1401,9 @@ class SelfdriveD:
       # An already-off PCM is not a new cruise cancellation. Only a fresh,
       # independently checked LAT source may replace the expired LAT-only proof.
       user_disable = any(event.userDisable and event.name != EventName.pcmDisable for event in self.events.to_msg())
-    if user_disable and self.held_axis_override_wait(CS, proof, now_ns, fresh_successor=fresh_successor and qualified_gm(self.CP))[0]:
+    held_brake, held_gas = self.held_axis_override_wait(CS, proof, now_ns,
+      fresh_successor=fresh_successor and (qualified_gm(self.CP) or self.ford_source_deadline_supported()))
+    if user_disable and (held_brake or self.ford_source_deadline_supported() and held_gas):
       # A fresh same-owner source can establish its own LAT permission after
       # an old output expires. Held-brake continuity does not renew that output;
       # the current native proof below still has to grant the new decision.
@@ -1779,8 +1783,9 @@ class SelfdriveD:
     # Established ordinary Mach-E cruise does not require an independent AOL latch.
     # Its native LONG pedal withdrawal may precede Card; the original combined
     # publication, live LAT grant and every health/deadline check below still apply.
-    ordinary_ford = bool(self.CP.carFingerprint == FORD_CAR.FORD_MUSTANG_MACH_E_MK1 and
-                         ford_native_accepts_cp(self.CP, int(car.CarParams.SafetyModel.ford), 19))
+    ordinary_ford = bool(self.CP.carFingerprint == FORD_CAR.FORD_MUSTANG_MACH_E_MK1 and self.CP.safetyConfigs and
+                         ford_native_accepts_cp(self.CP, int(car.CarParams.SafetyModel.ford),
+                            self.CP.safetyConfigs[-1].safetyParam))
     proof = getattr(self, 'aol_published_input_proof', None)
     prior = getattr(self, 'aol_published_input_native', None)
     anchor = getattr(self, 'aol_ordinary_source_anchor', None)

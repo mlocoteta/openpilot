@@ -15,17 +15,21 @@ SOURCE=10_020_000_000
 PUBLISHED_OFFSET=5_920_000
 SOURCE_AGE=33_452_000
 
-def profile():
+def profile(angle=False, pinion=False):
   fingerprint = gen_empty_fingerprint()
   fingerprint[0].update({0x5A: 8, 0x3A6: 8, 0x3A7: 8})
   fingerprint[2].update({0x3D6: 8, 0x186: 8})
   cp = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, fingerprint, [], True, False, False)
   cp.alternativeExperience = 32
   assert cp.flags == 3 and cp.safetyConfigs[0].safetyParam == 19
+  cp.safetyConfigs[0].safetyParam |= 128 if angle else 0
+  if pinion:
+    from opendbc.car.ford.pinion import select
+    assert select(cp, True)
   return cp
 
-def callers(case):
-  sd, controls, drive = case._authority_callers(False, cp=profile(), genuine_events=True)
+def callers(case, angle=False, pinion=False):
+  sd, controls, drive = case._authority_callers(False, cp=profile(angle, pinion), genuine_events=True)
   def stationary(tick, **kwargs):
     state = kwargs.get('observed_state')
     if state is None:
@@ -36,18 +40,20 @@ def callers(case):
     return drive(tick, **kwargs)
   return sd, controls, stationary
 
+@pytest.mark.parametrize('pedal', ['brake', 'gas'])
+@pytest.mark.parametrize('angle,pinion', [(False, False), (True, False), (False, True), (True, True)])
 @pytest.mark.parametrize('socket_timeout', [False, True])
 @pytest.mark.parametrize('published_offset,source_age', [(PUBLISHED_OFFSET, SOURCE_AGE)])
-def test_ford_held_brake_keeps_only_the_recorded_unexpired_proof( socket_timeout, published_offset, source_age):
+def test_ford_held_brake_keeps_only_the_recorded_unexpired_proof(socket_timeout, published_offset, source_age, angle, pinion, pedal):
   case = fixture.IoniqAvailabilityTests(methodName='runTest')
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
     cleanup.enter_context(OpenpilotPrefix())
-    sd, controls, drive = callers(case)
+    sd, controls, drive = callers(case, angle, pinion)
     for tick in (0, 1):
       stamp = 10_000_000_000 + tick * 10_000_000
-      drive(tick, brake=True, long_allowed=False, **settings('lateral_only', stamp, tick + 1))
-    old, state, command = drive(2, state_stamp=SOURCE, offset_ns=published_offset, brake=True,
+      drive(tick, brake=pedal == 'brake', gas=pedal == 'gas', long_allowed=False, **settings('lateral_only', stamp, tick + 1))
+    old, state, command = drive(2, state_stamp=SOURCE, offset_ns=published_offset, brake=pedal == 'brake', gas=pedal == 'gas',
       long_allowed=False, **settings('lateral_only', SOURCE, 3))
     assert old.lateralActive and command.latActive and not old.longitudinalActive and not command.longActive
     assert not state.enabled
@@ -57,7 +63,7 @@ def test_ford_held_brake_keeps_only_the_recorded_unexpired_proof( socket_timeout
     sd.car_state_poller = mock.Mock()
     sd.car_state_poller.poll.return_value = []
     axis, state, command = drive(5, timeout=socket_timeout, state_stamp=SOURCE, offset_ns=source_age - 30_000_000,
-      brake=True, long_allowed=False, **settings('lateral_only', SOURCE, 3))
+      brake=pedal == 'brake', gas=pedal == 'gas', long_allowed=False, **settings('lateral_only', SOURCE, 3))
     assert sd.aol_axis_publication_deferred, 'FORD_HELD_BRAKE_SOURCE_WAIT_EXCLUDED'
     assert axis.to_dict() == old_data and axis.validUntilMonoTime == deadline
     assert not state.enabled and not command.longActive
@@ -66,7 +72,7 @@ def test_ford_held_brake_keeps_only_the_recorded_unexpired_proof( socket_timeout
       expired, _ = controls.state_control()
     assert not expired.latActive and not expired.longActive
     fresh = SOURCE + 40_000_000
-    axis, state, command = drive(6, state_stamp=fresh, brake=True,
+    axis, state, command = drive(6, state_stamp=fresh, brake=pedal == 'brake', gas=pedal == 'gas',
       long_allowed=False, **settings('lateral_only', fresh, 4))
     assert axis.lateralActive and command.latActive and not state.enabled and not command.longActive, (axis.to_dict(), sd.events.names, sd.aol_axis_decision)
 
