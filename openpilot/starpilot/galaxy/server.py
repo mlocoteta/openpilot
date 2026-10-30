@@ -740,6 +740,13 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                         **({'gatewayAccess': True} if getattr(self.server, 'remote_transport', False) else {}),
                         'state': 'configured' if status == AccessStatus.CONFIGURED_LOCAL else
                                  'unavailable' if status == AccessStatus.UNAVAILABLE else 'setup_required'})
+      elif path == '/api/localization':
+        if not self.require_session():
+          return
+        from openpilot.common.params import Params
+        from openpilot.starpilot.galaxy.localization import language_snapshot
+        previous = parse_qs(urlsplit(self.path).query).get('language', [''])[0]
+        self.json(200, language_snapshot(Params(), previous))
       elif path == '/api/galaxy/device-name':
         if not self.require_session():
           return

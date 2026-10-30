@@ -824,3 +824,675 @@ msgstr ""
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Max speed when engaging openpilot. If you are already driving faster, your current speed is used. Resume restores the previous max speed. Changes apply the next time you engage."
 msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Home"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Controls"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Localization"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Use Kilometers (km/h)"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right-Hand Drive"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Device display language. Untranslated text uses English. Park before changing language."
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language, units and steering-wheel side for every vehicle."
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "On"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Off"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Auto"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stock"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unavailable"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Available"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved choice"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved value"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved choice cannot be read"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saving"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save changes"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Could not save"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Discard changes"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unsaved changes"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Next"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Previous"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Continue"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Confirm"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Apply"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reset to defaults"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Restore"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Default"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Delete"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Remove"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Add"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Edit"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Retry"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading…"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Opening page…"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This page could not open."
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reload page"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh Galaxy"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connected"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnected"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connecting"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connect"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnect"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pair"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pairing"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign in"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign out"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Password"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "System"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Appearance"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Display"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom Display Settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds & Alerts"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Alerts"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Controls"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle Settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Wheel Controls"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Model"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Models"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Model Laboratory"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Maps"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Navigation"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Favorites"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Drive History"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recent drives"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Last drive"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Your driving"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This week"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personal records"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vitals"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Storage"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Tools"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Logs"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recordings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Replay"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Cameras"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Camera"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Bluetooth"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offline maps"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Downloaded"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Installed"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Install"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Update"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Updates"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Check for updates"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Parked Power"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Force Drive State"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Onroad"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offroad"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Always On Lateral"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Long Planner"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Conditional Driving Modes"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Curve Speed Controller"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Speed Limit Controller"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Centering"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change Settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following distance"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following time"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Traffic Mode"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Chill"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Experimental"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personality"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personalities"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backup"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backups"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Export"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Import"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Play"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pause"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stop"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Start"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Front"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Rear"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Left"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Small"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Big"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "None"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Enabled"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disabled"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not reported"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not detected"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Warning"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Accept"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reject"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not now"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Done"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Details"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "View"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "More"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No drives"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History unavailable"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading history"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Date unavailable"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No results"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search settings"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Take control"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "LEAD"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "CURVE"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP LIGHT"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "SPEED"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "OFF"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PREVIOUS"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PERSONAL RECORDS"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "REPLAY"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAUSE"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "BIG"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "UNKNOWN"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DETAILS"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "ALL TIME"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAST WEEK"
+msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DISTANCE THIS WEEK"
+msgstr ""

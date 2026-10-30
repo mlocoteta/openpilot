@@ -822,3 +822,675 @@ msgstr "Tốc độ tối đa ban đầu"
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Max speed when engaging openpilot. If you are already driving faster, your current speed is used. Resume restores the previous max speed. Changes apply the next time you engage."
 msgstr "Tốc độ tối đa khi kích hoạt openpilot. Nếu bạn đang chạy nhanh hơn, tốc độ hiện tại sẽ được dùng. Nút tiếp tục khôi phục tốc độ tối đa trước đó. Thay đổi có hiệu lực ở lần kích hoạt tiếp theo."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Home"
+msgstr "Trang chủ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving"
+msgstr "Lái xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Controls"
+msgstr "Điều khiển"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Localization"
+msgstr "Ngôn ngữ và khu vực"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language"
+msgstr "Ngôn ngữ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Use Kilometers (km/h)"
+msgstr "Dùng kilômét (km/h)"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right-Hand Drive"
+msgstr "Tay lái bên phải"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Device display language. Untranslated text uses English. Park before changing language."
+msgstr "Ngôn ngữ hiển thị của thiết bị. Văn bản chưa dịch dùng tiếng Anh. Đỗ xe trước khi đổi ngôn ngữ."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language, units and steering-wheel side for every vehicle."
+msgstr "Ngôn ngữ, đơn vị và vị trí tay lái cho mọi xe."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "On"
+msgstr "Bật"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Off"
+msgstr "Tắt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Auto"
+msgstr "Tự động"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stock"
+msgstr "Nguyên bản"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom"
+msgstr "Tùy chỉnh"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unavailable"
+msgstr "Không khả dụng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Available"
+msgstr "Khả dụng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved choice"
+msgstr "Lựa chọn đã lưu không hợp lệ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved value"
+msgstr "Giá trị đã lưu không hợp lệ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved choice cannot be read"
+msgstr "Không đọc được lựa chọn đã lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save"
+msgstr "Lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved"
+msgstr "Đã lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saving"
+msgstr "Đang lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save changes"
+msgstr "Lưu thay đổi"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Could not save"
+msgstr "Không lưu được"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Discard changes"
+msgstr "Bỏ thay đổi"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unsaved changes"
+msgstr "Thay đổi chưa lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Next"
+msgstr "Tiếp theo"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Previous"
+msgstr "Trước"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Continue"
+msgstr "Tiếp tục"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Confirm"
+msgstr "Xác nhận"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Apply"
+msgstr "Áp dụng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reset to defaults"
+msgstr "Đặt lại mặc định"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Restore"
+msgstr "Khôi phục"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Default"
+msgstr "Mặc định"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Delete"
+msgstr "Xóa"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Remove"
+msgstr "Gỡ bỏ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Add"
+msgstr "Thêm"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Edit"
+msgstr "Chỉnh sửa"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search"
+msgstr "Tìm kiếm"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh"
+msgstr "Làm mới"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Retry"
+msgstr "Thử lại"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading"
+msgstr "Đang tải"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading…"
+msgstr "Đang tải…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Opening page…"
+msgstr "Đang mở trang…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This page could not open."
+msgstr "Không mở được trang này."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reload page"
+msgstr "Tải lại trang"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh Galaxy"
+msgstr "Làm mới Galaxy"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connected"
+msgstr "Đã kết nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnected"
+msgstr "Đã ngắt kết nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connecting"
+msgstr "Đang kết nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connect"
+msgstr "Kết nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnect"
+msgstr "Ngắt kết nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pair"
+msgstr "Ghép nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pairing"
+msgstr "Đang ghép nối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign in"
+msgstr "Đăng nhập"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign out"
+msgstr "Đăng xuất"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Password"
+msgstr "Mật khẩu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "System"
+msgstr "Hệ thống"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Settings"
+msgstr "Cài đặt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Appearance"
+msgstr "Giao diện"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Display"
+msgstr "Hiển thị"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom Display Settings"
+msgstr "Cài đặt hiển thị tùy chỉnh"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds & Alerts"
+msgstr "Âm thanh và cảnh báo"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds"
+msgstr "Âm thanh"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Alerts"
+msgstr "Cảnh báo"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Controls"
+msgstr "Điều khiển lái xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle Settings"
+msgstr "Cài đặt xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle"
+msgstr "Xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Wheel Controls"
+msgstr "Điều khiển vô lăng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Model"
+msgstr "Mô hình lái"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Models"
+msgstr "Mô hình"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Model Laboratory"
+msgstr "Phòng thử nghiệm mô hình"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Maps"
+msgstr "Bản đồ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Navigation"
+msgstr "Điều hướng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Favorites"
+msgstr "Yêu thích"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History"
+msgstr "Lịch sử"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Drive History"
+msgstr "Lịch sử lái xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recent drives"
+msgstr "Chuyến đi gần đây"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Last drive"
+msgstr "Chuyến đi trước"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Your driving"
+msgstr "Việc lái xe của bạn"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This week"
+msgstr "Tuần này"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personal records"
+msgstr "Kỷ lục cá nhân"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vitals"
+msgstr "Trạng thái hệ thống"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Storage"
+msgstr "Bộ nhớ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Tools"
+msgstr "Công cụ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Logs"
+msgstr "Nhật ký"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recordings"
+msgstr "Bản ghi"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Replay"
+msgstr "Phát lại"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Cameras"
+msgstr "Camera"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Camera"
+msgstr "Camera"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offline maps"
+msgstr "Bản đồ ngoại tuyến"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Downloaded"
+msgstr "Đã tải xuống"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Installed"
+msgstr "Đã cài đặt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Install"
+msgstr "Cài đặt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Update"
+msgstr "Cập nhật"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Updates"
+msgstr "Bản cập nhật"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Check for updates"
+msgstr "Kiểm tra cập nhật"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Parked Power"
+msgstr "Nguồn điện khi đỗ xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Force Drive State"
+msgstr "Buộc trạng thái lái"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Onroad"
+msgstr "Đang chạy"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offroad"
+msgstr "Đã đỗ xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Always On Lateral"
+msgstr "Luôn điều khiển ngang"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Long Planner"
+msgstr "Bộ lập kế hoạch dọc"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Conditional Driving Modes"
+msgstr "Chế độ lái có điều kiện"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Curve Speed Controller"
+msgstr "Điều khiển tốc độ khi vào cua"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Speed Limit Controller"
+msgstr "Điều khiển giới hạn tốc độ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Centering"
+msgstr "Giữ giữa làn"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change"
+msgstr "Chuyển làn"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change Settings"
+msgstr "Cài đặt chuyển làn"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following distance"
+msgstr "Khoảng cách theo xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following time"
+msgstr "Thời gian theo xe"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Traffic Mode"
+msgstr "Chế độ giao thông"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Chill"
+msgstr "Thư thả"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Experimental"
+msgstr "Thử nghiệm"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personality"
+msgstr "Phong cách lái"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personalities"
+msgstr "Phong cách lái"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved settings"
+msgstr "Cài đặt đã lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backup"
+msgstr "Sao lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backups"
+msgstr "Bản sao lưu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Export"
+msgstr "Xuất"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Import"
+msgstr "Nhập"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Play"
+msgstr "Phát"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pause"
+msgstr "Tạm dừng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stop"
+msgstr "Dừng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Start"
+msgstr "Bắt đầu"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Front"
+msgstr "Phía trước"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Rear"
+msgstr "Phía sau"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Left"
+msgstr "Trái"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right"
+msgstr "Phải"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Small"
+msgstr "Nhỏ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Big"
+msgstr "Lớn"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "None"
+msgstr "Không có"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Enabled"
+msgstr "Đã bật"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disabled"
+msgstr "Đã tắt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not reported"
+msgstr "Chưa báo cáo"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not detected"
+msgstr "Không phát hiện"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Warning"
+msgstr "Cảnh báo"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Accept"
+msgstr "Chấp nhận"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reject"
+msgstr "Từ chối"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not now"
+msgstr "Để sau"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Done"
+msgstr "Xong"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Details"
+msgstr "Chi tiết"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "View"
+msgstr "Xem"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "More"
+msgstr "Thêm"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No drives"
+msgstr "Không có chuyến đi"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History unavailable"
+msgstr "Lịch sử không khả dụng"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading history"
+msgstr "Đang tải lịch sử"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Date unavailable"
+msgstr "Không có ngày"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No results"
+msgstr "Không có kết quả"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search settings"
+msgstr "Tìm cài đặt"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Take control"
+msgstr "Tiếp quản điều khiển"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "LEAD"
+msgstr "XE PHÍA TRƯỚC"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "CURVE"
+msgstr "KHÚC CUA"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP LIGHT"
+msgstr "ĐÈN GIAO THÔNG"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "SPEED"
+msgstr "TỐC ĐỘ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "OFF"
+msgstr "TẮT"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PREVIOUS"
+msgstr "TRƯỚC"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PERSONAL RECORDS"
+msgstr "KỶ LỤC CÁ NHÂN"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "REPLAY"
+msgstr "PHÁT LẠI"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAUSE"
+msgstr "TẠM DỪNG"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP"
+msgstr "DỪNG"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "BIG"
+msgstr "LỚN"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "UNKNOWN"
+msgstr "KHÔNG RÕ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DETAILS"
+msgstr "CHI TIẾT"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "ALL TIME"
+msgstr "TOÀN BỘ THỜI GIAN"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAST WEEK"
+msgstr "TUẦN QUA"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DISTANCE THIS WEEK"
+msgstr "QUÃNG ĐƯỜNG TUẦN NÀY"

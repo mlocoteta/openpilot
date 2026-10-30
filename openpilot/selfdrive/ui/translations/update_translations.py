@@ -19,6 +19,8 @@ def update_translations():
       if filename.endswith(".py"):
         files.append(os.path.relpath(os.path.join(root, filename), BASEDIR))
 
+  files.append("openpilot/starpilot/ui/translation_strings.py")
+
   # Extract translatable strings and generate .pot template
   entries = extract_strings(files, BASEDIR)
   generate_pot(entries, POT_FILE)

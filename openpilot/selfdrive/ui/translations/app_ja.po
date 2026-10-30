@@ -822,3 +822,675 @@ msgstr ""
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Max speed when engaging openpilot. If you are already driving faster, your current speed is used. Resume restores the previous max speed. Changes apply the next time you engage."
 msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Home"
+msgstr "ホーム"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving"
+msgstr "運転"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Controls"
+msgstr "操作"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Localization"
+msgstr "地域と言語"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language"
+msgstr "言語"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Use Kilometers (km/h)"
+msgstr "キロメートルを使用 (km/h)"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right-Hand Drive"
+msgstr "右ハンドル"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Device display language. Untranslated text uses English. Park before changing language."
+msgstr "デバイスの表示言語です。未翻訳の文章は英語で表示されます。言語の変更は駐車中に行ってください。"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language, units and steering-wheel side for every vehicle."
+msgstr "すべての車両の言語、単位、ハンドル位置。"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "On"
+msgstr "オン"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Off"
+msgstr "オフ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Auto"
+msgstr "自動"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stock"
+msgstr "標準"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom"
+msgstr "カスタム"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unavailable"
+msgstr "利用不可"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Available"
+msgstr "利用可能"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved choice"
+msgstr "保存された選択が無効です"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved value"
+msgstr "保存された値が無効です"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved choice cannot be read"
+msgstr "保存された選択を読み取れません"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save"
+msgstr "保存"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved"
+msgstr "保存済み"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saving"
+msgstr "保存中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save changes"
+msgstr "変更を保存"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Could not save"
+msgstr "保存できませんでした"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Discard changes"
+msgstr "変更を破棄"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unsaved changes"
+msgstr "未保存の変更"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Next"
+msgstr "次へ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Previous"
+msgstr "前へ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Continue"
+msgstr "続行"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Confirm"
+msgstr "確認"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Apply"
+msgstr "適用"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reset to defaults"
+msgstr "初期設定に戻す"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Restore"
+msgstr "復元"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Default"
+msgstr "初期設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Delete"
+msgstr "削除"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Remove"
+msgstr "削除"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Add"
+msgstr "追加"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Edit"
+msgstr "編集"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search"
+msgstr "検索"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh"
+msgstr "更新"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Retry"
+msgstr "再試行"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading"
+msgstr "読み込み中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading…"
+msgstr "読み込み中…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Opening page…"
+msgstr "ページを開いています…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This page could not open."
+msgstr "このページを開けませんでした。"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reload page"
+msgstr "ページを再読み込み"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh Galaxy"
+msgstr "Galaxyを更新"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connected"
+msgstr "接続済み"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnected"
+msgstr "未接続"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connecting"
+msgstr "接続中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connect"
+msgstr "接続"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnect"
+msgstr "切断"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pair"
+msgstr "ペアリング"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pairing"
+msgstr "ペアリング中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign in"
+msgstr "ログイン"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign out"
+msgstr "ログアウト"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Password"
+msgstr "パスワード"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "System"
+msgstr "システム"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Settings"
+msgstr "設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Appearance"
+msgstr "外観"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Display"
+msgstr "表示"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom Display Settings"
+msgstr "表示のカスタム設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds & Alerts"
+msgstr "サウンドと警告"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds"
+msgstr "サウンド"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Alerts"
+msgstr "警告"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Controls"
+msgstr "運転制御"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle Settings"
+msgstr "車両設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle"
+msgstr "車両"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Wheel Controls"
+msgstr "ハンドル操作"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Model"
+msgstr "運転モデル"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Models"
+msgstr "モデル"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Model Laboratory"
+msgstr "モデルラボ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Maps"
+msgstr "地図"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Navigation"
+msgstr "ナビゲーション"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Favorites"
+msgstr "お気に入り"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History"
+msgstr "履歴"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Drive History"
+msgstr "運転履歴"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recent drives"
+msgstr "最近の走行"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Last drive"
+msgstr "前回の走行"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Your driving"
+msgstr "あなたの運転"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This week"
+msgstr "今週"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personal records"
+msgstr "自己記録"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vitals"
+msgstr "稼働状況"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Storage"
+msgstr "ストレージ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Tools"
+msgstr "ツール"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Logs"
+msgstr "ログ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recordings"
+msgstr "録画"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Replay"
+msgstr "リプレイ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Cameras"
+msgstr "カメラ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Camera"
+msgstr "カメラ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offline maps"
+msgstr "オフライン地図"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Downloaded"
+msgstr "ダウンロード済み"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Installed"
+msgstr "インストール済み"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Install"
+msgstr "インストール"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Update"
+msgstr "更新"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Updates"
+msgstr "更新"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Check for updates"
+msgstr "更新を確認"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Parked Power"
+msgstr "駐車中の電源"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Force Drive State"
+msgstr "走行状態を強制設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Onroad"
+msgstr "走行中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offroad"
+msgstr "停車中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Always On Lateral"
+msgstr "常時横方向制御"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Long Planner"
+msgstr "縦方向プランナー"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Conditional Driving Modes"
+msgstr "条件付き運転モード"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Curve Speed Controller"
+msgstr "カーブ速度制御"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Speed Limit Controller"
+msgstr "制限速度制御"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Centering"
+msgstr "車線中央維持"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change"
+msgstr "車線変更"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change Settings"
+msgstr "車線変更設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following distance"
+msgstr "車間距離"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following time"
+msgstr "車間時間"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Traffic Mode"
+msgstr "渋滞モード"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Chill"
+msgstr "穏やか"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Experimental"
+msgstr "実験的"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personality"
+msgstr "運転スタイル"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personalities"
+msgstr "運転スタイル"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved settings"
+msgstr "保存済みの設定"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backup"
+msgstr "バックアップ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backups"
+msgstr "バックアップ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Export"
+msgstr "エクスポート"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Import"
+msgstr "インポート"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Play"
+msgstr "再生"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pause"
+msgstr "一時停止"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stop"
+msgstr "停止"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Start"
+msgstr "開始"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Front"
+msgstr "前方"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Rear"
+msgstr "後方"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Left"
+msgstr "左"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right"
+msgstr "右"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Small"
+msgstr "小"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Big"
+msgstr "大"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "None"
+msgstr "なし"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Enabled"
+msgstr "有効"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disabled"
+msgstr "無効"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not reported"
+msgstr "報告なし"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not detected"
+msgstr "未検出"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Warning"
+msgstr "警告"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Accept"
+msgstr "承認"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reject"
+msgstr "拒否"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not now"
+msgstr "後で"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Done"
+msgstr "完了"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Details"
+msgstr "詳細"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "View"
+msgstr "表示"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "More"
+msgstr "その他"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No drives"
+msgstr "走行履歴なし"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History unavailable"
+msgstr "履歴を利用できません"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading history"
+msgstr "履歴を読み込み中"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Date unavailable"
+msgstr "日付不明"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No results"
+msgstr "結果なし"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search settings"
+msgstr "設定を検索"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Take control"
+msgstr "運転を引き継いでください"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "LEAD"
+msgstr "先行車"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "CURVE"
+msgstr "カーブ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP LIGHT"
+msgstr "信号機"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "SPEED"
+msgstr "速度"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "OFF"
+msgstr "オフ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PREVIOUS"
+msgstr "前へ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PERSONAL RECORDS"
+msgstr "自己記録"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "REPLAY"
+msgstr "リプレイ"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAUSE"
+msgstr "一時停止"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP"
+msgstr "停止"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "BIG"
+msgstr "大"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "UNKNOWN"
+msgstr "不明"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DETAILS"
+msgstr "詳細"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "ALL TIME"
+msgstr "全期間"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAST WEEK"
+msgstr "過去1週間"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DISTANCE THIS WEEK"
+msgstr "今週の走行距離"

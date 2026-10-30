@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from openpilot.system.ui.lib.multilang import tr
+
 import math
 import random
 from functools import lru_cache
@@ -107,6 +109,7 @@ def draw_hud_background(rect: rl.Rectangle, accent: rl.Color, glow: float = 1.0,
 
 
 def elide_text(fonts, text: str, role: FontRole, size: float, width: float) -> str:
+  text = tr(text)
   if fonts.measure(text, role, size).width <= width:
     return text
   suffix = "..."

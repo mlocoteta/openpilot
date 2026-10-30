@@ -145,3 +145,22 @@ The UI adapts StarPilot's earlier Vue Galaxy design; the adapted StarPilot
 source remains under the repository [LICENSE](../../../LICENSE). The bundled
 Vue and Bootstrap Icons assets retain their respective MIT notices in
 `web/vendor/notices/`. Other asset notices remain beside their files.
+
+## Shared display language
+
+Galaxy → Toggles → Localization selects the persistent openpilot `LanguageSetting`.
+Galaxy reads the authenticated `/api/localization` endpoint and applies the same
+`selfdrive/ui/translations/app_*.po` catalogs used by the device. Language changes
+apply to an open Galaxy page within two seconds. Translation changes presentation
+text and accessibility labels; request values, parameter keys, input values and
+technical logs remain unchanged. The native large/compact renderer translates
+measurements and drawing together and loads bundled Unicode fonts as needed.
+
+`starpilot/ui/translation_strings.py` marks shared labels for the existing catalog
+update tool. The initial shared set covers navigation, common actions, settings
+groups, home statistics and several onroad labels in Japanese, Korean, Spanish, French, German and
+Vietnamese. The catalogs also retain stock openpilot translations. This is not
+complete sentence coverage: long feature explanations, dynamically assembled
+messages and unlisted labels remain English. Boot/login screens initially use
+English until an authenticated language response is available. User-entered
+text, logs, identifiers and brand names are not translation targets.

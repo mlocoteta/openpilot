@@ -1,3 +1,4 @@
+import { startLocalization } from "./localization.js"
 import { rememberInstallPrompt } from "./install-app.js"
 import { toggleHaptic } from "./haptics.js"
 import { GxState } from "./state.js"
@@ -157,6 +158,7 @@ createApp({
     sessionExpired() { if (initializing) return; auth.expired(); initialize() },
   },
   mounted() {
+    this.stopLocalization = startLocalization()
     document.documentElement.dataset.theme = state.theme
     this.visibility = () => {
       if (!document.hidden) deviceRestart.wake()
@@ -177,6 +179,7 @@ createApp({
     })
   },
   beforeUnmount() {
+    this.stopLocalization?.()
     reconnectEnabled = false
     clearTimeout(reconnectTimer)
     startupGeneration++

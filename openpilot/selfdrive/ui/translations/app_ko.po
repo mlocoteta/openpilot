@@ -822,3 +822,675 @@ msgstr ""
 #: openpilot/selfdrive/ui/layouts/settings/toggles.py
 msgid "Max speed when engaging openpilot. If you are already driving faster, your current speed is used. Resume restores the previous max speed. Changes apply the next time you engage."
 msgstr ""
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Home"
+msgstr "홈"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving"
+msgstr "주행"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Controls"
+msgstr "제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Localization"
+msgstr "언어 및 지역"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language"
+msgstr "언어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Use Kilometers (km/h)"
+msgstr "킬로미터 사용 (km/h)"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right-Hand Drive"
+msgstr "우측 운전석"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Device display language. Untranslated text uses English. Park before changing language."
+msgstr "기기 표시 언어입니다. 번역되지 않은 텍스트는 영어로 표시됩니다. 주차 후 언어를 변경하세요."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Language, units and steering-wheel side for every vehicle."
+msgstr "모든 차량의 언어, 단위 및 운전석 위치."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "On"
+msgstr "켜짐"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Off"
+msgstr "꺼짐"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Auto"
+msgstr "자동"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stock"
+msgstr "기본"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom"
+msgstr "사용자 지정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unavailable"
+msgstr "사용 불가"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Available"
+msgstr "사용 가능"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved choice"
+msgstr "저장된 선택이 잘못되었습니다"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Invalid saved value"
+msgstr "저장된 값이 잘못되었습니다"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved choice cannot be read"
+msgstr "저장된 선택을 읽을 수 없습니다"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save"
+msgstr "저장"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved"
+msgstr "저장됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saving"
+msgstr "저장 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Save changes"
+msgstr "변경 사항 저장"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Could not save"
+msgstr "저장하지 못했습니다"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Discard changes"
+msgstr "변경 사항 취소"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Unsaved changes"
+msgstr "저장되지 않은 변경 사항"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Next"
+msgstr "다음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Previous"
+msgstr "이전"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Continue"
+msgstr "계속"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Confirm"
+msgstr "확인"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Apply"
+msgstr "적용"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reset to defaults"
+msgstr "기본값으로 초기화"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Restore"
+msgstr "복원"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Default"
+msgstr "기본값"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Delete"
+msgstr "삭제"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Remove"
+msgstr "제거"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Add"
+msgstr "추가"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Edit"
+msgstr "편집"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search"
+msgstr "검색"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh"
+msgstr "새로 고침"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Retry"
+msgstr "다시 시도"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading"
+msgstr "불러오는 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading…"
+msgstr "불러오는 중…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Opening page…"
+msgstr "페이지 여는 중…"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This page could not open."
+msgstr "이 페이지를 열 수 없습니다."
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reload page"
+msgstr "페이지 새로 고침"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Refresh Galaxy"
+msgstr "Galaxy 새로 고침"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connected"
+msgstr "연결됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnected"
+msgstr "연결 끊김"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connecting"
+msgstr "연결 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Connect"
+msgstr "연결"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disconnect"
+msgstr "연결 해제"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pair"
+msgstr "페어링"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pairing"
+msgstr "페어링 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign in"
+msgstr "로그인"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sign out"
+msgstr "로그아웃"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Password"
+msgstr "비밀번호"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "System"
+msgstr "시스템"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Settings"
+msgstr "설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Appearance"
+msgstr "모양"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Display"
+msgstr "화면"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Custom Display Settings"
+msgstr "사용자 지정 화면 설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds & Alerts"
+msgstr "소리 및 경고"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Sounds"
+msgstr "소리"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Alerts"
+msgstr "경고"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Controls"
+msgstr "주행 제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle Settings"
+msgstr "차량 설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vehicle"
+msgstr "차량"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Wheel Controls"
+msgstr "핸들 제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Driving Model"
+msgstr "주행 모델"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Models"
+msgstr "모델"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Model Laboratory"
+msgstr "모델 실험실"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Maps"
+msgstr "지도"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Navigation"
+msgstr "내비게이션"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Favorites"
+msgstr "즐겨찾기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History"
+msgstr "기록"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Drive History"
+msgstr "주행 기록"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recent drives"
+msgstr "최근 주행"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Last drive"
+msgstr "지난 주행"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Your driving"
+msgstr "내 주행"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "This week"
+msgstr "이번 주"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personal records"
+msgstr "개인 기록"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Vitals"
+msgstr "시스템 상태"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Storage"
+msgstr "저장 공간"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Tools"
+msgstr "도구"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Logs"
+msgstr "로그"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Recordings"
+msgstr "녹화"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Replay"
+msgstr "다시 보기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Cameras"
+msgstr "카메라"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Camera"
+msgstr "카메라"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offline maps"
+msgstr "오프라인 지도"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Downloaded"
+msgstr "다운로드됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Installed"
+msgstr "설치됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Install"
+msgstr "설치"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Update"
+msgstr "업데이트"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Updates"
+msgstr "업데이트"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Check for updates"
+msgstr "업데이트 확인"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Parked Power"
+msgstr "주차 중 전원"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Force Drive State"
+msgstr "주행 상태 강제 설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Onroad"
+msgstr "주행 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Offroad"
+msgstr "주차 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Always On Lateral"
+msgstr "항상 횡방향 제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Long Planner"
+msgstr "종방향 플래너"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Conditional Driving Modes"
+msgstr "조건부 주행 모드"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Curve Speed Controller"
+msgstr "커브 속도 제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Speed Limit Controller"
+msgstr "제한 속도 제어"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Centering"
+msgstr "차로 중앙 유지"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change"
+msgstr "차로 변경"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Lane Change Settings"
+msgstr "차로 변경 설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following distance"
+msgstr "차간 거리"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Following time"
+msgstr "차간 시간"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Traffic Mode"
+msgstr "정체 모드"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Chill"
+msgstr "편안함"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Experimental"
+msgstr "실험적"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personality"
+msgstr "주행 성향"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Personalities"
+msgstr "주행 성향"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Saved settings"
+msgstr "저장된 설정"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backup"
+msgstr "백업"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Backups"
+msgstr "백업"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Export"
+msgstr "내보내기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Import"
+msgstr "가져오기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Play"
+msgstr "재생"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Pause"
+msgstr "일시 정지"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Stop"
+msgstr "정지"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Start"
+msgstr "시작"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Front"
+msgstr "전방"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Rear"
+msgstr "후방"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Left"
+msgstr "왼쪽"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Right"
+msgstr "오른쪽"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Small"
+msgstr "작게"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Big"
+msgstr "크게"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "None"
+msgstr "없음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Enabled"
+msgstr "활성화됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Disabled"
+msgstr "비활성화됨"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not reported"
+msgstr "보고되지 않음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not detected"
+msgstr "감지되지 않음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Warning"
+msgstr "경고"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Accept"
+msgstr "수락"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Reject"
+msgstr "거부"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Not now"
+msgstr "나중에"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Done"
+msgstr "완료"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Details"
+msgstr "세부 정보"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "View"
+msgstr "보기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "More"
+msgstr "더 보기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No drives"
+msgstr "주행 기록 없음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "History unavailable"
+msgstr "기록을 사용할 수 없습니다"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Loading history"
+msgstr "기록 불러오는 중"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Date unavailable"
+msgstr "날짜를 사용할 수 없음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "No results"
+msgstr "결과 없음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Search settings"
+msgstr "설정 검색"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "Take control"
+msgstr "직접 제어하세요"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "LEAD"
+msgstr "선행 차량"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "CURVE"
+msgstr "커브"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP LIGHT"
+msgstr "신호등"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "SPEED"
+msgstr "속도"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "OFF"
+msgstr "꺼짐"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PREVIOUS"
+msgstr "이전"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PERSONAL RECORDS"
+msgstr "개인 기록"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "REPLAY"
+msgstr "다시 보기"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAUSE"
+msgstr "일시 정지"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "STOP"
+msgstr "정지"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "BIG"
+msgstr "크게"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "UNKNOWN"
+msgstr "알 수 없음"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DETAILS"
+msgstr "세부 정보"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "ALL TIME"
+msgstr "전체 기간"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "PAST WEEK"
+msgstr "지난주"
+
+#: openpilot/starpilot/ui/translation_strings.py
+msgid "DISTANCE THIS WEEK"
+msgstr "이번 주 주행 거리"
