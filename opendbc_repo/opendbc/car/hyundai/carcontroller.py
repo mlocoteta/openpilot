@@ -26,7 +26,7 @@ from opendbc.car.hyundai.ray_pedal import create_ray_pedal_command, ray_pedal_ga
 from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy
 from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_stock_aol
-from opendbc.car.hyundai.classic_long_aol import independent_buttons_qualified as qualified_classic_long_buttons
+from opendbc.car.hyundai.classic_long_aol import AOL_EXPERIENCE, qualified as qualified_classic_long_aol
 from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock_aol, qualified_long as qualified_canfd_long_aol
 from opendbc.car.hyundai.ev6_aol import qualified as qualified_ev6_aol
 from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
@@ -77,7 +77,7 @@ def angle_torque_reduction_gain(steering_torque, v_ego, lat_active, last_gain):
 
 def classic_aol_dash_enabled(cp):
   return bool(cp.carFingerprint != CAR.KIA_RAY_EV and (qualified_classic_stock_aol(cp, marked_only=True) or
-    cp.carFingerprint == CAR.HYUNDAI_ELANTRA_2021 and qualified_classic_long_buttons(cp, marked_only=True)))
+    cp.alternativeExperience == AOL_EXPERIENCE and qualified_classic_long_aol(cp, marked_only=True)))
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
