@@ -77,6 +77,7 @@ def test_live_compositor_keeps_widgets_below_the_shelf_and_alerts_above_it(monke
     return lambda *args, **kwargs: seen.append(name)
 
   view = onroad.OnroadView.__new__(onroad.OnroadView)
+  view.personality = Mock()
   view.fonts = Mock(spec=BitmapFonts, profile=Profile.LARGE)
   view.projection_viewport = None
   view.camera_layer = draw('camera')

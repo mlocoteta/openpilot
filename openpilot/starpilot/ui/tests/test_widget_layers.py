@@ -117,6 +117,7 @@ def test_renderer_dispatches_each_widget_in_saved_order(profile, viewport):
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
   seen = []
   view = NS(fonts=NS(profile=profile), projection_viewport=viewport)
+  view.personality = NS(render=lambda state: seen.append('following_distance'))
   view.pip_layer = Mock(side_effect=lambda rect, state, submit: [submit(key, lambda key=key: seen.append(key))
                                                                for key in ('pip_left', 'pip_right')])
   view.driver_monitor_layer = lambda *args: seen.append('driver_monitor')

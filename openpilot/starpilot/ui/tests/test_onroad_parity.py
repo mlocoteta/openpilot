@@ -209,6 +209,7 @@ def test_pending_confirmation_omits_redundant_speed_heading():
                                       presentation_id=5, action_enabled=True)
   state = road(longitudinal_active=True, slc_system_long_available=True, speed_limit=observation, slc_prompt_open=True)
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = Mock(profile=Profile.COMPACT)
   view.fonts.measure.return_value = NS(width=50, height=20)
   view.fonts.vertical_ink.return_value = (0, 20)
@@ -230,6 +231,7 @@ def test_compact_pending_label_and_button_follow_saved_action_placement():
   state = road(customization=document, longitudinal_active=True, slc_system_long_available=True,
                speed_limit=observation, slc_prompt_open=True)
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = Mock(profile=Profile.COMPACT)
   view.fonts.measure.return_value = NS(width=50, height=20)
   view.fonts.vertical_ink.return_value = (0, 20)

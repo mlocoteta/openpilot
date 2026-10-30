@@ -25,6 +25,7 @@ def test_stopped_timer_yields_only_when_its_area_is_needed_for_slc():
   state.customization['layouts']['compact']['stopped_timer']['enabled'] = True
   assert validate_document(state.customization) == state.customization
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = Mock(profile=Profile.COMPACT)
   view._stopped_timer(state, 134)
   view.fonts.draw.assert_not_called()

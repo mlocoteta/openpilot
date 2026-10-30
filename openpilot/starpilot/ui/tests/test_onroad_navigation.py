@@ -236,6 +236,7 @@ def test_replay_without_wall_anchor_omits_optional_hud_clock():
   document['layouts']['large'][CLOCK_WIDGET]['enabled'] = True
   observed = replace(observed, customization=document)
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = Mock(profile=Profile.LARGE)
   view.wall_clock = lambda: None
   view._clock(observed)

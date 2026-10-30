@@ -20,6 +20,7 @@ from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.wheel_feedback import WheelFeedbackFade
 from openpilot.starpilot.ui.speed_limit_widget import SpeedLimitWidget
 from openpilot.starpilot.ui.moon import draw_moon
+from openpilot.starpilot.ui.onroad_personality import PersonalityWidget
 
 
 @lru_cache(maxsize=128)
@@ -213,7 +214,7 @@ class MiciSidebarWidgets:
 
   def __init__(self, fonts: BitmapFonts | None = None):
     self.fonts = fonts
-    self.personality_renderer = None
+    self.personality = PersonalityWidget(fonts)
     self._confidence_filter = FirstOrderFilter(-0.5, 0.5, 1 / 60)
     self._confidence_drive_frame: int | None = None
     self._confidence_stamp_ns: int | None = None
@@ -230,7 +231,8 @@ class MiciSidebarWidgets:
       if not position["enabled"] or (position["x"] < sidebar.x and state.alert.size != AlertSize.NONE and not is_lane_change_notice(state.alert)):
         continue
       bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
-      draw_widget_frame(bounds, state.customization, "compact", key)
+      if key != "following_distance":
+        draw_widget_frame(bounds, state.customization, "compact", key)
       render(bounds, state)
 
   def render_personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
@@ -238,7 +240,6 @@ class MiciSidebarWidgets:
     if not position["enabled"] or (position["x"] < rect.x + rect.width - 60 and state.alert.size != AlertSize.NONE and not is_lane_change_notice(state.alert)):
       return
     bounds = rl.Rectangle(position["x"], position["y"], 60, 80)
-    draw_widget_frame(bounds, state.customization, "compact", "following_distance")
     self._personality(bounds, state)
 
   def _conditional(self, center: rl.Rectangle, state: OnroadState) -> None:
@@ -346,27 +347,5 @@ class MiciSidebarWidgets:
     measured = self.fonts.measure('E', FontRole.BOLD, 22)
     self.fonts.draw('E', FontRole.BOLD, 22, cx - measured.width / 2, cy - measured.height / 2, color)
 
-  def _personality(self, rect: rl.Rectangle, state: OnroadState) -> None:
-    cx, cy = rect.x + rect.width / 2, rect.y + rect.height / 2
-    accent = rl.Color(200, 32, 48, 255) if state.traffic_mode else rl.Color(112, 192, 216, 255)
-    if self.personality_renderer is not None:
-      label = state.traffic_display is not None and state.traffic_display.state in ('active', 'paused', 'off')
-      bounds = rl.Rectangle(rect.x, rect.y, rect.width, rect.height - 14 if label else rect.height)
-      self.personality_renderer(bounds, state)
-    else:
-      bottom_y, lane_top_y = cy + 24, cy - 24
-      color = rl.Color(*rgba(state.customization, "text", "compact", "following_distance"))
-      _line(cx - 25, bottom_y, cx - 13, lane_top_y, color, 3)
-      _line(cx + 25, bottom_y, cx + 13, lane_top_y, color, 3)
-      stack_count = 1 if state.traffic_mode else state.personality + 1
-      for y, half_width in ((cy + 12, 18), (cy - 1, 14), (cy - 14, 10))[:stack_count]:
-        _line(cx - half_width, y, cx + half_width, y, accent, 5)
-        _line(cx - half_width, y, cx - half_width - 3, y + 7, accent, 4)
-        _line(cx + half_width, y, cx + half_width + 3, y + 7, accent, 4)
-    if state.traffic_display is not None and self.fonts is not None and state.alert.size != AlertSize.FULL:
-      short = {'active': 'TRF', 'paused': 'PAUSE', 'off': 'OFF'}.get(state.traffic_display.state)
-      if short is None:
-        return
-      text = self.fonts.measure(short, FontRole.SEMI_BOLD, 11)
-      label_color = rl.Color(255, 155, 63, 255) if state.traffic_display.state == 'paused' else accent
-      self.fonts.draw(short, FontRole.SEMI_BOLD, 11, cx - text.width / 2, rect.y + rect.height - 14, label_color)
+  def _personality(self, _rect: rl.Rectangle, state: OnroadState) -> None:
+    self.personality.render(state)

@@ -443,6 +443,11 @@ class RuntimeSnapshotAdapter:
     display_selfdrive = display_message(sm, "selfdriveState", now_ns, after_frame=after) if started else None
     display_model = display_message(sm, "modelV2", now_ns, after_frame=after) if started else None
     display_radar = display_message(sm, "radarState", now_ns, after_frame=after) if started else None
+    display_plan = display_message(sm, 'longitudinalPlan', now_ns, after_frame=after) if started else None
+    display_events = display_message(sm, 'onroadEvents', now_ns, after_frame=after) if started else None
+    display_monitor = display_message(sm, 'driverMonitoringState', now_ns, after_frame=after) if started else None
+    if display_monitor is not None:
+      self._display_rhd = bool(display_monitor.isRHD)
     native_alert = current_alert(sm, now_ns, after_frame=after) if started else OnroadAlert()
     native_alert = lateral_lane_alert(native_alert, car=display_car, control=display_control,
                                       model=display_model, selfdrive=display_selfdrive)
@@ -680,6 +685,10 @@ class RuntimeSnapshotAdapter:
                          experimental_available=bool(ui.has_longitudinal_control),
                          experimental_enabled=observed_experimental,
                          personality=list(Personality).index(persona),
+                         lead_detected=bool(display_plan is not None and display_plan.hasLead),
+                         gas_pressed_override=bool(display_events is not None and any(
+                           e.name == log.OnroadEvent.EventName.gasPressedOverride for e in display_events)),
+                         right_hand_drive=getattr(self, '_display_rhd', False),
                          switchback_mode=bool(lateral_supported(cp) and display_control is not None and display_control.latActive and
                            self._switchback.sample(slc, drive_id=drive_id, now_ns=now_ns,
                              event_ns=int(sm.logMonoTime['slcState']))),

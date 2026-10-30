@@ -8,6 +8,7 @@ import pytest
 from openpilot.starpilot.ui.layout_preview_renderer import _png_rgba, _straight_rgba
 from openpilot.starpilot.ui.layout_preview_transport import _payload, validate_png, PreviewInvalid
 from openpilot.starpilot.ui.onroad_customization import RUNTIME_PREVIEW_WIDGETS, customization_metadata, default_document
+from openpilot.starpilot.ui.onroad_personality import PersonalityWidget
 
 
 def test_widget_art_request_uses_same_validated_document_and_scene():
@@ -82,7 +83,7 @@ def test_static_compact_sample_settles_actual_hud_without_changing_live_blink_po
   hud = CompactHudRenderer(Mock(), Path('/unused-assets'))
   canvas = _Canvas.__new__(_Canvas)
   canvas.profile = Profile.COMPACT
-  canvas.view = cast(OnroadView, NS(compact_hud=hud, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
+  canvas.view = cast(OnroadView, NS(personality=PersonalityWidget(), compact_hud=hud, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
   sample = sample_state('engaged', default_document())
   for _ in range(2):
     canvas._settle(sample)
@@ -103,7 +104,7 @@ def test_scene_switches_settle_cem_geometry_independently_of_previous_scene():
   gauge = AetherGauge(Mock())
   canvas = _Canvas.__new__(_Canvas)
   canvas.profile = Profile.LARGE
-  canvas.view = cast(OnroadView, NS(cem_gauge=gauge, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
+  canvas.view = cast(OnroadView, NS(personality=PersonalityWidget(), cem_gauge=gauge, torque_bar=NS(_torque_filter=NS(x=0), _alpha_filter=NS(x=0))))
   for scene in ('cem_stop_light', 'cem_curve', 'cem_lead', 'engaged', 'cem_curve'):
     state = sample_state(scene, default_document())
     gauge._road_h_filter.x = -1  # A previous animation must never leak into a static scene.
@@ -137,6 +138,7 @@ def test_large_wheel_art_is_drawn_inside_its_crop_with_or_without_sidebar(monkey
   monkeypatch.setattr(canvas, 'fonts', NS(profile=Profile.LARGE), raising=False)
   canvas.target = NS(texture=object())
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   monkeypatch.setattr(view, 'fonts', canvas.fonts, raising=False)
   view.projection_viewport = viewport
   view.steering_wheel = SteeringWheelWidget(Path('/unused'))

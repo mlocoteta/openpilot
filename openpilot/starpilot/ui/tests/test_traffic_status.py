@@ -17,7 +17,7 @@ from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSet
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.ui.onroad_compact_widgets import MiciSidebarWidgets
 from openpilot.starpilot.ui.onroad import OnroadView
-from openpilot.starpilot.ui.presentation import FontRole
+from openpilot.starpilot.ui.presentation import FontRole, Profile
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter
 from openpilot.starpilot.ui.shell import ShellMode
 from openpilot.starpilot.ui.tests.test_runtime_snapshot import ui_fake, BOOT_OFFSET_NS
@@ -128,12 +128,14 @@ class TestTrafficStatus(unittest.TestCase):
       self.assertEqual(shown.traffic_display.label, 'TRAFFIC')
       self.assertEqual(shown.speed_limit.kind.value, 'stale')  # Invalid SLC does not veto independent Traffic status.
       fonts = mock.Mock()
+      fonts.profile = Profile.COMPACT
       fonts.measure.return_value = NS(width=24, height=11)
       rail = MiciSidebarWidgets(fonts)
-      with mock.patch('openpilot.starpilot.ui.onroad_compact_widgets._line'), mock.patch.object(rl, 'draw_triangle'):
+      with mock.patch.object(rail.personality, 'draw'):
         rail._personality(rl.Rectangle(476, 160, 60, 80), shown)
       self.assertEqual(fonts.draw.call_args.args[:3], ('TRF', FontRole.SEMI_BOLD, 11))
       large = OnroadView.__new__(OnroadView)
+      large.personality = mock.Mock()
       large.fonts = fonts
       large.projection_viewport = None
       fonts.reset_mock()

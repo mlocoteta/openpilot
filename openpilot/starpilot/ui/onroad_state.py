@@ -189,6 +189,9 @@ class OnroadState:
   experimental_enabled: bool = False
   torque_utilization: float = 0.0
   personality: int = 1
+  lead_detected: bool = False
+  gas_pressed_override: bool = False
+  right_hand_drive: bool = False
   switchback_mode: bool = False
   traffic_mode: bool = False
   traffic_display: TrafficDisplay | None = None

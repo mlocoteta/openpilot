@@ -70,7 +70,7 @@ from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, curr
 from openpilot.starpilot.ui.runtime_software import deliver_software
 from openpilot.starpilot.ui.network_panel import NetworkPanelBridge
 from openpilot.starpilot.ui.slc_action_dispatch import SlcActionDispatcher
-from openpilot.starpilot.ui.onroad_state import AlertSize, BorderSignals, OnroadRequest, OnroadState, SlcUiRequest, is_personality_notice, is_lane_change_notice
+from openpilot.starpilot.ui.onroad_state import AlertSize, BorderSignals, OnroadRequest, OnroadState, SlcUiRequest, is_personality_notice
 from openpilot.starpilot.ui.onroad_favorites import OnroadFavorites
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
@@ -190,7 +190,6 @@ class StarShellSession:
         self.view.onroad.stock_confidence_layer = lambda rect, state: render_stock_confidence(camera_owner, rect, state)
         self.view.onroad.stock_confidence_reset = camera_owner.reset_stock_confidence_layer
         self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(rect, show_long_indicator=None)
-        self.view.onroad.compact_sidebar.personality_renderer = self._render_personality
       else:
         self.view.onroad.extra_overlays = lambda rect, state: camera_owner.render_model_source_layer(rect)
     except Exception:
@@ -339,12 +338,6 @@ class StarShellSession:
     self._driver_monitor_layer.render(state, monitor=monitor, driver=driver,
                                       fresh=monitor is not None and driver is not None,
                                       onroad=ui_state.is_onroad(), top_icons=top_icons)
-
-  def _render_personality(self, rect, state):
-    indicator = self.camera_owner._long_indicator
-    indicator.set_should_draw(state.alert.size == AlertSize.NONE or is_lane_change_notice(state.alert))
-    indicator.render_sidebar(rect, personality=state.personality,
-                             longitudinal_active=state.cruise_active, traffic_mode=state.traffic_mode)
 
   def _favorite_actions(self):
     return self._resolve_favorite_actions()

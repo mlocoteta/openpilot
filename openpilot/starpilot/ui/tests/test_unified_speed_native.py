@@ -49,6 +49,7 @@ def fonts(profile=Profile.LARGE):
 
 def slc_view(font):
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = font
   if font.profile == Profile.LARGE:
     view.unified_speed = UnifiedSpeedWidget(font)
@@ -306,6 +307,7 @@ def test_large_limit_keeps_a_unit_when_set_speed_is_hidden():
 @pytest.mark.parametrize('profile', list(Profile))
 def test_chooser_has_separate_tonal_actions_and_immediate_pressed_feedback(profile, drawing):
   view = OnroadView.__new__(OnroadView)
+  view.personality = Mock()
   view.fonts = fonts(profile)
   if profile == Profile.LARGE:
     view.unified_speed = UnifiedSpeedWidget(view.fonts)

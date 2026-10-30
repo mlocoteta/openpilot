@@ -310,7 +310,7 @@ def test_gauge_box_shrinks_to_its_content_and_saved_positions_keep_the_drawing_i
 
 
 @pytest.mark.parametrize('projection', [False, True])
-def test_default_cem_gauge_is_in_left_column_centered_above_driver_monitor(projection):
+def test_default_cem_gauge_keeps_left_column_with_personality_monitor_pair(projection):
   from openpilot.starpilot.system.starport.projection_layout import default_layout_for_viewport, layout_metadata_for_viewport
   from openpilot.starpilot.ui.onroad_customization import customization_metadata
 
@@ -322,6 +322,9 @@ def test_default_cem_gauge_is_in_left_column_centered_above_driver_monitor(proje
     widgets = customization_metadata()['profiles']['large']['widgets']
     layout = default_document()['layouts']['large']
   gauge, monitor, actions = (layout[key] for key in (CEM_GAUGE_WIDGET, 'driver_monitor', 'speed_limit_actions'))
-  assert gauge['x'] + widgets[CEM_GAUGE_WIDGET]['width'] / 2 == monitor['x'] + monitor['size'] / 2 == 184
+  personality = layout['following_distance']
+  assert gauge['x'] + widgets[CEM_GAUGE_WIDGET]['width'] / 2 == 184
+  assert personality['x'] + widgets['following_distance']['width'] + 32 == monitor['x']
+  assert personality['y'] + widgets['following_distance']['height'] / 2 == monitor['y'] + monitor['size'] / 2
   assert actions['y'] + widgets['speed_limit_actions']['height'] < gauge['y']
   assert gauge['y'] + widgets[CEM_GAUGE_WIDGET]['height'] < monitor['y']

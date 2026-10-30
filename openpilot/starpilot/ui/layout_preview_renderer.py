@@ -96,6 +96,7 @@ def sample_state(scene: str, document: dict) -> OnroadState:
                      metric=False, experimental_available=True,
                      experimental_enabled=scene == "experimental" or scene in CEM_SCENE_REASONS, lateral_active=lateral,
                      longitudinal_active=longitudinal, stock_cruise_active=False,
+                     lead_detected=True, gas_pressed_override=scene == 'slc_pedal',
                      slc_system_long_available=longitudinal, slc_wheel_confirmation_available=longitudinal, torque_utilization=0.78 if lateral else 0.0,
                      customization=document,
                      slc_prompt_open=scene == 'slc_pending',
@@ -404,6 +405,15 @@ class _Canvas:
   def _settle(self, state: OnroadState) -> None:
     if self.view is None:
       return
+    personality = self.view.personality
+    personality._alpha_filter.x = 1.0
+    personality._personality = state.personality
+    personality._personality_changed_time = -2.5
+    active_lead = state.lead_detected and state.cruise_active
+    personality._lead_car_filters[0].x = 0.0 if active_lead else 1.0 if state.lead_detected else .35
+    personality._lead_car_filters[1].x = float(active_lead)
+    for i, (active, green) in enumerate(personality._distance_filters):
+      active.x, green.x = float(i < (1 if state.traffic_mode else state.personality + 1)), 0.0
     if self.profile == Profile.COMPACT:
       hud = self.view.compact_hud
       # Freeze the synthetic sample inside the normal post-change set-speed blink.

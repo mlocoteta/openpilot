@@ -72,6 +72,7 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
     for profile in (Profile.LARGE, Profile.COMPACT):
       with self.subTest(profile=profile):
         view = OnroadView.__new__(OnroadView)
+        view.personality = Mock()
         fonts = Mock()
         fonts.profile = profile
         fonts.measure.return_value = NS(width=100, height=20)
@@ -111,6 +112,7 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
 
   def test_large_nonalert_draws_canonical_gauge_and_preview_labels_without_real_curve(self):
     view = OnroadView.__new__(OnroadView)
+    view.personality = Mock()
     fonts = Mock()
     fonts.profile = Profile.LARGE
     view.fonts = fonts

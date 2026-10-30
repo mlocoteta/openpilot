@@ -30,6 +30,7 @@ def test_big_and_projected_editor_share_one_graphic_cem_without_legacy_caption(v
   state=OnroadState(True, True, 20., 80., SpeedLimitObservation(), customization=document,
     longitudinal_active=True, visual_preview=OnroadVisualPreview(cem_reason='STOP LIGHT',layout_sample=editor))
   view=onroad.OnroadView.__new__(onroad.OnroadView)
+  view.personality = Mock()
   view.fonts=Mock(profile=Profile.LARGE)
   view.projection_viewport=viewport
   view.camera_layer=view.background_layer=view.extra_overlays=None

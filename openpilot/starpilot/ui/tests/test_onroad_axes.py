@@ -288,6 +288,7 @@ class TestOnroadAxes(unittest.TestCase):
       for profile in (Profile.LARGE, Profile.COMPACT):
         with self.subTest(profile=profile, lateral=lateral, longitudinal=longitudinal, override=override, alert=alert):
           view = onroad.OnroadView.__new__(onroad.OnroadView)
+          view.personality = Mock()
           object.__setattr__(view, "fonts", NS(profile=profile, draw=Mock(), measure=Mock(return_value=NS(width=100, height=30)),
                                               vertical_ink=Mock(return_value=(0, 20)), horizontal_ink=Mock(return_value=(0, 100))))
           view.camera_layer = Mock()
@@ -349,6 +350,7 @@ class TestOnroadAxes(unittest.TestCase):
     state = self.state(True, True)
     for profile in (Profile.LARGE, Profile.COMPACT):
       view = onroad.OnroadView.__new__(onroad.OnroadView)
+      view.personality = Mock()
       self.enterContext(patch.object(view, 'fonts', NS(profile=profile, draw=Mock()), create=True))
       view._driving_mode(state)
       view.fonts.draw.assert_not_called()

@@ -24,6 +24,7 @@ from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
 from openpilot.starpilot.ui.onroad_alerts import AlertRenderer
 from openpilot.starpilot.ui.onroad_border import render_compact_half_borders, render_large_half_borders
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer, MiciSidebarWidgets
+from openpilot.starpilot.ui.onroad_personality import PersonalityWidget
 from openpilot.starpilot.ui.onroad_curve import controlling as curve_controlling, glow_color, intensity, render_glow, status_label
 from openpilot.starpilot.ui.onroad_conditional import stop_active
 from openpilot.starpilot.ui.onroad_corner import CornerHintCache, render_corner_hint
@@ -147,6 +148,7 @@ class OnroadView:
     self.torque_bar = TorqueBarWidget()
     gui_app.add_render_prepare(self.torque_bar.prepare, self.torque_bar.close)
     if fonts.profile == Profile.LARGE:
+      self.personality = PersonalityWidget(fonts)
       self.unified_speed = UnifiedSpeedWidget(fonts)
       self.current_speed = CurrentSpeedHud(fonts)
       self.cem_gauge = AetherGauge(fonts)
@@ -156,6 +158,7 @@ class OnroadView:
     else:
       self.compact_hud = CompactHudRenderer(fonts, asset_directory)
       self.compact_sidebar = MiciSidebarWidgets(fonts)
+      self.personality = self.compact_sidebar.personality
       self._fade_path = asset_directory / "icons_mici/onroad/onroad_fade.png"
       self._fade: rl.Texture | None = None
 
@@ -295,6 +298,7 @@ class OnroadView:
     if pip is not None and (large or not driver_camera and state.appearance.camera_view != CameraViewChoice.NONE):
       pip(content, state, submit=submit)
     if large:
+      submit('following_distance', lambda: self.personality.render(state))
       if "nav_map" in state.customization["layouts"]["large"] and state.alert.size != AlertSize.FULL:
         if map_layer := getattr(self, "map_layer", None):
           submit("nav_map", lambda: map_layer(content, state))
@@ -408,6 +412,7 @@ class OnroadView:
             self._stopped_timer(state, state.stopped_duration_s)
         if self.extra_overlays is not None:
           self.extra_overlays(content, state)
+        self.personality.render(state)
         if monitor_layer := getattr(self, "driver_monitor_layer", None):
           monitor_layer(content, state)
       if self.projection_viewport and "nav_card" not in state.customization["layouts"]["large"]:

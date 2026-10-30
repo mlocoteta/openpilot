@@ -101,6 +101,18 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  def test_personality_feedback_uses_current_drive_plan_and_override_events(self):
+    ui = ui_fake()
+    ui.sm.put('longitudinalPlan', NS(hasLead=True))
+    ui.sm.put('onroadEvents', [NS(name=log.OnroadEvent.EventName.gasPressedOverride)])
+    ui.sm.put('driverMonitoringState', NS(isRHD=True))
+    adapter = RuntimeSnapshotAdapter(ui)
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW).onroad
+    self.assertTrue(state.lead_detected and state.gas_pressed_override and state.right_hand_drive)
+    ui.sm.recv_frame['longitudinalPlan'] = ui.sm.recv_frame['onroadEvents'] = 0
+    state = adapter.build(ShellMode.ONROAD, now_ns=NOW + 1).onroad
+    self.assertFalse(state.lead_detected or state.gas_pressed_override)
+
   def test_home_temperature_uses_live_units_and_warning_status(self):
     from openpilot.starpilot.ui.home import HomeView
     from openpilot.starpilot.ui.presentation import Profile

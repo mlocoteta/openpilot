@@ -107,6 +107,7 @@ class TestLiveDeveloperSidebar(unittest.TestCase):
       stack.enter_context(patch('openpilot.starpilot.ui.onroad.gui_app.add_render_prepare'))
       rail = stack.enter_context(patch('openpilot.starpilot.ui.onroad.render_live_sidebar'))
       view = OnroadView(fonts, Path('/unused'))
+      view.personality = Mock()
       view.unified_speed = view.current_speed = view.steering_wheel = Mock()
       view.navigation = view.alert = Mock()
       view._large(state)
