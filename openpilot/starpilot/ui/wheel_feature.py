@@ -44,6 +44,9 @@ class WheelFeature:
       return None
     if policy.fixed_cruise_buttons and not (key == KEYS[0] and policy.auxiliary_lkas_supported):
       return "Toggle AOL" if cp.brand == 'hyundai' else "Factory cruise / AOL"
+    if (key == KEYS[1] and policy.runtime_supported and cp.brand in ('chrysler', 'mazda', 'nissan', 'volkswagen') and
+        not button_reported(cp, key)):
+      return "Factory cruise / AOL"
     if cp.brand == 'ford' and policy.explicit_latch and policy.runtime_supported and key == KEYS[1]:
       sources = [read_saved(self.owner.params, name, 8) for name in KEYS[:2]]
       return "Factory cruise / AOL" if all(ok and value != b'9' for value, ok in sources) else "Factory cruise"
@@ -122,7 +125,7 @@ class WheelFeature:
         implicit_toggle = independent_cruise_buttons_supported(cp) and all(ok and value in ordinary_actions
                                                                           for value, ok in sources)
       ford_role = cp.brand == 'ford' and policy.explicit_latch and policy.runtime_supported and key == KEYS[0]
-      if implicit_toggle or ford_role and selected == "Off":
+      if (implicit_toggle or ford_role) and selected == "Off":
         selected = "Toggle AOL"
       default = next(label for label, code in ACTIONS.items() if code == DEFAULTS.get(key, 0))
       rows.append(FeatureRow(PREFIX + key, label, selected or "Invalid saved action", raw, choices,
@@ -131,6 +134,7 @@ class WheelFeature:
                              reason=("LKAS also toggles AOL independently of its saved extra action." if ford_role else
                                      "Neither LKAS nor MAIN is assigned Toggle AOL, so both retain the default AOL toggle." if implicit_toggle else
                                      "Bookmark on release. Available while Left Paddle Longitudinal Pause is Off." if key == PADDLE_KEY else
+                                     "Off adds no action to the vehicle's existing button behavior. " +
                                      "Axis pause and AOL assignments apply after restarting. Other actions can apply this drive. " +
                                      "Long actions fire while held."),
                              capability=capability, repair_value="Off" if selected is None else ""))

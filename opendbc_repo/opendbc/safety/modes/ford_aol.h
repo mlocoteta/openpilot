@@ -68,6 +68,8 @@ static bool ford_aol_neutral_packet(const CANPacket_t *msg) {
   } else if (msg->addr == 0x3D8U) {
     const unsigned int lines = msg->data[6] >> 3U;
     neutral = ((lines == 0U) || (lines == 30U)) && (((msg->data[6] >> 1U) & 3U) == 0U);
+  } else {
+    // Other packet types do not supply neutral display state.
   }
   return neutral;
 }
@@ -331,6 +333,8 @@ static void ford_aol_tx(const CANPacket_t *msg, bool accepted) {
       ford_aol_neutral_display_mask |= (msg->addr == 0x18AU) ? 1U : 2U;
     } else if (!accepted) {
       ford_aol_neutral_reset();
+    } else {
+      // No fresh neutral proof; retain the existing lease without renewing it.
     }
   }
 }
