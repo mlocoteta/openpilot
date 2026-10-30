@@ -207,6 +207,8 @@ class SelfdriveD:
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
     self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
+    self.blindspot_alert_settings = (self.params.get_bool("LoudBlindspotAlert"),
+                                    self.params.get_bool("LoudBlindspotAlertWhenDisengaged"))
 
     car_recognized = self.CP.brand != 'mock'
 
@@ -1108,6 +1110,16 @@ class SelfdriveD:
                   if alert.event_type in self.state_machine.current_alert_types)
     now_ns = time.monotonic_ns()
     drive = int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0
+    from openpilot.starpilot.audio.blindspot_alert import ALERT_TYPE as BSM_ALERT, blindspot_alert
+    loud, without_lateral = getattr(self, 'blindspot_alert_settings', (False, False))
+    blindspot = blindspot_alert(CS, self.sm, loud=loud, without_lateral=without_lateral,
+                                lane_change_blocked=EventName.laneChangeBlocked in self.events.names, now_ns=now_ns)
+    if blindspot is not None:
+      alerts = [alert for alert in alerts if alert.alert_type != 'laneChangeBlocked/warning']
+      self.AM.alerts.pop('laneChangeBlocked/warning', None)
+      alerts.append(blindspot)
+    else:
+      self.AM.alerts.pop(BSM_ALERT, None)
     switchback = bool(self.switchback_capable and self.sm.seen['slcState'] and self.sm.alive['slcState'] and
                       self.sm.valid['slcState'] and self.sm['carControl'].latActive and
                       self.switchback_status.sample_state(self.sm['slcState'], drive_id=drive, now_ns=now_ns,
@@ -2168,6 +2180,8 @@ class SelfdriveD:
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
       self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
+      self.blindspot_alert_settings = (self.params.get_bool("LoudBlindspotAlert"),
+                                      self.params.get_bool("LoudBlindspotAlertWhenDisengaged"))
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
       self.refresh_saved_driving_mode(time.monotonic_ns())
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
