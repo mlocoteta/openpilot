@@ -6,12 +6,12 @@ from opendbc.car.hyundai.values import CAR
 @dataclass(frozen=True)
 class WheelSettingsPolicy:
   settings_supported: bool = True
-  fixed_cruise_buttons: bool = True
+  fixed_cruise_buttons: bool = False
   explicit_latch: bool = True
   distance_pause_only: bool = True
   paddle_pause: bool = True
   runtime_supported: bool = False
-  lkas_button_supported: bool = False
+  lkas_button_supported: bool = True
   auxiliary_lkas_supported: bool = False
 
 

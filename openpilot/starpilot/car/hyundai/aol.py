@@ -183,7 +183,6 @@ def _policy_for(CP) -> AolVehiclePolicy:
     explicit_latch=qualified,
     distance_personality=distance_personality,
     safety_param_addition=0x0800 if stock else 0,
-    fixed_cruise_buttons=settings,
     distance_pause_only=settings,
     paddle_pause=settings,
   )

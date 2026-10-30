@@ -330,7 +330,7 @@ static uint8_t aol_ioniq6_request_mask(void) {
   } else if (heartbeat_engaged) {
     aol_ioniq6_session_started = true;
     if ((hyundai_canfd_ioniq6_long || hyundai_ev9_long_aol ||
-         (hyundai_canfd_torque_ev_long && !aol_optional_release_policy)) && controls_allowed && aol_ioniq6_enable_release &&
+         (aol_optional_release_capable && !aol_optional_release_policy)) && controls_allowed && aol_ioniq6_enable_release &&
         ((aol_host_axis_mask & 0x3U) == 0x3U) &&
         (safety_get_ts_elapsed(now, aol_ioniq6_enable_release_ts) <= AOL_HOST_REQUEST_TIMEOUT_US)) {
       aol_ioniq6_lateral_latch = true;
@@ -583,21 +583,22 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       cruise_button = (msg->data[4] >> 4) & 0x7U;
       main_button = GET_BIT(msg, 34U);
     }
+    const bool lkas_button = hyundai_canfd_alt_buttons ? GET_BIT(msg, 39U) : GET_BIT(msg, 23U);
     const bool previous_controls_allowed = controls_allowed;
     const int previous_cruise_button = cruise_button_prev;
     const int main_policy = hyundai_canfd_ccnc_ev_long ? (hyundai_canfd_pe_long ? HYUNDAI_MAIN_WITHDRAW : HYUNDAI_MAIN_TRACK) : HYUNDAI_MAIN_NONE;
     const bool normal_main_button = hyundai_canfd_ccnc_ev_long && GET_BIT(msg, 21U);
     hyundai_common_cruise_buttons_check(cruise_button, main_button, normal_main_button, main_policy);
     if ((hyundai_canfd_ioniq6_long || hyundai_ev9_long_aol ||
-         (hyundai_canfd_torque_ev_long && !aol_optional_release_policy)) && aol_ioniq6_long) {
+         (aol_optional_release_capable && !aol_optional_release_policy)) && aol_ioniq6_long) {
       static uint8_t aol_ioniq6_enable_counter = 0U;
       static uint32_t aol_ioniq6_enable_ts = 0U;
       const uint8_t counter = hyundai_canfd_get_counter(msg);
       const uint32_t now = microsecond_timer_get();
       const uint32_t elapsed = safety_get_ts_elapsed(now, aol_ioniq6_enable_ts);
       const bool fresh = aol_ioniq6_enable_counter_seen &&
-        hyundai_canfd_button_counter_follows(aol_ioniq6_enable_counter, counter, 0xFU) && (elapsed > 0U) && (elapsed <= 100000U);
-      if (!fresh || main_button || GET_BIT(msg, 23U)) {
+        hyundai_canfd_button_counter_follows(aol_ioniq6_enable_counter, counter, hyundai_canfd_alt_buttons ? 0xFFU : 0xFU) && (elapsed > 0U) && (elapsed <= 100000U);
+      if (!fresh || main_button || lkas_button) {
         aol_ioniq6_enable_pending = false;
         aol_ioniq6_enable_release = false;
       } else if (aol_ioniq6_enable_neutral && (previous_cruise_button == HYUNDAI_BTN_NONE) &&
@@ -616,7 +617,7 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       } else {
         // A held enable button does not renew the heartbeat grace.
       }
-      aol_ioniq6_enable_neutral = !main_button && !GET_BIT(msg, 23U) && (cruise_button == HYUNDAI_BTN_NONE);
+      aol_ioniq6_enable_neutral = !main_button && !lkas_button && (cruise_button == HYUNDAI_BTN_NONE);
       aol_ioniq6_enable_counter_seen = true;
       aol_ioniq6_enable_counter = counter;
       aol_ioniq6_enable_ts = now;
@@ -657,7 +658,7 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
         }
         aol_optional_release_previous = (uint8_t)cruise_button;
       }
-      const bool gesture = main_button || (hyundai_canfd_alt_buttons ? GET_BIT(msg, 39U) : GET_BIT(msg, 23U)); // LDA/LKAS button
+      const bool gesture = main_button || lkas_button;
       if (cruise_button == HYUNDAI_BTN_CANCEL) {
         aol_ioniq6_enable_reset();
         aol_optional_release_pending = false;
@@ -1495,7 +1496,7 @@ static safety_config hyundai_canfd_init_validated(uint16_t supplied_param) {
   hyundai_canfd_angle_model = 0U;
 #ifdef ALLOW_DEBUG
   hyundai_canfd_ioniq6_long = ioniq6_long_requested;
-  hyundai_canfd_torque_ev_long = (param == 0x0015U) || (param == 0x0095U) || torque_long_aol_requested || gv60_long_requested;
+  hyundai_canfd_torque_ev_long = (param == 0x0015U) || (param == 0x0095U) || (torque_long_aol_requested && GET_FLAG(param, 16U)) || gv60_long_requested;
 #endif
   hyundai_torque_aol_cancel_preserves_lateral = ioniq6_stock_aol_requested || torque_long_aol_requested ||
                                                (param == 0x8815U) || (param == 0x8895U);

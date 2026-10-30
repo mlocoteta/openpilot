@@ -512,6 +512,8 @@ int main() {
     0x6A28U, 0x6A2AU, 0x7008U, 0x700AU, 0x7010U, 0x7012U, 0x7028U, 0x702AU,
     0x7090U, 0x7092U, 0x7208U, 0x720AU, 0x7228U, 0x722AU, 0x7809U, 0x7829U,
   };
+  constexpr uint16_t sportage_long_words[] = {0x0804U, 0x0806U, 0x080CU, 0x080EU, 0x0814U, 0x0816U,
+                                              0x0894U, 0x0896U, 0x0824U, 0x0826U, 0x082CU, 0x082EU};
   for (uint32_t word = 0U; word <= 0xFFFFU; ++word) {
     bool expected = word == 0x2815U || word == 0x2895U || word == 0x0815U || word == 0x0895U || word == 0x8815U || word == 0x8895U || word == 0x5491U || word == 0x5C91U || word == 0x5C95U || word == 0x5495U;
     for (uint16_t stock_word : stock_canfd_words) {
@@ -519,6 +521,9 @@ int main() {
     }
     for (uint16_t stock_word : stock_angle_words) {
       expected = expected || word == stock_word;
+    }
+    for (uint16_t sportage_word : sportage_long_words) {
+      expected = expected || word == sportage_word;
     }
     assert(hyundai_aol_param(static_cast<uint16_t>(word)) == expected);
   }
