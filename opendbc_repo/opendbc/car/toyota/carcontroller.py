@@ -156,7 +156,7 @@ class CarController(CarControllerBase):
         CS.out.canValid and not CS.out.canTimeout and CS.out.cruiseState.available and (not self.original_prius_sdsu or CS.sdsu_state == 0) and
         not CS.out.accFaulted and not CS.out.stockAeb and not CS.out.steerFaultTemporary and not CS.out.steerFaultPermanent and
         CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport) and not CS.out.doorOpen and
-        not CS.out.seatbeltUnlatched and not CS.out.gasPressed and not CS.out.brakePressed)
+        not CS.out.seatbeltUnlatched and not CS.out.brakePressed)
     rav4h_long = rav4h_filter.enabled(self.CP)
     if rav4h_long:
       filter_allowed = bool(self.rav4h_filter_input is not None and self.rav4h_filter_input.update(now_nanos) and
@@ -186,11 +186,12 @@ class CarController(CarControllerBase):
       hold_source_ready = hold_source_ready and bool(self.pedal_input is not None and self.pedal_input.update(now_nanos) and CS.pedal_ready)
     if bypass_long:
       hold_source_ready = hold_source_ready and bool(self.bypass_input is not None and self.bypass_input.update(now_nanos))
-    if pedal_composite.configured(self.CP):
+    composite_pedal = pedal_composite.configured(self.CP)
+    if composite_pedal:
       filter_allowed = filter_allowed and bool(
         CS.out.canValid and not CS.out.canTimeout and CS.out.cruiseState.available and not CS.out.accFaulted and not CS.out.stockAeb and
         not CS.out.steerFaultTemporary and not CS.out.steerFaultPermanent and not CS.out.doorOpen and not CS.out.seatbeltUnlatched and
-        not CS.out.gasPressed and not CS.out.brakePressed and
+        not CS.out.brakePressed and
         CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport))
     if pedal_owner:
       filter_allowed = filter_allowed and bool(self.pedal_input is not None and self.pedal_input.update(now_nanos) and CS.pedal_ready)
@@ -200,9 +201,11 @@ class CarController(CarControllerBase):
         preference is not None and preference.update(now_nanos) and CS.out.canValid and not CS.out.canTimeout and
         CS.out.cruiseState.available and not CS.out.accFaulted and not CS.out.stockAeb and
         not CS.out.steerFaultTemporary and not CS.out.steerFaultPermanent and not CS.out.doorOpen and
-        not CS.out.seatbeltUnlatched and not CS.out.gasPressed and not CS.out.brakePressed and
+        not CS.out.seatbeltUnlatched and not CS.out.brakePressed and
         CS.out.gearShifter in (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport))
     long_active = CC.longActive and filter_allowed
+    if self.original_prius_filter or composite_pedal or bypass_long:
+      long_active = long_active and not CS.out.gasPressed
     if guarded_advert:
       long_active = long_active and not (CS.out.seatbeltUnlatched or CS.out.gasPressed or CS.out.brakePressed)
     actuators = CC.actuators
