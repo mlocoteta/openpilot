@@ -164,7 +164,7 @@ export class PlotsFeed {
       if (generation === this.generation) {
         if (this.deadline !== null) this.cancel(this.deadline); this.deadline = null
         this.request = null
-        if (this.active && !this.paused) this.timer = this.later(() => { this.timer = null; this.load() }, POLL_MS)
+        if (this.active && !this.paused) this.timer = this.later(() => { this.timer = null; this.load() }, Math.max(0, POLL_MS - (this.now() - start)))
       }
     }
   }
@@ -228,7 +228,7 @@ export const PlotsPage = {
       <template v-else>
         <div class="gx-plots__toolbar"><GxIconButton :label="paused ? 'Resume live plots' : 'Pause live plots'" :icon="paused ? 'bi-play-fill' : 'bi-pause-fill'" @click="togglePause" />
           <button type="button" class="gx-btn gx-btn--tonal" :aria-pressed="advanced" @click="advanced=!advanced">{{ advanced ? 'Hide' : 'Show' }} controller terms</button>
-          <span role="status">{{ paused ? 'Paused' : data?.bootStabilizing ? 'Starting vehicle systems' : status === 'current' ? 'Live' : status === 'stale' ? 'Reconnecting · last received values' : status === 'unavailable' ? 'Unavailable' : 'Connecting' }}</span></div>
+          <span class="gx-plots__status" role="status">{{ paused ? 'Paused' : data?.bootStabilizing ? 'Starting vehicle systems' : status === 'current' ? 'Live' : status === 'stale' ? 'Reconnecting · last received values' : status === 'unavailable' ? 'Unavailable' : 'Connecting' }}</span></div>
         <p class="gx-note gx-plots__hint" role="status">{{ !paused && error ? error : 'Missing samples leave a gap in the graph.' }}</p>
         <div class="gx-plots__grid">
           <section class="gx-card gx-plots__panel"><div class="gx-section__header"><i class="bi bi-graph-up" aria-hidden="true"></i><span class="gx-section__title">Lateral Acceleration</span></div><p class="gx-note">Desired / actual · m/s² · {{ source(data?.values?.lateralSource) }}</p>

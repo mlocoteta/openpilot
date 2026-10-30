@@ -741,6 +741,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-card-grid .gx-card { margin-bottom: 0; }
 
 .gx-plots__toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin: 1rem 0; }
+.gx-plots__status { flex: 0 0 100%; min-height: 2.8em; display: flex; align-items: center; }
+.gx-plots__hint { min-height: 2.8em; }
 .gx-plots__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: 1rem; }
 .gx-plots__panel { min-width: 0; --card-inset: clamp(.85rem, 2vw, 1.25rem); padding: var(--card-inset); }
 .gx-plots__panel svg { display: block; width: 100%; height: auto; min-height: 8rem; background: rgba(127,127,127,.06); border-radius: .6rem; }
