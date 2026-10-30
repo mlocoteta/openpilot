@@ -1880,183 +1880,220 @@ static safety_config hyundai_canfd_init_validated(uint16_t supplied_param) {
     }
   }
 
+  // Only one banked profile is active; keep its mutable RX status in RAM,
+  // while the alternative configuration templates remain in flash.
+  static RxCheck banked_rx_workspace[7];
   if (ioniq6_stock_aol_requested && (param != 0x0811U) && (param != 0x0891U)) {
-    RxCheck *selected = NULL;
+    const RxCheck *selected = NULL;
     if (hyundai_canfd_lka_steer_msg) {
       if (hyundai_hybrid_gas_signal) {
-        static RxCheck torque_hda2_hybrid_alt[] = {
+        static const RxCheck torque_hda2_hybrid_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
         };
-        static RxCheck torque_hda2_hybrid_std[] = {
+        _Static_assert((sizeof(torque_hda2_hybrid_alt) / sizeof(torque_hda2_hybrid_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_hda2_hybrid_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
         };
+        _Static_assert((sizeof(torque_hda2_hybrid_std) / sizeof(torque_hda2_hybrid_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_hda2_hybrid_alt : torque_hda2_hybrid_std;
       } else {
-        static RxCheck torque_hda2_ice_alt[] = {
+        static const RxCheck torque_hda2_ice_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
         };
-        static RxCheck torque_hda2_ice_std[] = {
+        _Static_assert((sizeof(torque_hda2_ice_alt) / sizeof(torque_hda2_ice_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_hda2_ice_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
         };
+        _Static_assert((sizeof(torque_hda2_ice_std) / sizeof(torque_hda2_ice_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_hda2_ice_alt : torque_hda2_ice_std;
       }
     } else if (hyundai_camera_scc) {
       if (hyundai_ev_gas_signal) {
-        static RxCheck torque_camera_ev_alt[] = {
+        static const RxCheck torque_camera_ev_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
-        static RxCheck torque_camera_ev_std[] = {
+        _Static_assert((sizeof(torque_camera_ev_alt) / sizeof(torque_camera_ev_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_camera_ev_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
+        _Static_assert((sizeof(torque_camera_ev_std) / sizeof(torque_camera_ev_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_camera_ev_alt : torque_camera_ev_std;
       } else if (hyundai_hybrid_gas_signal) {
-        static RxCheck torque_camera_hybrid_alt[] = {
+        static const RxCheck torque_camera_hybrid_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
-        static RxCheck torque_camera_hybrid_std[] = {
+        _Static_assert((sizeof(torque_camera_hybrid_alt) / sizeof(torque_camera_hybrid_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_camera_hybrid_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
+        _Static_assert((sizeof(torque_camera_hybrid_std) / sizeof(torque_camera_hybrid_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_camera_hybrid_alt : torque_camera_hybrid_std;
       } else {
-        static RxCheck torque_camera_ice_alt[] = {
+        static const RxCheck torque_camera_ice_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
-        static RxCheck torque_camera_ice_std[] = {
+        _Static_assert((sizeof(torque_camera_ice_alt) / sizeof(torque_camera_ice_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_camera_ice_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
         };
+        _Static_assert((sizeof(torque_camera_ice_std) / sizeof(torque_camera_ice_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_camera_ice_alt : torque_camera_ice_std;
       }
     } else {
       if (hyundai_ev_gas_signal) {
-        static RxCheck torque_radar_ev_alt[] = {
+        static const RxCheck torque_radar_ev_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
-        static RxCheck torque_radar_ev_std[] = {
+        _Static_assert((sizeof(torque_radar_ev_alt) / sizeof(torque_radar_ev_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_radar_ev_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
+        _Static_assert((sizeof(torque_radar_ev_std) / sizeof(torque_radar_ev_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_radar_ev_alt : torque_radar_ev_std;
       } else if (hyundai_hybrid_gas_signal) {
-        static RxCheck torque_radar_hybrid_alt[] = {
+        static const RxCheck torque_radar_hybrid_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
-        static RxCheck torque_radar_hybrid_std[] = {
+        _Static_assert((sizeof(torque_radar_hybrid_alt) / sizeof(torque_radar_hybrid_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_radar_hybrid_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
+        _Static_assert((sizeof(torque_radar_hybrid_std) / sizeof(torque_radar_hybrid_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_radar_hybrid_alt : torque_radar_hybrid_std;
       } else {
-        static RxCheck torque_radar_ice_alt[] = {
+        static const RxCheck torque_radar_ice_alt[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
-        static RxCheck torque_radar_ice_std[] = {
+        _Static_assert((sizeof(torque_radar_ice_alt) / sizeof(torque_radar_ice_alt[0])) == 6U, "Banked RX template size");
+        static const RxCheck torque_radar_ice_std[] = {
           HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
           HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
         };
+        _Static_assert((sizeof(torque_radar_ice_std) / sizeof(torque_radar_ice_std[0])) == 6U, "Banked RX template size");
         selected = hyundai_canfd_alt_buttons ? torque_radar_ice_alt : torque_radar_ice_std;
       }
     }
-    ret.rx_checks = selected;
     ret.rx_checks_len = 6;
+    for (int i = 0; i < ret.rx_checks_len; i++) {
+      banked_rx_workspace[i] = selected[i];
+    }
+    ret.rx_checks = banked_rx_workspace;
   }
   if (angle_aol_requested && hyundai_canfd_angle_steering && !hyundai_longitudinal) {
     static CanMsg independent_tx_msgs[64];
     const bool bounded = hyundai_canfd_angle_aol_capacity(&ret);
     if (bounded) {
-      RxCheck *selected = NULL;
+      const RxCheck *selected = NULL;
       if (hyundai_canfd_lka_steer_msg) {
         if (hyundai_ev_gas_signal) {
-          static RxCheck angle_hda2_ev_alt[] = {
+          static const RxCheck angle_hda2_ev_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x35)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
           };
-          static RxCheck angle_hda2_ev_std[] = {
+          _Static_assert((sizeof(angle_hda2_ev_alt) / sizeof(angle_hda2_ev_alt[0])) == 6U, "Banked RX template size");
+          static const RxCheck angle_hda2_ev_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x35)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
           };
+          _Static_assert((sizeof(angle_hda2_ev_std) / sizeof(angle_hda2_ev_std[0])) == 6U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_hda2_ev_alt : angle_hda2_ev_std;
         }
         else if (hyundai_hybrid_gas_signal) {
-          static RxCheck angle_hda2_hybrid_alt[] = {
+          static const RxCheck angle_hda2_hybrid_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x105)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
             {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
-          static RxCheck angle_hda2_hybrid_std[] = {
+          _Static_assert((sizeof(angle_hda2_hybrid_alt) / sizeof(angle_hda2_hybrid_alt[0])) == 7U, "Banked RX template size");
+          static const RxCheck angle_hda2_hybrid_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x105)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
             {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
+          _Static_assert((sizeof(angle_hda2_hybrid_std) / sizeof(angle_hda2_hybrid_std[0])) == 7U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_hda2_hybrid_alt : angle_hda2_hybrid_std;
         }
         else {
-          static RxCheck angle_hda2_ice_alt[] = {
+          static const RxCheck angle_hda2_ice_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x100)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
             {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
-          static RxCheck angle_hda2_ice_std[] = {
+          _Static_assert((sizeof(angle_hda2_ice_alt) / sizeof(angle_hda2_ice_alt[0])) == 7U, "Banked RX template size");
+          static const RxCheck angle_hda2_ice_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x100)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
             {.msg = {{0x70, 1, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
+          _Static_assert((sizeof(angle_hda2_ice_std) / sizeof(angle_hda2_ice_std[0])) == 7U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_hda2_ice_alt : angle_hda2_ice_std;
         }
       }
       else {
         if (hyundai_ev_gas_signal) {
-          static RxCheck angle_camera_ev_alt[] = {
+          static const RxCheck angle_camera_ev_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
           };
-          static RxCheck angle_camera_ev_std[] = {
+          _Static_assert((sizeof(angle_camera_ev_alt) / sizeof(angle_camera_ev_alt[0])) == 6U, "Banked RX template size");
+          static const RxCheck angle_camera_ev_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
           };
+          _Static_assert((sizeof(angle_camera_ev_std) / sizeof(angle_camera_ev_std[0])) == 6U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_camera_ev_alt : angle_camera_ev_std;
         }
         else if (hyundai_hybrid_gas_signal) {
-          static RxCheck angle_camera_hybrid_alt[] = {
+          static const RxCheck angle_camera_hybrid_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
             {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
-          static RxCheck angle_camera_hybrid_std[] = {
+          _Static_assert((sizeof(angle_camera_hybrid_alt) / sizeof(angle_camera_hybrid_alt[0])) == 7U, "Banked RX template size");
+          static const RxCheck angle_camera_hybrid_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
             {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
+          _Static_assert((sizeof(angle_camera_hybrid_std) / sizeof(angle_camera_hybrid_std[0])) == 7U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_camera_hybrid_alt : angle_camera_hybrid_std;
         }
         else {
-          static RxCheck angle_camera_ice_alt[] = {
+          static const RxCheck angle_camera_ice_alt[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
             {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
-          static RxCheck angle_camera_ice_std[] = {
+          _Static_assert((sizeof(angle_camera_ice_alt) / sizeof(angle_camera_ice_alt[0])) == 7U, "Banked RX template size");
+          static const RxCheck angle_camera_ice_std[] = {
             HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
             HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
             {.msg = {{0x70, 0, 32, 100U, .max_counter = 0xffU, .ignore_quality_flag = true}, {0}, {0}}},
           };
+          _Static_assert((sizeof(angle_camera_ice_std) / sizeof(angle_camera_ice_std[0])) == 7U, "Banked RX template size");
           selected = hyundai_canfd_alt_buttons ? angle_camera_ice_alt : angle_camera_ice_std;
         }
       }
-      ret.rx_checks = selected;
       ret.rx_checks_len = hyundai_ev_gas_signal ? 6 : 7;
+      for (int i = 0; i < ret.rx_checks_len; i++) {
+        banked_rx_workspace[i] = selected[i];
+      }
+      ret.rx_checks = banked_rx_workspace;
       for (int i = 0; i < ret.tx_msgs_len; i++) {
         independent_tx_msgs[i] = ret.tx_msgs[i];
         const unsigned int addr = independent_tx_msgs[i].addr;
