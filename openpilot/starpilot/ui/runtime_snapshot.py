@@ -22,6 +22,7 @@ from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.manual import TRAFFIC_MODE_ACTION, read_button_map
 from openpilot.starpilot.feature_capabilities import lateral_supported, longitudinal_supported
 from openpilot.starpilot.aol.runtime import current_axis
+from openpilot.starpilot.aol.wire import INTENT_SERVICE, decode_intent
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
@@ -128,6 +129,14 @@ def display_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0)
       # Account for qlog decimation during replay.
       max_age_ns = max(max_age_ns, min(1_000_000_000, int(2e9 * spec.decimation / spec.frequency)))
   return _message_at_age(sm, service, now_ns, after_frame, max_age_ns)
+
+
+def display_aol_latch(sm: Any, now_ns: int, *, after_frame: int) -> bool:
+  raw = display_message(sm, INTENT_SERVICE, now_ns, after_frame=after_frame)
+  intent = decode_intent(raw) if raw is not None else None
+  return bool(intent is not None and intent.settingsQualified and intent.producerSessionId and intent.sequence > 0 and
+              int(sm.logMonoTime[INTENT_SERVICE]) == intent.carStateLogMonoTime == intent.observedMonoTime and
+              0 < intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and intent.lateralArmed)
 
 
 def current_curve_message(sm: Any, now_ns: int, *, after_frame: int = 0) -> Any | None:
@@ -680,6 +689,8 @@ class RuntimeSnapshotAdapter:
                          torque_source_available=torque.utilization is not None,
                          torque_drive_frame=after if started else None, drive_frame=after if started else None, observed_ns=now_ns,
                          wheel_acceleration=observe_wheel_acceleration(display_car),
+                         aol_latched=(display_aol_latch(sm, now_ns, after_frame=after)
+                                      if started and getattr(ui, "aol_runtime", False) else None),
                          lateral_active=display_lat_active, longitudinal_active=display_long_active,
                          longitudinal_overridden=longitudinal_overridden,
                          driver_override_active=bool(display_car_valid and (

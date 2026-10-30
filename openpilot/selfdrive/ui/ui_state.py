@@ -132,6 +132,7 @@ class UIState:
         "carOutput",
         "carControl",
         "aolAxisState",
+        "aolIntentWire",
         "slcState",
         "vehicleParameters",
         "testJoystick",

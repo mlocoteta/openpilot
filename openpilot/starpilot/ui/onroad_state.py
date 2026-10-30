@@ -192,6 +192,7 @@ class OnroadState:
   switchback_mode: bool = False
   traffic_mode: bool = False
   traffic_display: TrafficDisplay | None = None
+  aol_latched: bool | None = None
   lateral_active: bool = False
   longitudinal_active: bool = False
   longitudinal_overridden: bool = False
