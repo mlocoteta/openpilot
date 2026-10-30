@@ -37,14 +37,11 @@ def _literal_control(row):
   if type(row) is not ControlEvidence:
     raise ValueError('exact original control receipt required')
   _trace_key(row.effect_trace)
-  result = {}
-  for field in fields(ControlEvidence):
-    value = getattr(row, field.name)
-    if field.name == 'effect_trace':
-      result[field.name] = _literal_trace(value)
-    else:
-      _validate_primitive(value)
-      result[field.name] = value
+  result = {field.name: _literal_trace(row.effect_trace) if field.name == 'effect_trace' else getattr(row, field.name)
+            for field in fields(ControlEvidence)}
+  # Close every field together before any packing or source comparison. This
+  # avoids a separate native stack-budget walk for each scalar in every tick.
+  _validate_primitive(result)
   return result
 
 
