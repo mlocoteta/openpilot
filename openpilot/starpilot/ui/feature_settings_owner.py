@@ -74,6 +74,8 @@ from openpilot.starpilot.curve_speed.actions import ACTION_KEYS as CURVE_ACTION_
 from openpilot.starpilot.controllers.toyota_cruise import capability as toyota_cruise_capability
 
 
+GLOBAL_BOOL_PREFERENCES = frozenset((LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY, NUDGE_KEY, "DisengageOnAccelerator"))
+
 BOOL_DEFAULTS = {
   "GMPedalLongitudinal": False, "ForceStops": False, "AlwaysAllowUploads": False, "TurnAssist": True,
   "SubaruAvhStartup": False,
@@ -90,6 +92,7 @@ BOOL_DEFAULTS = {
   LEAD_APPROACH_KEY: False,
   LEAD_TAKEOFF_KEY: False,
   NUDGE_KEY: True,
+  "DisengageOnAccelerator": False,
   CURVE_MASTER_KEY: False, CURVE_NO_LEAD_KEY: False,
   "ShowCSCStatus": False,
   "ForceAutoTuneOff": False, "AlwaysOnLateral": True, "NostalgiaMode": False,
@@ -475,8 +478,8 @@ class FeatureSettingsOwner:
     except (AttributeError, TypeError, ValueError):
       return None
 
-  def _apply_lead_preference(self, request: FeatureSettingsRequest) -> bool:
-    if (request.key not in (LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY, NUDGE_KEY) or request.value not in ("On", "Off") or
+  def _apply_global_bool_preference(self, request: FeatureSettingsRequest) -> bool:
+    if (request.key not in GLOBAL_BOOL_PREFERENCES or request.value not in ("On", "Off") or
         request.dependencies or request.capability is not None or request.vehicle_fingerprint is not None):
       return False
     if request.expected not in (None, b"0", b"1"):
@@ -485,7 +488,7 @@ class FeatureSettingsOwner:
       return self.authority("preferences")
     result = commit_exact(self.params, key=request.key, max_bytes=8,
                           raw=b"1" if request.value == "On" else b"0", expected=request.expected,
-                          authorized=authorized, temp_prefix=".lead-preference-")
+                          authorized=authorized, temp_prefix=".global-preference-")
     return result.committed and result.verified
 
   def _cruise_rows(self, configurable: bool) -> list[FeatureRow]:
@@ -1157,6 +1160,8 @@ class FeatureSettingsOwner:
       rows.append(self._bool_row(NUDGE_KEY, "Experimental Speed Nudge", self.authority("preferences"),
                                 reason="Gently recovers toward set speed when Experimental mode hesitates on a clear road. " +
                                        "Leads, stops, curve limits and driver overrides retain priority."))
+      if self._galaxy():
+        rows.append(self._bool_row("DisengageOnAccelerator", "Disengage on Accelerator Pedal", self.authority("preferences")))
       document, raw, valid = self._document()
       for category, field, label, choices in (
         ('acceleration', 'selectedAccelerationProfile', 'Selected Acceleration Profile',
@@ -1270,8 +1275,8 @@ class FeatureSettingsOwner:
                                    capability=capability, dependencies=traffic_dependencies,
                                    default_value=str(round(max(low, min(high, default_curve[index])), 4))))
     fingerprint = self.vehicle_fingerprint()
-    rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY, NUDGE_KEY,
-                                                              "ShowSpeedLimits", "AlwaysAllowUploads") or
+    rows = [replace(row, vehicle_fingerprint=None if row.key in GLOBAL_BOOL_PREFERENCES or
+                    row.key in (PLANNER_SELECTION_KEY, "ShowSpeedLimits", "AlwaysAllowUploads") or
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
     subtitle = (
@@ -1384,8 +1389,8 @@ class FeatureSettingsOwner:
         return False
       return save_selection(self.params, request.value, request.expected,
                             authorized=lambda: self.authority("preferences"))
-    if key in (LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY, NUDGE_KEY):
-      return self._apply_lead_preference(request)
+    if key in GLOBAL_BOOL_PREFERENCES:
+      return self._apply_global_bool_preference(request)
     if key in CRUISE_KEYS:
       return self._apply_cruise(request)
     if key.startswith("conditional:"):

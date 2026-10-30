@@ -19,6 +19,7 @@
   "CustomPersonalities",
   "DeveloperSidebar",
   "DisableOpenpilotLongitudinal",
+  "DisengageOnAccelerator",
   "DisengageVolume",
   "DriverCamera",
   "EVTuning",
