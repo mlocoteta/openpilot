@@ -1,6 +1,6 @@
 """A fresh queued proof may replace an expired snapshot; no lease is renewed."""
 
-from unittest.mock import patch
+from unittest.mock import call, patch
 import pytest
 from opendbc.can import CANPacker
 from opendbc.car import Bus
@@ -212,8 +212,11 @@ def test_queued_fresh_sdgm_axis_is_consumed_before_steering_gate(c9, case):
       )
     pending = [] if case in ('empty', 'old_long_axis_empty') else [v.as_reader() for v in values.values()]
 
+    transport_events = []
+
     def receive(timeout):
       nonlocal now
+      transport_events.append(('receive', timeout))
       assert timeout == 0
       controls.sm.update_msgs(now / 1e9, pending)
       if case == 'clock_crosses_deadline':
@@ -223,15 +226,32 @@ def test_queued_fresh_sdgm_axis_is_consumed_before_steering_gate(c9, case):
     with (
       patch.object(controls.sm, 'update', side_effect=receive) as receive_latest,
       patch('openpilot.selfdrive.controls.controlsd.time.monotonic_ns', return_value=now) as decision_clock,
+      patch('openpilot.cereal.messaging.Poller') as poller,
     ):
+      poller.return_value.registerSocket.side_effect = lambda socket: transport_events.append(('register', socket))
+      poller.return_value.poll.side_effect = lambda timeout: transport_events.append(('poll', timeout))
       command, _ = controls.state_control()
     # GM may refresh an expired combined proof, but cannot start LONG on a LAT-only receipt.
     expected = case in ('healthy', 'live_snapshot', 'disabled_long_candidate', 'stock_sibling', 'stock_cruise_off', 'new_host_long', 'old_long_axis')
     assert command.latActive == expected and not command.longActive, (case, command.to_dict())
     if case in ('live_snapshot', 'old_long_active_only', 'old_long_desired_only'):
       receive_latest.assert_not_called()
+      poller.assert_not_called()
+      assert not transport_events
+    elif case in ('empty', 'old_long_axis_empty'):
+      # Only an unchanged header permits the bounded wait and second receive.
+      socket = controls.sm.sock['aolAxisState']
+      poller.assert_called_once_with()
+      poller.return_value.registerSocket.assert_called_once_with(socket)
+      poller.return_value.poll.assert_called_once_with(10)
+      assert receive_latest.call_args_list == [call(0), call(0)]
+      assert transport_events == [('receive', 0), ('register', socket), ('poll', 10), ('receive', 0)]
+      assert controls.sm.logMonoTime['aolAxisState'] == BASE
+      assert controls.sm['aolAxisState'].validUntilMonoTime == original_deadline
     else:
       receive_latest.assert_called_once_with(0)
+      poller.assert_not_called()
+      assert transport_events == [('receive', 0)]
     if case == 'old_long_axis':
       refreshed = controls.sm['aolAxisState']
       assert refreshed.sourceCarStateMonoTime == BASE + 25_000_000
