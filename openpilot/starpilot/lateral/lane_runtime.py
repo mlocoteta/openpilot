@@ -25,7 +25,7 @@ def read_settings(params) -> LaneCenteringSettings:
     return value == b'1'
 
   try:
-    enabled = boolean('LaneCentering', b'0')
+    enabled = boolean('LaneCentering', b'1')
     pause = boolean('LaneCenteringPauseOnSignal', b'1')
     offset = float(raw('LaneCenterOffset', b'0.0'))
     authority = float(raw('LaneCenteringE2EAuthority', b'1.0'))

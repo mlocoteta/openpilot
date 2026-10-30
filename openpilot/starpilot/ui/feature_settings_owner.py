@@ -87,7 +87,7 @@ BOOL_DEFAULTS = {
   "SpeedLimitController": False, "ShowSpeedLimits": True,
   "SLCConfirmation": False,
   "PauseLateralOnSignal": False,
-  "LaneCentering": False, "LaneCenteringPauseOnSignal": True,
+  "LaneCentering": True, "LaneCenteringPauseOnSignal": True,
   "CustomPersonalities": False, PLANNER_SELECTION_KEY: True,
   LEAD_APPROACH_KEY: False,
   LEAD_TAKEOFF_KEY: False,
