@@ -61,7 +61,9 @@ class SoundsOwner:
     rows.append(pack_row)
     for key, label, reason in (
       (BLINDSPOT_KEYS[0], "Loud Blindspot Alert", "Uses the soft-warning sound when a lane change is blocked by a detected blind-spot vehicle."),
-      (BLINDSPOT_KEYS[1], "Blindspot Alert While Lateral Is Off", "Warns when signaling toward a detected blind-spot vehicle with steering assistance off or paused. Independent of Loud Blindspot Alert. Hazards do not trigger it."),
+      (BLINDSPOT_KEYS[1], "Blindspot Alert While Lateral Is Off",
+       "Warns when signaling toward a detected blind-spot vehicle with steering assistance off or paused. "
+       + "Independent of Loud Blindspot Alert. Hazards do not trigger it."),
     ):
       raw, readable = read_saved(self.params, key, 8)
       valid = readable and raw in (None, b"0", b"1")

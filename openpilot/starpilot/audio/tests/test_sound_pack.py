@@ -38,6 +38,11 @@ class SoundPackTests(unittest.TestCase):
     self.pack.mkdir(parents=True)
     self.loader = SoundPackLoader(self.params, self.stock, self.root)
 
+  def sound_pack_row(self, owner):
+    rows = [row for row in owner.snapshot().rows if row.key == 'SoundPack']
+    self.assertEqual(len(rows), 1)
+    return rows[0]
+
   def test_stock_samples_are_exact_and_cached(self):
     filenames = tuple({spec[0] for spec in sound_list.values()})
     loaded = self.loader.refresh(filenames, 0)
@@ -101,7 +106,7 @@ class SoundPackTests(unittest.TestCase):
   def test_owner_parked_saved_source_and_unavailable_repair(self):
     parked = [True]
     owner = SoundsOwner(self.params, lambda: parked[0], self.root)
-    row = owner.snapshot().rows[-1]
+    row = self.sound_pack_row(owner)
     self.assertEqual(row.choices, ("StarPilot Sounds", "Stock Sounds", "custom"))
     request = FeatureSettingsRequest("SoundPack", row.source, "custom")
     self.assertTrue(owner.apply(request))
@@ -110,7 +115,7 @@ class SoundPackTests(unittest.TestCase):
     self.assertFalse(owner.apply(FeatureSettingsRequest("SoundPack", b"custom", "stock")))
     parked[0] = True
     self.params.put("SoundPack", "missing", block=True)
-    self.assertEqual(owner.snapshot().rows[-1].repair_value, "starpilot")
+    self.assertEqual(self.sound_pack_row(owner).repair_value, "starpilot")
     self.assertTrue(owner.apply(FeatureSettingsRequest("SoundPack", b"missing", "stock")))
 
   def test_callback_does_not_read_files_or_params_and_keeps_chimes(self):
@@ -144,7 +149,7 @@ class SoundPackTests(unittest.TestCase):
     path = Path(self.params.get_param_path("SoundPack"))
     path.write_bytes(b"\xff")
     owner = SoundsOwner(self.params, lambda: True, self.root)
-    row = owner.snapshot().rows[-1]
+    row = self.sound_pack_row(owner)
     self.assertEqual(row.source, b"\xff")
     self.assertEqual(row.repair_value, "starpilot")
     self.assertEqual(path.read_bytes(), b"\xff")

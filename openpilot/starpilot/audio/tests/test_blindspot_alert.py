@@ -23,8 +23,8 @@ class Messages(dict):
 
 
 def car(**kw):
-  return NS(**(dict(leftBlinker=True, rightBlinker=False, leftBlindspot=True, rightBlindspot=False,
-                   canValid=True, canTimeout=False) | kw))
+  return NS(**({'leftBlinker': True, 'rightBlinker': False, 'leftBlindspot': True, 'rightBlindspot': False,
+               'canValid': True, 'canTimeout': False} | kw))
 
 
 def test_independent_switches_and_active_lane_change():
@@ -38,8 +38,8 @@ def test_independent_switches_and_active_lane_change():
   assert not blindspot_alert(car(), sm, loud=False, without_lateral=False, lane_change_blocked=True, now_ns=NOW)
 
 
-@pytest.mark.parametrize('fields', [dict(leftBlinker=False), dict(rightBlinker=True),
-  dict(leftBlindspot=False, rightBlindspot=True), dict(canValid=False), dict(canTimeout=True)])
+@pytest.mark.parametrize('fields', [{'leftBlinker': False}, {'rightBlinker': True},
+  {'leftBlindspot': False, 'rightBlindspot': True}, {'canValid': False}, {'canTimeout': True}])
 def test_no_wrong_side_hazards_or_invalid_can(fields):
   assert not blindspot_alert(car(**fields), Messages(), loud=False, without_lateral=True,
                             lane_change_blocked=False, now_ns=NOW)
@@ -100,7 +100,11 @@ def test_switch_defaults_persistence_and_exact_authority(tmp_path):
 def test_galaxy_sounds_switches_save_and_reset_with_session_checks(tmp_path):
   from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsGateway, SettingsChanged
   params = Params(str(tmp_path))
-  context = NS(sample=lambda: AuthorityContext(True, None, None))
+  class Context:
+    def sample(self) -> AuthorityContext:
+      return AuthorityContext(True, None, None)
+
+  context = Context()
   gateway = SettingsGateway(params, context)
   for key, label in zip(KEYS, ('Loud Blindspot Alert', 'Blindspot Alert While Lateral Is Off'), strict=True):
     page = gateway.page('sounds', 'session', b'generation')
