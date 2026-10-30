@@ -1702,7 +1702,7 @@ class SelfdriveD:
       lateral_events = [event for event in lateral_events if event not in (EventName.wrongGear, EventName.reverseGear)]
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
-        not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
+        not any(sample.seatbeltUnlatched or sample.doorOpen for sample, _ in getattr(self, 'car_state_samples', ()))),
       intent=intent, native=native, car_state=CS, initialized=self.initialized,
       model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
                        self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
@@ -2055,6 +2055,7 @@ class SelfdriveD:
       from openpilot.starpilot.aol.seatbelt import seatbelt_lateral_soft_event_allowed
       reverse_pause = known_reverse_pause(CS, getattr(self, 'car_state_samples', ()))
       aol_hard_soft_fault = any(event.softDisable and not (
+        event.name == EventName.doorOpen or
         event.name == EventName.wrongGear and reverse_pause or
         event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
@@ -2072,6 +2073,9 @@ class SelfdriveD:
         self.events.add(EventName.controlsMismatch)
         lost_active_aol |= pause
     was_enabled = self.enabled
+    if self.aol_replay and source_current and CS.doorOpen and was_enabled:
+      # Ordinary cruise is withdrawn; its legacy permission is no longer expected.
+      self.aol_availability_long_inhibit = True
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
     if not was_enabled and self.enabled and self.events.contains(ET.ENABLE):
@@ -2142,7 +2146,7 @@ class SelfdriveD:
         intent is not None and intent.allowedLatch and
         any(event.softDisable and event.name != EventName.doorOpen for event in self.events.to_msg()) and
         not self.events.contains(ET.IMMEDIATE_DISABLE)):
-      # Door-open pauses independent steering quietly; ordinary LONG keeps its alert.
+      # Door-open does not inhibit independent steering; ordinary LONG keeps its alert.
       self.aol_soft_takeover_alert = True
     if (self.aol_replay and intent is not None and intent.lateralArmed and
         CS.steerFaultTemporary and not CS.steerFaultPermanent and not CS.steeringPressed):

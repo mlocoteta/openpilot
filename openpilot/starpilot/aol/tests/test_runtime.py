@@ -132,7 +132,7 @@ class CardIntentTests(unittest.TestCase):
       for extra in (log.OnroadEvent.EventName.doorOpen, log.OnroadEvent.EventName.calibrationInvalid,
                     log.OnroadEvent.EventName.canError):
         with self.subTest(extra=extra):
-          self.assertFalse(step(extra=extra).lateral_active)
+          self.assertEqual(step(extra=extra).lateral_active, extra == log.OnroadEvent.EventName.doorOpen)
       for optional in (False, True):
         with self.subTest(gm_optional=optional):
           sd.CP = gm.as_reader()
@@ -283,7 +283,7 @@ class CardIntentTests(unittest.TestCase):
     self.assertFalse(direct.desired_longitudinal)
     events.add(log.OnroadEvent.EventName.doorOpen)
     self.assertFalse(disarming_fault(events.to_msg(), state))
-    self.assertTrue(aol_no_entry(events.names, state, paddle_only_cancel=False))
+    self.assertFalse(aol_no_entry(events.names, state, paddle_only_cancel=False))
 
   def test_temporary_eps_and_known_gears_preserve_latch_with_zero_steering(self):
     owner = AolCardIntent(AolSettings(True, 0, 0, 0, (0, 0, 0), (0, 0, 0)), explicit_latch=True)

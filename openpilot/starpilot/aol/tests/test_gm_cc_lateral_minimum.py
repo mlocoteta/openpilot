@@ -102,4 +102,4 @@ def test_only_cruise_speed_event_is_removed(event):
   cs = car.CarState(canValid=True, gearShifter='drive', vEgo=4.8)
   cs.cruiseState.available = True
   allowed = cc_independent_lateral_below_engage(cp, intent, enabled=False, active=False)
-  assert aol_no_entry([EventName.belowEngageSpeed, event], cs, paddle_only_cancel=False, allow_below_engage_speed=allowed)
+  assert aol_no_entry([EventName.belowEngageSpeed, event], cs, paddle_only_cancel=False, allow_below_engage_speed=allowed) == (event != EventName.doorOpen)
