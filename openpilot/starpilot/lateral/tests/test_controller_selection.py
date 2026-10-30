@@ -95,10 +95,11 @@ class TestControllerSelection(unittest.TestCase):
     wrong = ioniq.as_reader().as_builder()
     wrong.notCar = True
     self.assertIsNone(policy_for(wrong))
-    with self.assertRaises(ValueError):
-      unsupported = cp_for(TOYOTA.TOYOTA_RAV4_TSS2_2022)
-      LatControlTorque(unsupported.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2_2022](unsupported), DT_CTRL,
-                       controller_mode=ControllerMode.STARPILOT)
+    generic = cp_for(TOYOTA.TOYOTA_RAV4_TSS2_2022)
+    controller = LatControlTorque(generic.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2_2022](generic), DT_CTRL,
+                                  controller_mode=ControllerMode.STARPILOT)
+    self.assertEqual(controller.controller_policy, 'generic')
+    self.assertIsNotNone(selected_policy(controller))
 
   def test_standard_skips_policy_constructor_and_ioniq_factor_multiplier(self):
     for vehicle in (HYUNDAI.HYUNDAI_IONIQ_6, HYUNDAI.GENESIS_G70_2020, TOYOTA.TOYOTA_COROLLA_TSS2):
