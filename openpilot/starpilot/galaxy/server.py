@@ -126,7 +126,6 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
 
   address_source = local_access if local_access is not None else LocalAccess(port)
   console_source = tmux_live if tmux_live is not None else TmuxLive()
-  monitor_source = monitor if monitor is not None else SystemMonitor()
   reports = crashes if crashes is not None else CrashReports()
   crash_reports_lock = threading.Lock()
   starport_logs_source = starport_logs
@@ -175,6 +174,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     from openpilot.starpilot.galaxy.evidence import EvidenceSource
     evidence_source = EvidenceSource()
 
+  monitor_source = monitor if monitor is not None else SystemMonitor(messages=evidence_source)
   vehicle_display = DeviceStateSource(evidence_source)
 
   def context_source(params):

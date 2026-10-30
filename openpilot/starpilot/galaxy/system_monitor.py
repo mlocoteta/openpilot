@@ -11,7 +11,9 @@ from pathlib import Path
 
 class SystemMonitor:
   def __init__(self, root=Path('/proc'), *, storage=Path('/data'), clock=time.monotonic,
-               wall_clock=time.time, disk_usage=shutil.disk_usage, page_size=None):  # noqa: TID251 - Display capture date; intervals use monotonic.
+               wall_clock=time.time, disk_usage=shutil.disk_usage, page_size=None, messages=None,  # noqa: TID251 - Display capture date; intervals use monotonic.
+               boot_clock=lambda: time.clock_gettime(getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC))):
+    self.messages, self.boot_clock = messages, boot_clock
     self.root = Path(root)
     self.storage = Path(storage)
     self.clock, self.wall_clock, self.disk_usage = clock, wall_clock, disk_usage
@@ -29,6 +31,23 @@ class SystemMonitor:
         # A failed sample breaks the comparison interval, including PID identity.
         self.previous, self.cpu_previous, self.previous_time = {}, {}, None
         raise OSError('System telemetry is unavailable') from None
+
+  def _battery_voltage(self):
+    if self.messages is None:
+      return None
+    try:
+      sm = self.messages.snapshot()
+      if sm is None or not sm.seen['peripheralState'] or not sm.valid['peripheralState']:
+        return None
+      age = self.boot_clock() - int(sm.logMonoTime['peripheralState']) / 1e9
+      received_age = self.clock() - sm.recv_time['peripheralState']
+      state = sm['peripheralState']
+      if not (0 <= age < 5 and 0 <= received_age < 5) or state.pandaType == 0:
+        return None
+      volts = state.voltage / 1000
+      return round(volts, 2) if math.isfinite(volts) and 0 < volts < 60 else None
+    except (OSError, RuntimeError, AttributeError, KeyError, TypeError, ValueError, OverflowError):
+      return None
 
   def _sample(self):
     now = self.clock()
@@ -120,6 +139,7 @@ class SystemMonitor:
                  'usedMiB': round(used / 1024, 1) if used is not None else None,
                  'availableMiB': round(available / 1024, 1) if available is not None else None,
                  'percent': round(100 * used / total, 1) if used is not None else None},
+      'batteryVoltage': self._battery_voltage(),
       'storage': storage, 'uptimeSeconds': uptime, 'processCount': len(rows), 'processes': rows,
     }
     self.previous, self.cpu_previous, self.previous_time = process_ticks, cpu_now, now

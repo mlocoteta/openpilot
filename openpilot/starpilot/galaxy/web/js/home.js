@@ -100,6 +100,7 @@ export function homeSummary(monitor, model, software) {
       available: !!live,
       cpu: measure(live?.cpuPercent, "%"),
       memory: measure(live?.memory?.percent, "%"),
+      battery: measure(live?.batteryVoltage, " V", 1),
       storage: live?.storage?.usedGiB != null && live?.storage?.totalGiB != null
         ? `${measure(live.storage.usedGiB, " GiB", 1)} / ${measure(live.storage.totalGiB, " GiB", 1)}` : "Unavailable",
       observed: live ? new Date(live.sampledAt * 1000).toLocaleString(displayLocale()) : "Unavailable",
@@ -248,6 +249,7 @@ export const Home = {
             <p v-if="!summary.system.available" role="status">Live system status unavailable.</p>
             <template v-else><div class="gx-home__metrics"><div><strong>{{ summary.system.cpu }}</strong><span>CPU</span></div>
               <div><strong>{{ summary.system.memory }}</strong><span>Memory</span></div></div>
+              <p>12 V battery: <strong>{{ summary.system.battery }}</strong></p>
               <p>Storage: {{ summary.system.storage }}</p><small>Sampled {{ summary.system.observed }}</small></template>
             <button type="button" class="gx-home__link" @click="go('/logs/monitor')">Open System Monitor <i class="bi bi-arrow-right"></i></button>
           </section>

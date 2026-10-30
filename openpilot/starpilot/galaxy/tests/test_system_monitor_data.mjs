@@ -43,3 +43,8 @@ assert.equal(impossible.storage.usedGiB, null)
 assert.equal(vital(impossible, "memoryUsedBytes", "memoryMaxAgeMs"), null)
 assert.equal(vital(impossible, "memoryTotalBytes", "memoryMaxAgeMs"), null)
 console.log("System Monitor data contract: pass")
+
+assert.equal(normalizeSnapshot({...fixture,batteryVoltage:12.64}).batteryVoltage,12.64)
+for (const bad of [null,undefined,'12.6',NaN,Infinity,0,-12,10000]) {
+  assert.equal(normalizeSnapshot({...fixture,batteryVoltage:bad}).batteryVoltage,null)
+}

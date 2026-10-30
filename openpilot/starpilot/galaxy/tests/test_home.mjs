@@ -195,3 +195,10 @@ assert.doesNotMatch(icon, /<image|<script/)
 console.log("Galaxy Home source, lifecycle, and route checks passed")
 
 assert.doesNotMatch(Home.template, /drive analysis failure|failure.reason|analysisError/)
+
+const batterySummary = snapshot => homeSummary({status:'current',snapshot}, {status:'idle'}, {status:'idle'}).system.battery
+assert.equal(batterySummary({batteryVoltage:12.64}),'12.6 V')
+assert.equal(batterySummary({batteryVoltage:14.42}),'14.4 V')
+assert.equal(batterySummary({}),'Unavailable')
+assert.equal(absent.system.battery,'Unavailable')
+assert.match(Home.template,/12 V battery/)
