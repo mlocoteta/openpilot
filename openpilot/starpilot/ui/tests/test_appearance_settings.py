@@ -52,7 +52,7 @@ class AppearanceSettingsTests(unittest.TestCase):
   def test_absent_defaults_are_read_only_and_match_both_views(self):
     self.assertEqual(onroad_appearance(self.params), OnroadAppearance())
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.LARGE).rows),
-                     ("DeveloperSidebar", "HidePersonalityAlerts", "ShowBrakeStatus", "BlindSpotMetrics", "SignalMetrics"))
+                     ("DeveloperSidebar", "HidePersonalityAlerts", "ShowBrakeStatus", "BlindSpotMetrics", "SignalMetrics", "ReduceMotion"))
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.COMPACT).rows),
                      ("CameraView", "DriverCamera", "StockConfidenceBallWidget", "HidePersonalityAlerts", "ShowBrakeStatus",
                       "HideLeadMarker", "LeadInfo", "SignalMetrics", "BlindSpotMetrics"))
@@ -477,7 +477,8 @@ class AppearanceSettingsTests(unittest.TestCase):
     large.press(1980, 300, state)
     large.move(1800, 300, state)
     large.release(1800, 300, state)
-    self.assertEqual(changed, [], "the remaining rows fit on one page")
+    self.assertEqual([(action.kind, action.direction) for action in changed], [('scroll', 1)])
+    changed.clear()
     large.press(1980, 300, state)
     large.release(1980, 300, state)
     self.assertEqual(changed[0].row.key, "DeveloperSidebar")

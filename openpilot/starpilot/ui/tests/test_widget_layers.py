@@ -87,13 +87,14 @@ def test_projection_escape_replaces_native_corner_hint():
     guard = parents[guard]
   condition = compile(ast.Expression(guard.test), str(source), 'eval')
 
-  def visible(viewport, alert_size):
-    return eval(condition, {'AlertSize': NS(FULL='full')},
-                {'self': NS(projection_viewport=viewport), 'state': NS(alert=NS(size=alert_size))})
+  def visible(viewport, alert_size, opened=False):
+    return eval(condition, {'AlertSize': NS(FULL='full', NONE='none')},
+                {'self': NS(projection_viewport=viewport), 'state': NS(alert=NS(size=alert_size), quick_select_open=opened)})
 
   assert visible(None, 'none')
   assert not visible((2880, 1080), 'none')
   assert not visible(None, 'full')
+  assert not visible(None, 'none', True)
 
 
 @pytest.mark.parametrize('profile,viewport', [('large', None), ('compact', None), ('large', (2880, 1080))])

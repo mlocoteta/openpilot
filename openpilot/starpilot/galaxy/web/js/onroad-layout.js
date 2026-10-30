@@ -422,6 +422,24 @@ export const OnroadLayoutPage = {
     sceneBorder() { return previewScene(this.state.scene).border },
     expandedRoad() { return !this.projection && this.state.profile === "large" && this.displayValue("DeveloperSidebar") !== "On" },
     roadBounds() { return this.expandedRoad ? { ...this.profile.bounds, width: this.profile.bounds.width + 300 } : this.profile.bounds },
+    favoriteZones() {
+      const zones = this.profile?.inputZones || []
+      if (this.state.profile !== "large" || this.projection) return zones
+      const height = 180 * Math.max(.35, Math.min(this.roadBounds.width / 2160, this.roadBounds.height / 1080))
+      return zones.map(zone => ({ ...zone, y: this.roadBounds.y + this.roadBounds.height - height, height }))
+    },
+    quickSelectShelves() {
+      if (this.projection || this.state.profile !== 'large') return []
+      return (this.profile?.quickSelectShelves || []).map(zone => ({ ...zone,
+        conflicts: ['current_speed', 'cruise_limits'].filter(id => {
+          const widget = this.widgets.find(widget => widget.id === id)
+          const at = this.layout?.[id]
+          if (!widget || !at?.enabled) return false
+          const x = this.previewX(id)
+          return x < zone.x + zone.width && zone.x < x + widget.width && at.y < zone.y + zone.height && zone.y < at.y + widget.height
+        }) }))
+    },
+    quickSelectBlocked() { return this.quickSelectShelves.length === 2 && this.quickSelectShelves.every(zone => zone.conflicts.length) },
     // Widgets reach the whole screen only while the developer sidebar is hidden; otherwise the road beside it.
     limitProfile() {
       if (this.expandedRoad || this.projection || !this.profile) return this.profile
@@ -860,6 +878,14 @@ export const OnroadLayoutPage = {
       this.state.draft.clock24Hour = event.target.checked
       this.recordChange(before)
       this.state.notice = ""
+      showDraftChange()
+    },
+    setReduceMotion(value) {
+      if (this.state.profile !== 'large' || !this.editable || this.projection || this.state.drag || this.state.layerDrag || typeof value !== 'boolean') return
+      const before = clone(this.state.draft)
+      this.state.draft.reduceMotion = value
+      this.recordChange(before)
+      this.state.notice = ''
       showDraftChange()
     },
     displayRow(key) { return this.state.data?.display?.find(row => row.key === key) },

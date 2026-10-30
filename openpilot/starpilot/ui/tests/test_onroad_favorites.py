@@ -19,6 +19,7 @@ def setup(profile=Profile.COMPACT):
   data = {'revision': 'revision', 'configurable': True,
               'slots': [{'key': f'action{i}', 'label': f'Favorite {i}', 'enabled': True, 'show_onroad': True, 'state_label': 'Off'} for i in range(3)],
               'options': [{'key': 'new', 'label': 'New control', 'available': False}]}
+  state.customization['reduceMotion'] = profile == Profile.LARGE
   controller.update(state, data, 1)
   return controller, emit, state, data
 
@@ -247,7 +248,7 @@ class TestOnroadFavorites(unittest.TestCase):
     controller, emit, _, _ = setup(Profile.LARGE)
     assert controller.press(50, 1000, 1)
     controller.release(*end, 1.1)
-    assert controller.mode == 'radial'
+    assert controller.mode == 'shelf'
     emit.assert_not_called()
 
 
@@ -256,22 +257,65 @@ class TestOnroadFavorites(unittest.TestCase):
     controller, emit, _, _ = setup(Profile.LARGE)
     assert controller.press(50, 1000, 1)
     controller.release(*end, 1.1)
-    assert controller.mode == 'radial'
+    assert controller.mode == 'shelf'
     emit.assert_not_called()
+
+  def test_large_corner_reserves_monitor_and_keeps_bottom_edge_accessible(self):
+    controller, emit, _, _ = setup(Profile.LARGE)
+    assert not controller.press(180, 940, 1)
+    assert controller.press(330, 1020, 1)
+    controller.release(330, 1020, 1.1)
+    assert controller.is_open
+    emit.assert_not_called()
+
+  def test_corner_gesture_cancels_if_a_widget_moves_into_its_start(self):
+    controller, emit, state, data = setup(Profile.LARGE)
+    assert controller.press(50, 1000, 1)
+    state.customization['layouts']['large']['clock'].update(enabled=True, x=40, y=940)
+    controller.update(state, data, 1.05)
+    controller.release(50, 1000, 1.1)
+    assert not controller.is_open
+    emit.assert_not_called()
+
+  def test_tray_keeps_long_labels_states_and_press_feedback_inside_equal_buttons(self):
+    from openpilot.starpilot.ui import onroad_favorites as native
+    controller, _, _, data = setup(Profile.LARGE)
+    controller.fonts = NS(profile=Profile.LARGE, draw=Mock(),
+                          measure=lambda text, role, size: NS(width=len(text) * size / 2, height=size),
+                          vertical_ink=lambda text, role, size: (0, size),
+                          horizontal_ink=lambda text, role, size: (0, len(text) * size / 2))
+    data['slots'][0]['label'] = 'An intentionally long favorite label that requires more than two lines'
+    controller.open(1)
+    controller.press_target = ('slot', 1)
+    for name in ('draw_line_ex', 'draw_circle', 'draw_circle_v', 'draw_rectangle_rounded', 'draw_rectangle_rounded_lines_ex', 'draw_ring'):
+      self.enterContext(patch.object(native.rl, name))
+    controller._shelf(1)
+    native.rl.draw_rectangle_rounded_lines_ex.assert_called_once()
+    assert native.rl.draw_rectangle_rounded.call_count == 2  # Shared tray and pressed-button fill.
+    for index, (button, _) in enumerate(controller.menu_buttons()):
+      texts = [call.args for call in controller.fonts.draw.call_args_list if button[0] <= call.args[3] < button[0] + button[2]]
+      title = [args for args in texts if args[2] == 28]
+      assert 1 <= len(title) <= 2
+      if index == 0:
+        assert title[-1][0].endswith('...')
+      for text, role, size, x, y, _ in texts:
+        measured = controller.fonts.measure(text, role, size)
+        assert button[0] <= x <= x + measured.width <= button[0] + button[2]
+        assert button[1] <= y <= y + measured.height <= button[1] + button[3]
 
 
 
 
   def test_large_long_press_edits_without_invoking_and_unassigns_with_revision(self):
     controller, emit, state, data = setup(Profile.LARGE)
-    controller.mode = 'radial'
-    blade, center = controller.blades()[0]
+    controller.open(1)
+    blade, center = controller.menu_buttons()[0]
     controller.press(*center, 1)
     controller.update(state, data, 1.61)
     controller.release(*center, 1.62)
     assert controller.editing == 0
     emit.assert_not_called()
-    x, y = blade[0] + blade[2] - 2 * controller.scale, blade[1] + 2 * controller.scale
+    x, y = blade[0] + 32, blade[1] + 32
     controller.press(x, y, 2)
     controller.release(x, y, 2.1)
     request = emit.call_args.args[0]
@@ -281,8 +325,8 @@ class TestOnroadFavorites(unittest.TestCase):
   def test_unavailable_action_can_still_be_assigned_when_configuration_allowed(self):
     controller, emit, _, data = setup(Profile.LARGE)
     data['slots'][0]['enabled'] = False
-    controller.mode = 'radial'
-    center = controller.blades()[0][1]
+    controller.open(1)
+    center = controller.menu_buttons()[0][1]
     controller.press(*center, 1)
     controller.release(*center, 1.1)
     assert controller.mode == 'picker'
@@ -391,7 +435,7 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.ui.shell import ShellMode
     controller, emit, state, _ = setup(Profile.LARGE)
-    controller.mode = 'radial'
+    controller.open(1)
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.favorites = controller
     session.profile = controller.profile

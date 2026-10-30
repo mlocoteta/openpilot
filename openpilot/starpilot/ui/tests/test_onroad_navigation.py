@@ -164,7 +164,7 @@ def test_native_card_tap_is_consumed_before_favorites_or_background(monkeypatch)
   session._input_snapshot = session.snapshot
   session._update_favorites = Mock()
   session.input = Mock(onroad=NS(claimed=False))
-  session.favorites = Mock(is_open=False)
+  session.favorites = Mock(is_open=False, claims_corner=Mock(return_value=False))
   monkeypatch.setattr(session, 'view', NS(onroad=NS(navigation=card)), raising=False)
   session.press(ShellMode.ONROAD, 120, 40)
   session.favorites.press.assert_not_called()
@@ -182,7 +182,7 @@ def test_existing_slc_or_wheel_touch_owner_keeps_priority(monkeypatch):
   session._input_snapshot = session.snapshot
   session._update_favorites = Mock()
   session.input = Mock(onroad=NS(claimed=True))
-  session.favorites = Mock(is_open=False)
+  session.favorites = Mock(is_open=False, claims_corner=Mock(return_value=False))
   monkeypatch.setattr(session, 'view', NS(onroad=NS(navigation=card)), raising=False)
   session.press(ShellMode.ONROAD, 120, 40)
   card.press.assert_not_called()

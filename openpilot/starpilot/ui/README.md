@@ -43,6 +43,16 @@ mounting position on actual hardware before treating a design as validated.
 - `onroad.py` composes profile-specific widgets, overlays and alerts.
   `onroad_customization.py` owns the versioned layout and color document;
   the Galaxy editor and native renderers use the same widget registry.
+- Quick Select keeps its lower-left corner cue and tap/swipe entry. Three equal
+  176px controls share one opaque rounded shelf, drawn above the live HUD and
+  below alerts and the engagement border. Ordinary widgets keep their positions
+  and normal rendering. A vertical fallback protects moved speed readings; if
+  both forms conflict, the drawer stays closed and the layout editor explains why.
+  Alerts and pending confirmations dismiss it immediately. Touch stays captured
+  through the 150ms exit; entrance takes 200ms. Compact keeps its three-zone input.
+- Reduce Quick Select motion is available for Large UI in native Appearance and Galaxy Colors
+  & Layout. The optional `reduceMotion` boolean uses the existing validated layout
+  document without a version bump. See [the design notes](QUICK_SELECT_DESIGN.md).
 - `ui_state.py` in `selfdrive/ui` follows hardwared's effective started state.
   Physical ignition remains separate. Camera reception, model filters and
   transition updates must continue when a settled opaque settings page skips

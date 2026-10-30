@@ -29,6 +29,37 @@ for (const feed of [vm.artFeed, vm.backdropFeed]) {
 vm.state.data = data
 vm.state.draft = structuredClone(data.document)
 vm.state.status = "ready"
+for (const [sidebar, y, height] of [["On", 900, 150], ["Off", 880, 170]]) {
+  vm.state.draft.display = { DeveloperSidebar: sidebar }
+  assert.deepEqual(vm.favoriteZones, [{ id: "favorites_drawer", label: "Quick Select drawer", x:30, y, width:340, height,
+    excludes:data.metadata.profiles.large.inputZones[0].excludes }])
+}
+vm.state.draft = structuredClone(data.document)
+for (const id of ['current_speed', 'cruise_limits', 'steering_wheel', 'driver_monitor'])
+  assert(vm.favoriteZones[0].excludes.includes(id))
+for (const id of ['nav_map', 'pip_left', 'pip_right', 'torque_bar']) assert(!vm.favoriteZones[0].excludes.includes(id))
+assert.deepEqual(vm.quickSelectShelves.map(({x,y,width,height}) => [x,y,width,height]), [[30,842,656,208], [30,378,208,672]])
+assert.equal(vm.quickSelectBlocked, false)
+Object.assign(vm.layout.current_speed, {x:470, y:730})
+assert(vm.quickSelectShelves[0].conflicts.includes('current_speed'))
+assert(!vm.quickSelectShelves[1].conflicts.includes('current_speed'))
+Object.assign(vm.layout.current_speed, {x:50, y:730})
+assert.equal(vm.quickSelectBlocked, true)
+vm.state.draft = structuredClone(data.document)
+const savedLayouts = JSON.parse(JSON.stringify(vm.state.draft.layouts))
+vm.setReduceMotion(true)
+assert.equal(vm.state.draft.reduceMotion, true)
+vm.state.profile = 'compact'
+vm.setReduceMotion(false)
+assert.equal(vm.state.draft.reduceMotion, true)
+vm.state.profile = 'large'
+assert.deepEqual(vm.state.draft.layouts, savedLayouts)
+assert.equal(validDocument(vm.state.draft, data.metadata), true)
+assert.equal(validDocument({...vm.state.draft, reduceMotion: 'true'}, data.metadata), false)
+const malformedShelves = structuredClone(data)
+malformedShelves.metadata.profiles.large.quickSelectShelves[0].width = NaN
+assert.equal(validSnapshot(malformedShelves), false)
+vm.state.draft = structuredClone(data.document)
 assert.equal(data.document.layouts.large.nav_card.enabled, true, "the native turn card stays on after an upgrade")
 assert(!vm.inactiveWidgets.some(widget => widget.id === "nav_card"))
 vm.changePosition("nav_card", 100, 300)

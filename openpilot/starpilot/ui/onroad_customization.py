@@ -11,6 +11,7 @@ from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.ui.onroad_torque_geometry import maximum_footprint
 from openpilot.starpilot.ui.large_speed_geometry import confirmation_bounds, confirmation_footprint
 from openpilot.starpilot.ui.onroad_stopped_timer import timer_size
+from openpilot.starpilot.ui.onroad_favorites_geometry import shelf_metadata
 from openpilot.starpilot.ui.large_speed_geometry import (WIDTH, CARD_HEIGHT, ACTION_WIDTH, ACTION_HEIGHT, ACTION_X, ACTION_Y,
                                                         GAP, SOURCE_ROW_HEIGHT, sources_extent)
 
@@ -78,6 +79,7 @@ class LayoutProfile(TypedDict):
   inputZonePriority: NotRequired[str]
   widgetOrder: NotRequired[list[str]]
   runtimePreviewWidgets: NotRequired[list[str]]
+  quickSelectShelves: NotRequired[list[dict[str, Any]]]
 
 
 def _widget(label: str, kind: str, width: float, height: float, x: float, y: float) -> Widget:
@@ -297,12 +299,16 @@ def customization_metadata():
   profiles["large"]["widgets"]["cruise_limits"]["sourcesExtent"] = {
     "inline": sources_extent({'speedSources': True}), "card": sources_extent({'speedSources': True, 'speedSourcesCard': True}), 'actionGap': GAP}
   profiles["large"]["inputZones"] = [{"id": "favorites_drawer", "label": "Quick Select drawer",
-                                       "x": 30, "y": 900, "width": 150, "height": 150}]
+                                    "x": 30, "y": 900, "width": 340, "height": 150,
+                                    "excludes": [key for key in profiles["large"]["widgets"]
+                                                 if key not in ("torque_bar", "pip_left", "pip_right", "nav_map", "speed_limit_actions")]}]
+  profiles["large"]["quickSelectShelves"] = shelf_metadata()
   profiles["compact"]["inputZones"] = [
     {"id": f"favorite_{index + 1}", "label": f"Quick Select {index + 1}",
      "x": index * 476 / 3, "y": 0, "width": 476 / 3, "height": 240} for index in range(3)]
   for profile in profiles.values():
     profile["inputZonePriority"] = "Enabled Quick Select slots; speed-limit controls and steering wheel take priority"
+  profiles["large"]["inputZonePriority"] = "Visible corner cue; other controls take priority over the larger swipe area"
   for name, profile in profiles.items():
     for key, widget in profile["widgets"].items():
       widget["colors"] = dict(WIDGET_COLORS[name].get(key, {}))
@@ -321,7 +327,7 @@ def customization_metadata():
 
 
 def default_document():
-  return {"version": 12, "clock24Hour": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
+  return {"version": 12, "clock24Hour": False, "reduceMotion": False, "palette": dict(PALETTE), "roadColors": {profile: {} for profile in PROFILES},
           "widgetColors": {profile: {} for profile in PROFILES}, "layouts": {
     profile: {key: {**widget["default"], **({"size": WIDGET_SIZES[key][profile][1]} if key in WIDGET_SIZES else {})}
               for key, widget in data["widgets"].items()}
@@ -474,6 +480,10 @@ def validate_document(value):
     fields.add('clock24Hour')
     if type(value['clock24Hour']) is not bool:
       raise ValueError('Invalid clock format preference')
+  if 'reduceMotion' in value:
+    fields.add('reduceMotion')
+    if type(value['reduceMotion']) is not bool:
+      raise ValueError('Invalid motion preference')
   if 'showMaxSpeed' in value:
     fields.add('showMaxSpeed')
     if type(value['showMaxSpeed']) is not bool:
@@ -666,6 +676,7 @@ def validate_document(value):
     result['speedSourcesCard'] = value['speedSourcesCard']
   if 'speedAlign' in value:
     result['speedAlign'] = value['speedAlign']
+  result['reduceMotion'] = value.get('reduceMotion', False)
   if 'clock24Hour' in value:
     result['clock24Hour'] = value['clock24Hour']
   if 'showMaxSpeed' in value:

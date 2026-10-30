@@ -124,6 +124,7 @@ class OnroadView:
     self.projection_viewport = projection_viewport
     self.wall_clock = wall_clock or (lambda: datetime.now().astimezone())
     self._corner_cache = CornerHintCache()
+    self.quick_select_layer = None
     gui_app.add_render_prepare(self._corner_cache.prepare, self._corner_cache.close)
     self.fonts = fonts
     self.camera_layer = camera_layer
@@ -431,6 +432,8 @@ class OnroadView:
           exit_layer(state)
       if not ordered and manual_slc_confirmation(self.fonts.profile, state):
         self._slc_actions(state)
+      if not self.projection_viewport and (quick_select := getattr(self, 'quick_select_layer', None)) is not None:
+        quick_select(content, state)
       self.alert.render(content, state.alert)
     finally:
       clip.end_scissor_mode()
@@ -438,7 +441,7 @@ class OnroadView:
       render_live_sidebar(self.fonts, rl.Rectangle(width, 0, SIDEBAR_WIDTH, height), state.developer_metrics)
     # Projection has its own permanent escape control in this corner; the native
     # favorite-menu hint would overlap it and does not control projected input.
-    if not self.projection_viewport and state.alert.size != AlertSize.FULL:
+    if not self.projection_viewport and not state.quick_select_open and state.alert.size == AlertSize.NONE:
       render_corner_hint(content, cache=self._corner_cache)
     label = status_label(state)
     if label is not None:
@@ -567,6 +570,7 @@ class OnroadView:
       self.fonts.draw(text, role, size, x, y, tint)
 
   def close(self) -> None:
+    self.quick_select_layer = None
     gui_app.remove_render_prepare(self._corner_cache.prepare)
     self._corner_cache.close()
     gui_app.remove_render_prepare(self.torque_bar.prepare)

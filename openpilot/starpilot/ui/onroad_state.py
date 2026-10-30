@@ -226,6 +226,7 @@ class OnroadState:
   viewport_width: float = 2160.0
   developer_metrics: tuple[DeveloperMetric, ...] = ()
   slc_prompt_open: bool = False
+  quick_select_open: bool = False
   slc_wheel_confirmation_available: bool = False
   toyota_cruise_status: str = ''
   toyota_cruise_target_kph: float | None = None

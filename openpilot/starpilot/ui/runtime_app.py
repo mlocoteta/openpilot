@@ -283,6 +283,9 @@ class StarShellSession:
     self.favorites_owner = FavoritesOwner(ui_state.params, self._favorite_actions, self._favorite_authority, self._favorite_render_actions,
                                          current_action=lambda key: self._resolve_favorite_actions(frozenset((key,))).get(key))
     self.favorites = OnroadFavorites(self.fonts, self._favorite_request)
+    if profile == Profile.LARGE:
+      self.favorites.prepare()
+      self.view.onroad.quick_select_layer = lambda _content, _state: self.favorites.render(time.monotonic())
     self._favorite_snapshot = None
     self._favorite_data = None
     self._favorite_read_at = None
@@ -1396,6 +1399,8 @@ class StarShellSession:
     if mode == ShellMode.ONROAD:
       self._update_favorites(snapshot.onroad, time.monotonic())
       self._poll_wheel(time.monotonic_ns())
+      if self.profile == Profile.LARGE and self.favorites.is_open:
+        snapshot = replace(snapshot, onroad=self.favorites.present(snapshot.onroad))
     else:
       self.favorites.cancel()
     if mode != ShellMode.ONROAD or not snapshot.onroad.camera_available:
@@ -1419,7 +1424,7 @@ class StarShellSession:
       drag_x = getattr(self.input, pane[2]).drag_x if pane else 0.0
       self.view.render(replace(snapshot, selected=Destination.NETWORK) if external else snapshot, drag_x=drag_x)
       self._pip_signals_cache = None
-      if mode == ShellMode.ONROAD:
+      if mode == ShellMode.ONROAD and self.profile == Profile.COMPACT:
         self.favorites.render(time.monotonic())
     network = (mode == ShellMode.SETTINGS and self.profile == Profile.LARGE and snapshot.selected == Destination.NETWORK and
                snapshot.settings.destination(Destination.NETWORK).available and self.network_layer is not None)
@@ -1639,7 +1644,7 @@ class StarShellSession:
     self._onroad_claimed = False
     if mode == ShellMode.ONROAD:
       self._update_favorites(snapshot.onroad, now)
-      if self.favorites.is_open:
+      if self.favorites.is_open or self.favorites.claims_corner(x, y):
         self._favorite_claimed = self.favorites.press(x, y, now)
         self.input.cancel()
         return
