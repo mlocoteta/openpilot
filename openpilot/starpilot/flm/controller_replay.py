@@ -1585,7 +1585,10 @@ def pack_primitive_snapshot(value):
       active.remove(identity)
     checked.add(identity)
 
-  primitive(value, primitive)
+  from openpilot.starpilot.flm.native_primitives import try_native
+
+  if try_native('probe_source_valid', value) is not True:
+    primitive(value, primitive)
   raw = pickle.dumps(value, protocol=5)
   if len(raw) > MAX_FIT_RAW_BYTES:
     raise ValueError('fit job raw byte bound')
