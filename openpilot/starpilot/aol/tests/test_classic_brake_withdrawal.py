@@ -18,10 +18,20 @@ from openpilot.starpilot.aol.wire import IntentState, decode_intent, encode_inte
 from openpilot.starpilot.tests.test_ford_reverse_intent import NOW, PRODUCER, change, native_change
 
 IDENTITIES = (CAR.HYUNDAI_PALISADE, CAR.HYUNDAI_SONATA, CAR.HYUNDAI_SONATA_HYBRID,
-              CAR.HYUNDAI_ELANTRA_2021, CAR.HYUNDAI_KONA_EV)
+              CAR.HYUNDAI_ELANTRA_2021, CAR.HYUNDAI_KONA_EV, 'palisade_hdai', 'palisade_hdaii')
 
 
 def profile(identity):
+  if identity in ('palisade_hdai', 'palisade_hdaii'):
+    from opendbc.car.hyundai.tests.test_palisade_2023 import params as mixed_params
+    from opendbc.car.hyundai.blended_stock_aol import qualified_alpha
+    cp = mixed_params('hdaii' if identity == 'palisade_hdaii' else 'hdai')
+    cp.openpilotLongitudinalControl, cp.pcmCruise = True, False
+    cp.alphaLongitudinalAvailable = True
+    cp.safetyConfigs[0].safetyParam = 0x2014 if identity == 'palisade_hdaii' else 0x2004
+    cp.alternativeExperience = 32
+    assert qualified_alpha(cp, marked_only=True)
+    return cp
   cp = params(identity, lda=True)
   cp.safetyConfigs[0].safetyParam = aol_word(cp)
   cp.alternativeExperience = 32
@@ -105,8 +115,9 @@ def test_actual_card_brake_join_retains_latch_and_only_native_lateral(identity, 
 
 @pytest.mark.parametrize('fault', ['lat_denied', 'rx', 'heartbeat', 'native_fault', 'panda_fault', 'session',
   'producer', 'epoch', 'source', 'expired_native', 'invalid_wire', 'can', 'eps', 'acc', 'critical', 'no_brake_event'])
-def test_brake_join_cannot_retain_faulted_or_unproven_intent(fault):
-  card, cs = armed_card(CAR.HYUNDAI_PALISADE)
+@pytest.mark.parametrize('identity', (CAR.HYUNDAI_PALISADE, 'palisade_hdai', 'palisade_hdaii'))
+def test_brake_join_cannot_retain_faulted_or_unproven_intent(fault, identity):
+  card, cs = armed_card(identity)
   now = NOW + 10_000_000
   cs.brakePressed = True
   native = withdrawal(card, cs, now)
@@ -141,8 +152,9 @@ def test_brake_join_cannot_retain_faulted_or_unproven_intent(fault):
   assert failed and not card.aol_card_intent.allowed_latch
 
 
-def test_saved_brake_pause_still_withdraws_steering_without_clearing_intent():
-  card, cs = armed_card(CAR.HYUNDAI_PALISADE, pause_speed=30.)
+@pytest.mark.parametrize('identity', (CAR.HYUNDAI_PALISADE, 'palisade_hdai', 'palisade_hdaii'))
+def test_saved_brake_pause_still_withdraws_steering_without_clearing_intent(identity):
+  card, cs = armed_card(identity, pause_speed=30.)
   cs.brakePressed = True
   now = NOW + 10_000_000
   native = withdrawal(card, cs, now)
@@ -153,7 +165,7 @@ def test_saved_brake_pause_still_withdraws_steering_without_clearing_intent():
   assert not result.lateral_active and not result.longitudinal_active
 
 
-@pytest.mark.parametrize('identity', (CAR.HYUNDAI_PALISADE, CAR.HYUNDAI_SONATA_HYBRID))
+@pytest.mark.parametrize('identity', (CAR.HYUNDAI_PALISADE, CAR.HYUNDAI_SONATA_HYBRID, 'palisade_hdai', 'palisade_hdaii'))
 def test_actual_selfdrive_controls_withdraw_long_before_parsed_brake(identity):
   from contextlib import ExitStack
 
@@ -181,7 +193,8 @@ def test_actual_selfdrive_controls_withdraw_long_before_parsed_brake(identity):
     assert log.OnroadEvent.EventName.controlsMismatch not in sd.events.names
 
 
-def test_classic_persistent_long_denial_keeps_original_mismatch_limit():
+@pytest.mark.parametrize('identity', (CAR.HYUNDAI_PALISADE, 'palisade_hdai', 'palisade_hdaii'))
+def test_classic_persistent_long_denial_keeps_original_mismatch_limit(identity):
   from contextlib import ExitStack
 
   from openpilot.common.prefix import OpenpilotPrefix
@@ -191,7 +204,7 @@ def test_classic_persistent_long_denial_keeps_original_mismatch_limit():
   with ExitStack() as cleanup:
     cleanup.callback(case.doCleanups)
     cleanup.enter_context(OpenpilotPrefix())
-    sd, _, drive = case._authority_callers(True, cp=profile(CAR.HYUNDAI_PALISADE), genuine_events=True)
+    sd, _, drive = case._authority_callers(True, cp=profile(identity), genuine_events=True)
     for tick in range(10):
       drive(tick)
     for tick in range(10, 214):
@@ -203,3 +216,30 @@ def test_classic_persistent_long_denial_keeps_original_mismatch_limit():
       assert axis.lateralActive and command.latActive and state.enabled
     assert sd.mismatch_counter >= 200
     assert not state.enabled and not axis.lateralActive and not command.latActive
+
+
+@pytest.mark.parametrize('identity', ['palisade_hdai', 'palisade_hdaii'])
+@pytest.mark.parametrize('change', ['none', 'unmarked', 'word', 'model', 'identity', 'passive', 'dashcam', 'not_car', 'stock', 'topology'])
+def test_mixed_brake_join_requires_exact_final_marked_profile(identity, change):
+  from openpilot.starpilot.car.hyundai.aol import classic_brake_withdrawal, early_native_long_withdrawal_supported
+  from opendbc.car.hyundai.values import HyundaiFlags
+
+  cp = profile(identity)
+  if change == 'unmarked':
+    cp.alternativeExperience = 0
+  elif change == 'word':
+    cp.safetyConfigs[0].safetyParam ^= 0x10
+  elif change == 'model':
+    cp.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.hyundaiCanfd
+  elif change == 'identity':
+    cp.carFingerprint = CAR.HYUNDAI_PALISADE
+  elif change in ('passive', 'dashcam', 'not_car'):
+    setattr(cp, {'passive': 'passive', 'dashcam': 'dashcamOnly', 'not_car': 'notCar'}[change], True)
+  elif change == 'stock':
+    cp.openpilotLongitudinalControl, cp.pcmCruise = False, True
+  elif change == 'topology':
+    cp.flags = int(cp.flags) ^ int(HyundaiFlags.CANFD_LKA_STEER_MSG)
+  cs = structs.CarState(brakePressed=True, canValid=True, gearShifter='drive')
+  cs.cruiseState.available = True
+  assert early_native_long_withdrawal_supported(cp) == (change == 'none')
+  assert classic_brake_withdrawal(cp, cs) == (change == 'none')
