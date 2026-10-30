@@ -286,7 +286,8 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
   return tx;
 }
 
-static safety_config subaru_init(uint16_t param) {
+static safety_config subaru_init(uint16_t raw_param) {
+  uint16_t param = raw_param;
   const bool impreza_main = (param == 4096U) || (param == 4104U) || (param == 4608U) || (param == 4616U);
   if (impreza_main) {
     param &= ~4096U;
