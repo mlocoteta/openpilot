@@ -270,7 +270,7 @@ def description(row):
     suffix = ('Axis-pause and AOL assignments require the next vehicle startup to configure the ' +
       'native button permissions. Other actions refresh during the drive.')
   if row.key == 'GMLongitudinalTune':
-    suffix = 'ACC Tune refreshes during the drive. Volt Tune initializes its stop/start response when driving processes start.'
+    suffix = 'ACC Tune refreshes during the drive.'
   warning = row.reason.strip().removeprefix('Saved for this vehicle. ')
   related = any(word in warning.lower() for word in
     ('temporarily ignored', 'temporarily ignores', 'fixed torque conversion', 'inactive while', 'custom display is off',

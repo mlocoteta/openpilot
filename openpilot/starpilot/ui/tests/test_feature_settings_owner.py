@@ -164,36 +164,22 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
       self.assertTrue(self.owner.apply(request))
       self.params.put_bool("ToyotaAutoHold", False, block=True)
 
-  def test_gm_tune_configured_choice_preserves_intent_and_guards_commit(self):
+  def test_volt_tune_is_not_exposed_even_in_configuration(self):
     from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
     cp = volt_camera_pedal_params(release=True)
     self.fingerprint = cp.carFingerprint
     self.owner.vehicle_params = lambda: cp
-    self.owner.configuration_vehicle = lambda: True
-    row = self._row("vehicle", "GMLongitudinalTune")
-    self.assertEqual(row.choices, ("Vehicle Default", "Volt Tune"))
-    request = required_change(row)
-    self.assertEqual(request.value, "Volt Tune")
-    self.assertTrue(self.owner.apply(request))
-    self.assertFalse(self.owner.apply(request))
+    self.params.put("GMLongitudinalTune", 2, block=True)
+    for configured in (False, True):
+      self.owner.configuration_vehicle = lambda configured=configured: configured
+      self.assertNotIn("GMLongitudinalTune", [row.key for row in self.owner.snapshot(
+        "vehicle", parked=True, system_long=True, lateral_context=True, metric=False).rows])
     self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
-    self.owner.configuration_vehicle = lambda: False
-    self.assertNotIn("GMLongitudinalTune", [r.key for r in self.owner.snapshot(
-      "vehicle", parked=True, system_long=False, lateral_context=True, metric=False).rows])
-    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
-    self.owner.configuration_vehicle = lambda: True
-    row = self._row("vehicle", "GMLongitudinalTune")
-    reset = row_default(row)
-    assert reset is not None
-    self.allowed = False
-    self.assertFalse(self.owner.apply(reset))
-    self.allowed = True
-    self.assertTrue(self.owner.apply(reset))
-    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"0")
 
   def test_gm_tune_invalid_saved_choice_repairs_only_vehicle_default(self):
-    from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
-    cp = volt_camera_pedal_params()
+    from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
+    from opendbc.car.gm.values import CAR as GM_CAR
+    cp = ordinary_params(GM_CAR.CHEVROLET_SUBURBAN, radar=True)
     self.fingerprint = cp.carFingerprint
     self.owner.vehicle_params = lambda: cp
     path = Path(self.params.get_param_path("GMLongitudinalTune"))

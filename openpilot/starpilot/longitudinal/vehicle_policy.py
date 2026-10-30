@@ -23,10 +23,7 @@ def installed_policy_for(cp):
 
 
 def policy_for(cp, startup_preferences=None):
-  from opendbc.car.gm.long_tune import selected_policy
-  installed = installed_policy_for(cp)
-  selection = getattr(startup_preferences, "gm_longitudinal_tune", 0)
-  return selected_policy(cp, installed, selection)
+  return installed_policy_for(cp)
 
 
 def stopping_decel_rate(cp, policy):
