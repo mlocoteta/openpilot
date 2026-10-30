@@ -335,6 +335,12 @@ class LongitudinalPlanner:
       fallback=should_stop(v_ego, output_a_target_mpc))
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
+    if (self.force_stop_plan.resume_override and not self.force_stop_plan.forcing and
+        not self.force_stop_plan.should_stop and not reset_state and not self.fcw and self.allow_throttle and
+        abs(v_ego) < 2.0 and v_cruise > 0.3 and self.mpc.solution_status == 0 and
+        not any(lead.present for lead in (sm['radarState'].leadOne, sm['radarState'].leadTwo))):
+      output_a_target_e2e = max(output_a_target_e2e, 0.2)
+      output_should_stop_e2e = False
 
     relevant_lead = any(braking_lead_relevant(lead, v_ego) for lead in
                         (sm['radarState'].leadOne, sm['radarState'].leadTwo))

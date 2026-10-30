@@ -62,6 +62,7 @@ class StopPlan:
   manual_hold: bool = False
   takeoff_light_observed: bool = False
   takeoff_light: bool = False
+  resume_override: bool = False
 
 
 class ForceStop:
@@ -75,6 +76,7 @@ class ForceStop:
     self.from_light = False
     self.light_clear_ns = 0
     self.override_until_ns = 0
+    self.resume_until_ns = 0
     self.entry_speed = None
     self.activation_gate = False
     self.stop_seen_ns = 0
@@ -132,11 +134,16 @@ class ForceStop:
     # Reopened geometry may withdraw a moving approach; it cannot classify
     # a stationary hold as a green light.
     go_scene = available and horizon >= 50.0 and not frame.raw_model_stopped and not frame.model_should_stop
+    held_before = self.previously_enabled and self.standstill_reason is not None
     engaged_stopped = not self.previously_enabled and frame.standstill
     if frame.standstill and (self.forcing or engaged_stopped and stop_scene) and self.standstill_reason is None:
       self.standstill_since_ns = now
       self.standstill_reason = 'unclassified'
       self.distance = 0
+    if held_before and frame.standstill and frame.resume_requested:
+      self.resume_until_ns = now + 6_000_000_000
+    if abs(speed) >= 2.0 or frame.lead_present or frame.tracking_lead:
+      self.resume_until_ns = 0
     driver_release = frame.pedal_override or frame.resume_requested
     if self.standstill_reason is not None and driver_release:
       self.override_until_ns = now + 10_000_000_000
@@ -212,4 +219,5 @@ class ForceStop:
     obstacle = stop_length * .93 + offset + tune.distance_bias_m if stop_length > tune.handoff_m else None
     return StopPlan(now, ceiling, obstacle, self.forcing, bool(self.forcing and ceiling is not None and ceiling <= .5),
                     self.distance if self.forcing else 0.0, approach,
-                    tune.jerk_scale if self.forcing or approach > 0 else 1.0, bool(held and self.forcing and not overridden))
+                    tune.jerk_scale if self.forcing or approach > 0 else 1.0, bool(held and self.forcing and not overridden),
+                    resume_override=now < self.resume_until_ns)

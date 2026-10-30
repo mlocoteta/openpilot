@@ -364,3 +364,79 @@ class ForceStopRuntimeTests(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+  def test_resume_from_aol_engages_but_does_not_override_red_light_model(self):
+    for same_tick in (False, True):
+      with self.subTest(same_tick=same_tick):
+        self.owner = ForceStopRuntime(self.params)
+        planner = LongitudinalPlanner(self.cp)
+        for tick in range(45):
+          sm = Frame(tick, stopped=True, horizon=30.)
+          sm['selfdriveState'].experimentalMode = True
+          sm['modelV2'].action.shouldStop = True
+          sm['modelV2'].action.desiredAcceleration = 0.
+          if tick < 40:
+            sm['carControl'].longActive = False
+            sm['carControl'].latActive = True
+            sm['selfdriveState'].enabled = False
+          if tick == 39:
+            self.owner.resume.observe(button_event(194), now_ns=BASE + 1_950_000_001, drive_id=DRIVE)
+            self.owner.resume.observe(button_event(195, [('accelCruise', True)]), now_ns=BASE + 1_950_000_001, drive_id=DRIVE)
+          if same_tick and tick == 40:
+            self.owner.resume.observe(button_event(199), now_ns=BASE + 2_000_000_001, drive_id=DRIVE)
+            self.owner.resume.observe(button_event(200, [('accelCruise', True)]), now_ns=BASE + 2_000_000_001, drive_id=DRIVE)
+          planner.update(sm, now_ns=sm.stamp + 1_000_000, drive_id=DRIVE,
+                         force_stop_provider=lambda follow, source=sm: self.sample(source, follow_seconds=follow))
+          self.assertFalse(getattr(planner.force_stop_plan, 'resume_override', False))
+          if tick >= 40:
+            self.assertTrue(planner.output_should_stop)
+            self.assertLessEqual(planner.output_a_target, 0.)
+
+  def test_res_releases_preexisting_force_hold_without_overriding_other_stop_candidates(self):
+    from dataclasses import replace
+    planner = LongitudinalPlanner(self.cp)
+    for tick in range(90):
+      sm = Frame(tick, stopped=True, horizon=30.)
+      sm['selfdriveState'].experimentalMode = True
+      sm['modelV2'].action.shouldStop = True
+      sm['modelV2'].action.desiredAcceleration = 0.
+      planner.update(sm, now_ns=sm.stamp + 1_000_000, drive_id=DRIVE,
+                     force_stop_provider=lambda follow, source=sm: self.sample(source, follow_seconds=follow))
+    self.assertTrue(planner.output_should_stop)
+    self.assertTrue(planner.force_stop_plan.manual_hold)
+    self.owner.resume.observe(button_event(448), now_ns=BASE + 4_490_000_001, drive_id=DRIVE)
+    self.owner.resume.observe(button_event(449, [('accelCruise', True)]), now_ns=BASE + 4_490_000_001, drive_id=DRIVE)
+    for tick in range(90, 110):
+      sm = Frame(tick, stopped=True, horizon=30.)
+      sm['carState'].vEgo = -1e-8 if tick % 2 else 0.
+      sm['selfdriveState'].experimentalMode = True
+      sm['modelV2'].action.shouldStop = True
+      sm['modelV2'].action.desiredAcceleration = 0.
+      planner.update(sm, now_ns=sm.stamp + 1_000_000, drive_id=DRIVE,
+                     force_stop_provider=lambda follow, source=sm: self.sample(source, follow_seconds=follow))
+    self.assertTrue(planner.force_stop_plan.resume_override)
+    self.assertFalse(planner.output_should_stop)
+    self.assertGreaterEqual(planner.output_a_target, .1)
+    resumed = planner.force_stop_plan
+    for defect in ('lead1', 'lead2', 'brake', 'gas', 'force', 'inactive', 'stale', 'zero_target'):
+      with self.subTest(defect=defect):
+        sm = Frame(110, stopped=True)
+        sm['selfdriveState'].experimentalMode = True
+        sm['modelV2'].action.shouldStop = True
+        sm['modelV2'].action.desiredAcceleration = 0.
+        if defect.startswith('lead'):
+          lead = sm['radarState'].leadOne if defect == 'lead1' else sm['radarState'].leadTwo
+          lead.present = True
+        elif defect in ('brake', 'gas'):
+          setattr(sm['carState'], defect + 'Pressed', True)
+        elif defect == 'force':
+          sm['controlsState'].forceDecel = True
+        elif defect == 'inactive':
+          sm['carControl'].longActive = False
+        elif defect == 'zero_target':
+          sm['carState'].vCruise = 0.
+        stamp = sm.stamp - 1 if defect == 'stale' else sm.stamp
+        planner.update(sm, now_ns=sm.stamp + 1_000_000, drive_id=DRIVE,
+                       force_stop_provider=lambda _, source=stamp: replace(resumed, model_ns=source))
+        self.assertTrue(planner.output_should_stop)

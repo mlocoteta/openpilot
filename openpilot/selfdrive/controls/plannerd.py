@@ -231,6 +231,12 @@ def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: in
   if (now_ns - sm.logMonoTime['modelV2'] > 150_000_000 or
       now_ns - int(sm.recv_time['modelV2'] * 1e9) > 150_000_000):
     return unavailable()
+  stop_plan = getattr(planner, 'force_stop_plan', None)
+  if (stop_plan is not None and stop_plan.resume_override and stop_plan.model_ns == sm.logMonoTime['modelV2'] and
+      not stop_plan.forcing and not stop_plan.should_stop and abs(vehicle.vEgo) < 2.0 and planner.allow_throttle and
+      not any(lead.present for lead in (sm['radarState'].leadOne, sm['radarState'].leadTwo))):
+    host.mode.projector.stop_detector.reset()
+    return False
   from openpilot.starpilot.car.ford.stop_release import owner_for
   owner = getattr(host, 'ford_stopped_lead_release', None)
   if owner is None:

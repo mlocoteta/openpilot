@@ -73,12 +73,14 @@ class ForceStopTests(unittest.TestCase):
   def test_resume_releases_standstill_hold_but_does_not_create_override_when_idle(self):
     self.owner.step(frame(0, light=False, horizon_m=190., resume_requested=True), self.tune)
     self.assertEqual(self.owner.override_until_ns, 0)
+    self.assertEqual(self.owner.resume_until_ns, 0)
     held = frame(1, speed_mps=0., horizon_m=30., standstill=True, raw_model_stopped=True)
     self.owner.reset()
     self.assertTrue(self.owner.step(held, self.tune).should_stop)
     released = self.owner.step(replace(held, model_ns=held.model_ns + TICK, resume_requested=True), self.tune)
     self.assertFalse(released.should_stop)
     self.assertFalse(released.forcing)
+    self.assertTrue(released.resume_override)
     self.assertEqual(self.owner.override_until_ns, held.model_ns + TICK + 10_000_000_000)
 
   def test_light_release_requires_half_second_continuously_clear(self):
@@ -228,3 +230,20 @@ class ForceStopTests(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+  def test_resume_override_is_only_for_a_previous_hold_and_ends_at_speed_lead_or_timeout(self):
+    for cause in ('speed', 'lead', 'tracked', 'timeout'):
+      with self.subTest(cause=cause):
+        self.owner.reset()
+        held = frame(0, speed_mps=0., horizon_m=30., standstill=True, raw_model_stopped=True)
+        self.owner.step(held, self.tune)
+        self.assertTrue(self.owner.step(replace(held, model_ns=BASE + TICK, resume_requested=True), self.tune).resume_override)
+        for tick in range(2, 123 if cause == 'timeout' else 3):
+          changes = {'speed': {'speed_mps': 2.}, 'lead': {'lead_present': True},
+                     'tracked': {'tracking_lead': True}, 'timeout': {}}[cause]
+          result = self.owner.step(replace(held, model_ns=BASE + tick * TICK, **changes), self.tune)
+        self.assertFalse(result.resume_override)
+    self.owner.reset()
+    first = self.owner.step(frame(0, speed_mps=0., horizon_m=30., standstill=True, raw_model_stopped=True, resume_requested=True), self.tune)
+    self.assertFalse(first.resume_override)
