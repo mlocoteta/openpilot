@@ -10,7 +10,8 @@ Schema 2 (F29, Accord head unit, accord-head-unit/upper-screen/HUD-V2.md) adds, 
 - road: mapdOut lanes/estimatedRoadWidth/roadName
 - lead.yRel (right positive) + lead.trackId (radarTrackId, -1 = vision-only lead)
 - tracks (v2.1): credible radarTracks points, moving with us or stopped after being seen moving
-- fuel (v2.2, Accord 9G only): the car's own trip-fuel counter (CAN 0x324 bytes 2-3) as mL + mpg
+- fuel (v2.2, Accord 9G only): the car's own trip-fuel counter (CAN 0x324 bytes 2-3) as mL + mpg; v2.3 adds the tank
+  level (CAN 0x1A6 byte 3): levelRaw/levelPct/levelGal/rangeMi
 """
 
 from collections import deque
@@ -55,6 +56,16 @@ FUEL_MPG_CAP = 99.9
 FUEL_AVG_MIN_M = 400.0
 FUEL_BUCKET_MI = 0.25
 FUEL_HIST_MAX = 120
+# v2.3 tank level (Accord 9G): 0x1A6 byte 3 = fuel sender, 5..105 valid (Honda's own DivaListener range), 105 = saturated
+# full. Pump-verified 2026-10-30 (two fills): 0.156 gal per count, raw 0 ~ empty, tank 17.2 gal, 4.63 mi per count (the
+# meter's range ~= raw x 4.63). It sloshes +-6-7 counts while moving, so the HUD sends a 60 s median.
+LEVEL_ADDR = 0x1A6
+LEVEL_MIN = 5
+LEVEL_MAX = 105
+LEVEL_WINDOW_S = 60.0
+LEVEL_GAL_PER_COUNT = 0.156
+LEVEL_TANK_GAL = 17.2
+LEVEL_MI_PER_COUNT = 4.63
 M_PER_MI = 1609.344
 ML_PER_GAL = 3785.41
 
@@ -275,6 +286,22 @@ class FuelTrip:
     self.hist = []
     self.bucket = (0.0, 0.0)   # (miles, mL) at the start of the open bucket
     self.seen = False
+    self.levels = deque()      # (t, raw 0x1A6 byte 3) inside LEVEL_WINDOW_S
+
+  def update_level(self, raw, now):
+    if raw is None or not LEVEL_MIN <= raw <= LEVEL_MAX:
+      return
+    self.levels.append((now, raw))
+    while self.levels and self.levels[0][0] < now - LEVEL_WINDOW_S:
+      self.levels.popleft()
+
+  def level(self):
+    if not self.levels:
+      return {'levelRaw': None, 'levelPct': None, 'levelGal': None, 'rangeMi': None}
+    raw = sorted(r for _, r in self.levels)[len(self.levels) // 2]
+    gal = min(LEVEL_TANK_GAL, raw * LEVEL_GAL_PER_COUNT)
+    pct = 100 if raw >= LEVEL_MAX - 1 else round(gal / LEVEL_TANK_GAL * 100)
+    return {'levelRaw': raw, 'levelPct': pct, 'levelGal': round(gal, 1), 'rangeMi': round(raw * LEVEL_MI_PER_COUNT)}
 
   def update(self, count, v_ego, now, onroad):
     if onroad is not True:
@@ -324,7 +351,7 @@ class FuelTrip:
     if self.m > FUEL_AVG_MIN_M and self.ml > 0:
       avg = round(min(FUEL_MPG_CAP, (self.m / M_PER_MI) / (self.ml / ML_PER_GAL)), 1)
     return {'tripMl': round(self.ml, 1), 'tripM': round(self.m), 'rateMlS': rate, 'instMpg': inst, 'avgMpg': avg,
-            'hist': [list(item) for item in self.hist]}
+            'hist': [list(item) for item in self.hist], **self.level()}
 
 
 def fuel_count(batches):
@@ -336,6 +363,20 @@ def fuel_count(batches):
           data = bytes(frame.dat)
           if len(data) >= 4:
             return int.from_bytes(data[2:4], 'big')
+    except (AttributeError, TypeError, ValueError):
+      continue
+  return None
+
+
+def fuel_level(batches):
+  """Newest 0x1A6 byte 3 (tank sender) in drained CAN batches, or None."""
+  for can in reversed(batches[-FUEL_SCAN_BATCHES:]):
+    try:
+      for frame in can:
+        if frame.address == LEVEL_ADDR and frame.src == FUEL_BUS:
+          data = bytes(frame.dat)
+          if len(data) >= 4:
+            return data[3]
     except (AttributeError, TypeError, ValueError):
       continue
   return None
@@ -575,7 +616,10 @@ class MessagingHudReader:
       onroad = _bool(device, 'started') if device is not None else None
       car_state = msgs['carState']
       v_ego = finite(_field(car_state, 'vEgo')) if car_state is not None else None
-      self.fuel.update(self._fuel_count() if onroad else None, v_ego, now, onroad)
+      count, level = self._fuel_frames() if onroad else (None, None)
+      self.fuel.update(count, v_ego, now, onroad)
+      if onroad is True:
+        self.fuel.update_level(level, now)
       fuel = self.fuel.value()
     values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel)
     current = core_fresh(values, fresh)
@@ -587,8 +631,8 @@ class MessagingHudReader:
   def _fuel_car(self, car_params):
     return car_params is not None and _text(car_params, 'carFingerprint', 60) == FUEL_CAR
 
-  def _fuel_count(self):
-    """Drain the raw (non-conflated) CAN queue and return the newest 0x324 counter, or None."""
+  def _fuel_frames(self):
+    """Drain the raw (non-conflated) CAN queue once: (newest 0x324 counter, newest 0x1A6 level), None when absent."""
     try:
       if self.can_sock is None:
         self.can_sock = self.messaging.sub_sock('can', conflate=False)
@@ -597,9 +641,9 @@ class MessagingHudReader:
         event = self.messaging.log_from_bytes(raw)
         if event.which() == 'can':
           batches.append(event.can)
-      return fuel_count(batches)
+      return fuel_count(batches), fuel_level(batches)
     except Exception:
-      return None
+      return None, None
 
   def close(self):
     self.sm = None
