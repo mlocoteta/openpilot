@@ -127,9 +127,7 @@ class WheelFeature:
       ford_role = cp.brand == 'ford' and policy.explicit_latch and policy.runtime_supported and key == KEYS[0]
       if (implicit_toggle or ford_role) and selected == "Off":
         selected = "Toggle AOL"
-      default = next(label for label, code in ACTIONS.items() if code == DEFAULTS.get(key, 0))
       rows.append(FeatureRow(PREFIX + key, label, selected or "Invalid saved action", raw, choices,
-                             default_value=default if default in choices else None,
                              available=readable and self.owner.authority("preferences"),
                              reason=("LKAS also toggles AOL independently of its saved extra action." if ford_role else
                                      "Neither LKAS nor MAIN is assigned Toggle AOL, so both retain the default AOL toggle." if implicit_toggle else
