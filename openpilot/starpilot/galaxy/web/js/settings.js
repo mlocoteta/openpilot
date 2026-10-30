@@ -233,6 +233,7 @@ export class SettingsFeed {
     const attempt = this.generation
     const result = await operation
     if (result?.saved === true) {
+      if (page === "localization") globalThis.dispatchEvent?.(new Event("galaxy-language-changed"))
       for (const feed of activeSettings) {
         if (feed !== this && !feed.pending && !feed.saving) feed.load(feed.page, { keepData: true, quiet: true })
       }

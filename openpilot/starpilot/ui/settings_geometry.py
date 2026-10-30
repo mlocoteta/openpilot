@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openpilot.system.ui.lib.multilang import tr
+from openpilot.system.ui.lib.multilang import tr_display as tr
 
 import math
 import random

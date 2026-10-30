@@ -136,12 +136,13 @@ class TermsPage(Widget):
     self._on_accept = on_accept
     self._on_decline = on_decline
 
-    self._title = Label(tr("Welcome to openpilot"), font_size=90, font_weight=FontWeight.BOLD, text_alignment=TextAlignment.LEFT)
-    self._desc = Label(tr("You must accept the Terms and Conditions to use openpilot. Read the latest terms at https://comma.ai/terms before continuing."),
+    self._title = Label(lambda: tr("Welcome to openpilot"), font_size=90, font_weight=FontWeight.BOLD, text_alignment=TextAlignment.LEFT)
+    self._desc = Label(
+      lambda: tr("You must accept the Terms and Conditions to use openpilot. Read the latest terms at https://comma.ai/terms before continuing."),
                        font_size=90, font_weight=FontWeight.MEDIUM, text_alignment=TextAlignment.LEFT)
 
-    self._decline_btn = Button(tr("Decline"), click_callback=on_decline)
-    self._accept_btn = Button(tr("Agree"), button_style=ButtonStyle.PRIMARY, click_callback=on_accept)
+    self._decline_btn = Button(lambda: tr("Decline"), click_callback=on_decline)
+    self._accept_btn = Button(lambda: tr("Agree"), button_style=ButtonStyle.PRIMARY, click_callback=on_accept)
 
   def _render(self, _):
     welcome_x = self._rect.x + 165
@@ -170,10 +171,10 @@ class TermsPage(Widget):
 class DeclinePage(Widget):
   def __init__(self, back_callback=None):
     super().__init__()
-    self._text = Label(tr("You must accept the Terms and Conditions in order to use openpilot."),
+    self._text = Label(lambda: tr("You must accept the Terms and Conditions in order to use openpilot."),
                        font_size=90, font_weight=FontWeight.MEDIUM, text_alignment=TextAlignment.LEFT)
-    self._back_btn = Button(tr("Back"), click_callback=back_callback)
-    self._uninstall_btn = Button(tr("Decline, uninstall openpilot"), button_style=ButtonStyle.DANGER,
+    self._back_btn = Button(lambda: tr("Back"), click_callback=back_callback)
+    self._uninstall_btn = Button(lambda: tr("Decline, uninstall openpilot"), button_style=ButtonStyle.DANGER,
                                  click_callback=self._on_uninstall_clicked)
 
   def _on_uninstall_clicked(self):

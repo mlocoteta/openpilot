@@ -210,7 +210,7 @@ class MiciOffroadAlerts(Scroller):
     self.alert_items: list[AlertItem] = []
 
     # Create empty state label
-    self._empty_label = UnifiedLabel(tr("no alerts"), 65, FontWeight.DISPLAY, rl.WHITE,
+    self._empty_label = UnifiedLabel(lambda: tr("no alerts"), 65, FontWeight.DISPLAY, rl.WHITE,
                                      alignment=TextAlignment.CENTER,
                                      alignment_vertical=TextAlignmentVertical.MIDDLE)
 

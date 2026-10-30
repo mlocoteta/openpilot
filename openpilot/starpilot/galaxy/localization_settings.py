@@ -49,7 +49,7 @@ class LocalizationSettingsOwner:
     name = next((name for name, value in LANGUAGES.items() if value == code), "English")
     rows.append(FeatureRow("LanguageSetting", "Language", name, raw, tuple(LANGUAGES),
                            available=readable and self.authorized() and self.parked(),
-                           reason="Device display language. Untranslated text uses English. Park before changing language.",
+                           reason="Display language for Galaxy and the device. Untranslated text uses English. Park before changing language.",
                            default_value="English"))
     return FeatureSettingsState("localization", "Localization", "Language, units and steering-wheel side for every vehicle.",
                                 tuple(rows), self.parked())

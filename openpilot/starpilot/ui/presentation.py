@@ -10,7 +10,8 @@ import numpy as np
 from PIL import Image
 import pyray as rl
 
-from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR, multilang, tr
+from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR, multilang, tr_display as tr
+from openpilot.system.ui.lib.display_translation import native_text
 
 
 class Profile(StrEnum):
@@ -179,7 +180,7 @@ class BitmapFonts:
     return 1., 0.
 
   def measure(self, text: str, role: FontRole, size: float, *, spacing: float = 0, fallback: bool = False) -> TextSize:
-    text = tr(text) if role != FontRole.BRAND else text
+    text = native_text(tr(text)) if role != FontRole.BRAND else text
     font = self._text_font(text, role, fallback)
     spacing = round(spacing, 4)
     width_scale, weight = self._optical_style(role, fallback)
@@ -193,7 +194,7 @@ class BitmapFonts:
 
   def vertical_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
     """Visible glyph top/bottom, independent of the font's padded line box."""
-    text = tr(text) if role != FontRole.BRAND else text
+    text = native_text(tr(text)) if role != FontRole.BRAND else text
     key = (text, role, size)
     if key not in self._vertical_ink:
       font = self._text_font(text, role)
@@ -208,7 +209,7 @@ class BitmapFonts:
 
   def horizontal_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
     """Visible glyph left/right from the draw x, without the font's side bearings."""
-    text = tr(text) if role != FontRole.BRAND else text
+    text = native_text(tr(text)) if role != FontRole.BRAND else text
     key = (text, role, size)
     if key not in self._horizontal_ink:
       font = self._text_font(text, role)
@@ -257,7 +258,7 @@ class BitmapFonts:
 
   def draw(self, text: str, role: FontRole, size: float, x: float, y: float, color: rl.Color = rl.WHITE,
            *, spacing: float = 0, fallback: bool = False) -> None:
-    text = tr(text) if role != FontRole.BRAND else text
+    text = native_text(tr(text)) if role != FontRole.BRAND else text
     font = self._text_font(text, role, fallback)
     draw = getattr(rl, "_orig_draw_text_ex", rl.draw_text_ex)
     width_scale, weight = self._optical_style(role, fallback)

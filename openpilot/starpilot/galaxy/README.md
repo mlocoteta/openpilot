@@ -156,11 +156,13 @@ text and accessibility labels; request values, parameter keys, input values and
 technical logs remain unchanged. The native large/compact renderer translates
 measurements and drawing together and loads bundled Unicode fonts as needed.
 
-`starpilot/ui/translation_strings.py` marks shared labels for the existing catalog
-update tool. The initial shared set covers navigation, common actions, settings
-groups, home statistics and several onroad labels in Japanese, Korean, Spanish, French, German and
-Vietnamese. The catalogs also retain stock openpilot translations. This is not
-complete sentence coverage: long feature explanations, dynamically assembled
-messages and unlisted labels remain English. Boot/login screens initially use
-English until an authenticated language response is available. User-entered
-text, logs, identifiers and brand names are not translation targets.
+`starpilot/ui/translation_strings.py` and `translation_messages.json` retain the
+shared UI sources for the existing catalog update tool. The six requested
+languages each contain 5,465 catalog entries: stock openpilot labels, Galaxy
+pages and settings descriptions, native UI labels, formatted status messages
+and driving alerts. Formatted translations retain the original values and
+identifiers. Unlisted runtime diagnostics and external content retain English
+fallback; user names, addresses, media metadata and technical logs are literal.
+Boot/login initially uses English until the authenticated language response.
+Native text is translated before measurement, wrapping and elision; translated
+values carry a marker so they cannot be translated twice.

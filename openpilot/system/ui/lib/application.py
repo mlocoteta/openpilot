@@ -808,6 +808,9 @@ class GuiApplication:
                                rl.ffi.cast("int *", codepoint_buffer), len(codepoints))
       rl.gen_texture_mipmaps(font.texture)
       rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
+      for previous in self._fallback_fonts.values():
+        rl.unload_font(previous)
+      self._fallback_fonts.clear()
       self._fallback_fonts[language] = font
     return self._fallback_fonts[language]
 
@@ -847,7 +850,6 @@ class GuiApplication:
       rl._orig_draw_text_ex = rl.draw_text_ex
 
     def _draw_text_ex_scaled(font, text, position, font_size, spacing, tint):
-      text = multilang.tr(text)
       font = font_fallback(font)
       return rl._orig_draw_text_ex(font, text, position, font_size * FONT_SCALE, spacing, tint)
 

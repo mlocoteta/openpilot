@@ -7,7 +7,7 @@ from openpilot.starpilot.saved_source import read_saved
 from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR, load_translations
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=1)
 def catalog(code):
   if code == "en":
     return {}

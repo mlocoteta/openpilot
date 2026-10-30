@@ -1,3 +1,4 @@
+import { displayLocale } from "./localization.js"
 import { GxState } from "./state.js"
 import { GxNotice } from "./notice.js"
 import { LocalAccess } from "./local-access.js"
@@ -34,13 +35,13 @@ const driveDate = (start, end = null) => {
   if (start === null) return "Date unavailable"
   const date = new Date(start * 1000)
   if (!Number.isFinite(date.getTime())) return "Date unavailable"
-  const calendar = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
-  const clock = (value) => new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value * 1000))
+  const calendar = new Intl.DateTimeFormat(displayLocale(), { month: "short", day: "numeric", year: "numeric" })
+  const clock = (value) => new Intl.DateTimeFormat(displayLocale(), { hour: "2-digit", minute: "2-digit" }).format(new Date(value * 1000))
   const day = calendar.format(date)
   const endDay = end !== null ? calendar.format(new Date(end * 1000)) : null
   return `${day} · ${clock(start)}${end !== null ? `–${endDay === day ? "" : endDay + " · "}${clock(end)}` : ""}`
 }
-const dayLabel = (date) => new Intl.DateTimeFormat(undefined, { timeZone: "UTC", weekday: "short" }).format(new Date(`${date}T00:00:00Z`))
+const dayLabel = (date) => new Intl.DateTimeFormat(displayLocale(), { timeZone: "UTC", weekday: "short" }).format(new Date(`${date}T00:00:00Z`))
 const recordDisplay = (record, isMetric) => record.value === null ? "Unavailable" :
   record.unit === "m" ? distance(record.value, isMetric) : record.unit === "s" ? duration(record.value) :
     record.unit === "days" || record.unit === "drives" ? counted(record.value, record.unit.slice(0, -1)) :
@@ -101,7 +102,7 @@ export function homeSummary(monitor, model, software) {
       memory: measure(live?.memory?.percent, "%"),
       storage: live?.storage?.usedGiB != null && live?.storage?.totalGiB != null
         ? `${measure(live.storage.usedGiB, " GiB", 1)} / ${measure(live.storage.totalGiB, " GiB", 1)}` : "Unavailable",
-      observed: live ? new Date(live.sampledAt * 1000).toLocaleString() : "Unavailable",
+      observed: live ? new Date(live.sampledAt * 1000).toLocaleString(displayLocale()) : "Unavailable",
     },
     model: {
       available: !!loaded,
@@ -236,7 +237,7 @@ export const Home = {
             <div v-else class="gx-home__model-layout"><div class="gx-home__model-donut" :style="driving.modelStyle"></div>
               <div><div v-for="model in driving.models" :key="model.name" class="gx-home__model-row">
                 <span class="gx-home__swatch" :style="{ background: model.color }"></span>
-                <div><strong>{{ model.name }}</strong><small>{{ counted(model.drives, "drive") }} · {{ model.distance }}</small></div></div></div></div>
+                <div><strong><span translate="no">{{ model.name }}</span></strong><small>{{ counted(model.drives, "drive") }} · {{ model.distance }}</small></div></div></div></div>
           </section>
         </template>
         <div class="gx-home__section-title"><span></span>Your device</div>

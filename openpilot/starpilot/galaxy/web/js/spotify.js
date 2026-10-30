@@ -478,8 +478,8 @@ export const SpotifyPage = {
       <section v-if="setup && setupDone && !phoneSource" class="gx-card gx-starport-step gx-starport-home gx-spotify-now" aria-labelledby="gx-spotify-now-title">
         <div class="gx-spotify-now__main">
           <div class="gx-spotify-now__text">
-            <h3 id="gx-spotify-now-title" class="gx-truncate">{{ track?.title || setup.preferences.deviceName }}</h3>
-            <p v-if="track" class="gx-truncate">{{ track.artists }}<template v-if="track.album"> · {{ track.album }}</template></p>
+            <h3 id="gx-spotify-now-title" class="gx-truncate"><span translate="no">{{ track?.title || setup.preferences.deviceName }}</span></h3>
+            <p v-if="track" class="gx-truncate"><span translate="no">{{ track.artists }}</span><template v-if="track.album"> · <span translate="no">{{ track.album }}</span></template></p>
             <p role="status" class="gx-note gx-truncate">{{ statusText }}<template v-if="setup.enabled"> · {{ outputName }}</template></p>
           </div>
         </div>
@@ -497,7 +497,7 @@ export const SpotifyPage = {
         <small v-if="setup.enabled && player?.loggedIn && player.volume !== null" class="gx-note">Volume {{ player.volume }}% - change in Spotify app if needed, otherwise use car volume</small>
         <div v-if="setup.enabled && player?.loggedIn && !player.active" class="gx-stack">
           <button type="button" class="gx-btn gx-btn--tonal" @click="control('activate')">
-            <i class="bi bi-broadcast" aria-hidden="true"></i> Move Spotify to {{ setup.preferences.deviceName || 'StarPilot' }}</button>
+            <i class="bi bi-broadcast" aria-hidden="true"></i> Move Spotify to <span translate="no">{{ setup.preferences.deviceName || 'StarPilot' }}</span></button>
           <small class="gx-note">Takes over from the phone or speaker Spotify is playing on now. Music plays through {{ outputName }}. You might need to confirm the switch in the Spotify app.</small>
         </div>
         <GalaxySettingRow :row="switchRow('Spotify', setup.enabled, 'Turn off to stop playing and free up the comma. Your setup stays saved.')"
@@ -584,7 +584,7 @@ export const SpotifyPage = {
         <li v-if="!phoneSource" class="gx-card gx-starport-step" :class="{ 'gx-starport-step--done': setupDone && setup.enabled && player?.loggedIn }">
           <div class="gx-starport-step__head">
             <span class="gx-starport-step__num" aria-hidden="true"><i v-if="setupDone && setup.enabled && player?.loggedIn" class="bi bi-check-lg"></i><template v-else>4</template></span>
-            <div><h3>Connect Spotify</h3><p>Turn it on, then pick <strong>{{ setup.preferences.deviceName }}</strong> in the Spotify app’s device list.</p></div>
+            <div><h3>Connect Spotify</h3><p>Turn it on, then pick <strong><span translate="no">{{ setup.preferences.deviceName }}</span></strong> in the Spotify app’s device list.</p></div>
           </div>
           <div class="gx-starport-step__body">
             <GalaxySettingRow :row="switchRow('Spotify', setup.enabled, 'Runs Spotify on your comma. Turn off to stop playing; your setup stays saved.')"
@@ -625,7 +625,7 @@ export const SpotifyPage = {
             <li>For cellular or different networks after pairing, turn off <strong>Local device visibility</strong> in Spotify → Settings → Apps and devices. Both devices need internet access.</li>
             <li>On iPhone, allow Spotify’s <strong>Local Network</strong> permission in iPhone Settings. If your phone’s hotspot blocks initial pairing, pair once on another shared Wi‑Fi network.</li>
             <li>If it still does not appear, turn Spotify off and back on here. This reconnects using your saved account; you do not need to clear the account or cache.</li>
-            <li>In Spotify, tap the device icon and look for <strong>{{ setup?.preferences.deviceName || 'StarPilot' }}</strong>.</li>
+            <li>In Spotify, tap the device icon and look for <strong><span translate="no">{{ setup?.preferences.deviceName || 'StarPilot' }}</span></strong>.</li>
           </ol>
         </details>
         <details class="gx-starport-wiki"><summary>Can I use the comma hotspot or wireless Android Auto?</summary>
@@ -709,7 +709,7 @@ export const SpotifyPage = {
                   </label>
                   <small v-if="archiveChecking" role="status" class="gx-note">Checking the file…</small>
                   <div v-if="archiveFile && !archiveError && !archiveChecking" class="gx-chip gx-starport-file-chip">
-                    <i class="bi bi-file-earmark-zip"></i><span>{{ archiveFile.name }}</span><small>{{ Math.ceil(archiveFile.size / 1048576) }} MB</small>
+                    <i class="bi bi-file-earmark-zip"></i><span><span translate="no">{{ archiveFile.name }}</span></span><small>{{ Math.ceil(archiveFile.size / 1048576) }} MB</small>
                   </div>
                   <small v-if="archiveError" class="gx-starport-bad" role="alert">{{ archiveError }}</small>
                 </div>

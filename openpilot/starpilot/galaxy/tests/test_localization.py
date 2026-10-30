@@ -81,3 +81,24 @@ def test_shared_messages_have_translations(tmp_path, code):
   _, entries = parse_po(TRANSLATIONS_DIR.joinpath(f'app_{code}.po'))
   translations = {entry.msgid: entry.msgstr for entry in entries}
   assert all(translations.get(message) for message in MESSAGES)
+
+
+@pytest.mark.parametrize('code', ['ja', 'ko', 'es', 'fr', 'de', 'vi'])
+def test_all_registered_display_messages_have_catalog_values(code):
+  import json
+  from openpilot.common.basedir import BASEDIR
+  from openpilot.selfdrive.ui.translations.potools import parse_po
+  from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR
+  registry = json.loads((Path(BASEDIR) / 'openpilot/starpilot/ui/translation_messages.json').read_text())
+  _, entries = parse_po(TRANSLATIONS_DIR.joinpath(f'app_{code}.po'))
+  messages = {entry.msgid: entry.msgstr for entry in entries}
+  assert all(messages.get(row['source']) for row in registry['messages'])
+  assert all(entry.msgstr or entry.msgstr_plural for entry in entries)
+
+
+def test_display_registry_is_part_of_standard_catalog_update():
+  import json
+  from openpilot.common.basedir import BASEDIR
+  from openpilot.selfdrive.ui.translations.update_translations import display_catalog_entries
+  registry = json.loads((Path(BASEDIR) / 'openpilot/starpilot/ui/translation_messages.json').read_text())
+  assert {entry.msgid for entry in display_catalog_entries()} == {row['source'] for row in registry['messages']}
