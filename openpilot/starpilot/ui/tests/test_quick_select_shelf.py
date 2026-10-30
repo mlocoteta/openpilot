@@ -17,7 +17,7 @@ from openpilot.starpilot.ui.onroad_customization import (
 )
 from openpilot.starpilot.ui.onroad_favorites_geometry import COLUMN_BODY, ROW_BODY, intersects
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
-from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 
 
 def fixture(*, reduced=False, document=None):
@@ -76,15 +76,21 @@ def test_live_compositor_keeps_widgets_below_the_shelf_and_alerts_above_it(monke
   def draw(name):
     return lambda *args, **kwargs: seen.append(name)
 
-  view = NS(fonts=NS(profile=Profile.LARGE), projection_viewport=None, camera_layer=draw('camera'), background_layer=None,
-            extra_overlays=None, pip_layer=None, map_layer=None, driver_monitor_layer=draw('driver_monitor'),
-            navigation=NS(render=draw('navigation')),
-            navigation_favorites=NS(render=draw('navigation_favorite')), quick_select_layer=draw('shelf'),
-            alert=NS(render=draw('alert')), _driving_mode=draw('mode'), _clock=draw('clock'),
-            _slc_actions=draw('guidance'), _stopped_timer=draw('timer'), _traffic_badge=draw('traffic'), _preview_badge=draw('preview'))
-  for attr in ('unified_speed', 'current_speed', 'cem_gauge', 'steering_wheel', 'torque_bar'):
-    setattr(view, attr, NS(render=draw(attr)))
-  view._ordered_widgets = lambda *args: onroad.OnroadView._ordered_widgets(view, *args)
+  view = onroad.OnroadView.__new__(onroad.OnroadView)
+  view.fonts = Mock(spec=BitmapFonts, profile=Profile.LARGE)
+  view.projection_viewport = None
+  view.camera_layer = draw('camera')
+  view.background_layer = view.extra_overlays = view.pip_layer = view.map_layer = None
+  view.driver_monitor_layer = draw('driver_monitor')
+  view.navigation = Mock(spec=onroad.NavigationCard, render=draw('navigation'))
+  view.navigation_favorites = Mock(spec=onroad.NavigationFavorites, render=draw('navigation_favorite'))
+  view.alert = Mock(spec=onroad.AlertRenderer, render=draw('alert'))
+  for attr, label in (('quick_select_layer', 'shelf'), ('_driving_mode', 'mode'), ('_clock', 'clock'),
+                      ('_slc_actions', 'guidance'), ('_stopped_timer', 'timer'), ('_traffic_badge', 'traffic'), ('_preview_badge', 'preview')):
+    monkeypatch.setattr(view, attr, draw(label), raising=attr != 'quick_select_layer')
+  for attr, widget in (('unified_speed', onroad.UnifiedSpeedWidget), ('current_speed', onroad.CurrentSpeedHud),
+                       ('cem_gauge', AetherGauge), ('steering_wheel', onroad.SteeringWheelWidget), ('torque_bar', onroad.TorqueBarWidget)):
+    setattr(view, attr, Mock(spec=widget, render=draw(attr)))
   for method in ('draw_rectangle_rec', 'draw_rectangle_gradient_v', 'draw_rectangle_lines_ex', 'draw_rectangle_rounded_lines_ex'):
     monkeypatch.setattr(onroad.rl, method, lambda *args: None)
   monkeypatch.setattr(onroad.clip, 'begin_scissor_mode', lambda *args: None)
@@ -173,9 +179,9 @@ def test_unavailable_large_control_neither_invokes_nor_opens_configuration():
   data['slots'][0]['available'] = False
   drawer.update(state, data, 1.)
   drawer.open(1.)
-  point = drawer.menu_buttons()[0][1]
-  drawer.press(*point, 1.1)
-  drawer.release(*point, 1.2)
+  x, y = drawer.menu_buttons()[0][1]
+  drawer.press(x, y, 1.1)
+  drawer.release(x, y, 1.2)
   assert drawer.mode == 'shelf'
   emit.assert_not_called()
 
@@ -201,7 +207,8 @@ def test_higher_priority_observation_aborts_before_render_and_held_release(state
 @pytest.mark.parametrize('confirmation', (False, True))
 def test_live_session_routes_the_visible_cue_and_pending_confirmation_to_the_right_owner(confirmation):
   from openpilot.starpilot.ui.runtime_app import StarShellSession
-  from openpilot.starpilot.ui.shell import ShellMode
+  from openpilot.starpilot.ui.onroad import OnroadView, NavigationCard
+  from openpilot.starpilot.ui.shell import ShellMode, ShellView
   drawer, emit, state, data = fixture(reduced=True)
   if confirmation:
     drawer.open(1.)
@@ -213,9 +220,11 @@ def test_live_session_routes_the_visible_cue_and_pending_confirmation_to_the_rig
   session.profile = Profile.LARGE
   session.snapshot = Mock(return_value=NS(onroad=state))
   session._input_snapshot = session.snapshot
-  session._update_favorites = lambda observed, now: drawer.update(observed, data, now)
+  session._update_favorites = Mock(side_effect=lambda observed, now: drawer.update(observed, data, now))
   session.input = Mock(onroad=NS(claimed=True))
-  session.view = NS(onroad=NS(navigation=Mock()))
+  session.view = ShellView.__new__(ShellView)
+  session.view.onroad = OnroadView.__new__(OnroadView)
+  session.view.onroad.navigation = Mock(spec=NavigationCard)
   with patch('openpilot.starpilot.ui.runtime_app.time.monotonic', return_value=1.1):
     session.press(ShellMode.ONROAD, 70, 1010)
   if confirmation:
@@ -274,7 +283,7 @@ def test_value_truncation_measures_the_font_used_to_paint_it():
 
 def test_cem_keeps_its_normal_paint_path_and_live_observation_behind_overlay():
   state = sample_state('cem_curve', default_document())
-  gauge = AetherGauge(NS())
+  gauge = AetherGauge(Mock(spec=BitmapFonts))
   gauge._drive_frame = state.drive_frame
   gauge._road_h_filter.x = ROAD_HEIGHT / 2
   with patch.object(gauge, '_render_unified_road') as paint:
@@ -297,12 +306,14 @@ def test_reduce_motion_uses_guarded_layout_document_without_moving_widgets(tmp_p
   owner = AppearanceOwner(params, lambda: parked)
   row = next(row for row in owner.snapshot(Profile.LARGE).rows if row.key == 'ReduceMotion')
   request = row_change(row, 1)
+  assert request is not None
   assert owner.apply(request)
   saved = decode_document(path.read_bytes())
   assert saved['reduceMotion'] and saved['layouts'] == document['layouts']
   assert not owner.apply(request)
   row = next(row for row in owner.snapshot(Profile.LARGE).rows if row.key == 'ReduceMotion')
   request = row_change(row, -1)
+  assert request is not None
   parked = False
   assert not owner.apply(request)
   parked = True
