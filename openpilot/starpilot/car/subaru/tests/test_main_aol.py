@@ -68,3 +68,32 @@ def test_physical_acc_fault_cancels_pending_main_edge():
   cs.accFaulted = False
   observe(intent, cs, 30_000_000, 20_000_000, False)
   assert not intent.allowed_latch
+
+
+def test_impreza_main_setting_is_exact_and_preserves_stock_assist_selection():
+  from opendbc.car.subaru.interface import CarInterface
+  from opendbc.car.subaru.values import CAR
+  from opendbc.car.subaru.stock_aol import IMPREZA_MAIN_AOL, qualified
+  from opendbc.car.subaru import software_cruise, sng
+  from openpilot.starpilot.car.subaru.aol import policy_for, create_intent
+
+  for word in (0, 8, 512, 520):
+    cp = CarInterface.get_non_essential_params(CAR.SUBARU_IMPREZA_2020)
+    cp.safetyConfigs[0].safetyParam = word
+    policy = policy_for(cp)
+    assert policy.intent_supported and policy.safety_param_addition == IMPREZA_MAIN_AOL
+    assert create_intent(cp, owner().settings).main_arm
+    cp.alternativeExperience = 32
+    cp.safetyConfigs[0].safetyParam |= policy.safety_param_addition
+    assert qualified(cp, marked_only=True)
+    assert create_intent(cp, owner().settings).main_arm
+    assert software_cruise.eligible(cp) and sng.eligible(cp)
+    cp.alternativeExperience = 0
+    assert not qualified(cp) and not software_cruise.eligible(cp) and not sng.eligible(cp)
+    cp.alternativeExperience = 32
+    cp.safetyConfigs[0].safetyParam |= 2
+    assert not qualified(cp)
+  cp = CarInterface.get_non_essential_params(CAR.SUBARU_FORESTER)
+  cp.alternativeExperience = 32
+  cp.safetyConfigs[0].safetyParam |= IMPREZA_MAIN_AOL
+  assert not qualified(cp) and not sng.eligible(cp)

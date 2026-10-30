@@ -135,7 +135,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     subaru_aol_observe_main(acc_main_on);
   }
 
-  if (subaru_aol_main_arm && msg_matches(msg, MSG_SUBARU_ES_Distance, SUBARU_ALT_BUS)) {
+  if (subaru_aol_main_arm && msg_matches(msg, MSG_SUBARU_ES_Distance, subaru_lkas_angle ? SUBARU_ALT_BUS : SUBARU_CAM_BUS)) {
     subaru_aol_acc_fault = GET_BIT(msg, 15U);
     if (subaru_aol_acc_fault) {
       subaru_aol_clear();
@@ -149,12 +149,7 @@ static void subaru_rx_hook(const CANPacket_t *msg) {
     subaru_software_main = GET_BIT(msg, 40U);
     if (subaru_aol_enabled) {
       subaru_aol_grant(cruise_engaged);
-      subaru_aol_main = GET_BIT(msg, 40U);
-      subaru_aol_main_seen = true;
-      subaru_aol_main_ts = microsecond_timer_get();
-      if (!subaru_aol_main) {
-        subaru_aol_clear();
-      }
+      subaru_aol_observe_main(GET_BIT(msg, 40U));
     }
   }
 
@@ -292,6 +287,10 @@ static bool subaru_tx_hook(const CANPacket_t *msg) {
 }
 
 static safety_config subaru_init(uint16_t param) {
+  const bool impreza_main = (param == 4096U) || (param == 4104U) || (param == 4608U) || (param == 4616U);
+  if (impreza_main) {
+    param &= ~4096U;
+  }
 #ifdef ALLOW_DEBUG
   const bool avh = ((param == 1169U) || (param == 1425U)) &&
     (((unsigned int)alternative_experience == 0U) || ((unsigned int)alternative_experience == 32U));
@@ -403,7 +402,7 @@ static safety_config subaru_init(uint16_t param) {
   subaru_aol_enabled = ((unsigned int)alternative_experience == 32U) &&
     ((param == 209U) || (param == 465U) || (param == 16U) || (param == 0U) || (param == 1U) || (param == 17U) || (param == 145U) ||
      avh || (param == 177U) || (param == 401U) || (param == 8U) || (param == 520U) || (param == 512U) || (param == 2225U));
-  subaru_aol_main_arm = subaru_aol_enabled && (param == 17U);
+  subaru_aol_main_arm = subaru_aol_enabled && ((param == 17U) || impreza_main);
   if (subaru_aol_enabled) {
     static const AolSafetyPolicy policy = {
       .reset = subaru_aol_reset,
@@ -459,10 +458,14 @@ static safety_config subaru_init(uint16_t param) {
   } else {
     static const RxCheck subaru_rx_checks[] = {
       SUBARU_COMMON_RX_CHECKS(SUBARU_MAIN_BUS)
+      {.msg = {{MSG_SUBARU_ES_Distance, SUBARU_CAM_BUS, 8, 20U, .max_counter = 15U, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     };
     rx_count = sizeof(subaru_rx_checks) / sizeof(subaru_rx_checks[0]);
     for (int i = 0; i < rx_count; i++) {
       subaru_rx_workspace[i] = subaru_rx_checks[i];
+    }
+    if (!subaru_aol_main_arm) {
+      rx_count--;
     }
     ret = subaru_sng_enabled ? (subaru_software_enabled ?
       BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_SNG_SOFTWARE_TX_MSGS) : BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_SNG_TX_MSGS)) :
@@ -470,7 +473,8 @@ static safety_config subaru_init(uint16_t param) {
                                    BUILD_SAFETY_CFG(subaru_rx_workspace, SUBARU_TX_MSGS);
   }
   ret.rx_checks_len = rx_count;
-  if (((unsigned int)alternative_experience == 32U) && !subaru_aol_enabled) {
+  if ((((unsigned int)alternative_experience == 32U) && !subaru_aol_enabled) ||
+      (impreza_main && ((unsigned int)alternative_experience != 32U))) {
     ret.tx_msgs = NULL;
     ret.tx_msgs_len = 0;
   }

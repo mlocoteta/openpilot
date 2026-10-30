@@ -1,15 +1,15 @@
-"""Physical MAIN intent for exactly Crosstrek AOL; no ordinary controls grant."""
+"""Physical MAIN intent for qualified angle and Impreza torque AOL; no ordinary controls grant."""
 import pytest
 
 from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.safety.tests import test_subaru_stock_aol as stock_module
 
 
-@pytest.fixture
-def owner():
+@pytest.fixture(params=(17, 4096, 4104, 4608, 4616))
+def owner(request):
   item = stock_module.TestSubaruStockAol(methodName='runTest')
   item.setUp()
-  item.configure(17)
+  item.configure(request.param)
   try:
     yield item
   finally:
@@ -71,10 +71,11 @@ def test_new_physical_acc_source_is_required_before_main_edge(owner):
 def test_acc_wire_checksum_and_counter_cannot_be_faked_by_host(owner):
   neutral(owner)
   assert owner.feed() == 1
-  bad = owner.frame('ES_Distance', {}, 1)
+  bus = 1 if owner.param == 17 else 2
+  bad = owner.frame('ES_Distance', {}, bus)
   raw = bytearray(bytes(bad.data))
   raw[0] ^= 1
-  assert not owner.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x221, 1, bytes(raw[:8])))
+  assert not owner.safety.safety_rx_hook(libsafety_py.make_CANPacket(0x221, bus, bytes(raw[:8])))
   assert owner.safety.aol_get_permission_mask() == 0
 
 
@@ -96,6 +97,22 @@ def test_acc_fault_cannot_be_bypassed_by_stock_enable_packets(owner):
   assert owner.feed() == 1
   assert owner.feed(acc_fault=True) == 0
   for enabled in (0, 1):
-    assert owner.safety.safety_rx_hook(owner.frame('ES_Status', {'Cruise_Activated': enabled}, 1))
+    name = 'ES_Status' if owner.param == 17 else 'CruiseControl'
+    values = {'Cruise_Activated': enabled, 'Cruise_On': 1} if name == 'CruiseControl' else {'Cruise_Activated': enabled}
+    assert owner.safety.safety_rx_hook(owner.frame(name, values, 1 if owner.param == 17 else 0))
     owner.safety.aol_set_host_request(1)
     assert owner.safety.aol_get_permission_mask() == 0
+
+
+@pytest.mark.parametrize('param, experience', [(4096, 0), (4104, 0), (4608, 0), (4616, 0), (4097, 32), (4098, 32)])
+def test_impreza_main_setting_cannot_select_unqualified_native_output(param, experience):
+  item = stock_module.TestSubaruStockAol(methodName='runTest')
+  item.setUp()
+  try:
+    item.configure(param, experience)
+    neutral(item)
+    for _ in range(20):
+      assert item.feed() == 0
+    assert not item.safety.safety_tx_hook(item.frame('ES_LKAS', {}, 0))
+  finally:
+    item.tearDown()

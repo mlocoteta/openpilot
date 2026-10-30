@@ -1,6 +1,6 @@
 """Subaru physical cruise intent with independent lateral authority."""
 from opendbc.car import structs
-from opendbc.car.subaru.stock_aol import qualified, temporary_restriction
+from opendbc.car.subaru.stock_aol import IMPREZA_MAIN_AOL, qualified, temporary_restriction
 from opendbc.car.subaru.values import CAR
 from openpilot.starpilot.aol.intent import AolCardIntent
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
@@ -61,11 +61,13 @@ def policy_for(cp):
                           normal_runtime_supported=admitted, full_axis_runtime_required=qualified(cp, marked_only=True),
                           ordinary_axis_ack_required=qualified(cp, marked_only=True), explicit_latch=admitted,
                           fixed_cruise_buttons=admitted, lkas_button_supported=False,
-                          alternative_experience_addition=32 if admitted else 0)
+                          alternative_experience_addition=32 if admitted else 0,
+                          safety_param_addition=IMPREZA_MAIN_AOL if admitted and cp.carFingerprint == CAR.SUBARU_IMPREZA_2020 else 0)
 
 
 def native_profile_supported(model, param):
-  return model == int(structs.CarParams.SafetyModel.subaru) and param in (0, 1, 8, 16, 17, 145, 177, 209, 401, 465, 512, 520, 1169, 1425, 2225)
+  return model == int(structs.CarParams.SafetyModel.subaru) and param in (
+    0, 1, 8, 16, 17, 145, 177, 209, 401, 465, 512, 520, 1169, 1425, 2225, 4096, 4104, 4608, 4616)
 
 
 def native_accepts_cp(cp, model, param):
@@ -86,7 +88,9 @@ def ordinary_axis_request_allowed(cp, state):
 
 
 def create_intent(cp, settings):
-  return SubaruStockCardIntent(settings, main_arm=cp.carFingerprint == CAR.SUBARU_CROSSTREK_2025)
+  main_arm = (cp.carFingerprint == CAR.SUBARU_CROSSTREK_2025 or
+              (cp.carFingerprint == CAR.SUBARU_IMPREZA_2020 and qualified(cp)))
+  return SubaruStockCardIntent(settings, main_arm=main_arm)
 
 
 def sng_standstill_lateral_inhibit(cp, state):
