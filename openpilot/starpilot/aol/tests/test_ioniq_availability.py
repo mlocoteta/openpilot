@@ -338,7 +338,7 @@ class IoniqAvailabilityTests(unittest.TestCase):
       return sd.pm.messages['aolAxisState'].aolAxisState, sd.pm.messages['selfdriveState'].selfdriveState, command
     return sd, controls, step
 
-  def _ioniq_availability_callers(self, full_op=True, *, initially_armed=True, stock_angle=False):
+  def _ioniq_availability_callers(self, full_op=True, *, initially_armed=True, stock_angle=False, cp=None):
     from opendbc.car.hyundai.interface import CarInterface
     from opendbc.car.hyundai.radar_interface import RadarInterface
     from openpilot.selfdrive.car.card import Car
@@ -354,18 +354,19 @@ class IoniqAvailabilityTests(unittest.TestCase):
 
     self.addCleanup(restore_simulation)
     os.environ['SIMULATION'] = '0'
-    if stock_angle:
+    supplied_profile = cp is not None
+    if stock_angle and not supplied_profile:
       from opendbc.car.hyundai.tests.test_stock_angle_aol import source_profile
       from opendbc.car.hyundai.values import CAR
       cp = source_profile(CAR.HYUNDAI_IONIQ_5_PE if stock_angle is True else CAR(stock_angle))
-    else:
+    elif not supplied_profile:
       _, cp = candidate(True)
       cp.safetyConfigs[-1].safetyParam |= 0x0800
     sd, controls, step = self._authority_callers(full_op, cp=cp, genuine_events=True)
     card_cp = cp.as_reader().as_builder()
     card = Car(CI=CarInterface(card_cp), RI=RadarInterface(card_cp))
     self.assertEqual(card.CP.to_dict(), sd.CP.to_dict())
-    self.assertEqual(card.CP.safetyConfigs[-1].safetyParam, cp.safetyConfigs[-1].safetyParam if stock_angle else 0x8895)
+    self.assertEqual(card.CP.safetyConfigs[-1].safetyParam, cp.safetyConfigs[-1].safetyParam if stock_angle or supplied_profile else 0x8895)
     self.assertTrue(card.aol_card_intent.explicit_latch)
     card.slc_producer_session = 'authority-card'
     cs = car_state()

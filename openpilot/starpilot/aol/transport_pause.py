@@ -777,12 +777,18 @@ class TransportPauseFeedback:
     previous = self.signature
     pending = bool(self.pending_event)
     all_off = bool(withdrawn and not axis.desiredLongitudinal and not axis.longitudinalActive and str(axis.mode) == 'off')
-    if pending and (not all_off or previous is None or previous[5] != 'none' or
+    event_ns = int(sm.logMonoTime['onroadEvents'])
+    same_longitudinal = bool(previous is not None and
+      (axis.longitudinalActive, axis.desiredLongitudinal) == (previous[10], previous[12]))
+    withdrawal_role = bool(all_off or withdrawn and same_longitudinal and
+      (cs.steeringPressed or self.temporary_eps_event_ns and previous is not None and not previous[9] and not previous[11]))
+    if pending and (not withdrawal_role or previous is None or previous[5] != 'none' or
       previous[0] != self.session or previous[7] != self.session or
-      previous[1] != self.sequence or previous[6] != self.pending_event or
-      previous[9] or previous[10] or previous[11] or previous[12] or
+      previous[1] != self.sequence or previous[6] not in (self.pending_event, self.temporary_eps_event_ns) or
+      previous[9] or previous[11] or not same_longitudinal or
       previous[14] != producer or previous[15] != self.availability_epoch or
-      axis.faultEventMonoTime != self.pending_event or
+      axis.faultEventMonoTime not in (self.pending_event, self.temporary_eps_event_ns) or
+      max(axis.faultEventMonoTime, event_ns) != self.pending_event or
       axis.sourceCarStateMonoTime < previous[8] or stamp < previous[2] or
       not 0 < self.pending_event <= now_ns or now_ns - self.pending_event > AXIS_MAX_AGE_NS):
       return False
@@ -801,9 +807,15 @@ class TransportPauseFeedback:
       (signature == previous or fresh_active_successor))
     if not withdrawn and not held_original:
       return False
-    event_ns = int(sm.logMonoTime['onroadEvents'])
+    stock_user = stock_lateral_user_event(cp)
+    stock_eps_user = bool(self.lateral_only_baseline and cp.pcmCruise and
+      not axis.desiredLongitudinal and not axis.longitudinalActive and not cs.steeringDisengage and
+      cs.cruiseState.available and not cs.cruiseState.enabled and stock_user is not None and
+      any(event.name == stock_user and event.userDisable for event in sm['onroadEvents']))
     # Seatbelt blocks normal LONG, not admitted LAT intent. Keep warnings/native/output checks.
     events = tuple(event for event in sm['onroadEvents'] if not (
+      stock_eps_user and event.name == stock_user and event.userDisable and
+      not event.softDisable and not event.immediateDisable) and not (
       self.lateral_only_baseline and cs.seatbeltUnlatched and not axis.desiredLongitudinal and
       not axis.longitudinalActive and event.name == log.OnroadEvent.EventName.seatbeltNotLatched and
       event.softDisable and event.noEntry and not event.immediateDisable and not event.userDisable))
@@ -815,7 +827,10 @@ class TransportPauseFeedback:
         pending and any(event.userDisable for event in events)):
       return False
     temporary_event = any(event.name in temporary_names for event in events)
-    matched_withdrawal = bool(temporary_event and axis.faultEventMonoTime == event_ns <= stamp)
+    override_temporary = bool((cs.steeringPressed or 0 < event_ns == self.temporary_eps_event_ns) and not temporary_event and
+      any(event.name == log.OnroadEvent.EventName.steerOverride for event in events) and
+      not any(event.softDisable or event.userDisable for event in events))
+    matched_withdrawal = bool((temporary_event or override_temporary) and axis.faultEventMonoTime == event_ns <= stamp)
     original_active = bool(previous is not None and previous[0] == self.session and
       previous[7] == self.session and previous[5] == 'none' and
       previous[9] and previous[11] and previous[13] and previous[6] == event_ns and
@@ -823,15 +838,23 @@ class TransportPauseFeedback:
       previous[14] == producer and previous[15] == self.availability_epoch and
       0 < self.lateral_source_ns <= previous[8] <= previous[2] <= now_ns <= previous[4] and
       now_ns - previous[8] <= AXIS_MAX_AGE_NS)
-    pending_withdrawal = bool(all_off and not any(event.softDisable or event.userDisable for event in events) and
+    repeated_join = bool(self.temporary_eps_event_ns and previous is not None and withdrawn and
+      not previous[9] and not previous[11] and same_longitudinal and
+      previous[6] == self.temporary_eps_event_ns and (temporary_event or override_temporary) and
+      axis.faultEventMonoTime != event_ns and
+      min(axis.faultEventMonoTime, event_ns) == self.temporary_eps_event_ns and
+      0 < max(axis.faultEventMonoTime, event_ns) <= now_ns and
+      now_ns - max(axis.faultEventMonoTime, event_ns) <= AXIS_MAX_AGE_NS)
+    pending_withdrawal = bool(withdrawal_role and not any(event.softDisable or event.userDisable for event in events) and
       not temporary_event and 0 < event_ns < axis.faultEventMonoTime <= stamp and
       now_ns - axis.faultEventMonoTime <= AXIS_MAX_AGE_NS and
       (pending or original_active and axis.sequence > self.sequence))
-    if withdrawn and not (matched_withdrawal or pending_withdrawal):
+    if withdrawn and not (matched_withdrawal or pending_withdrawal or repeated_join):
       return False
     if held_original and not (
         axis.faultEventMonoTime == event_ns <= stamp and not any(event.softDisable for event in events) or
-        temporary_event and 0 < axis.faultEventMonoTime < event_ns and now_ns - event_ns <= AXIS_MAX_AGE_NS):
+        (temporary_event or override_temporary) and 0 < axis.faultEventMonoTime < event_ns and
+        now_ns - event_ns <= AXIS_MAX_AGE_NS):
       return False
     # Intent only: temporary EPS still blocks transport/availability health proofs.
     from openpilot.starpilot.car.nissan.aol import temporary_eps_restriction
@@ -862,6 +885,7 @@ class TransportPauseFeedback:
       not axis.desiredLongitudinal and not axis.longitudinalActive)
     native = _configured_transport_native(sm, cp, self.session, now_ns, allow_restricted_lateral=restricted_eps)
     if (native is None or not native.pandaInventory or
+        stock_eps_user and (native.requestedLongitudinal or native.longitudinalAllowed) or
         held_original and not (native.requestedLateral and (native.lateralAllowed or
           restricted_eps and not native.requestedLongitudinal and not native.longitudinalAllowed)) or
         axis.longitudinalActive and not native.longitudinalAllowed or
@@ -876,10 +900,10 @@ class TransportPauseFeedback:
         # Prior gas: accepted event receipt, not newer other-socket CS release.
         self.temporary_eps_gas_override = any(
           event.name == log.OnroadEvent.EventName.gasPressedOverride for event in events)
-    if pending_withdrawal:
+    if pending_withdrawal or repeated_join:
       # Exact physical-EPS join: intent only; newer/duplicate proofs cannot reanchor.
       if not pending:
-        self.pending_event = int(axis.faultEventMonoTime)
+        self.pending_event = max(int(axis.faultEventMonoTime), event_ns)
       self.awaiting = True
     elif pending:
       self.pending_event = 0
