@@ -1,3 +1,4 @@
+from importlib.resources import as_file
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,8 @@ def test_http_catalog_requires_existing_session(tmp_path, monkeypatch):
 def test_shared_messages_have_translations(tmp_path, code):
   from openpilot.selfdrive.ui.translations.potools import parse_po
   from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR
-  _, entries = parse_po(TRANSLATIONS_DIR.joinpath(f'app_{code}.po'))
+  with as_file(TRANSLATIONS_DIR.joinpath(f'app_{code}.po')) as path:
+    _, entries = parse_po(path)
   translations = {entry.msgid: entry.msgstr for entry in entries}
   assert all(translations.get(message) for message in MESSAGES)
 
@@ -90,7 +92,8 @@ def test_all_registered_display_messages_have_catalog_values(code):
   from openpilot.selfdrive.ui.translations.potools import parse_po
   from openpilot.system.ui.lib.multilang import TRANSLATIONS_DIR
   registry = json.loads((Path(BASEDIR) / 'openpilot/starpilot/ui/translation_messages.json').read_text())
-  _, entries = parse_po(TRANSLATIONS_DIR.joinpath(f'app_{code}.po'))
+  with as_file(TRANSLATIONS_DIR.joinpath(f'app_{code}.po')) as path:
+    _, entries = parse_po(path)
   messages = {entry.msgid: entry.msgstr for entry in entries}
   assert all(messages.get(row['source']) for row in registry['messages'])
   assert all(entry.msgstr or entry.msgstr_plural for entry in entries)

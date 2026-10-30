@@ -130,9 +130,11 @@ class TestLocalizedPresentation(unittest.TestCase):
   def test_home_statistics_use_shared_localized_measurement_and_drawing(self):
     from unittest.mock import Mock
     from openpilot.starpilot.ui.home_stats import DriveStatsDashboard
-    fonts = SimpleNamespace(font=Mock(side_effect=[object(), object(), object()]),
-                            measure=Mock(return_value=SimpleNamespace(width=80, height=24)), draw=Mock())
-    dashboard = DriveStatsDashboard(fonts, None)
+    from openpilot.starpilot.ui.home_state import DriveStatsData, DriveSummary
+    fonts = Mock(spec=BitmapFonts, font=Mock(side_effect=[object(), object(), object()]),
+                 measure=Mock(return_value=SimpleNamespace(width=80, height=24)), draw=Mock())
+    data = DriveStatsData(DriveSummary(), DriveSummary(), DriveSummary(), (), ())
+    dashboard = DriveStatsDashboard(fonts, data)
     measured = dashboard._measure(dashboard._font_bold, 'PERSONAL RECORDS', 20)
     assert (measured.x, measured.y) == (80, 24)
     dashboard._draw_text(dashboard._font_bold, 'PERSONAL RECORDS', SimpleNamespace(x=10, y=20), 20, 0, 'color')
