@@ -729,7 +729,7 @@ struct SlcState {
   struct ConditionalModeState;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 18, 21)
+    CAPNP_DECLARE_STRUCT_HEADER(a1680744031fdb2d, 18, 22)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1245,7 +1245,7 @@ struct SlcCruiseCommand {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(bd443b539493bc68, 10, 3)
+    CAPNP_DECLARE_STRUCT_HEADER(bd443b539493bc68, 10, 4)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -1453,7 +1453,7 @@ struct MapdOut {
 
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(a4f1eb3323f5f582, 14, 6)
+    CAPNP_DECLARE_STRUCT_HEADER(a4f1eb3323f5f582, 16, 7)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -4349,6 +4349,11 @@ public:
 
   inline  ::uint64_t getAcceptedMonoTime() const;
 
+  inline float getUpcomingSpeedLimit() const;
+
+  inline bool hasUpcomingBoundaryId() const;
+  inline  ::capnp::Text::Reader getUpcomingBoundaryId() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -4631,6 +4636,16 @@ public:
 
   inline  ::uint64_t getAcceptedMonoTime();
   inline void setAcceptedMonoTime( ::uint64_t value);
+
+  inline float getUpcomingSpeedLimit();
+  inline void setUpcomingSpeedLimit(float value);
+
+  inline bool hasUpcomingBoundaryId();
+  inline  ::capnp::Text::Builder getUpcomingBoundaryId();
+  inline void setUpcomingBoundaryId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initUpcomingBoundaryId(unsigned int size);
+  inline void adoptUpcomingBoundaryId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownUpcomingBoundaryId();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -8885,6 +8900,9 @@ public:
   inline bool hasSource() const;
   inline  ::capnp::Text::Reader getSource() const;
 
+  inline bool hasUpcomingBoundaryId() const;
+  inline  ::capnp::Text::Reader getUpcomingBoundaryId() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -8969,6 +8987,13 @@ public:
   inline  ::capnp::Text::Builder initSource(unsigned int size);
   inline void adoptSource(::capnp::Orphan< ::capnp::Text>&& value);
   inline ::capnp::Orphan< ::capnp::Text> disownSource();
+
+  inline bool hasUpcomingBoundaryId();
+  inline  ::capnp::Text::Builder getUpcomingBoundaryId();
+  inline void setUpcomingBoundaryId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initUpcomingBoundaryId(unsigned int size);
+  inline void adoptUpcomingBoundaryId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownUpcomingBoundaryId();
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -10431,6 +10456,15 @@ public:
 
   inline  ::uint64_t getProducerSession() const;
 
+  inline float getPreviewSpeedLimit() const;
+
+  inline float getPreviewDistance() const;
+
+  inline bool hasPreviewBoundaryId() const;
+  inline  ::capnp::Text::Reader getPreviewBoundaryId() const;
+
+  inline  ::int64_t getPreviewWayId() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -10584,6 +10618,22 @@ public:
 
   inline  ::uint64_t getProducerSession();
   inline void setProducerSession( ::uint64_t value);
+
+  inline float getPreviewSpeedLimit();
+  inline void setPreviewSpeedLimit(float value);
+
+  inline float getPreviewDistance();
+  inline void setPreviewDistance(float value);
+
+  inline bool hasPreviewBoundaryId();
+  inline  ::capnp::Text::Builder getPreviewBoundaryId();
+  inline void setPreviewBoundaryId( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initPreviewBoundaryId(unsigned int size);
+  inline void adoptPreviewBoundaryId(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownPreviewBoundaryId();
+
+  inline  ::int64_t getPreviewWayId();
+  inline void setPreviewWayId( ::int64_t value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -19564,6 +19614,54 @@ inline void SlcState::Builder::setAcceptedMonoTime( ::uint64_t value) {
       ::capnp::bounded<17>() * ::capnp::ELEMENTS, value);
 }
 
+inline float SlcState::Reader::getUpcomingSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS);
+}
+
+inline float SlcState::Builder::getUpcomingSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS);
+}
+inline void SlcState::Builder::setUpcomingSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<33>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcState::Reader::hasUpcomingBoundaryId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcState::Builder::hasUpcomingBoundaryId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader SlcState::Reader::getUpcomingBoundaryId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder SlcState::Builder::getUpcomingBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS));
+}
+inline void SlcState::Builder::setUpcomingBoundaryId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder SlcState::Builder::initUpcomingBoundaryId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS), size);
+}
+inline void SlcState::Builder::adoptUpcomingBoundaryId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> SlcState::Builder::disownUpcomingBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<21>() * ::capnp::POINTERS));
+}
+
 inline bool SlcState::SourceReading::Reader::hasSource() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
@@ -26083,6 +26181,40 @@ inline ::capnp::Orphan< ::capnp::Text> SlcCruiseCommand::Builder::disownSource()
       ::capnp::bounded<2>() * ::capnp::POINTERS));
 }
 
+inline bool SlcCruiseCommand::Reader::hasUpcomingBoundaryId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcCruiseCommand::Builder::hasUpcomingBoundaryId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader SlcCruiseCommand::Reader::getUpcomingBoundaryId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder SlcCruiseCommand::Builder::getUpcomingBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void SlcCruiseCommand::Builder::setUpcomingBoundaryId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder SlcCruiseCommand::Builder::initUpcomingBoundaryId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void SlcCruiseCommand::Builder::adoptUpcomingBoundaryId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> SlcCruiseCommand::Builder::disownUpcomingBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
 inline bool AolAxisState::Reader::hasSessionId() const {
   return !_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
@@ -28367,6 +28499,82 @@ inline  ::uint64_t MapdOut::Builder::getProducerSession() {
 inline void MapdOut::Builder::setProducerSession( ::uint64_t value) {
   _builder.setDataField< ::uint64_t>(
       ::capnp::bounded<13>() * ::capnp::ELEMENTS, value);
+}
+
+inline float MapdOut::Reader::getPreviewSpeedLimit() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+
+inline float MapdOut::Builder::getPreviewSpeedLimit() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS);
+}
+inline void MapdOut::Builder::setPreviewSpeedLimit(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<19>() * ::capnp::ELEMENTS, value);
+}
+
+inline float MapdOut::Reader::getPreviewDistance() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS);
+}
+
+inline float MapdOut::Builder::getPreviewDistance() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS);
+}
+inline void MapdOut::Builder::setPreviewDistance(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<28>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool MapdOut::Reader::hasPreviewBoundaryId() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline bool MapdOut::Builder::hasPreviewBoundaryId() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader MapdOut::Reader::getPreviewBoundaryId() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder MapdOut::Builder::getPreviewBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+inline void MapdOut::Builder::setPreviewBoundaryId( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder MapdOut::Builder::initPreviewBoundaryId(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), size);
+}
+inline void MapdOut::Builder::adoptPreviewBoundaryId(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> MapdOut::Builder::disownPreviewBoundaryId() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<6>() * ::capnp::POINTERS));
+}
+
+inline  ::int64_t MapdOut::Reader::getPreviewWayId() const {
+  return _reader.getDataField< ::int64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+
+inline  ::int64_t MapdOut::Builder::getPreviewWayId() {
+  return _builder.getDataField< ::int64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS);
+}
+inline void MapdOut::Builder::setPreviewWayId( ::int64_t value) {
+  _builder.setDataField< ::int64_t>(
+      ::capnp::bounded<15>() * ::capnp::ELEMENTS, value);
 }
 
 inline  ::uint16_t LearningControlEvidence::Reader::getVersion() const {
