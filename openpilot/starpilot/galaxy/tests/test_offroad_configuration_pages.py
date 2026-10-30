@@ -61,6 +61,13 @@ class TestOffroadConfigurationPages(unittest.TestCase):
               self.assertFalse(expected[0][1])
               self.assertTrue(current[0][1])
               expected = [(row[0], True, *row[2:]) for row in expected]
+            if name == 'profiles':
+              # Saved configuration uses the native catalog; this preference is Galaxy-only.
+              label = 'Disengage on Accelerator Pedal'
+              self.assertNotIn(label, [row[0] for row in expected])
+              self.assertEqual([row for row in current if row[0] == label],
+                               [(label, True, ('Off', 'On'), 0.0, 0.0, 0.0)])
+              current = [row for row in current if row[0] != label]
             self.assertEqual(expected, current)
         self.assert_no_car_cache()
 
