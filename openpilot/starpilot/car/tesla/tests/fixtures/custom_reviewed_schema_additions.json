@@ -1,6 +1,6 @@
 {
-  "reviewed_schema_commit": "632fa395624275e900b072309950624d36b0184f",
-  "reviewed_schema_sha256": "ce728d3074ad43da2f8782cedae4665c118412f5758b011350d747ea6fbb93a0",
+  "reviewed_schema_commit": "63395a56f1584e81f68556d1fe42c30fc6b3729a",
+  "reviewed_schema_sha256": "cf1217c26673f2cd0e61f33cee56dc11f5d583dde096c41579fd4d633bdf9e64",
   "incumbent_fixture_sha256": "a36ab54c00b5bbe61d520873d24aadfb8f33babd70c31a07046516d5545838d9",
   "types": {
     "0xf35cc4560bbf6ec2": {
@@ -82,7 +82,7 @@
       },
       "new_storage": {
         "dataWordCount": 18,
-        "pointerCount": 21,
+        "pointerCount": 22,
         "preferredListEncoding": "inlineComposite",
         "isGroup": false,
         "discriminantCount": 0,
@@ -195,6 +195,42 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 56
+          }
+        },
+        {
+          "slot": {
+            "offset": 33,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "upcomingSpeedLimit",
+          "codeOrder": 57,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 57
+          }
+        },
+        {
+          "slot": {
+            "offset": 21,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "upcomingBoundaryId",
+          "codeOrder": 58,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 58
           }
         }
       ]
@@ -380,7 +416,7 @@
       },
       "new_storage": {
         "dataWordCount": 10,
-        "pointerCount": 3,
+        "pointerCount": 4,
         "preferredListEncoding": "inlineComposite",
         "isGroup": false,
         "discriminantCount": 0,
@@ -403,6 +439,24 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 14
+          }
+        },
+        {
+          "slot": {
+            "offset": 3,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "upcomingBoundaryId",
+          "codeOrder": 15,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 15
           }
         }
       ]
@@ -485,6 +539,102 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 47
+          }
+        }
+      ]
+    },
+    "0xa4f1eb3323f5f582": {
+      "kind": "struct",
+      "before_name": "MapdOut",
+      "after_name": "MapdOut",
+      "old_field_count": 34,
+      "old_storage": {
+        "dataWordCount": 14,
+        "pointerCount": 6,
+        "preferredListEncoding": "inlineComposite",
+        "isGroup": false,
+        "discriminantCount": 0,
+        "discriminantOffset": 0
+      },
+      "new_storage": {
+        "dataWordCount": 16,
+        "pointerCount": 7,
+        "preferredListEncoding": "inlineComposite",
+        "isGroup": false,
+        "discriminantCount": 0,
+        "discriminantOffset": 0
+      },
+      "added_fields": [
+        {
+          "slot": {
+            "offset": 19,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "previewSpeedLimit",
+          "codeOrder": 34,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 34
+          }
+        },
+        {
+          "slot": {
+            "offset": 28,
+            "type": {
+              "float32": null
+            },
+            "defaultValue": {
+              "float32": 0.0
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "previewDistance",
+          "codeOrder": 35,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 35
+          }
+        },
+        {
+          "slot": {
+            "offset": 6,
+            "type": {
+              "text": null
+            },
+            "defaultValue": {
+              "text": ""
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "previewBoundaryId",
+          "codeOrder": 36,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 36
+          }
+        },
+        {
+          "slot": {
+            "offset": 15,
+            "type": {
+              "int64": null
+            },
+            "defaultValue": {
+              "int64": 0
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "previewWayId",
+          "codeOrder": 37,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 37
           }
         }
       ]
