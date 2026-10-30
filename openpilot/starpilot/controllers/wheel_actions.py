@@ -68,7 +68,10 @@ def button_reported(cp, key):
                   cp.flags & TeslaFlags.AOL_SCREEN_BUTTON)
     return bool(key in KEYS[5:8] and cp.carFingerprint == CAR.TESLA_MODEL_S_PREAP)
   if key == 'LKASButtonControl':
-    if brand in ('chrysler', 'gm', 'mazda', 'nissan', 'volkswagen', 'volvo'):
+    if brand == 'gm':
+      from opendbc.car.gm.values import is_volt_flashed_profile
+      return is_volt_flashed_profile(cp)
+    if brand in ('chrysler', 'mazda', 'nissan', 'volkswagen', 'volvo'):
       return False
     if brand == 'hyundai':
       from opendbc.car.hyundai.values import CAR, HyundaiFlags, is_blended

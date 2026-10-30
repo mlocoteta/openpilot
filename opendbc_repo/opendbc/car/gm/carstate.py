@@ -70,6 +70,8 @@ class CarState(CarStateBase):
     self.buttons_counter = 0
 
     self.distance_button = 0
+    self.flashed_volt_profile = is_volt_flashed_profile(CP)
+    self.flashed_lkas_button = None
     self.pedal_sensor_healthy = False
     self.pedal_sensor_ts_nanos = 0
     self.bolt_pedal_gear_ts_nanos = 0
@@ -535,7 +537,7 @@ class CarState(CarStateBase):
       # A missing camera can leave the ECU faulted; that is not engaged cruise.
       ret.cruiseState.enabled &= pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.FAULTED
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
-    if is_volt_flashed_profile(self.CP):
+    if self.flashed_volt_profile:
       # There is no stock cruise/ACC controller. Preserve the actual EBCM fault.
       ret.accFaulted = friction_unavailable
       ret.brakePressed |= bool(pt_cp.vl["ECMEngineStatus"]["BrakePressed"])
@@ -684,6 +686,15 @@ class CarState(CarStateBase):
       ret.buttonEvents = [event for old, new in edges for event in
                           create_button_events(new, old, BUTTONS_DICT, unpressed_btn=CruiseButtons.UNPRESS)] + create_button_events(
                             self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+    if self.flashed_volt_profile:
+      lkas_events = []
+      for pressed in pt_cp.vl_all["ASCMSteeringButton"]["LKAButton"]:
+        if self.flashed_lkas_button is not None:
+          lkas_events.extend(create_button_events(pressed, self.flashed_lkas_button, {1: ButtonType.lkas}))
+        self.flashed_lkas_button = pressed
+      if lkas_events:
+        ret.buttonEvents = [event.to_dict() for event in ret.buttonEvents] + lkas_events
+
     if ret.vEgo < self.CP.minSteerSpeed:
       ret.lowSpeedAlert = True
 

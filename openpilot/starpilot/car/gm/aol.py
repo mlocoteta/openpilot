@@ -4,17 +4,17 @@ import math
 from opendbc.car.gm.cancel_remap import aol_enabled, enabled as cancel_remap_enabled, supported as cancel_remap_supported
 
 from opendbc.car.structs import CarParams
-from opendbc.car.gm.values import CAR, GMFlags, control_flags, camera_acc_pedal_profile, is_volt_ascm_longitudinal
+from opendbc.car.gm.values import CAR, GMFlags, control_flags, camera_acc_pedal_profile, is_volt_ascm_longitudinal, is_volt_flashed_profile
 from opendbc.car.gm.aol import GM_AOL_ALTERNATIVE_EXPERIENCE, GM_AOL_WORDS, qualified_gm
 from openpilot.starpilot.aol.policy import AolVehiclePolicy
-from openpilot.starpilot.aol.intent import AOL_TOGGLE, AolCardIntent
+from openpilot.starpilot.aol.intent import AOL_TOGGLE, PAUSE_LATERAL, AolCardIntent
 
 
 def policy_for(cp) -> AolVehiclePolicy:
   qualified = qualified_gm(cp)
   return AolVehiclePolicy(intent_supported=qualified, settings_supported=qualified,
                          runtime_supported=qualified, normal_runtime_supported=qualified,
-                         lkas_button_supported=False,
+                         lkas_button_supported=qualified and is_volt_flashed_profile(cp),
                          full_axis_runtime_required=qualified and aol_enabled(cp),
                          alternative_experience_addition=GM_AOL_ALTERNATIVE_EXPERIENCE if qualified else 0)
 
@@ -205,7 +205,7 @@ class GmAolCardIntent(AolCardIntent):
   """Follow physical MAIN; a current fault inhibits intent until healthy again."""
 
   def __init__(self, settings, cp=None):
-    super().__init__(settings, lkas_button_supported=False)
+    super().__init__(settings, lkas_button_supported=is_volt_flashed_profile(cp))
     self.cp = cp
     self.requires_fault_observation = True
     self._main_cycle_required = False
@@ -221,6 +221,12 @@ class GmAolCardIntent(AolCardIntent):
       semantic = CS.as_builder() if hasattr(CS, 'as_builder') else CS.as_reader().as_builder()
       semantic.buttonEvents = [event for event in CS.buttonEvents if str(event.type) != 'cancel']
     super().update_auxiliary(semantic, media=media, media_eligible=media_eligible, fault_active=fault_active)
+
+  @property
+  def lkas_action(self):
+    # MAIN still owns automatic arming; a mapped LKAS toggle pauses steering.
+    action = super().lkas_action
+    return PAUSE_LATERAL if action == AOL_TOGGLE else action
 
   @property
   def main_action(self):
