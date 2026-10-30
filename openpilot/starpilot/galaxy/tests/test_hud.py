@@ -15,7 +15,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.hud import (SERVICES, TI_SAFETY_PARAM, FuelTrip, Hud, HudReading, MessagingHudReader, empty, extract,
-                                           fuel_count, ti_car, tracks)
+                                           fuel_count, fuel_level, ti_car, tracks)
 from openpilot.starpilot.galaxy.server import make_server
 
 CONTRACT_KEYS = {'schemaVersion', 'state', 'sessionId', 'seq', 'ageSeconds', 'error', *empty()}
@@ -211,6 +211,23 @@ class FuelTest(unittest.TestCase):
     self.assertEqual(len(v['hist']), 4)
     self.assertTrue(all(0.24 < b - a < 0.3 for a, b in zip([0.0] + [h[0] for h in v['hist']], [h[0] for h in v['hist']])))
     json.dumps(v)
+
+  def test_level_scan_and_60s_median(self):
+    batch = [frame(0x1A6, 128, bytes([0, 0, 0, 99])), frame(0x1A6, 0, bytes([0x20, 0, 0, 45, 61, 0, 0, 0]))]
+    self.assertEqual(fuel_level([[frame(0x1A6, 0, bytes([0, 0, 0, 80]))], batch]), 45)
+    self.assertIsNone(fuel_level([[frame(0x1A6, 0, b'\x00\x00')]]))
+    f = FuelTrip()
+    f.update(1000, 20.0, 0.0, True)
+    self.assertEqual(f.value()['levelRaw'], None)
+    for i, raw in enumerate([45, 52, 38, 0, 200, 46, 44]):   # slosh + invalid frames (0 at startup, >105)
+      f.update_level(raw, i * 1.0)
+    v = f.value()
+    self.assertEqual((v['levelRaw'], v['levelPct'], v['levelGal'], v['rangeMi']), (45, 41, 7.0, 208))
+    f.update_level(105, 100.0)   # older samples leave the 60 s window; 105 = saturated full
+    self.assertEqual((f.value()['levelRaw'], f.value()['levelPct'], f.value()['levelGal']), (105, 100, 16.4))
+    json.dumps(f.value())
+    f.update(1000, 0.0, 101.0, False)   # offroad: level forgotten with the trip
+    self.assertIsNone(f.value())
 
   def test_fuel_only_read_on_the_accord_9g(self):
     reader = MessagingHudReader.__new__(MessagingHudReader)
