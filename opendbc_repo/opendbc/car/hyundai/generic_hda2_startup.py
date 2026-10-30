@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Any
 import time
 
-from opendbc.car.hyundai.canfd_stock_aol import qualified as stock_qualified
+from opendbc.car.hyundai.canfd_stock_aol import qualified as stock_qualified, qualified_long
 from opendbc.car.hyundai.ecu_continuity import ContinuousECUStartup, StartupKeeper
 from opendbc.car.hyundai.ecu_startup import Outcome, stock_copy
 from opendbc.car.hyundai.radar_hda2_startup import RadarHDA2Startup
@@ -91,14 +91,19 @@ class GenericHDA2Startup(RadarHDA2Startup):
       raise RuntimeError('Ordinary HDA-II finalization requires configured startup')
     if self.prepared_for(ci.CP):
       return
-    if self.outcome not in (Outcome.STOCK_UNTOUCHED, Outcome.STOCK_RESTORED) or not stock_qualified(ci.CP, marked_only=True):
+    long_aol = self.outcome is Outcome.SENT_UNCONFIRMED and qualified_long(ci.CP, marked_only=True)
+    if not long_aol and (self.outcome not in (Outcome.STOCK_UNTOUCHED, Outcome.STOCK_RESTORED) or
+                         not stock_qualified(ci.CP, marked_only=True)):
       raise RuntimeError('Ordinary HDA-II startup does not admit this AOL configuration')
     expected: Any = deepcopy(self.prepared_cp)
     configs = expected.get('safetyConfigs', [])
+    allowed_words = tuple(word | 4 for word in STOCK_WORDS) if long_aol else STOCK_WORDS
     if (len(configs) != 1 or configs[0]['safetyModel'] != 'hyundaiCanfd' or
-        configs[0]['safetyParam'] not in STOCK_WORDS or expected['alternativeExperience'] != 0):
+        configs[0]['safetyParam'] not in allowed_words or expected['alternativeExperience'] != 0):
       raise RuntimeError('Ordinary HDA-II prepared stock profile cannot be finalized')
     configs[0]['safetyParam'] |= 0x800
+    if long_aol:
+      expected['alternativeExperience'] = 32
     if ci.CP.to_dict() != expected:
       raise RuntimeError('Ordinary HDA-II finalization changed unrelated CarParams')
     self.prepared_cp = expected
