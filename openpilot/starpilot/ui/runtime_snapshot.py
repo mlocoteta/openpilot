@@ -801,6 +801,10 @@ class RuntimeSnapshotAdapter:
                                offroad=confirmed_offroad,
                                available_actions=frozenset(device_actions))
     updater_state = _text(params, "UpdaterState")
+    fast = params.get('UpdaterFastState')
+    fast = fast if isinstance(fast, dict) else {}
+    checking_metadata = fast.get('check', {}).get('state') == 'checking'
+    background = fast.get('background') and updater_state in ('downloading...', 'finalizing update...')
     available = _flag(params, "UpdaterFetchAvailable")
     status = "updater status unavailable" if not updater_state else updater_state if updater_state != "idle" else (
       "update available" if available else "up to date, last checked " + ("previously" if _text(params, "LastUpdateTime") else "never"))
@@ -810,6 +814,11 @@ class RuntimeSnapshotAdapter:
       if updater_state == "idle":
         software_actions.update((SoftwareRequest.FAST_UPDATE, SoftwareRequest.ROLLBACK))
         software_actions.add(SoftwareRequest.DOWNLOAD_UPDATE if available else SoftwareRequest.CHECK_FOR_UPDATES)
+      elif background and not checking_metadata:
+        software_actions.add(SoftwareRequest.CHECK_FOR_UPDATES)
+      if checking_metadata:
+        software_actions.discard(SoftwareRequest.CHECK_FOR_UPDATES)
+        software_actions.discard(SoftwareRequest.DOWNLOAD_UPDATE)
       if not _flag(params, "IsTestedBranch") and _text(params, "UpdaterAvailableBranches"):
         software_actions.add(SoftwareRequest.OPEN_BRANCH_CHOOSER)
     software = SoftwareState(current_version=_text(params, "UpdaterCurrentDescription"),

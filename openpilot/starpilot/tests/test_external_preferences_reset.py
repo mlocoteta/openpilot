@@ -177,3 +177,14 @@ class TestExternalPreferencesReset(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+def test_fresh_preferences_disable_scheduled_automatic_installation(tmp_path):
+  from openpilot.starpilot.software.auto_install import InstallSettings
+  settings = InstallSettings(tmp_path / 'software' / 'auto-install')
+  value = settings.read()
+  assert value is not None
+  settings.save(True, '0 0 * * *', value['revision'], lambda: True)
+  assert reset.reset_external_preferences(tmp_path, tmp_path / 'models') == ()
+  value = settings.read()
+  assert value is not None and not value['enabled']

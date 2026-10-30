@@ -38,7 +38,7 @@ it labels its sample System Monitor data and cannot edit a device.
 | Home and Tools | Local status cards, navigation, theme, drawer, pinned tiles, and hash routes. |
 | System Monitor and Plots | Bounded local process/device and driving-message samples. Unavailable data stays unknown; leaving a page stops its polling. |
 | Logs and Routes | Crash-report previews and a shared route workspace for camera footage, driving UI replay, segment details, and scoped footage/replay/log downloads. |
-| Software & Updates | Read-only installed and updater status. Refresh rereads reported Params; it does not check, download, switch branches, install, roll back, or reboot. |
+| Software & Updates | Parked update controls and a newest-first version list. Installed and fully cached commits are marked; selecting a commit offers installation or download and installation. Initially shows up to two newer commits, the installed commit, and the previous installed commit. Collapsed gaps above and below the installed commit expand independently; older history remains available below the previous version. Each gap shows its own remaining count and reveals at most ten commits per click inside a scroll area bounded by the viewport. Release notes follow the selected installed or prepared version. |
 | Driving and Device Preferences | Saved settings through typed owners shared with native controls, including SLC, lateral and longitudinal tuning, conditional modes, display, cameras, and sounds. |
 | Vehicle Controls | One saved manual vehicle choice for the next start, or Auto for normal detection. |
 | Models and Model Laboratory | Verified model catalog management and parked Laboratory configuration. Paired inference is unavailable in the production model runner. |
@@ -47,6 +47,21 @@ it labels its sample System Monitor data and cannot edit a device.
 | Cameras and Sentry | Saved PiP and V-ASM settings and bounded Sentry event metadata. The crop editor uses a browser-local still image; it does not upload that image. |
 | Sound packs | Catalog status, verified download and cancellation through the local sound owner. |
 | Galaxy Access & Install | Remote link pairing, Galaxy installation, and an opt-in Wi-Fi hotspot. Local addresses are on Home. |
+
+`Refresh` and branch changes request filtered
+history metadata in a separate Git cache and worker. They remain available during
+background staging. `Check for updates` also wakes the background updater after the metadata check. When automatic downloads are enabled, a newer commit wakes
+the separate download phase. Update and download actions retrieve the chosen
+snapshot's missing file contents; version browsing uses `--filter=blob:none` with
+bounded history depth. The branch selector lives in the version list and refreshes its metadata without changing the updater target. `Download only` prepares the selected commit without restarting; `Select previous version` selects the saved branch and commit without installing it. Downloads report Git object progress and finalization
+reports copied files; Git garbage collection is outside the finalization path.
+
+Automatic installation is opt-in and defaults off. Its five numeric cron fields
+(minute, hour, day, month, weekday) default to `0 0 * * *`: daily at midnight in
+the saved local timezone shown in Advanced options. The timezone selector saves an IANA timezone with the schedule, including daylight-saving rules. The updater only restarts for a
+validated, prepared update while idle and freshly confirmed offroad. It skips
+onroad occurrences and reserves each scheduled minute before restarting to avoid
+reboot loops. These preferences live in the StarPilot software state directory.
 
 The Vue router in `web/js/app.js` and the route handlers in `server.py` are the
 current route map. API groups include `/api/auth`, `/api/system/monitor`,
