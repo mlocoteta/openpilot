@@ -1,4 +1,6 @@
 {
+  "bundle_format": 1,
+  "bundle_revision": 0,
   "version": "153.6.0esr",
   "agnos": "19.8.1",
   "packages": [
