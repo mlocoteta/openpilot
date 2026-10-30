@@ -208,7 +208,7 @@ def current_axis(sm, *, now_ns: int):
 
 
 def refresh_expired_lateral_snapshot(sm, *, now_ns: int, allow_combined: bool = False) -> bool:
-  """Receive queued AOL inputs once; an expired proof never gains time."""
+  """Receive a replacement AOL proof; an expired proof never gains time."""
   axis = sm['aolAxisState']
   if (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState'] and
       axis.qualified and axis.nativeAcknowledged and axis.sessionId and
@@ -218,7 +218,16 @@ def refresh_expired_lateral_snapshot(sm, *, now_ns: int, allow_combined: bool = 
       0 < sm.logMonoTime['aolAxisState'] <= axis.observedMonoTime <= axis.validUntilMonoTime < now_ns):
     # All normal authority, source, physical and native gates run on the newly
     # received snapshot. An empty receive leaves the expired proof untouched.
+    header_ns = sm.logMonoTime['aolAxisState']
     sm.update(0)
+    if allow_combined and sm.logMonoTime['aolAxisState'] == header_ns:
+      from openpilot.cereal import messaging
+      # GM EPS can refuse a one-frame withdrawal. Wait at most one control tick
+      # for a new proof; all permission and physical checks still run afterward.
+      poller = messaging.Poller()
+      poller.registerSocket(sm.sock['aolAxisState'])
+      poller.poll(10)
+      sm.update(0)
     return True
   return False
 
