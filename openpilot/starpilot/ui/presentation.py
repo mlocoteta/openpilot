@@ -156,7 +156,8 @@ class BitmapFonts:
       chars = set(map(chr, range(32, 127))) | set(text)
       chars.update(TRANSLATIONS_DIR.joinpath(f"app_{language}.po").read_text(encoding="utf-8"))
       points = sorted(map(ord, chars))
-      font = rl.load_font_ex(str(directory / filename), 64, rl.ffi.new("int[]", points), len(points))
+      glyphs = rl.ffi.new("int[]", points)
+      font = rl.load_font_ex(str(directory / filename), 64, rl.ffi.cast("int *", glyphs), len(points))
       if font.texture.id in (0, rl.get_font_default().texture.id) or font.glyphCount == 0:
         raise RuntimeError(f"Unable to load language font {filename}")
       for previous in fonts.values():
