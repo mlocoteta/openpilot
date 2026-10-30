@@ -63,7 +63,7 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.finalized.mkdir()
     self.installed = root / "installed"
     self.installed.mkdir()
-    self.git = {self.installed: ("main", "a" * 40), self.finalized: ("release", "b" * 40)}
+    self.git: dict[Path, tuple[str, str] | None] = {self.installed: ("main", "a" * 40), self.finalized: ("release", "b" * 40)}
     self.owner = SoftwareOperations(self.params, parked=lambda: self.parked, process=self.process,
                                     finalized=self.finalized, metadata=self.metadata, installed=self.installed,
                                     install_settings=InstallSettings(root / 'install-settings'),
