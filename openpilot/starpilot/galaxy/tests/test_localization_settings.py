@@ -23,7 +23,7 @@ def test_real_gateway_units_and_wheel_side_without_a_vehicle(tmp_path):
   def preview(index, value):
     page = gateway.page("localization", token, generation)
     assert page["title"] == "Localization" and not page["vehicleIdentified"]
-    assert [row["label"] for row in page["rows"]] == ["Use Kilometers (km/h)", "Right-Hand Drive", "Language"]
+    assert [row["label"] for row in page["rows"]] == ["Use Metric", "Right-Hand Drive", "Language"]
     return gateway.preview(page["view"], index, 0, token, generation, value=value)["intent"]
 
   assert gateway.confirm(preview(0, "On"), token, generation)

@@ -26,7 +26,7 @@ class LocalizationSettingsOwner:
   def snapshot(self):
     rows = []
     for key, label, reason in (
-      ("IsMetric", "Use Kilometers (km/h)", "On uses kilometers; Off uses miles. Saved speed-limit offsets keep their physical values."),
+      ("IsMetric", "Use Metric", "On uses kilometers; Off uses miles. Saved speed-limit offsets keep their physical values."),
       ("IsRhdDetected", "Right-Hand Drive", "Sets the initial driver-monitoring side for the next drive. Automatic wheel-side detection continues."),
     ):
       raw, readable = read_saved(self.params, key, 8)
