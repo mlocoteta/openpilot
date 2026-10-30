@@ -1,5 +1,5 @@
 from openpilot.cereal import log
-from openpilot.starpilot.aol.runtime import current_intent
+from openpilot.starpilot.aol.runtime import current_axis, current_intent
 from openpilot.starpilot.aol.wire import INTENT_SERVICE
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
@@ -32,6 +32,34 @@ class AxisAlerts:
     self.last_sound = AudibleAlert.none
     self.last_sound_at = 0
     self.native_sound = AudibleAlert.none
+    self.steering_session = None
+    self.steering_warned = False
+    self.steering_recovered_since = 0
+
+  def temporary_steering_sound(self, sm, intent, native_sound, now_ns, state_fresh):
+    if intent is None or not state_fresh:
+      self.steering_recovered_since = 0
+      return native_sound
+    if intent.producerSessionId != self.steering_session or not intent.lateralArmed or intent.pauseLateral:
+      self.steering_session = intent.producerSessionId
+      self.steering_warned = False
+      self.steering_recovered_since = 0
+    temporary = sm['selfdriveState'].alertType == 'steerTempUnavailableSilent/warning'
+    axis = current_axis(sm, now_ns=now_ns) if 'aolAxisState' in sm.logMonoTime else None
+    # Brief recovery or a competing alert must not replay the same warning.
+    # This clock affects audio only; fault events and steering gates stay owned upstream.
+    if axis is not None and axis.nativeAcknowledged and axis.lateralActive and not temporary:
+      if not self.steering_recovered_since:
+        self.steering_recovered_since = now_ns
+      elif now_ns - self.steering_recovered_since >= COALESCE_NS:
+        self.steering_warned = False
+    else:
+      self.steering_recovered_since = 0
+    if temporary and intent.lateralArmed and not intent.pauseLateral and native_sound == AudibleAlert.prompt:
+      if self.steering_warned:
+        return AudibleAlert.none
+      self.steering_warned = True
+    return native_sound
 
   def update(self, sm, native_sound: int, now_ns: int) -> int:
     intent = (current_intent(sm, car_state_ns=int(sm.logMonoTime[INTENT_SERVICE]), now_ns=now_ns)
@@ -51,6 +79,8 @@ class AxisAlerts:
       bool(intent is not None and state_fresh and sm['selfdriveState'].enabled and not intent.pauseLongitudinal), now_ns)
     extra_sound = (AudibleAlert.disengage if min(lateral, longitudinal) < 0 else
                    AudibleAlert.engage if max(lateral, longitudinal) > 0 else AudibleAlert.none)
+
+    native_sound = self.temporary_steering_sound(sm, intent, native_sound, now_ns, state_fresh)
 
     if native_sound != AudibleAlert.none:
       if native_sound != self.native_sound and native_sound in (AudibleAlert.engage, AudibleAlert.disengage):

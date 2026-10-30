@@ -27,7 +27,7 @@ class AudioFixture:
   def publish(self, armed=False, lateral=False, longitudinal=False, native=AudibleAlert.none,
               *, age_ns=0, valid=True, session='card', sequence=None, acknowledged=True, payload=None,
               intent_message=None, enabled=None, pause_longitudinal=False, pause_lateral=False,
-              active=False, state_age_ns=0, state_valid=True):
+              active=False, state_age_ns=0, state_valid=True, alert_type=''):
     self.now += 50_000_000
     self.sequence += 1
     stamp = self.now - age_ns
@@ -54,6 +54,7 @@ class AudioFixture:
     state = messaging.new_message('selfdriveState', valid=state_valid)
     state.logMonoTime = self.now - state_age_ns
     state.selfdriveState.alertSound = native
+    state.selfdriveState.alertType = alert_type
     state.selfdriveState.enabled = longitudinal if enabled is None else enabled
     state.selfdriveState.active = active
     self.sm.update_msgs(self.now / 1e9, [message.as_reader(), state.as_reader(), intent_message.as_reader()])
@@ -226,3 +227,76 @@ def test_explicit_lateral_pause_remains_known_without_standard_state(audio):
   audio.publish(active=True, enabled=True)
   assert audio.publish(active=True, enabled=True, pause_lateral=True, state_valid=False) == AudibleAlert.disengage
   assert audio.publish(active=True, enabled=True, pause_lateral=True) == AudibleAlert.none
+
+
+TEMPORARY_STEERING = 'steerTempUnavailableSilent/warning'
+
+
+def test_temporary_steering_sound_is_once_across_advisories_and_brief_recovery(audio):
+  def warning():
+    return audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING)
+  assert warning() == AudibleAlert.prompt
+  for _ in range(40):
+    assert warning() == AudibleAlert.none
+    assert audio.publish(armed=True, alert_type='belowSteerSpeed/warning') == AudibleAlert.none
+  for _ in range(3):
+    audio.publish(armed=True, lateral=True)
+  assert warning() == AudibleAlert.none
+  for _ in range(7):
+    audio.publish(armed=True, lateral=True)
+  assert warning() == AudibleAlert.prompt
+  assert audio.sm['selfdriveState'].alertType == TEMPORARY_STEERING
+  assert audio.sm['selfdriveState'].alertSound == AudibleAlert.prompt
+  assert not audio.sm['aolAxisState'].lateralActive
+
+
+def test_unacknowledged_recovery_does_not_rearm_temporary_sound(audio):
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING) == AudibleAlert.prompt
+  for _ in range(20):
+    audio.publish(armed=True, lateral=True, acknowledged=False)
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING) == AudibleAlert.none
+
+
+@pytest.mark.parametrize('sound', [AudibleAlert.warningSoft, AudibleAlert.warningImmediate, AudibleAlert.refuse, AudibleAlert.promptRepeat])
+def test_temporary_warning_never_mutes_takeover_or_other_alerts(audio, sound):
+  audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING)
+  assert audio.publish(armed=True, native=sound, alert_type='steerTempUnavailable/softDisable') == sound
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type='different/warning') == AudibleAlert.prompt
+
+
+def test_new_driver_session_and_explicit_disarm_get_a_new_warning(audio):
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING) == AudibleAlert.prompt
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING, session='new') == AudibleAlert.prompt
+  audio.publish(armed=False, session='new')
+  assert audio.publish(armed=True, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING, session='new') == AudibleAlert.prompt
+
+
+def test_temporary_warning_without_aol_armed_is_unchanged(audio):
+  for _ in range(3):
+    assert audio.publish(armed=False, native=AudibleAlert.prompt, alert_type=TEMPORARY_STEERING) == AudibleAlert.prompt
+
+
+def test_actual_soundd_callback_plays_one_complete_prompt_during_repeated_selection(audio):
+  import numpy as np
+  from openpilot.selfdrive.ui import soundd
+  daemon = soundd.Soundd.__new__(soundd.Soundd)
+  daemon.axis_alerts = AxisAlerts()
+  daemon.current_alert = daemon.current_sound = AudibleAlert.none
+  daemon.current_sound_frame = 0
+  daemon.current_volume = 1.0
+  daemon.pending_stop = False
+  daemon.loaded_sounds = {AudibleAlert.prompt: np.full(4800, .25, dtype=np.float32)}
+  daemon.pack_loader = SimpleNamespace(is_builtin=lambda _: False)
+  daemon.saved_volumes = {'PromptVolume': 100}
+  daemon.update_alert = Mock(wraps=daemon.update_alert)
+  audio.sound = daemon
+  count = 0
+  for tick in range(200):
+    temporary = tick % 5 != 4
+    audio.publish(armed=True, native=AudibleAlert.prompt if temporary else AudibleAlert.none,
+                  alert_type=TEMPORARY_STEERING if temporary else 'belowSteerSpeed/warning')
+    pcm = np.zeros((2400, 1), np.float32)
+    daemon.callback(pcm, len(pcm), None, None)
+    count += int(np.count_nonzero(pcm))
+  assert count == 4800
+  assert daemon.current_alert == AudibleAlert.none
