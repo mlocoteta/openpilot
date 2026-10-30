@@ -365,7 +365,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     from openpilot.starpilot.lateral.controller_selection import policy_for
     from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
     cp = interfaces[CAR.MAZDA_CX5_2022].get_non_essential_params(CAR.MAZDA_CX5_2022)
-    self.assertIsNone(policy_for(cp))
+    self.assertEqual(policy_for(cp), 'generic')
     self.owner.vehicle_params = lambda: cp
     self.owner.controller.vehicle_params = self.owner.vehicle_params
     self.fingerprint = cp.carFingerprint

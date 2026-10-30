@@ -76,10 +76,10 @@ def test_exact_admission_and_saved_standard_keeps_upstream_controller():
   changed = cp.as_reader().as_builder()
   changed.lateralTuning.init('pid')
   assert not policy.supported_cp(changed)
-  for vehicle in (CAR.GENESIS_GV70_1ST_GEN, CAR.GENESIS_GV70_ELECTRIFIED_2ND_GEN):
+  for vehicle, expected in ((CAR.GENESIS_GV70_1ST_GEN, 'generic'), (CAR.GENESIS_GV70_ELECTRIFIED_2ND_GEN, None)):
     sibling = interfaces[vehicle].get_non_essential_params(vehicle)
     assert not policy.supported_cp(sibling)
-    assert policy_for(sibling) is None
+    assert policy_for(sibling) == expected
 
 
 def test_stabilization_only_changes_feedforward_feedback_remains_immediate():

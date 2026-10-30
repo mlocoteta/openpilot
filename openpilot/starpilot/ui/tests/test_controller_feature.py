@@ -71,10 +71,11 @@ class TestControllerFeature(unittest.TestCase):
     self.cp.notCar = True
     self.assertIsNone(self.row())
 
-  def test_registered_stock_torque_uses_scoped_learning_without_controller_choice(self):
+  def test_registered_stock_torque_has_both_controllers_and_scoped_learning(self):
     self.cp = interfaces[HONDA.HONDA_FIT_4G].get_non_essential_params(HONDA.HONDA_FIT_4G)
     self.assertEqual(self.cp.lateralTuning.which(), 'torque')
-    self.assertIsNone(self.row())
+    self.assertEqual(self.require_row().choices, ('Stock Controller', 'StarPilot Controller'))
+    self.assertEqual(self.require_row().value, 'Stock Controller')
     learning = self.require_row('ForceAutoTuneOff')
     self.assertEqual(learning.label, 'Use StarPilot Auto Learn')
     self.assertEqual(learning.value, 'On')

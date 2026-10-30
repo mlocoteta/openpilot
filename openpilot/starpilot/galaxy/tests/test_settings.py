@@ -1121,7 +1121,7 @@ class SettingsGatewayTest(unittest.TestCase):
     from opendbc.car.mazda.values import CAR
     from openpilot.starpilot.lateral.controller_selection import policy_for
     cp = interfaces[CAR.MAZDA_CX5_2022].get_non_essential_params(CAR.MAZDA_CX5_2022)
-    self.assertIsNone(policy_for(cp))
+    self.assertEqual(policy_for(cp), 'generic')
     self.context.value = AuthorityContext(True, cp, cp.as_reader().as_builder().to_bytes())
     page = self.page('torque')
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Turn Assist')
