@@ -715,7 +715,8 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     bolt_pedal_profile = is_bolt_pedal_profile(CP) or is_bolt_pedal_profile(CP, stock_only=True)
     pt_messages = []
-    if (is_volt_gateway_profile(CP) and not CP.openpilotLongitudinalControl and
+    flashed_volt = is_volt_flashed_profile(CP)
+    if (not flashed_volt and is_volt_gateway_profile(CP) and not CP.openpilotLongitudinalControl and
         camera_acc_pedal_profile(CP) is None):
       pt_messages += [("PSCMStatus", 10), ("EBCMWheelSpdRear", 10), ("ASCMSteeringButton", 10),
                       ("AcceleratorPedal2", 10), ("ECMEngineStatus", 10), ("EBCMRegenPaddle", 40)]
@@ -725,7 +726,7 @@ class CarState(CarStateBase):
       pt_messages.append(("EBCMBrakePedalPosition", 100))
     if is_volt_one_pedal(CP):
       pt_messages.append(("EVDriveMode", float('nan')))
-    if is_volt_flashed_profile(CP):
+    if flashed_volt:
       pt_messages += [("PSCMStatus", 10), ("ESPStatus", 10), ("EBCMWheelSpdFront", 20),
                       ("EBCMWheelSpdRear", 20), ("EBCMFrictionBrakeStatus", 20), ("PSCMSteeringAngle", 100),
                       ("ECMPRDNL2", 10), ("AcceleratorPedal2", 33), ("ECMEngineStatus", 100),
