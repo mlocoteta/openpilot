@@ -13,6 +13,16 @@ def _digest(payload):
   return hashlib.sha256(payload).hexdigest()
 
 
+def _validate_primitive(value):
+  # Validation-only callers need no allocated type-key tree. This checks the
+  # same closed graph and bounds afresh; both mutation-comparison keys below
+  # still materialize every original field and exact float bit independently.
+  from openpilot.starpilot.flm.native_primitives import try_native
+  if try_native('probe_source_valid', value) is not True:
+    from openpilot.starpilot.flm.live_tracking_probe import _primitive
+    _primitive(value)
+
+
 def _plain(value, cls):
   from openpilot.starpilot.flm.live_tracking_probe import _record
 
@@ -22,7 +32,7 @@ def _plain(value, cls):
 
 def _literal_control(row):
   from openpilot.starpilot.flm.fullrate_collector import ControlEvidence
-  from openpilot.starpilot.flm.live_tracking_probe import _primitive, _trace_key
+  from openpilot.starpilot.flm.live_tracking_probe import _trace_key
 
   if type(row) is not ControlEvidence:
     raise ValueError('exact original control receipt required')
@@ -33,20 +43,20 @@ def _literal_control(row):
     if field.name == 'effect_trace':
       result[field.name] = _literal_trace(value)
     else:
-      _primitive(value)
+      _validate_primitive(value)
       result[field.name] = value
   return result
 
 
 def _literal_trace(value):
-  from openpilot.starpilot.flm.live_tracking_probe import _primitive, _trace_key
+  from openpilot.starpilot.flm.live_tracking_probe import _trace_key
 
   _trace_key(value)
   if value is None:
     return None
   trace = {item.name: getattr(value, item.name) for item in fields(type(value))}
   trace['envelope'] = {item.name: getattr(value.envelope, item.name) for item in fields(type(value.envelope))}
-  _primitive(trace)
+  _validate_primitive(trace)
   return trace
 
 
@@ -126,7 +136,7 @@ def probe_replay_snapshot(replay, prefix_controls, *, endpoint_output=None):
     stored = []
     for frame in frames:
       row = {field.name: _literal_trace(frame.effect_trace) if field.name == 'effect_trace' else getattr(frame, field.name) for field in fields(ReplayFrame)}
-      _primitive(row)
+      _validate_primitive(row)
       stored.append(row)
     # The original comparator's unknown fallback may deepcopy. Only a fully
     # closed literal frame graph may reach it, including all tuning fields.
@@ -150,7 +160,7 @@ def probe_replay_snapshot(replay, prefix_controls, *, endpoint_output=None):
       if type(event) is not Emission or type(event.witness) is not TorqueProjection:
         raise ValueError('exact actual native prefix event required')
       row = {field.name: _projection_literal(event.witness) if field.name == 'witness' else getattr(event, field.name) for field in fields(Emission)}
-      _primitive(row)
+      _validate_primitive(row)
       native.append(row)
     if not events or events[-1].control_ns != last:
       raise ValueError('actual endpoint native chronology missing')
@@ -229,7 +239,7 @@ def make_probe_job(
   from openpilot.starpilot.flm.fullrate_collector import AppliedEvidence
   from openpilot.starpilot.flm.live_trial_contract import LiveTrialBinding, full_coordinates
   from openpilot.starpilot.flm.live_tracking_response import witness_to_dict
-  from openpilot.starpilot.flm.live_tracking_probe import _primitive, _projection_literal
+  from openpilot.starpilot.flm.live_tracking_probe import _projection_literal
   from openpilot.starpilot.flm.runtime_adapter_registry import SourceState
   from opendbc.car.steering_projection import TorqueProjection
 
@@ -256,7 +266,7 @@ def make_probe_job(
   applied = {
     field.name: _projection_literal(output.projection) if field.name == 'projection' else getattr(output, field.name) for field in fields(AppliedEvidence)
   }
-  _primitive(applied)
+  _validate_primitive(applied)
   payload = {
     'version': VERSION,
     'replay': replay_snapshot,
@@ -274,7 +284,7 @@ def make_probe_job(
     'names': names,
     'prefix_controls': tuple(_literal_control(row) for row in prefix_controls),
   }
-  _primitive(dict(payload, replay=None))
+  _validate_primitive(dict(payload, replay=None))
   if _payload_only:
     return payload
   packed = pack_primitive_snapshot(payload)
@@ -285,7 +295,6 @@ def make_probe_job(
 
 def decode_probe_job(job):
   from openpilot.starpilot.flm.controller_replay import unpack_primitive_snapshot
-  from openpilot.starpilot.flm.live_tracking_probe import _primitive
 
   if (
     type(job) is not dict
@@ -306,7 +315,7 @@ def decode_probe_job(job):
   if batch is not None:
     if type(batch) is not tuple or not 1 <= len(batch) <= 4:
       raise ValueError('bounded genuine numerical endpoint batch required')
-    _primitive(dict(payload, batch=None, replay=None))
+    _validate_primitive(dict(payload, batch=None, replay=None))
     rows = batch
   else:
     rows = (payload,)
@@ -319,7 +328,7 @@ def decode_probe_job(job):
       or not 0 < len(row['replay']) <= MAX_PACKED
     ):
       raise ValueError('bounded literal replay bytes required')
-    _primitive(dict(row, replay=None))
+    _validate_primitive(dict(row, replay=None))
   return payload
 
 
@@ -348,7 +357,7 @@ def _pack_probe_batch(rows, *, queued_ns):
         type(row.get('replay')) is not bytes or not 0 < len(row['replay']) <= MAX_PACKED or
         type(row.get('prefix_controls')) is not tuple or not row['prefix_controls']):
       raise ValueError('single genuine endpoint inputs required')
-    _primitive(dict(row, replay=None))
+    _validate_primitive(dict(row, replay=None))
   common = ('binding', 'accepted_full30', 'anchor', 'group', 'names', 'archived_clock')
   first = rows[0]
   previous = previous_apply = 0

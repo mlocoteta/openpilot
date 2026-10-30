@@ -565,6 +565,25 @@ class LiveTrackingActor:
       expected = original_probe_context(selected, accepted, self.certificate.binding, source, group=group, names=names, now_ns=now_ns)
 
       def prepare_probe():
+        import json
+        import os
+        import resource
+        import time
+
+        os.nice(10)
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
+        limit = min([20] + [value for value in (soft, hard) if value >= 0])
+        resource.setrlimit(resource.RLIMIT_CPU, (limit, hard))
+        memory_soft, memory_hard = resource.getrlimit(resource.RLIMIT_AS)
+        memory_limit = min([2 * 1024 * 1024 * 1024] + [value for value in (memory_soft, memory_hard) if value >= 0])
+        resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_hard))
+        from openpilot.starpilot.flm.learner_cpu import configure_cpu
+        configure_cpu(numerical=True)
+        from openpilot.starpilot.flm.native_primitives import enable_fit_worker
+        enable_fit_worker()
+        from openpilot.starpilot.flm.live_tracking_probe_worker import evaluate_job, MAX_OUTPUT
+
         jobs = []
         for endpoint, emission, original_prefix in selected:
           snapshot = probe_replay_snapshot(collector.adapter.replay, original_prefix, endpoint_output=emission)
@@ -589,20 +608,6 @@ class LiveTrackingActor:
         # This existing child already owns a frozen original source snapshot.
         # Reconstruct/validate the same numerical job HERE instead of paying a
         # second Python startup and streaming it through another pipe.
-        import json
-        import os
-        import resource
-        import time
-
-        os.nice(10)
-        from openpilot.starpilot.flm.live_tracking_probe_worker import evaluate_job, MAX_OUTPUT
-
-        soft, hard = resource.getrlimit(resource.RLIMIT_CPU)
-        limit = min([20] + [value for value in (soft, hard) if value >= 0])
-        resource.setrlimit(resource.RLIMIT_CPU, (limit, hard))
-        memory_soft, memory_hard = resource.getrlimit(resource.RLIMIT_AS)
-        memory_limit = min([2 * 1024 * 1024 * 1024] + [value for value in (memory_soft, memory_hard) if value >= 0])
-        resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_hard))
         prepared = prepare_probe_payloads(tuple(jobs), queued_ns=now_ns, expected=expected)
         started_ns = time.monotonic_ns()
         if not now_ns <= started_ns <= now_ns + 2_000_000_000:

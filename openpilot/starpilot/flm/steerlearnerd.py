@@ -1021,6 +1021,8 @@ def main():
     if hasattr(os, 'sched_setscheduler'):
       os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
     os.setpriority(os.PRIO_PROCESS, 0, 0)
+    from openpilot.starpilot.flm.learner_cpu import configure_cpu
+    configure_cpu()
   except OSError:
     # An optional estimator must not inherit realtime scheduling on failure.
     return
