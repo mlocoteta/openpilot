@@ -62,6 +62,21 @@ class TestC4AudioToggle(unittest.TestCase):
     self.panel = toggles.TogglesLayoutMici()
     self.audio = next(item for key, item in self.panel._refresh_toggles if key == "RecordAudio")
 
+  def test_rhd_control_saves_shared_param_and_rejects_open_preview(self):
+    from openpilot.starpilot.galaxy.localization_settings import LocalizationSettingsOwner
+    self.panel._localization = LocalizationSettingsOwner(self.params, lambda: True, lambda: True)
+    for desired in (True, False):
+      self.panel._rhd_source = self.panel._localization.snapshot().rows[1].source
+      self.panel._on_rhd(desired)
+      self.assertEqual(self.params.get_bool('IsRhdDetected'), desired)
+      self.assertTrue(self.params.get_bool('OnroadCycleRequested'))
+      self.assertEqual(self.panel._rhd_toggle._checked, desired)
+    self.params.put_bool('OnroadCycleRequested', False, block=True)
+    self.params.put_bool('IsDriverViewEnabled', True, block=True)
+    self.panel._on_rhd(True)
+    self.assertFalse(self.params.get_bool('IsRhdDetected'))
+    self.assertFalse(self.params.get_bool('OnroadCycleRequested'))
+
   def test_release_queues_audio_before_restart_without_blocking_writes(self):
     with patch.object(self.params, "put_bool") as save:
       self.audio._handle_mouse_release(MousePos(0, 0))

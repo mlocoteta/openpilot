@@ -1829,7 +1829,6 @@ class StarMainLayout(MainLayout):
     device_scroller._items.insert(1, device_scroller._items.pop())
     toggle_items = self._large_panels[Destination.TOGGLES]._scroller._items
     toggle_items.insert(2, text_item("Safe Mode", "N/A"))
-    toggle_items.insert(7, text_item("Right Hand Driving", "N/A"))
     from openpilot.common.hardware import HARDWARE
     from openpilot.starpilot.ui.starpilot_settings_adapter_large import StarPilotSettingsAdapterLarge
     for destination, owner in self._large_panels.items():
@@ -1941,7 +1940,7 @@ class StarMainLayout(MainLayout):
       return False
     param = {ToggleKey.ENABLED: "OpenpilotEnabledToggle", ToggleKey.EXPERIMENTAL: "ExperimentalMode",
              ToggleKey.DISENGAGE_ACCELERATOR: "DisengageOnAccelerator", ToggleKey.LANE_DEPARTURE: "IsLdwEnabled",
-             ToggleKey.ALWAYS_ON_DM: "AlwaysOnDM", ToggleKey.RECORD_FRONT: "RecordFront",
+             ToggleKey.ALWAYS_ON_DM: "AlwaysOnDM", ToggleKey.RIGHT_HAND_DRIVING: "IsRhdDetected", ToggleKey.RECORD_FRONT: "RecordFront",
              ToggleKey.RECORD_AUDIO: "RecordAudio", ToggleKey.METRIC: "IsMetric"}.get(request.key)
     return bool(param is not None and owner.request_toggle(param, request.value))
 

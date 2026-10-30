@@ -222,7 +222,8 @@ class NativeSettingsTests(unittest.TestCase):
     self.assertIs(layout._large_panels[Destination.SOFTWARE].panel, self.software)
     self.assertIs(layout._large_panels[Destination.TOGGLES].panel, toggles)
     self.assertEqual(toggles._scroller._items[2].title, 'Safe Mode')
-    self.assertEqual(toggles._scroller._items[7].title, 'Right Hand Driving')
+    self.assertFalse(any(item.title == 'Right Hand Driving' for item in toggles._scroller._items),
+                     'RHD belongs to the native toggle owner, not an inserted N/A placeholder')
     self.assertEqual(self.device._scroller._items[0].title, 'Galaxy')
     self.assertNotIn(self.device._power_off_btn, self.device._scroller._items)
     self.assertEqual(session.system_power_action, layout._system_power_action)

@@ -822,9 +822,12 @@ class RuntimeSnapshotAdapter:
     toggles = TogglesState(enabled=_flag(params, "OpenpilotEnabledToggle"),
                            experimental=experimental, disengage_accelerator=_flag(params, "DisengageOnAccelerator"),
                            lane_departure=_flag(params, "IsLdwEnabled"),
-                           always_on_dm=_flag(params, "AlwaysOnDM"), record_front=_flag(params, "RecordFront"),
+                           always_on_dm=_flag(params, "AlwaysOnDM"), right_hand_driving=_flag(params, "IsRhdDetected"),
+                           record_front=_flag(params, "RecordFront"),
                            record_audio=_flag(params, "RecordAudio"), metric=bool(ui.is_metric), personality=persona,
-                           unavailable=frozenset((ToggleKey.SAFE_MODE, ToggleKey.RIGHT_HAND_DRIVING)))
+                           unavailable=frozenset((ToggleKey.SAFE_MODE,)) | (
+                             frozenset() if confirmed_offroad and not _flag(params, "IsDriverViewEnabled") else
+                             frozenset((ToggleKey.RIGHT_HAND_DRIVING,))))
     snapshot = ShellSnapshot(mode, home, settings, onroad, device_state, software, toggles, selected)
     if mode == ShellMode.ONROAD:
       self._onroad_ancillary = (now_ns, ancillary_key, snapshot)
