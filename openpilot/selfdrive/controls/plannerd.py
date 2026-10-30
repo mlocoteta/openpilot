@@ -201,7 +201,7 @@ def conditional_handoff_for_frame(host: ConditionalPlannerHost | None, sm, CP, n
 
 def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: int, *, now_boot_ns: int | None = None, sample_skew_ns: int = 0) -> bool:
   def unavailable():
-    owner = getattr(host, 'ford_stopped_lead_release', None)
+    owner = getattr(host, 'stopped_lead_release', None)
     if owner is not None:
       owner.reset()
     return False
@@ -241,12 +241,12 @@ def apply_conditional_stop_hold(host, planner, sm, CP, now_ns: int, drive_id: in
       not any(lead.present for lead in (sm['radarState'].leadOne, sm['radarState'].leadTwo))):
     host.mode.projector.stop_detector.reset()
     return False
-  from openpilot.starpilot.car.ford.stop_release import owner_for
-  owner = getattr(host, 'ford_stopped_lead_release', None)
+  from openpilot.starpilot.conditional_mode.stop_release import owner_for
+  owner = getattr(host, 'stopped_lead_release', None)
   if owner is None:
     owner = owner_for(CP)
     if owner is not None:
-      host.ford_stopped_lead_release = owner
+      host.stopped_lead_release = owner
   if owner is not None and owner.sample(sm, CP, planner, host.mode.projector.stop_detector, now_ns=now_ns, drive_id=drive_id):
     detector = host.mode.projector.stop_detector
     detector.committed = detector.standstill_committed = False
