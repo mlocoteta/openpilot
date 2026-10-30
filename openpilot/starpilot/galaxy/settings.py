@@ -30,7 +30,7 @@ from openpilot.starpilot.ui.feature_settings_state import (
   FeatureRow, FeatureSettingsRequest, FEATURE_CONFIRM_ACTIONS, is_long_confirm_action, row_change, row_default,
 )
 from openpilot.starpilot.saved_source import read_saved
-from openpilot.starpilot.galaxy.developer_settings import DRIVER_MONITORING_RESET, DeveloperSettingsOwner
+from openpilot.starpilot.galaxy.developer_settings import CALIBRATION_RESET, DRIVER_MONITORING_RESET, DeveloperSettingsOwner
 from openpilot.starpilot.speed_limits.vision_gate import diagnostic_choice_enabled
 from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, host_parked
 from openpilot.starpilot.ui.pip_owner import EDITOR as PIP_EDITOR, FORMAT_PREFIX as PIP_FORMAT_PREFIX, RESET as PIP_RESET, PiPOwner, validated_editor_draft
@@ -45,7 +45,7 @@ PAGES = frozenset(("hub", "localization", "developer", "vehicle", "slc", "lane",
                    "conditional", "conditional/cem", "conditional/ccm",
                    *(f"{name}/{category}" for name in ("traffic", "aggressive", "standard", "relaxed")
                      for category in ("acceleration", "braking", "following"))))
-CONFIRM_ACTIONS = FEATURE_CONFIRM_ACTIONS | {DRIVER_MONITORING_RESET}
+CONFIRM_ACTIONS = FEATURE_CONFIRM_ACTIONS | {DRIVER_MONITORING_RESET, CALIBRATION_RESET}
 MAX_VIEWS = 64
 MAX_INTENTS = 64
 TTL = 60.0
@@ -431,6 +431,8 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
     return f"Save {row.label.lower()} as {value}?"
   if key == SENTRY_RESET:
     return "Replace invalid saved motion settings with Off and the default sensitivity and warning time?"
+  if key == CALIBRATION_RESET:
+    return "Reset camera and steering calibration? Automatic steering learning will be invalidated and the device will recalibrate on the next drive."
   if key == DRIVER_MONITORING_RESET:
     return "Clear saved driver monitoring wheel-side detection? Automatic detection will run again on the next drive."
   if key.startswith("sentry:"):
