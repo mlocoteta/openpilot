@@ -54,7 +54,10 @@ def test_factory_exposes_only_discovered_four_byte_buttons(tmp_path, identity, s
   rows = {r.key: r for r in feature(Params(str(tmp_path)), cp).rows()}
   assert {'wheel:LKASButtonControl', 'wheel:DistanceButtonControl', 'wheel:LongDistanceButtonControl',
           'wheel:VeryLongDistanceButtonControl'} <= rows.keys()
-  assert not {'wheel:MainCruiseButtonControl', 'wheel:CancelButtonControl'} & rows.keys()
+  assert 'wheel:CancelButtonControl' not in rows
+  main = rows['wheel:MainCruiseButtonControl']
+  assert main.value == 'Factory cruise / AOL' and not main.available and not main.choices
+  assert not feature(Params(str(tmp_path)), cp).choices('MainCruiseButtonControl')
   if not stock:
     assert 'Cycle personality' in rows['wheel:DistanceButtonControl'].choices
 
