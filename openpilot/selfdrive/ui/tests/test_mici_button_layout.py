@@ -42,6 +42,7 @@ def drawn(monkeypatch):
   lambda: button.BigButton("long branch name that needs to scroll", "installed", scroll=True),
   lambda: button.BigButton("network", "connected", SimpleNamespace(width=76, height=56)),
   lambda: button.BigToggle("enable controls", "Off"),
+  lambda: button.BigToggle("disengage on accelerator"),
   lambda: button.BigMultiToggle("controller", ["Default", "Custom"]),
   lambda: button.GreyBigButton("saved settings", "unavailable while driving"),
   lambda: button.GreyBigButton("", "A full explanation that must retain enough room for several lines of readable text."),

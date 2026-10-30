@@ -40,6 +40,8 @@ class TogglesLayoutMici(NavScroller):
                                                    "Set speed is a maximum, not a target.\n" +
                                                    "These are alpha features. Expect mistakes.\n" +
                                                    "The path colors show acceleration and braking.")
+    disengage_on_accelerator = BigParamControl("disengage on accelerator", "DisengageOnAccelerator",
+                                              description="When enabled, pressing the accelerator pedal will disengage openpilot.")
     self._initial_cruise_speed = InitialCruiseSpeedButton()
     self._initial_cruise_speed.set_visible(lambda: ui_state.CP is not None and ui_state.has_longitudinal_control and not ui_state.CP.pcmCruise)
     is_metric_toggle = BigToggle("use metric units", initial_state=ui_state.params.get_bool("IsMetric"),
@@ -64,6 +66,7 @@ class TogglesLayoutMici(NavScroller):
       self._personality_toggle,
       self._safe_mode_btn,
       self._experimental_btn,
+      disengage_on_accelerator,
       self._initial_cruise_speed,
       is_metric_toggle,
       ldw_toggle,
@@ -78,6 +81,7 @@ class TogglesLayoutMici(NavScroller):
     self._refresh_toggles = (
       ("SafeMode", self._safe_mode_btn),
       ("ExperimentalMode", self._experimental_btn),
+      ("DisengageOnAccelerator", disengage_on_accelerator),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),

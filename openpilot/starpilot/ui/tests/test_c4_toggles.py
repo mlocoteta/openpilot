@@ -45,7 +45,7 @@ class TestC4SafeMode(unittest.TestCase):
       panel._personality_toggle.set_value.assert_called_once_with("relaxed")
 
 
-class TestC4AudioToggle(unittest.TestCase):
+class TestC4Toggles(unittest.TestCase):
   def setUp(self):
     directory = tempfile.TemporaryDirectory()
     self.addCleanup(directory.cleanup)
@@ -61,6 +61,29 @@ class TestC4AudioToggle(unittest.TestCase):
     self.enterContext(patch.object(gui_app, "texture", return_value=NS(width=64, height=64)))
     self.panel = toggles.TogglesLayoutMici()
     self.audio = next(item for key, item in self.panel._refresh_toggles if key == "RecordAudio")
+
+  def test_accelerator_toggle_saves_shared_param_without_restart(self):
+    accelerator = dict(self.panel._refresh_toggles)["DisengageOnAccelerator"]
+    self.assertIn(accelerator, self.panel._scroller.items)
+    self.assertFalse(accelerator._checked)
+    for desired in (True, False):
+      with patch.object(self.params, "put_bool", wraps=self.params.put_bool) as save:
+        accelerator._handle_mouse_release(MousePos(0, 0))
+      save.assert_called_once_with("DisengageOnAccelerator", desired, block=True)
+      self.assertEqual(self.params.get_bool("DisengageOnAccelerator"), desired)
+      self.assertEqual(accelerator._checked, desired)
+    self.assertFalse(self.params.get_bool("OnroadCycleRequested"))
+
+  def test_accelerator_toggle_loads_and_refreshes_saved_value(self):
+    self.params.put_bool("DisengageOnAccelerator", True, block=True)
+    panel = toggles.TogglesLayoutMici()
+    accelerator = dict(panel._refresh_toggles)["DisengageOnAccelerator"]
+    self.assertTrue(accelerator._checked)
+    self.params.put_bool("DisengageOnAccelerator", False, block=True)
+    panel._update_toggles()
+    self.assertFalse(accelerator._checked)
+    self.ui.engaged = True
+    self.assertTrue(accelerator.enabled)
 
   def test_rhd_control_saves_shared_param_and_rejects_open_preview(self):
     from openpilot.starpilot.galaxy.localization_settings import LocalizationSettingsOwner
