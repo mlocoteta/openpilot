@@ -49,6 +49,11 @@ def test_hkg_default_toggle_and_explicit_mapping_are_displayed_truthfully(tmp_pa
   assert rows['wheel:MainCruiseButtonControl'].value == 'Off'
   assert params.get('LKASButtonControl') == 9
   assert params.get('MainCruiseButtonControl') == 0
+  params.put('LKASButtonControl', 8, block=True)
+  rows = {row.key: row for row in wheel.rows()}
+  assert rows['wheel:LKASButtonControl'].value == 'Bookmark'
+  assert rows['wheel:MainCruiseButtonControl'].value == 'Toggle AOL'
+  assert params.get('LKASButtonControl') == 8
 
 
 def test_mach_e_fixed_lkas_role_matches_actual_intent_and_cannot_claim_off(tmp_path):
@@ -81,3 +86,41 @@ def test_ioniq6_actual_settings_owner_exposes_both_rows(tmp_path):
   rows = {row.key: row for row in page.rows}
   for key in ('LKASButtonControl', 'MainCruiseButtonControl'):
     assert 'Toggle AOL' in rows['wheel:' + key].choices
+
+
+@pytest.mark.parametrize('brand', ['chrysler', 'mazda', 'nissan', 'volkswagen'])
+def test_factory_main_aol_role_is_visible_without_inventing_a_button_mapping(tmp_path, brand):
+  from openpilot.starpilot.aol.vehicle import policy_for
+
+  candidates = (interface.get_non_essential_params(identity) for identity, interface in interfaces.items()
+                if interface.__module__.split('.')[-2] == brand)
+  cp = next((candidate for candidate in candidates if policy_for(candidate).runtime_supported), None)
+  assert cp is not None, brand
+  params = Params(str(tmp_path))
+  wheel = WheelFeature(owner(params, cp))
+  rows = {row.key: row for row in wheel.rows()}
+  main = rows['wheel:MainCruiseButtonControl']
+  assert main.value == 'Factory cruise / AOL'
+  assert not main.available and not main.choices
+  assert params.get('MainCruiseButtonControl') is None
+  assert not wheel.choices('MainCruiseButtonControl')
+
+
+def test_mazda_cancel_assignment_reaches_wheel_publisher_without_missing_import(tmp_path):
+  from opendbc.car.mazda.values import CAR as MAZDA
+  from openpilot.starpilot.controllers.wheel_actions import WheelPublisher, button_reported, capture, eligible
+
+  cp = interfaces[MAZDA.MAZDA_CX5_2022].get_non_essential_params(MAZDA.MAZDA_CX5_2022)
+  cp.alternativeExperience = 32
+  params = Params(str(tmp_path))
+  params.put('CancelButtonControl', 8, block=True)
+  assert eligible(cp)
+  assert button_reported(cp, 'CancelButtonControl')
+  publisher = WheelPublisher(params)
+  state = structs.CarState(canValid=True, gearShifter='drive')
+  publisher.observe(params, cp, state, now_ns=10_000_000, drive_id=1)
+  state.buttonEvents = [structs.CarState.ButtonEvent(type='cancel', pressed=True)]
+  publisher.observe(params, cp, state, now_ns=20_000_000, drive_id=1)
+  state.buttonEvents = [structs.CarState.ButtonEvent(type='cancel', pressed=False)]
+  commands = publisher.observe(params, cp, state, now_ns=30_000_000, drive_id=1)
+  assert commands == (('CancelButtonControl', 8),), (capture(params), publisher.mapping, publisher.cancel_tracker.__dict__, publisher.axis_keys)
