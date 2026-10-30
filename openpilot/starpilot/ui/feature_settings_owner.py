@@ -82,7 +82,7 @@ BOOL_DEFAULTS = {
   "SubaruStopStartOff": False,
   "SubaruSNG": False,
   "SubaruRedneckCruise": False,
-  "ReverseCruise": False, "ToyotaAutoHold": False, "JeepBrakeHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
+  "ReverseCruise": False, "ToyotaAutoHold": False, "SNGHack": False, "JeepBrakeHold": False, "VoltSNG": False, "GMAutoHold": False, "VoltOnePedalMode": False,
   "RemapCancelToDistance": False, "LongPitch": True, "DisableOpenpilotLongitudinal": False,
   "SpeedLimitController": False, "ShowSpeedLimits": True,
   "SLCConfirmation": False,
@@ -426,6 +426,25 @@ class FeatureSettingsOwner:
               self.authority("vehicle") and self.authority("parked_preferences") and request.expected in (None, b"0", b"1"))
     return commit_exact(self.params, key="JeepBrakeHold", max_bytes=128, raw=b"1" if request.value == "On" else b"0",
                         expected=request.expected, authorized=authorized, temp_prefix=".jeep-hold-").verified
+
+  def _toyota_sng_capability(self):
+    from opendbc.car.toyota.sng import eligible
+    cp = self.vehicle_params()
+    if not eligible(cp):
+      return None
+    return (str(cp.carFingerprint), int(cp.flags), bool(cp.autoResumeSng),
+            tuple((str(config.safetyModel), int(config.safetyParam)) for config in cp.safetyConfigs))
+
+  def _apply_toyota_sng(self, request):
+    if not request.confirmation or request.value not in ("Off", "On") or request.dependencies:
+      return False
+    def authorized():
+      return (self.authority("parked_preferences") and self.authority("vehicle") and
+              request.capability is not None and request.capability == self._toyota_sng_capability() and
+              request.vehicle_fingerprint == self.vehicle_fingerprint() and request.expected in (None, b"0", b"1"))
+    return commit_exact(self.params, key="SNGHack", max_bytes=8, expected=request.expected,
+                        raw=b"1" if request.value == "On" else b"0", authorized=authorized,
+                        temp_prefix=".toyota-sng-").verified
 
   def _auto_hold_capability(self) -> tuple | None:
     from opendbc.car.toyota.interface import toyota_auto_hold_supported
@@ -820,7 +839,7 @@ class FeatureSettingsOwner:
               FeatureRow("", "Always On Lateral", "Keep steering assistance active independently of cruise control", page=FeaturePage.AOL, available=True),
               FeatureRow("", "Wheel Controls", "Assign steering-wheel buttons and cruise behavior", page=FeaturePage.WHEEL, available=True)]
       if (self._long_pitch_capability() is not None or self._bolt_disable_capability() is not None or
-          self._auto_hold_capability() is not None or self._jeep_hold_capability() is not None or
+          self._auto_hold_capability() is not None or self._toyota_sng_capability() is not None or self._jeep_hold_capability() is not None or
           self._toyota_radar_capability() is not None or self._pedal_setup_capability() is not None or
           self.subaru_smoothing.capability() is not None or
           self._subaru_avh_capability() is not None or self._subaru_startup_capability() is not None or self._subaru_sng_capability() is not None or
@@ -845,6 +864,12 @@ class FeatureSettingsOwner:
                            "Hold the brake for over one second at a complete stop with cruise main on and cruise disengaged. " +
                            "Holds until you press the gas; normal cruise stop-and-go is unchanged. Applies after the next startup.")
       rows.extend([replace(row, available=row.available and self._readable("ToyotaAutoHold"), capability=capability)] if capability is not None else [])
+      sng_capability = self._toyota_sng_capability()
+      if sng_capability is not None:
+        row = self._bool_row("SNGHack", "Stop-and-Go Hack",
+                             configurable and parked and self.authority("vehicle") and self.authority("parked_preferences"),
+                             "Automatic resume for Toyota/Lexus vehicles without factory stop-and-go. Applies after the next startup.")
+        rows.append(replace(row, available=row.available and self._readable("SNGHack"), capability=sng_capability))
       radar_capability = self._toyota_radar_capability()
       if radar_capability is not None:
         from openpilot.starpilot.car.toyota.radar_preferences import CHOICES, KEY
@@ -1380,6 +1405,8 @@ class FeatureSettingsOwner:
       return self._apply_jeep_hold(request)
     if key == "AlphaLongitudinalEnabled":
       return self._apply_alpha_long(request)
+    if key == "SNGHack":
+      return self._apply_toyota_sng(request)
     if key == "ToyotaAutoHold":
       return self._apply_auto_hold(request)
     if key == "ToyotaRadarMode":

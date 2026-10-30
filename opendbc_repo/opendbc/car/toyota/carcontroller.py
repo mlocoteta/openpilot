@@ -85,6 +85,7 @@ class CarController(CarControllerBase):
     self.last_angle = 0
     self.alert_active = False
     self.standstill_req = False
+    self.sng_hack = False
     self.last_standstill = False
     self.prius_longitudinal = prius_longitudinal.enabled(CP)
     self.sdsu_hybrid = (eps8_sdsu.configured(CP) or legacy_sdsu.configured(CP)) and bool(CP.flags & ToyotaFlags.HYBRID)
@@ -359,6 +360,9 @@ class CarController(CarControllerBase):
 
         if not should_resume and CS.out.cruiseState.standstill:
           self.standstill_req = True
+
+      if self.sng_hack and long_active:
+        self.standstill_req = False
 
       if (bypass_long or rav4h_long or pedal_owner or advert_long or original_prius_long) and (not filter_allowed or not long_active and CS.out.standstill):
         self.standstill_req = True
