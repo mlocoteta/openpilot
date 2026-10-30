@@ -363,6 +363,8 @@ class CarController(CarControllerBase):
                   not CS.out.steerFaultTemporary and not CS.out.steerFaultPermanent and not CS.out.accFaulted and
                   not CS.out.doorOpen and not CS.out.seatbeltUnlatched and CS.out.gearShifter in
                   (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport, structs.CarState.GearShifter.low))
+    # Native standby-display proof starts with an accepted inactive steering packet.
+    neutral_ui = neutral_ui and any(address == 0x3D6 for address, _, _ in can_sends)
     if not aol_owned_ui or ui_enabled or neutral_ui:
       send_ui = (self.main_on_last != main_on) or (self.lkas_enabled_last != ui_enabled) or (self.steer_alert_last != steer_alert)
       # send lkas ui msg at 1Hz or if ui state changes

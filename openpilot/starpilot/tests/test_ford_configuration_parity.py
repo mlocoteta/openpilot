@@ -148,3 +148,27 @@ def test_cancel_retains_lateral_with_native_first_feedback_while_gas_held(ford_j
   monkeypatch.ford_native_10hz = True
   monkeypatch.ford_cancel_gas = True
   run_actual_producer(ford_joined, monkeypatch, scenario='cancel-native-cadence')
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[6], FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [False])
+@pytest.mark.parametrize('topology', ['automatic'])
+def test_neutral_display_waits_for_same_batch_inactive_steering(ford_joined, monkeypatch):
+  controller = ford_joined.host.CI.CC
+  update = controller.update
+  checked = [0]
+
+  def check_batch(control, state, now_nanos):
+    result = update(control, state, now_nanos)
+    addresses = {address for address, _, _ in result[1]}
+    if not control.latActive and addresses & {0x3D8, 0x18A}:
+      assert 0x3D6 in addresses, 'Standby display preceded inactive steering proof'
+      steering = next(data for address, data, _ in result[1] if address == 0x3D6)
+      assert ((steering[0] >> 4) & 7) == 0
+      checked[0] += 1
+    return result
+
+  monkeypatch.setattr(controller, 'update', check_batch)
+  run_actual_producer(ford_joined, monkeypatch, scenario='configuration-parity')
+  assert checked[0] > 0
