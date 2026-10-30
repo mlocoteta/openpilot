@@ -1107,7 +1107,8 @@ class SelfdriveD:
       # AOL already withdrew steering while ordinary cruise was disabled.
       # Select the existing fault's takeover warning without starting LONG or
       # changing its event classification, threshold, or output decision.
-      alerts.extend(self.events.create_alerts([ET.SOFT_DISABLE], [self.CP, CS, self.sm, self.is_metric, 0, pers]))
+      alerts.extend(alert for alert in self.events.create_alerts(
+        [ET.SOFT_DISABLE], [self.CP, CS, self.sm, self.is_metric, 0, pers]) if alert.alert_type != 'doorOpen/softDisable')
     alerts.extend(alert for alert in getattr(self, 'tesla_stock_alerts', [])
                   if alert.event_type in self.state_machine.current_alert_types)
     now_ns = time.monotonic_ns()
@@ -2138,8 +2139,10 @@ class SelfdriveD:
     if (self.aol_replay and source_current and not was_enabled and not self.enabled and
         previous.lateral_active and previous.native_acknowledged and not self.aol_axis_decision.lateral_active and
         self.aol_fault_reason in ('critical', 'availabilityPause') and not self.aol_authority_lost and
-        intent is not None and intent.allowedLatch and self.events.contains(ET.SOFT_DISABLE) and
+        intent is not None and intent.allowedLatch and
+        any(event.softDisable and event.name != EventName.doorOpen for event in self.events.to_msg()) and
         not self.events.contains(ET.IMMEDIATE_DISABLE)):
+      # Door-open pauses independent steering quietly; ordinary LONG keeps its alert.
       self.aol_soft_takeover_alert = True
     if (self.aol_replay and intent is not None and intent.lateralArmed and
         CS.steerFaultTemporary and not CS.steerFaultPermanent and not CS.steeringPressed):
