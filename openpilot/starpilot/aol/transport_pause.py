@@ -13,7 +13,6 @@ def cp_identity(cp):
 
 
 def _configured_transport_native(sm, cp, session, now_ns, native=None, *, require_longitudinal=True, allow_restricted_lateral=False):
-  """Validate the exact live native configuration and every Panda."""
   try:
     validated_here = native is None
     native = native or current_native(sm, cp, now_ns=now_ns, axis_session_id=session)
@@ -52,7 +51,6 @@ def _configured_transport_native(sm, cp, session, now_ns, native=None, *, requir
 
 
 def _healthy_transport_native(sm, cp, cs, session, now_ns, native=None, *, require_longitudinal=True):
-  """Require both current vehicle health and the exact live native configuration."""
   try:
     if not cs.canValid or cs.canTimeout or cs.steerFaultTemporary or cs.steerFaultPermanent:
       return None
@@ -79,13 +77,11 @@ def _newer_combined_intent_native(sm, cp, cs, axis, now_ns):
 
 
 def independent_lateral_health(sm, cp, cs, session, now_ns):
-  """Structural health for retaining LAT intent; never grant either output axis."""
   native = _healthy_transport_native(sm, cp, cs, session, now_ns, require_longitudinal=False)
   return native if native is not None and native.requestedLateral and native.lateralAllowed else None
 
 
 def healthy_transport(sm, cp, cs, session, now_ns, native=None):
-  """Require the live, exact native configuration, including every Panda."""
   return _healthy_transport_native(sm, cp, cs, session, now_ns, native) is not None
 
 
@@ -102,7 +98,6 @@ HOST_SOURCE_AVAILABILITY_EVENTS = (*AVAILABILITY_EVENTS, log.OnroadEvent.EventNa
 
 
 def host_source_availability_only(events):
-  """Closed host SOFT set for qualified inactive source-zero intent only."""
   faults = [event for event in events if event.immediateDisable or event.softDisable]
   return bool(faults and not any(event.userDisable for event in events) and
     all(event.name in HOST_SOURCE_AVAILABILITY_EVENTS and event.softDisable and
@@ -110,7 +105,6 @@ def host_source_availability_only(events):
 
 
 def stock_lateral_user_event(cp):
-  """Current ordinary-owner USER event for an established stock LAT role."""
   if not cp.pcmCruise:
     return None
   if cp.brand == 'honda':
@@ -225,7 +219,6 @@ class TransportPause:
 
   def observe(self, *, cp, session, sm, cs, native, now_ns, companion, previous_intent,
               intent, expired_healthy_source, previously_active, hard_fault, model_ready, user_disable):
-    """Return (temporary inhibit, hard upgrade); require a prior accepted pair."""
     # Per observation; adjacent producer only.
     self.observed_native = None
     context_current = bool(cp_identity(cp) == self.cp and session == self.session and model_ready and companion is not None)
@@ -308,7 +301,6 @@ class TransportPauseFeedback:
     self.healthy_inventory = None
 
   def _first_ford_gas_lateral_grant(self, sm, cp, cs, axis, now_ns, *, latched, producer):
-    """Bind the first real LAT-only grant while gas independently vetoes LONG."""
     from opendbc.car import structs
     from opendbc.car.ford.values import CAR
     from opendbc.car.ford.aol import qualified as ford_qualified
@@ -344,7 +336,6 @@ class TransportPauseFeedback:
     return native
 
   def _native_long_withdrawal_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, producer):
-    """Retain LAT intent from a fresh native LAT grant; never grant LONG or bypass faults."""
     from openpilot.starpilot.nostalgia import physical_cancel
     from openpilot.starpilot.car.gm.aol import native_accepts_cp
     from openpilot.starpilot.car.hyundai.aol import early_native_long_withdrawal_supported, classic_brake_withdrawal
@@ -410,7 +401,6 @@ class TransportPauseFeedback:
     return native
 
   def _ordinary_warning_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
-    """Retain armed intent through a fresh SOFT withdrawal; grant no output."""
     from openpilot.starpilot.aol.vehicle import policy_for
     from openpilot.starpilot.nostalgia import physical_cancel
     from opendbc.car import structs
@@ -507,7 +497,6 @@ class TransportPauseFeedback:
     return True
 
   def _temporary_host_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
-    """A fresh inactive proof may retain intent, never native/output authority."""
     from openpilot.starpilot.nostalgia import physical_cancel
     if physical_cancel(cs, cp) or cs.steeringDisengage:
       return False
@@ -622,7 +611,6 @@ class TransportPauseFeedback:
     return True
 
   def _temporary_lag_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
-    """Retain intent only through isolated lag or its bounded critical/event join."""
     reason = str(axis.faultReason)
     events = sm['onroadEvents']
     faults = [event for event in events if event.immediateDisable or event.softDisable]
@@ -761,7 +749,6 @@ class TransportPauseFeedback:
       self.lateral_inventory==(native.pandaSerial,tuple(p.hardwareSerial for p in native.pandaInventory)))
 
   def _temporary_steering_intent_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer, signature):
-    """Keep an existing armed intent during isolated temporary EPS withdrawal."""
     if (not latched or self.failed or self.paused or self.retention_started_ns or
       not self.session or str(axis.sessionId) != self.session or not cs.steerFaultTemporary or
       cs.steerFaultPermanent or not cs.canValid or cs.canTimeout or
@@ -910,7 +897,6 @@ class TransportPauseFeedback:
     return True
 
   def _honda_brake_lateral_current(self, sm, cp, cs, axis, now_ns, *, latched, brake_source_ns):
-    """Preserve existing LAT intent through brake's LONG withdrawal, never output."""
     from opendbc.car.honda.stock_aol import qualified
     from opendbc.car.structs import car
 
@@ -942,7 +928,6 @@ class TransportPauseFeedback:
     return native
 
   def _longitudinal_cancel_current(self, sm, cp, cs, axis, now_ns, *, latched, cancel_source_ns, withdrawal_required=True) -> SafetyState | None:
-    """Retain existing intent during Cancel's bounded LONG withdrawal handshake."""
     from opendbc.car.hyundai.ev6_aol import qualified
     from openpilot.starpilot.car.hyundai.aol import qualified_ccnc_long_aol as ev9_qualified
     from opendbc.car.structs import car
@@ -1097,7 +1082,6 @@ class TransportPauseFeedback:
     return True
 
   def _availability_recovery_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, current, continuity, producer):
-    """Join a verified pause's healthy recovery pair; this never grants output."""
     event_ns = int(sm.logMonoTime['onroadEvents'])
     # Pending healthy SOFT join needs both owners + original deadlines/source/event/producer/epoch/inventory
     # and current native LAT grant.
@@ -1141,7 +1125,6 @@ class TransportPauseFeedback:
       (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
 
   def _new_expired_combined_source(self, sm, cp, axis, stamp, now_ns, signature):
-    """An established combined producer advanced while Card missed its output lease."""
     previous = self.signature
     if (now_ns <= signature[4] or previous is None or self.retention_started_ns or
       not (sm.seen['aolAxisState'] and sm.valid['aolAxisState'] and sm.alive['aolAxisState']) or
@@ -1310,12 +1293,6 @@ class TransportPauseFeedback:
       (native.pandaSerial, tuple(p.hardwareSerial for p in native.pandaInventory)) == self.lateral_inventory)
 
   def _inactive_gear_source_gap(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
-    """Keep existing intent through a source-zero OFF sample while reversing.
-
-    Both axes must already be OFF in the host and native inventory. Only the
-    original healthy source's 200ms intent-retention bound applies; this never
-    grants output or advances any source, native, output or baseline lease.
-    """
     from opendbc.car import structs
     previous = self.signature
     if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or
@@ -1358,7 +1335,6 @@ class TransportPauseFeedback:
         (native.pandaSerial, tuple(slot.hardwareSerial for slot in native.pandaInventory)))
 
   def _inactive_source_pause_current(self, sm, cp, cs, axis, stamp, now_ns, *, latched, producer):
-    """Retain accepted intent through a bounded, fully withdrawn source pause."""
     from opendbc.car import structs
     previous = self.signature
     if (not latched or self.failed or self.paused or self.pending_event or self.retention_started_ns or

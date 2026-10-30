@@ -79,7 +79,8 @@ class TogglesLayout(Widget):
       ),
       "IsRhdDetected": (
         lambda: tr("Right Hand Driving"),
-        "Select the right-hand driver-monitoring side for the next drive. Off selects left-hand. Automatic side detection continues. Park and close driver camera preview before changing.",
+        ("Select the right-hand driver-monitoring side for the next drive. Off selects left-hand. Automatic side detection continues. " +
+        "Park and close driver camera preview before changing."),
         "monitoring.png",
         False,
       ),

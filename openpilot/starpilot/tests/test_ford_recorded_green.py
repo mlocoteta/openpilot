@@ -1,4 +1,4 @@
-import gzip
+import lzma
 import json
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPl
 @pytest.mark.parametrize('alpha', [True])
 @pytest.mark.parametrize('hands_free', [True])
 def test_captured_green_forecast_releases_existing_model_hold(ford_joined, monkeypatch, geometry):
-  samples = json.loads(gzip.decompress((Path(__file__).parent / 'testdata/ford_mache_green_origin.json.gz').read_bytes()))['frames']
+  samples = json.loads(lzma.decompress((Path(__file__).parent / 'testdata/ford_mache_green_origin.json.xz').read_bytes()))['frames']
   case = green.CemGreenCallerTests(methodName='runTest')
   case.setUp()
   case.cp = ford_joined.host.CP
