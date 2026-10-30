@@ -270,9 +270,24 @@ def is_bolt_euv_longitudinal(cp: CarParams) -> bool:
     return False
 
 
+def is_volt_flashed_profile(cp: CarParams) -> bool:
+  """Manual plain-Volt OBD owner: flashed, no camera/radar, F1 brake input."""
+  try:
+    return (cp.brand == 'gm' and cp.carFingerprint == CAR.CHEVROLET_VOLT and
+            cp.networkLocation == CarParams.NetworkLocation.gateway and cp.radarUnavailable and
+            cp.alphaLongitudinalAvailable and not cp.pcmCruise and control_flags(cp) == 0 and
+            not cp.passive and not cp.dashcamOnly and not cp.notCar and len(cp.safetyConfigs) == 1 and
+            cp.safetyConfigs[0].safetyModel == CarParams.SafetyModel.gm and
+            gm_control_word(cp) == int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG | GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE))
+  except (AttributeError, IndexError, TypeError, ValueError):
+    return False
+
+
 def is_volt_gateway_profile(cp: CarParams) -> bool:
   """Exact radar-qualified gateway owner, independently of the startup speed choice."""
   try:
+    if is_volt_flashed_profile(cp):
+      return True
     profile = camera_acc_pedal_profile(cp)
     if profile is not None and profile.topology == "gateway":
       return True
@@ -514,7 +529,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=1363, wheelbase=2.662, steerRatio=15.7, centerToFrontRatio=0.4),
   )
   CHEVROLET_VOLT = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt (OBD-II Harness) 2017-18", support_type=SupportType.COMMUNITY, support_link="#community",
+    [GMCarDocs("Chevrolet Volt (OBD-II Harness) 2017-18", "ACC or flashed bypass (alpha long)", support_type=SupportType.COMMUNITY, support_link="#community",
                min_enable_speed=0, video="https://youtu.be/QeMCN_4TFfQ")],
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=15.7, centerToFrontRatio=0.45, tireStiffnessFactor=1.0),
   )

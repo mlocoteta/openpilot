@@ -1,4 +1,5 @@
 from opendbc.car.gm.steering_authority import SteeringAuthority
+from opendbc.car.gm.values import is_volt_flashed_profile
 from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 from opendbc.car.gm.values import gm_control_word, is_volt_one_pedal, camera_acc_pedal_profile, BrakeSource, volt_cc_pedal_profile
 from opendbc.car.gm.values import is_volt_longitudinal, is_gm_auto_hold
@@ -534,6 +535,12 @@ class CarState(CarStateBase):
       # A missing camera can leave the ECU faulted; that is not engaged cruise.
       ret.cruiseState.enabled &= pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.FAULTED
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL
+    if is_volt_flashed_profile(self.CP):
+      # There is no stock cruise/ACC controller. Preserve the actual EBCM fault.
+      ret.accFaulted = friction_unavailable
+      ret.brakePressed |= bool(pt_cp.vl["ECMEngineStatus"]["BrakePressed"])
+      ret.cruiseState.enabled = False
+      ret.cruiseState.standstill = False
     if (self.CP.carFingerprint in CC_GATEWAY_STOCK_CAR or self.CP.carFingerprint == CAR.CHEVROLET_VOLT_CC):
       # AcceleratorPedal2 CruiseState is an ACC state, not a conventional-cruise fault source.
       ret.accFaulted = False
@@ -718,6 +725,12 @@ class CarState(CarStateBase):
       pt_messages.append(("EBCMBrakePedalPosition", 100))
     if is_volt_one_pedal(CP):
       pt_messages.append(("EVDriveMode", float('nan')))
+    if is_volt_flashed_profile(CP):
+      pt_messages += [("PSCMStatus", 10), ("ESPStatus", 10), ("EBCMWheelSpdFront", 20),
+                      ("EBCMWheelSpdRear", 20), ("EBCMFrictionBrakeStatus", 20), ("PSCMSteeringAngle", 100),
+                      ("ECMPRDNL2", 10), ("AcceleratorPedal2", 33), ("ECMEngineStatus", 100),
+                      ("BCMTurnSignals", 1), ("BCMDoorBeltStatus", 10), ("BCMGeneralPlatformStatus", 10),
+                      ("ASCMSteeringButton", 33), ("EBCMRegenPaddle", 40)]
     if CP.carFingerprint in VOLT_BSM_CAR and CP.flags & GMFlags.HAS_BSM.value:
       pt_messages.append(("BCMBlindSpotMonitor", float('nan')))
     if CP.flags & GMFlags.PEDAL_LONG.value and not is_bolt_pedal_removed_profile(CP, stock_only=True):

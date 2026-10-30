@@ -446,11 +446,28 @@ class CarInterface(CarInterfaceBase):
           if 0xbe not in fingerprint[CanBus.POWERTRAIN]:
             ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE.value
 
+    flashed_volt = False
+    if candidate == CAR.CHEVROLET_VOLT and ret.radarUnavailable and not docs:
+      pt, camera = fingerprint[CanBus.POWERTRAIN], fingerprint[CanBus.CAMERA]
+      required = {0x184: 8, 0x34A: 5, 0x348: 5, 0x1C4: 8, 0xC9: 8, 0x1E1: 7,
+                  0x1F5: 8, 0xBD: 7, 0xF1: 6, 0x232: 8}
+      flashed_volt = (not is_release and all(pt.get(a) == length for a, length in required.items()) and
+                      not any(a in pt for a in (0xBE, 0x201, 0x2FF, 0x320)) and
+                      not any(a in camera for a in (0x180, 0x320, 0x370)) and not fingerprint[CanBus.OBSTACLE])
+      if flashed_volt:
+        # Reuse the plain OBD/F1 wire protocol; this is not stock cruise or a camera owner.
+        ret.flags = int(ret.flags) & int(GMFlags.HAS_BSM)
+        ret.alphaLongitudinalAvailable = True
+        ret.openpilotLongitudinalControl = bool(alpha_long)
+        ret.pcmCruise = False
+        ret.safetyConfigs[0].safetyParam = int(GMSafetyFlags.EV | GMSafetyFlags.VOLT_GATEWAY_LONG |
+                                             GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)
+
     # These cars have been put into dashcam only due to both a lack of users and test coverage.
     # These cars likely still work fine. Once a user confirms each car works and a test route is
     # added to opendbc/car/tests/routes.py, we can remove it from this list.
     ret.dashcamOnly = candidate in {CAR.CADILLAC_ATS, CAR.HOLDEN_ASTRA, CAR.CHEVROLET_MALIBU, CAR.BUICK_REGAL} or \
-                      (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable)
+                      (ret.networkLocation == NetworkLocation.gateway and ret.radarUnavailable and not flashed_volt)
 
     # Start with a baseline tuning for all GM vehicles. Override tuning as needed in each model section below.
     ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0.], [0.]]
