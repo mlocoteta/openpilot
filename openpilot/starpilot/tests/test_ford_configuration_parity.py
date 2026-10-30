@@ -11,7 +11,7 @@ def configuration_topology(monkeypatch, topology, request):
   monkeypatch.ford_topology = topology
   if request.node.name.startswith(('test_brake_retains_lateral_with_native_first_feedback',
       'test_cancel_retains_lateral_with_native_first_feedback', 'test_gas_first_engagement_native_cadence',
-      'test_first_main_gas_native_cadence')):
+      'test_first_main_gas_native_cadence', 'test_native_rejected_ui_cannot_replace_stock_cluster')):
     monkeypatch.ford_native_10hz = True
     monkeypatch.ford_angle = request.node.callspec.params['angle']
   if request.node.name.startswith('test_recorded_radar_creep_enters_native_stopping'):
@@ -172,3 +172,17 @@ def test_neutral_display_waits_for_same_batch_inactive_steering(ford_joined, mon
   monkeypatch.setattr(controller, 'update', check_batch)
   run_actual_producer(ford_joined, monkeypatch, scenario='configuration-parity')
   assert checked[0] > 0
+
+
+@pytest.mark.parametrize('identity', [FORD_FACTORIES[11]])
+@pytest.mark.parametrize('alpha', [True])
+@pytest.mark.parametrize('hands_free', [False])
+@pytest.mark.parametrize('topology', ['automatic'])
+@pytest.mark.parametrize('fault', ['heartbeat', 'source-loss'])
+@pytest.mark.parametrize('angle', [True])
+def test_native_rejected_ui_cannot_replace_stock_cluster(ford_joined, monkeypatch, fault, angle):
+  monkeypatch.ford_native_10hz = True
+  monkeypatch.ford_route22_final_fault = fault
+  run_actual_producer(ford_joined, monkeypatch, scenario='route22')
+  assert ford_joined.rejected_ui_packets
+  assert all(address in (0x18A, 0x3D8) for _, address in ford_joined.rejected_ui_packets)

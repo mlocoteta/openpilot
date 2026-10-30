@@ -190,6 +190,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
   brake_seen = False
   transition_trace = []
   last_neutral_ui = {}
+  joined.rejected_ui_packets = []
   long_parser = CANParser(DBC[host.CP.carFingerprint][Bus.pt], [('ACCDATA', 50)], 0)
 
   class ClockMappedSafety:
@@ -490,6 +491,7 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
           local.setattr(owner.sm, 'update', lambda *args: None)
         host.controls_update(state, host.sm['carControl'])
         if state.canValid:
+          accepted_ui = []
           assert 'sendcan' in published
           assert published['sendcan'].valid
           for frame in published['sendcan'].sendcan:
@@ -505,9 +507,16 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
               if mode:
                 assert not accepted, 'Native fault admitted active steering'
             if not accepted:
-              assert fault_before_receipt and not safety.get_controls_allowed(), (
+              display_only = frame.address in (0x18A, 0x3D8)
+              display_veto = (display_only and scenario == 'route22' and
+                fault in ('heartbeat', 'source-loss', 'rx-quality') and permission == 0)
+              assert display_veto or (fault_before_receipt and not safety.get_controls_allowed()), (
                 steps, fault, hex(frame.address), bytes(frame.dat).hex(), request, native_request, permission)
+              if display_only:
+                joined.rejected_ui_packets.append((steps, frame.address))
               continue
+            if frame.address in (0x18A, 0x3D8):
+              accepted_ui.append(frame)
             data, address = frame.dat, frame.address
             if address in (0x3CA, 0x3D3, 0x3D6):
               joined.last_lateral_packets.append((address, bytes(data)))
@@ -533,8 +542,8 @@ def run_actual_producer(ford_joined, monkeypatch, *, scenario='reverse', reengag
               last_neutral_ui[address] = now[0]
         if getattr(monkeypatch, 'ford_angle', False) or scenario in (
             'display', 'route24', 'route24-mixed-eps', 'route2a', 'route2a-main', 'route2a-main-fault'):
-          ui = [f for f in published['sendcan'].sendcan if f.address in (0x3D8, 0x18A)]
-          owns = all(safety.safety_fwd_hook(2, address) == -1 for address in (0x3D8, 0x18A))
+          ui = accepted_ui if state.canValid else []
+          owns = all(safety.safety_fwd_hook(2, frame.address) == -1 for frame in ui)
           assert host.CP.carFingerprint not in (CAR.FORD_MUSTANG_MACH_E_MK1, CAR.FORD_F_150_LIGHTNING_MK1,
                                                   CAR.FORD_ESCAPE_MK4_5, CAR.FORD_EXPEDITION_MK4,
                                                   CAR.FORD_F_150_MK14, CAR.FORD_RANGER_MK2) or not ui or owns, (
