@@ -380,13 +380,17 @@ def test_existing_settings_owner_saves_guards_and_repairs_one_timing_option(tmp_
   assert keys.index('SLCAdvanceSeconds') == keys.index('SLCConfirmation')+1
   assert row().available and row().value == 'Off'
   request = row_change(row())
+  assert request is not None
   assert owner.apply(request)
   assert read_params(params).advance_seconds == 1
   assert not owner.apply(request)
   request = row_change(row())
+  assert request is not None
   allowed[0] = False
   assert not owner.apply(request)
   allowed[0] = True
   Path(params.get_param_path('SLCAdvanceSeconds')).write_bytes(b'broken')
-  assert row().choices == ('Off',) and owner.apply(row_default(row()))
+  assert row().choices == ('Off',)
+  request = row_default(row())
+  assert request is not None and owner.apply(request)
   assert read_params(params).advance_seconds == 0 and read_params(params).enabled

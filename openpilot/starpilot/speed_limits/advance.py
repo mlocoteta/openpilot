@@ -58,7 +58,7 @@ class Advance:
 
     # shortcut: use fresh GPS distance without propagation; revisit only if replay shows material timing error.
     eligible = (can_offer and type(seconds) is int and 0 < seconds <= 10 and not standstill and
-                type(speed_mps) in (int, float) and math.isfinite(speed_mps) and speed_mps > 0 and
+                speed_mps is not None and type(speed_mps) in (int, float) and math.isfinite(speed_mps) and speed_mps > 0 and
                 upcoming is not None and upcoming.distance_m <= speed_mps * seconds)
     if eligible and (encounter is None or upcoming.boundary_id != encounter.boundary_id):
       proposed = dict(observations)
