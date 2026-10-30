@@ -27,6 +27,7 @@ class Settings:
   errors: tuple[str, ...] = ()
   # Saved intent must still retire pending work when vehicle capabilities disable control.
   requested: bool = False
+  advance_seconds: int = 0
 
 
 def _bool(values: Mapping[str, object], key: str, default: bool = False) -> bool:
@@ -70,18 +71,22 @@ def parse(values: Mapping[str, object]) -> Settings:
     if type(override) is not int or override not in (0, 1, 2):
       raise ValueError("invalid saved SLC override")
     confirmation = _bool(values, "SLCConfirmation")
+    advance = values.get('SLCAdvanceSeconds', 0)
+    if type(advance) is not int or not 0 <= advance <= 10:
+      advance = 0  # An invalid optional timer cannot enable early adoption.
     policy = acc.Policy(confirm_lower=confirmation, confirm_higher=confirmation,
                         display_only=not control)
     offsets = (document if isinstance(document, od.OffsetDocument) else
                od.adopt_legacy(metric, tuple(_number(values, f"Offset{i + 1}") for i in range(7)))).schedule()
     # SLCOverride remains a validated legacy preference; only set-speed changes override SLC.
-    return Settings(control, display, sel.SelectionPolicy(mode, slots, False), policy, offsets, requested=control)
+    return Settings(control, display, sel.SelectionPolicy(mode, slots, False), policy, offsets,
+                    requested=control, advance_seconds=advance)
   except (ValueError, OverflowError) as error:
     return _disabled(str(error))
 
 
 SAVED_KEYS = ("SpeedLimitController", "ShowSpeedLimits", "IsMetric", "SLCPriority1", "SLCPriority2",
-              "SLCOverride", "SLCConfirmation",
+              "SLCOverride", "SLCConfirmation", "SLCAdvanceSeconds",
               *(f"Offset{i}" for i in range(1, 8)))
 
 
@@ -106,9 +111,14 @@ def read_params(params) -> Settings:
     # any non-"1" Boolean as false. Neither may silently alter confirmation or
     # units. Decode the saved bytes explicitly; only an absent file uses defaults.
     try:
-      raw = Path(params.get_param_path(key)).read_bytes()
+      with Path(params.get_param_path(key)).open('rb') as stream:
+        raw = stream.read(8 if key == 'SLCAdvanceSeconds' else -1)
       if key.startswith('Offset'):
         value = float(raw)
+      elif key == 'SLCAdvanceSeconds':
+        if raw not in tuple(str(seconds).encode() for seconds in range(11)):
+          raise ValueError('invalid advance time')
+        value = int(raw)
       elif key == 'SLCOverride':
         value = int(raw)
       elif key in ('SLCPriority1', 'SLCPriority2'):
@@ -121,5 +131,8 @@ def read_params(params) -> Settings:
     except FileNotFoundError:
       continue
     except (OSError, ValueError, OverflowError):
+      if key == 'SLCAdvanceSeconds':
+        values[key] = 0
+        continue
       return _disabled(f'Invalid saved {key}')
   return parse(values)

@@ -34,3 +34,18 @@ generation, GPS source and OSM way ID. It is not a durable identity for restorin
 a limit in a later drive. Freshness and a unique loaded-tile match do not establish
 real-road accuracy or current map metadata. Synthetic host tests verify these
 software gates; they do not qualify Maps on the vehicle.
+
+The pinned data-only provider also appends `previewSpeedLimit`, `previewDistance`,
+`previewBoundaryId` and `previewWayId`. They share the current match's original
+GPS epoch, ordering, source TTL and verified snapshot. Older messages have no
+qualified preview. Invalid optional preview fields cannot invalidate an otherwise
+qualified current limit or enable early adoption.
+
+Lookahead walks at most 500 metres and 64 ways through a unique legal
+continuation. It stops at unknown intermediate limits, missing coverage,
+branches or cycles. It uses raw road geometry with no controller propagation,
+retained minimum distance, curve-speed calculation or new vehicle subscriptions.
+The boundary hash binds the snapshot, adjacent boundary ways, crossing position
+and travel direction; it survives approach through several same-limit ways.
+The SLC presentation identity additionally binds the current source evidence so
+retired producers and stale actions cannot authorize a returned proposal.

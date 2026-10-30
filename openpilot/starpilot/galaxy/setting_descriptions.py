@@ -61,6 +61,7 @@ DESCRIPTIONS = {
   'SpeedLimitController': 'Adjusts the set speed to accepted speed limits using your source priority and offsets.',
   'ShowSpeedLimits': 'Shows recognized speed-limit signs on the driving screen.',
   'SLCConfirmation': 'Auto adopts new limits immediately. With Automatic adoption off, + accepts and − declines within 10 seconds.',
+  'SLCAdvanceSeconds': 'Offers mapped limits early using road distance and current speed. Existing adoption and confirmation settings still apply.',
   'SLCPriority1': 'Chooses the first source checked for a fresh speed limit.',
   'SLCPriority2': 'Chooses the source used when the primary source has no fresh speed limit.',
   'slc_adopt': 'Keeps the current speed-limit offset schedule fixed when display units change.',

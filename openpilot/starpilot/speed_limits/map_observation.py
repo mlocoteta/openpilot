@@ -1,20 +1,20 @@
 """Current-road Maps projection; source ordering/freshness stays in MapTracker."""
 import hashlib
 import json
+import math
+from dataclasses import dataclass
 
 from openpilot.starpilot.speed_limits import acceptance as acc
 from openpilot.starpilot.speed_limits import map_source as ms
+from openpilot.starpilot.speed_limits.map_source import copy_frame as copy_frame
 
 
-def copy_frame(road, *, event_valid: bool, event_boot_ns: int) -> ms.MapFrame:
-  """Copy a current mapdOut reader without retaining a mutable cereal view."""
-  try:
-    return ms.MapFrame(event_valid, event_boot_ns, int(road.sampleVersion), str(road.roadStatus),
-      str(road.gpsSource), int(road.gpsMonoTime), int(road.computedMonoTime),
-      int(road.sourceGeneration), int(road.producerSession), float(road.speedLimit),
-      bool(road.tileLoaded), int(road.wayId), str(road.waySelectionType))
-  except Exception as error:  # pycapnp lazy reads may raise KjException, not ValueError
-    raise ValueError('invalid mapdOut reader') from error
+@dataclass(frozen=True)
+class Upcoming:
+  observation: acc.Observation
+  distance_m: float
+  boundary_id: str
+  way_id: int
 
 
 class MapSource:
@@ -22,12 +22,18 @@ class MapSource:
 
   def __init__(self):
     self.tracker = ms.MapTracker()
+    self.upcoming: Upcoming | None = None
+    self.way_id = 0
 
   def reset(self):
     self.tracker.reset()
+    self.upcoming = None
+    self.way_id = 0
 
   def step(self, frame: ms.MapFrame | None, *, received: bool, now_boot_ns: int,
            transport_alive: bool, drive_session: str, car_fingerprint: str) -> acc.Observation:
+    self.upcoming = None
+    self.way_id = 0
     evidence = self.tracker.step(frame, received=received, now_boot_ns=now_boot_ns,
                                  transport_alive=transport_alive)
     if evidence.observation.kind is acc.ObservationKind.STALE:
@@ -42,5 +48,16 @@ class MapSource:
       return acc.Observation(acc.ObservationKind.UNKNOWN)
     identity = hashlib.sha256(json.dumps((drive_session, car_fingerprint, accepted.producer_session,
       accepted.generation, accepted.source, accepted.way_id), separators=(',', ':')).encode()).hexdigest()
+    self.way_id = accepted.way_id
+    boundary = accepted.preview_boundary_id
+    if (type(boundary) is str and len(boundary) == 64 and all(c in '0123456789abcdef' for c in boundary) and
+        type(accepted.preview_speed_mps) is float and math.isfinite(accepted.preview_speed_mps) and
+        accepted.preview_speed_mps >= 1.0 and abs(accepted.preview_speed_mps - accepted.speed_mps) > .02 and
+        type(accepted.preview_distance_m) is float and math.isfinite(accepted.preview_distance_m) and
+        0 < accepted.preview_distance_m <= 500 and type(accepted.preview_way_id) is int and accepted.preview_way_id > 0):
+      preview_identity = hashlib.sha256(f'{identity}:{boundary}'.encode()).hexdigest()
+      observation = acc.Observation(acc.ObservationKind.VALID, acc.Candidate('map',
+        acc.ObservationIdentity(acc.IdentityKind.GEOGRAPHIC, value=preview_identity), accepted.preview_speed_mps))
+      self.upcoming = Upcoming(observation, accepted.preview_distance_m, boundary, accepted.preview_way_id)
     return acc.Observation(acc.ObservationKind.VALID, acc.Candidate('map',
       acc.ObservationIdentity(acc.IdentityKind.GEOGRAPHIC, value=identity), accepted.speed_mps))

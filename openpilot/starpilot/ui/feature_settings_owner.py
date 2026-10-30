@@ -107,6 +107,7 @@ FLOAT_SPECS = {
 }
 SLC_PRIORITY = "SLCPriority1"
 SLC_SECONDARY = "SLCPriority2"
+SLC_ADVANCE_CHOICES = ('Off', *(f'{seconds} s' for seconds in range(1, 11)))
 LONG_PREFIX = "profile:"
 PRESETS = {"acceleration": ACCELERATION_PRESETS, "braking": BRAKING_PRESETS, "following": FOLLOWING_PRESETS}
 PROFILE_NAMES = ("aggressive", "standard", "relaxed")
@@ -621,7 +622,7 @@ class FeatureSettingsOwner:
       return "Vision"
     if key == "IsMetric":
       return "0"
-    if key.startswith("Offset") or key == "ForceStopDistanceOffset":
+    if key.startswith("Offset") or key in ("ForceStopDistanceOffset", "SLCAdvanceSeconds"):
       return "0"
     value = self.params.get_default_value(key)
     return str(value) if value is not None else ""
@@ -1082,6 +1083,13 @@ class FeatureSettingsOwner:
       confirmation = self._bool_row("SLCConfirmation", "Automatic adoption", allowed,
         reason="On adopts new limits immediately; Off asks for confirmation within 10 seconds")
       rows.append(replace(confirmation, value={"On": "Off", "Off": "On"}.get(confirmation.value, confirmation.value), default_value="On"))
+      advance, raw_advance, readable_advance = self._value('SLCAdvanceSeconds')
+      valid_advance = readable_advance and advance in tuple(str(seconds) for seconds in range(11))
+      rows.append(FeatureRow('SLCAdvanceSeconds', 'Adopt limits early',
+        SLC_ADVANCE_CHOICES[int(advance)] if valid_advance else f'Saved {advance}', raw_advance,
+        SLC_ADVANCE_CHOICES if valid_advance else ('Off',), available=allowed, default_value='Off',
+        reason='Offer or adopt mapped limits this many seconds early at the current speed; applies to increases and decreases'
+          if valid_advance else 'Invalid saved advance time; restore Off'))
       source_capability = self._source_capability()
       vision_dev, maps_available = source_capability
       source_allowed = configurable and self.authority("preferences")
@@ -1423,7 +1431,7 @@ class FeatureSettingsOwner:
     elif key.startswith(LONG_PREFIX):
       source_key = PERSONALITY_PROFILES_PARAM
       group = "long"
-    elif key in BOOL_DEFAULTS or key in FLOAT_SPECS or key in (SLC_PRIORITY, SLC_SECONDARY):
+    elif key in BOOL_DEFAULTS or key in FLOAT_SPECS or key in (SLC_PRIORITY, SLC_SECONDARY, 'SLCAdvanceSeconds'):
       source_key = key
       long_key = (key in ("CustomPersonalities", "ForceStops", "ForceStopDistanceOffset") or "Personality" in key or
                   key.endswith(("Follow", "FollowHigh")) or "Jerk" in key)
@@ -1553,6 +1561,12 @@ class FeatureSettingsOwner:
         encoded = self._edit_document(key, request.value, seed_capability=request.capability if named_acceleration_seed else None)
         if encoded is None:
           return False
+      elif key == 'SLCAdvanceSeconds':
+        current, _, valid = self._value(key)
+        if (request.value not in SLC_ADVANCE_CHOICES or request.value != 'Off' and
+            (not valid or current not in tuple(str(seconds) for seconds in range(11)))):
+          return False
+        encoded = str(SLC_ADVANCE_CHOICES.index(request.value))
       elif key in BOOL_DEFAULTS:
         current, _, valid = self._value(key)
         if not valid or current not in ("0", "1") or request.value not in ("On", "Off"):
@@ -1655,6 +1669,8 @@ class FeatureSettingsOwner:
         return result.committed and result.verified
       if source_key in BOOL_DEFAULTS:
         self.params.put_bool(source_key, encoded == "1", block=True)
+      elif source_key == 'SLCAdvanceSeconds':
+        self.params.put(source_key, int(encoded), block=True)
       elif source_key == AOL_THRESHOLD:
         self.params.put(source_key, encoded, block=True)
       elif source_key in AOL_BUTTONS:

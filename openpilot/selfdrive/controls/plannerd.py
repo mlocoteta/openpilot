@@ -73,9 +73,13 @@ class SavedSlcLifecycle:
       return self.runtime, False
     previous_runtime = self.runtime
     if (self.runtime is not None and self.configuration is not None and
-        configuration[:-1] == (self.configuration[0], replace(self.runtime.settings, offsets=settings.offsets),
+        configuration[:-1] == (self.configuration[0], replace(self.runtime.settings, offsets=settings.offsets,
+                                                               advance_seconds=settings.advance_seconds),
                                *self.configuration[2:-1])):
-      self.runtime.update_offsets(settings.offsets, is_metric=configuration[5])
+      if settings.offsets != self.runtime.settings.offsets or configuration[5] != self.configuration[5]:
+        self.runtime.update_offsets(settings.offsets, is_metric=configuration[5])
+      if settings.advance_seconds != self.runtime.settings.advance_seconds:
+        self.runtime.update_advance(settings.advance_seconds)
     else:
       set_speed_after_ns = self.runtime.set_speed_after_ns if self.runtime is not None else 0
       if self.runtime is not None:

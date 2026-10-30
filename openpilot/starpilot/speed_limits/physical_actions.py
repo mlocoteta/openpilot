@@ -18,6 +18,16 @@ def finite_speed(value: object) -> bool:
   return math.isfinite(value) and value > 0
 
 
+def adoption_speed(state):
+  boundary = str(getattr(state, 'upcomingBoundaryId', ''))
+  if not boundary:
+    return float(state.speedLimit) if finite_speed(state.speedLimit) else None
+  if len(boundary) != 64 or any(c not in '0123456789abcdef' for c in boundary):
+    return None
+  speed = getattr(state, 'upcomingSpeedLimit', 0.0)
+  return float(speed) if finite_speed(speed) else None
+
+
 def source_matches(state, observation, producer_session: str, now_ns: int) -> bool:
   return (str(state.source) == 'dashboard' and str(state.observationKind) == 'valid' and
           str(state.sourceProducerSessionId) == producer_session and producer_session != '' and
@@ -39,7 +49,8 @@ def _current_state(sm, now_ns: int):
   if not (state.enabled and not state.displayOnly and str(state.sessionId) and
           0 < int(state.frameMonoTime) <= int(sm.logMonoTime['slcState']) and
           now_ns - int(state.frameMonoTime) <= STATE_MAX_AGE_NS and
-          str(state.observationKind) == 'valid' and str(state.source) in tuple(Source) and finite_speed(state.speedLimit)):
+          str(state.observationKind) == 'valid' and str(state.source) in tuple(Source) and finite_speed(state.speedLimit) and
+          adoption_speed(state) is not None):
     return None
   return state
 
@@ -48,7 +59,8 @@ def state_current(sm, observation, producer_session: str, now_ns: int):
   state = _current_state(sm, now_ns)
   if state is None:
     return None
-  if str(state.source) == 'dashboard' and (observation is None or not source_matches(state, observation, producer_session, now_ns)):
+  if (not getattr(state, 'upcomingBoundaryId', '') and str(state.source) == 'dashboard' and
+      (observation is None or not source_matches(state, observation, producer_session, now_ns))):
     return None
   return state
 
@@ -62,7 +74,7 @@ def pending_confirmation(sm, now_ns: int, *, long_active: bool,
   if (state is None or int(state.frameMonoTime) <= after_ns or not state.hasPending or state.automaticAdoptionPending or
       int(state.decisionId) <= 0 or int(state.presentationId) <= 0):
     return None
-  if not finite_speed(state.pendingSpeedLimit) or abs(float(state.pendingSpeedLimit) - float(state.speedLimit)) > 0.02:
+  if not finite_speed(state.pendingSpeedLimit) or abs(float(state.pendingSpeedLimit) - adoption_speed(state)) > 0.02:
     return None
   return SlcPendingConfirmation(str(state.sessionId), int(state.decisionId), int(state.presentationId))
 
@@ -71,17 +83,24 @@ def command_applicable(command, state, observation, producer_session: str, now_n
                        selected_mps: float, *, long_active: bool, button_event: bool) -> bool:
   if state is None or button_event or not long_active or not state.hasAccepted:
     return False
+  boundary = str(getattr(state, 'upcomingBoundaryId', ''))
+  speed = adoption_speed(state)
+  if speed is None or str(getattr(command, 'upcomingBoundaryId', '')) != boundary:
+    return False
+  source = 'map' if boundary else str(state.source)
+  producer, episode, observed, valid_until = ('', 0, 0, 0) if boundary else (
+    str(state.sourceProducerSessionId), int(state.sourceEpisode), int(state.sourceObservedMonoTime), int(state.sourceValidUntilMonoTime))
   if (str(command.kind) != 'adoptAcceptedLimit' or not str(command.sessionId) or
       str(command.sessionId) != str(state.sessionId) or int(command.commandId) <= 0 or
       int(command.actionId) < 0 or int(command.presentationId) <= 0 or
       int(command.commandId) != int(state.commandId) or
       int(command.presentationId) != int(state.presentationId) or
-      int(command.sourceEpisode) != int(state.sourceEpisode) or
-      str(command.source) != str(state.source) or
-      str(command.sourceProducerSessionId) != str(state.sourceProducerSessionId) or
-      int(command.sourceObservedMonoTime) != int(state.sourceObservedMonoTime) or
-      int(command.sourceValidUntilMonoTime) != int(state.sourceValidUntilMonoTime) or
-      (str(state.source) == 'dashboard' and (observation is None or not source_matches(state, observation, producer_session, now_ns)))):
+      int(command.sourceEpisode) != episode or
+      str(command.source) != source or
+      str(command.sourceProducerSessionId) != producer or
+      int(command.sourceObservedMonoTime) != observed or
+      int(command.sourceValidUntilMonoTime) != valid_until or
+      (source == 'dashboard' and (observation is None or not source_matches(state, observation, producer_session, now_ns)))):
     return False
   issued, expires = int(command.issuedMonoTime), int(command.expiresMonoTime)
   if not (0 < issued <= now_ns <= expires and expires - issued <= COMMAND_MAX_AGE_NS):
@@ -90,6 +109,6 @@ def command_applicable(command, state, observation, producer_session: str, now_n
   # Float32 transport can round a legal boundary just outside its double-precision value.
   return (finite_speed(expected) and finite_speed(target) and finite_speed(selected_mps) and
           abs(expected - selected_mps) <= 0.1 and
-          abs(float(state.acceptedSpeedLimit) - float(state.speedLimit)) <= 0.02 and
+          abs(float(state.acceptedSpeedLimit) - speed) <= 0.02 and
           abs(target - (float(state.acceptedSpeedLimit) + float(state.offset))) <= 0.1 and
           V_CRUISE_MIN / 3.6 - 1e-5 <= target <= V_CRUISE_MAX / 3.6 + 1e-5)

@@ -4,6 +4,7 @@ import math
 from typing import cast
 
 from openpilot.selfdrive.car.cruise import ButtonType, SlcPendingConfirmation, V_CRUISE_UNSET, slc_target_kph
+from openpilot.starpilot.speed_limits.physical_actions import adoption_speed
 
 
 def eligible(cp) -> bool:
@@ -115,7 +116,8 @@ class ToyotaCruise:
     self.approval = None
     if (slc_enabled and approved is not None and approved.hasAccepted and not approved.hasPending and
         approved.hasAcceptedAdjustedLimit and approved.acceptedMonoTime > 0 and
-        abs(float(approved.acceptedSpeedLimit) - float(approved.speedLimit)) <= 0.02):
+        adoption_speed(approved) is not None and
+        abs(float(approved.acceptedSpeedLimit) - adoption_speed(approved)) <= 0.02):
       self.target_kph = slc_target_kph(float(approved.acceptedAdjustedLimit), metric)
       self.approved_target_mps = float(approved.acceptedAdjustedLimit)
       self.approval = (str(approved.sessionId), int(approved.acceptedMonoTime), self.target_kph)

@@ -76,6 +76,18 @@ def test_latest_limit_and_offset_replace_accepted_sign_while_waiting():
 
 
 @pytest.mark.parametrize('profile', list(Profile))
+def test_confirmation_arrow_uses_upcoming_target_while_current_reading_stays_current(profile, drawing):
+  current = state()
+  current = replace(current, speed_limit=replace(current.speed_limit,
+    pending_speed_limit_mps=30 / 3.6, pending_adjusted_limit_mps=35 / 3.6))
+  font = fonts(profile)
+  SpeedLimitWidget(font, profile).render_confirmation(current)
+  assert drawing['arrow'].call_args.args[3] == 1
+  assert '30' in [call.args[0] for call in font.draw.call_args_list]
+  assert current.speed_limit.speed_limit_mps == 50 / 3.6
+
+
+@pytest.mark.parametrize('profile', list(Profile))
 def test_both_renderers_show_small_latest_sign_and_offset(profile):
   font = fonts(profile)
   current = state()

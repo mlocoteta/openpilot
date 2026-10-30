@@ -10,7 +10,7 @@ from openpilot.starpilot.ui.onroad_state import OnroadState, manual_slc_confirma
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.speed_limit_pulse import SpeedLimitPulse
 from openpilot.starpilot.ui.speed_limit_shapes import SpeedLimitShapes
-from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, resolve_unified_speed
+from openpilot.starpilot.ui.unified_speed_presentation import displayed_adjusted_limit_mps, positive, resolve_unified_speed
 
 
 INK = rl.Color(241, 246, 243, 255)
@@ -95,7 +95,7 @@ class SpeedLimitWidget:
     scale = CONFIRMATION_SCALE[self.profile]
     x, y, right, _ = bounds
     width = (right - x) / scale
-    shown = resolve_unified_speed(state)
+    shown = resolve_unified_speed(state, confirmation=True)
     source = SOURCE_LABELS.get(shown.source, 'SPEED')
     white = rl.Color(242, 246, 244, 255)
     secondary = rl.Color(209, 222, 218, 255)
@@ -148,7 +148,9 @@ class SpeedLimitWidget:
     self.shapes.confirmation(bounds, strength=self.pulse.confirmation_strength(now))
     source_color = rl.Color(197, 212, 208, 255)
     label_width = ink_width(source, 22, FontRole.SEMI_BOLD)
-    target = displayed_adjusted_limit_mps(state.speed_limit)
+    target = state.speed_limit.pending_adjusted_limit_mps
+    if not positive(target):
+      target = displayed_adjusted_limit_mps(state.speed_limit)
     direction = (-1 if target > state.speed_mps else 1) if target is not None and state.speed_mps is not None and target != state.speed_mps else 0
     start = (width - label_width - (19.2 if direction else 0)) / 2
     text(source, 22, start + label_width / 2, 22, source_color, FontRole.SEMI_BOLD)

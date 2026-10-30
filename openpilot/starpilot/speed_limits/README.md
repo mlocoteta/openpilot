@@ -53,7 +53,47 @@ can still complete its presented decision; a later action cannot accept it.
 The existing saved `SLCConfirmation` bit is retained: `0` means Automatic adoption
 on and `1` means off. Both native settings layouts show the inverse as Automatic
 adoption. Legacy directional confirmation and override preferences do not change
-this policy. No new saved preference or dependency is needed.
+this confirmation policy.
+
+## Optional early adoption
+
+The existing SLC settings page adds **Adopt limits early**: Off by default, or
+1–10 whole seconds (`SLCAdvanceSeconds`). It applies to both increases and
+decreases from offline Maps. Other sources keep their current-limit behavior.
+The upcoming Map proposal must win the configured source-selection policy.
+There is no new onroad widget, caption, or countdown. The existing New Limit
+confirmation presents the proposed limit and its own offset; the ordinary sign
+and source readings continue to describe the current road.
+
+A fresh, qualified along-road distance becomes eligible when
+`0 < distance <= carState.vEgo * seconds`. Only physical vehicle speed is used;
+SET, cluster speed, acceleration forecasts and wheel-distance propagation do not
+estimate arrival. A first offer requires motion and active system speed control.
+This is approximate timing, not a promise to reach the target speed at the sign.
+
+The first offer latches one boundary encounter. Slowing or stopping does not
+retract it or restart the existing ten-second confirmation deadline. Source loss
+removes authority and hides the pending prompt; fresh recovery of the same
+boundary uses the original deadline and a current presentation. Decline, expiry,
+manual override and completed application survive the boundary becoming current.
+An unchanged approach limit cannot be offered again solely because the preview
+is lost or disabled. Current-source evidence, command freshness, expected SET,
+driver-button checks and Toyota's native capacity/release checks still apply.
+The configured adopt wheel action continues to adopt the displayed current limit
+when no confirmation is pending.
+
+Timing-only edits preserve the runtime session and driver decisions. Off cancels
+unapplied advance work and leaves an applied SET intact; normal current-limit
+behavior resumes at the boundary. Offset and unit edits retain their existing
+meaning. A short lower-limit zone can immediately qualify its exit increase;
+there is no hidden minimum dwell time. GPS uncertainty, missing map data and an
+unresolved continuation can prevent advance adoption; ordinary current-limit SLC
+remains the fallback. No accepted SET is rolled back just because data vanishes.
+
+On the wire, `slcState.speedLimit` remains the current selected observation.
+`upcomingSpeedLimit` and `upcomingBoundaryId` identify a qualified early proposal;
+an early `slcCruiseCommand` must carry the same boundary ID. The boundary record
+is in memory for this runtime session, not a saved decision database.
 
 Only a finite positive source observation can propose a limit. Missing, stale and
 unknown observations stay distinct. Source loss clears a pending choice; it cannot

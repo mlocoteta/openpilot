@@ -71,6 +71,19 @@ def update(helper, cs, approved=None, *, enabled=True, slc=True, metric=True, pe
   helper.update_v_cruise(cs, enabled, metric, pending, slc_enabled=slc, slc_approved=approved)
 
 
+def test_upcoming_approval_keeps_native_capacity_and_release_checks(helper):
+  approved = approval(70.)
+  approved.speedLimit = 50./3.6
+  approved.upcomingSpeedLimit = 70./3.6
+  approved.upcomingBoundaryId = 'a' * 64
+  update(helper, state(native=60.), approved)
+  assert helper.toyota.status == 'raise_dash'
+  update(helper, state(native=80., button='accelCruise', pressed=True), approved)
+  assert helper.toyota.status == 'release_plus'
+  update(helper, state(native=80., button='accelCruise', pressed=False), approved)
+  assert helper.toyota.status == 'ready' and helper.toyota.can_apply(70./3.6)
+
+
 @pytest.fixture(params=[False, True], ids=['normal-steps', 'swapped-steps'])
 def swap(helper, tmp_path, request):
   params = Params(str(tmp_path))
