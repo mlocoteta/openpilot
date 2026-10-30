@@ -19,6 +19,8 @@ class CarEvents:
     self.CP = CP
     self.event_rules = event_rules(CP)
 
+    from opendbc.car.gm.values import is_volt_cc_profile
+    self.volt_cc_profile = CP.brand == "gm" and is_volt_cc_profile(CP)
     self.steering_unpressed = 0
     self.low_speed_alert = False
     self.no_steer_warning = False
@@ -74,6 +76,12 @@ class CarEvents:
             events.add(EventName.manualRestart)
 
     elif self.CP.brand == 'gm':
+      if self.volt_cc_profile:
+        # Conventional LONG requires the car's cruise acknowledgment. MAIN alone
+        # still arms independent steering and cannot create a LONG engagement.
+        if (CS.canValid and not CS.canTimeout and CS.cruiseState.available and CS.cruiseState.enabled and
+            (CS.buttonEnable or not CS_prev.cruiseState.enabled)):
+          events.add(EventName.buttonEnable)
       # Enabling at a standstill with brake is allowed
       # TODO: verify 17 Volt can enable for the first time at a stop and allow for all GMs
       if CS.vEgo < self.CP.minEnableSpeed and not (CS.standstill and CS.brakePressed and
@@ -152,7 +160,7 @@ class CarEvents:
       events.add(EventName.invalidLkasSetting)
     if CS.lowSpeedAlert:
       events.add(EventName.belowSteerSpeed)
-    if CS.buttonEnable:
+    if CS.buttonEnable and not self.volt_cc_profile:
       events.add(EventName.buttonEnable)
 
     # Handle cancel button presses
