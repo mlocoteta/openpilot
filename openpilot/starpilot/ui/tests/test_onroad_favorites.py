@@ -60,6 +60,7 @@ class TestOnroadFavorites(unittest.TestCase):
 
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
+      params.put_bool("LaneCentering", False, block=True)
       cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
       session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
       session._mode, session.profile, session.selected = runtime_app.ShellMode.ONROAD, Profile.COMPACT, runtime_app.Destination.STAR

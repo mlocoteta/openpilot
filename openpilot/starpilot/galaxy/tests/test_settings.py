@@ -179,7 +179,8 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertNotEqual(first["view"], second["view"])
     self.assertEqual(first["rows"], second["rows"])
     first_row = first["rows"][0]
-    self.params.put_bool("LaneCentering", False, block=True)
+    self.assertEqual(first_row["value"], "On")
+    self.params.put_bool("LaneCentering", True, block=True)
     row = self.page("lane")["rows"][0]
     self.assertEqual(first_row["value"], row["value"])
     self.assertNotEqual(first_row["revision"], row["revision"])
@@ -773,6 +774,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertEqual(legacy.read_bytes(), b'{"0.001":{"average":2.4,"count":2}}')
 
   def test_one_use_confirmation_and_exact_source_context(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     page = self.page("lane")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Enable Lane Centering")
     intent = self.gateway.preview(page["view"], index, 1, self.session, self.generation)
@@ -1154,6 +1156,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(_onroad_preference("torque", "reset_profiles"))
 
   def test_live_lane_rejects_unsupported_vehicle_and_master_dependency(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     tagged, _ = self._live_lane_context()
     page = self.page("lane")
     pause = next(row for row in page["rows"] if row["label"] == "Pause on signal")
@@ -1917,6 +1920,7 @@ class SettingsHttpTest(unittest.TestCase):
     self.assertEqual(legacy.read_bytes(), b'{}')
 
   def test_auth_precedes_source_read_and_http_save(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     calls = 0
     original = self.gateway.page
     def counted(*args):
@@ -1980,6 +1984,7 @@ class SettingsHttpTest(unittest.TestCase):
     self.assertFalse(self.params.get_bool("LaneCentering"))
 
   def test_confirm_finishes_before_acknowledged_logout(self):
+    self.params.put_bool("LaneCentering", False, block=True)
     cookie = self.login()
     _, page, _ = self.request("/api/settings/pages/lane", cookie=cookie)
     index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Enable Lane Centering")
