@@ -560,7 +560,7 @@ class LiveTrackingActor:
       # Fork freezes the genuine source prefix without copying its nested
       # checkpoint graph on the ingestion loop. The original worker still
       # recomputes the complete controller/native evidence independently.
-      from openpilot.starpilot.flm.live_tracking_probe_process import original_probe_context, prepare_probe_wire
+      from openpilot.starpilot.flm.live_tracking_probe_process import original_probe_context, prepare_probe_payloads
 
       expected = original_probe_context(selected, accepted, self.certificate.binding, source, group=group, names=names, now_ns=now_ns)
 
@@ -583,6 +583,7 @@ class LiveTrackingActor:
               group=group,
               names=names,
               prefix_controls=original_prefix,
+              _payload_only=True,
             )
           )
         # This existing child already owns a frozen original source snapshot.
@@ -602,7 +603,7 @@ class LiveTrackingActor:
         memory_soft, memory_hard = resource.getrlimit(resource.RLIMIT_AS)
         memory_limit = min([2 * 1024 * 1024 * 1024] + [value for value in (memory_soft, memory_hard) if value >= 0])
         resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_hard))
-        prepared = prepare_probe_wire(jobs, queued_ns=now_ns, expected=expected)
+        prepared = prepare_probe_payloads(tuple(jobs), queued_ns=now_ns, expected=expected)
         started_ns = time.monotonic_ns()
         if not now_ns <= started_ns <= now_ns + 2_000_000_000:
           raise ValueError('original numerical input deadline expired')

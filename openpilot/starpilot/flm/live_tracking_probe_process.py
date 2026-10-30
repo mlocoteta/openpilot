@@ -82,7 +82,7 @@ def probe_replay_snapshot(replay, prefix_controls, *, endpoint_output=None):
   ):
     raise ValueError('genuine bounded raw prefix owner required')
 
-  def source():
+  def source(*, verify_frames=True):
     if (
       type(replay.records) is not deque
       or type(replay.checkpoints) is not deque
@@ -135,7 +135,7 @@ def probe_replay_snapshot(replay, prefix_controls, *, endpoint_output=None):
       or not frames
       or frames[0].control_ns != first
       or frames[-1].control_ns != last
-      or any(not _same_original_frame(frame, _frame(control)) for frame, control in zip(frames, prefix_controls, strict=True))
+      or verify_frames and any(not _same_original_frame(frame, _frame(control)) for frame, control in zip(frames, prefix_controls, strict=True))
     ):
       raise ValueError('genuine complete original prefix differs')
     selected_events = []
@@ -194,7 +194,9 @@ def probe_replay_snapshot(replay, prefix_controls, *, endpoint_output=None):
   packed = pack_primitive_snapshot(data)
   if len(packed) > MAX_PACKED:
     raise ValueError('bounded raw probe snapshot byte limit')
-  _, after, current_factory = source()
+  # The second complete key rereads every frame AND original control. If it
+  # is unchanged, the first pass's exact frame-membership proof still holds.
+  _, after, current_factory = source(verify_frames=False)
   if after != key or current_factory is not factory:
     raise ValueError('actual raw prefix source changed while copying')
   return packed
@@ -216,6 +218,7 @@ def make_probe_job(
   names,
   prefix_controls,
   archived_clock=False,
+  _payload_only=False,
 ):
   """Freeze genuine owner evidence, independently of later application authority.
 
@@ -231,7 +234,8 @@ def make_probe_job(
   from opendbc.car.steering_projection import TorqueProjection
 
   if (
-    type(archived_clock) is not bool
+    type(_payload_only) is not bool
+    or type(archived_clock) is not bool
     or type(evidence_ns) is not int
     or evidence_ns <= 0
     or type(queued_ns) is not int
@@ -271,6 +275,8 @@ def make_probe_job(
     'prefix_controls': tuple(_literal_control(row) for row in prefix_controls),
   }
   _primitive(dict(payload, replay=None))
+  if _payload_only:
+    return payload
   packed = pack_primitive_snapshot(payload)
   if len(packed) > MAX_PACKED:
     raise ValueError('numerical probe job byte bound')
@@ -323,14 +329,26 @@ def make_probe_batch(jobs, *, queued_ns):
   Each original evidence clock and literal snapshot is retained. queued_ns is
   only the actual batch lifecycle clock; no stale evidence becomes a grant.
   """
-  from openpilot.starpilot.flm.controller_replay import pack_primitive_snapshot
-  from openpilot.starpilot.flm.live_tracking_probe import _primitive
-
   if type(jobs) is not tuple or not 1 <= len(jobs) <= 4 or type(queued_ns) is not int or queued_ns <= 0:
     raise ValueError('bounded actual probe batch required')
   rows = tuple(decode_probe_job(job) for job in jobs)
   if any('batch' in row or type(row.get('prefix_controls')) is not tuple or not row['prefix_controls'] for row in rows):
     raise ValueError("single genuine endpoint inputs required")
+  return _pack_probe_batch(rows, queued_ns=queued_ns)
+
+
+def _pack_probe_batch(rows, *, queued_ns):
+  from openpilot.starpilot.flm.controller_replay import pack_primitive_snapshot
+  from openpilot.starpilot.flm.live_tracking_probe import _primitive
+
+  if type(rows) is not tuple or not 1 <= len(rows) <= 4 or type(queued_ns) is not int or queued_ns <= 0:
+    raise ValueError('bounded actual probe batch required')
+  for row in rows:
+    if (type(row) is not dict or row.get('version') != VERSION or 'batch' in row or
+        type(row.get('replay')) is not bytes or not 0 < len(row['replay']) <= MAX_PACKED or
+        type(row.get('prefix_controls')) is not tuple or not row['prefix_controls']):
+      raise ValueError('single genuine endpoint inputs required')
+    _primitive(dict(row, replay=None))
   common = ('binding', 'accepted_full30', 'anchor', 'group', 'names', 'archived_clock')
   first = rows[0]
   previous = previous_apply = 0
@@ -430,10 +448,20 @@ def original_probe_context(selected, accepted, binding, source, *, group, names,
 
 def prepare_probe_wire(jobs, *, queued_ns, expected):
   """Called in the preparation CHILD; never walk large replay graphs in parent."""
-  import json
-
   job = make_probe_batch(tuple(jobs), queued_ns=queued_ns)
   context = _prepared_context(decode_probe_job(job))
+  return _prepared_wire(job, context, expected)
+
+
+def prepare_probe_payloads(rows, *, queued_ns, expected):
+  """Pack the child's original validated endpoints once for independent replay."""
+  job = _pack_probe_batch(rows, queued_ns=queued_ns)
+  return _prepared_wire(job, _prepared_context({'batch': rows}), expected)
+
+
+def _prepared_wire(job, context, expected):
+  import json
+
   digest = _context_digest(context)
   if digest != _context_digest(expected):
     raise ValueError('prepared numerical input differs from original request')
