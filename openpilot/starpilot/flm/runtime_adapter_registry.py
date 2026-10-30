@@ -131,8 +131,17 @@ def current_authority(sm, cp, *, now_ns, required):
     if required:
       from openpilot.starpilot.aol.runtime import current_native
       from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
+      from openpilot.starpilot.aol.wire import decode_safety
 
-      native = current_native(sm, cp, now_ns=now_ns)
+      raw = sm['aolSafetyWire']
+      announced = decode_safety(bytes(raw) if isinstance(raw, (bytes, bytearray, memoryview)) else raw)
+      healthy = None
+      if announced is not None and announced.requestedLateral and announced.lateralAllowed:
+        # This existing path performs current_native itself, validating the
+        # packet configuration once while keeping every live check per call.
+        healthy = _healthy_transport_native(sm, cp, sm['carState'], str(announced.axisSessionId), now_ns,
+          require_longitudinal=False)
+      native = healthy if healthy is not None else current_native(sm, cp, now_ns=now_ns)
       identity = native_identity_digest(native_identity_key(native))
       # Typed LAT grants are independent of ordinary LONG controlsAllowed.
       # Reuse existing exact current configuration/health semantics, preserving
@@ -141,7 +150,7 @@ def current_authority(sm, cp, *, now_ns, required):
         native is not None
         and native.requestedLateral
         and native.lateralAllowed
-        and _healthy_transport_native(sm, cp, sm['carState'], str(native.axisSessionId), now_ns, native=native, require_longitudinal=False) is not None
+        and healthy is not None
       )
     else:
       healthy = bool(
