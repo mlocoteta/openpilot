@@ -292,6 +292,18 @@ def test_compact_max_restores_dinish_number_label_and_shadow(drawing):
   drawing['draw_circle_gradient'].assert_called_once()
 
 
+@pytest.mark.parametrize('metric', [False, True])
+@pytest.mark.parametrize('engaged', [False, True])
+def test_compact_unset_max_stays_hidden(metric, engaged, drawing):
+  font = fonts(Profile.COMPACT)
+  hud = CompactHudRenderer(font, Mock())
+  current = state(metric=metric, engaged=engaged, longitudinal_active=engaged, cruise_kph=None, drive_frame=1)
+  hud.render_max_speed(current)
+  hud.render_max_speed(replace(current, observed_ns=current.observed_ns + 20_000_000))
+  font.draw.assert_not_called()
+  drawing['draw_circle_gradient'].assert_not_called()
+
+
 def test_large_limit_keeps_a_unit_when_set_speed_is_hidden():
   profile = Profile.LARGE
   current = state()
