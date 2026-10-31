@@ -137,9 +137,11 @@ def test_preference_change_discards_old_route_and_fetches_again(owner, saved_ori
   executor.jobs[1].set_result(NavigationRoute(ROUTE))
   assert runtime.update(14, position, 1)['route']
   if not saved_origin:
-    off_route = (15, (0., .01), 5., 90.)
-    runtime.update(15, off_route, 1)
-    runtime.update(2_000_000_016, off_route, 1)
-    runtime.update(2_000_000_017, off_route, 1)
+    def off_route(t):
+      return (t, (0., .01), 5., 90.)
+    runtime.update(15, off_route(15), 1)  # a fresh route is not judged off-route for REROUTE_GRACE_NS
+    runtime.update(10_000_000_016, off_route(10_000_000_016), 1)
+    runtime.update(14_000_000_016, off_route(14_000_000_016), 1)
+    runtime.update(14_000_000_017, off_route(14_000_000_017), 1)
     assert len(executor.jobs) == 3
     assert executor.calls[2][-1] == ('toll', 'motorway', 'ferry')

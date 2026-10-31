@@ -105,12 +105,18 @@ class Step:
   modifier: str
 
 
+ARRIVE_M = 30.              # stopped this close to the route's end = arrived
+ARRIVE_ZONE_M = 60.         # never off-route (no reroute) this close to the end
+MISALIGNED_MIN_SPEED = 5.   # m/s; heading only counts as "wrong road" above this
+
+
 @dataclass(frozen=True)
 class Progress:
   instruction: dict
   next_maneuver: dict
   off_route: bool
   arrived: bool
+  end_m: float = float('inf')   # straight-line metres to the route's last point
 
 
 class NavigationRoute:
@@ -186,14 +192,22 @@ class NavigationRoute:
     fraction = min(1., max(0., (threshold_speed - speeds[bucket]) / (speeds[bucket + 1] - speeds[bucket])))
     threshold = distances[bucket] + fraction * (distances[bucket + 1] - distances[bucket])
     misaligned = False
-    if bearing is not None and known_speed and speed >= 2.5:
+    # 10-31 (Mat: reroute loops): a heading this far off only means a wrong road when moving; below ~11 mph GPS
+    # heading swings through turns and lots, and a fresh route from a stop was flagged within seconds.
+    if bearing is not None and known_speed and speed >= MISALIGNED_MIN_SPEED:
       a, b = self.points[segment], self.points[segment + 1]
       lat1, lat2, delta = math.radians(a[1]), math.radians(b[1]), math.radians(b[0] - a[0])
       direction = math.degrees(math.atan2(math.sin(delta) * math.cos(lat2),
                               math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(delta)))
       misaligned = abs((direction - bearing + 180) % 360 - 180) > 75
-    arrived = known_speed and speed < 2 and distance(position, self.points[-1]) < 40 and instruction['remainingDistanceMeters'] < 40
-    return Progress(instruction, next_maneuver, separation > threshold or misaligned, arrived)
+    end_m = distance(position, self.points[-1])
+    remaining_m = instruction['remainingDistanceMeters']
+    # 10-31 (Mat: routes never end): stopped within ARRIVE_M of the end, or stopped past the end of the line still close to it.
+    # The old rule (stopped < 40 m on BOTH measures) missed a destination pin set back from the road, and pulling into
+    # the lot/driveway flagged off-route first, which rerouted back to the same place instead of arriving.
+    arrived = known_speed and speed < 2 and (end_m < ARRIVE_M or (remaining_m < 1 and end_m < ARRIVE_ZONE_M))
+    near_end = end_m < ARRIVE_ZONE_M or remaining_m < ARRIVE_ZONE_M
+    return Progress(instruction, next_maneuver, (separation > threshold or misaligned) and not near_end, arrived, end_m)
 
 
 class MapboxRouteEngine:

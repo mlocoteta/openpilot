@@ -140,10 +140,10 @@ def test_arrival_ends_navigation_after_a_short_stop(tmp_path, route):
   assert owner.read()['destination'] is not None
   assert at(20, 5.)['status'] == 'guiding', 'driving off resets arrival'
   at(21)
-  assert at(35)['status'] == 'arrived' and owner.read()['destination'] is not None
-  assert at(36)['status'] == 'arrived'
-  assert owner.read()['destination'] is None, 'navigation ends 15 s after stopping at the destination'
-  assert at(37)['status'] == 'noDestination'
+  assert at(30)['status'] == 'arrived' and owner.read()['destination'] is not None
+  assert at(31)['status'] == 'arrived'
+  assert owner.read()['destination'] is None, 'navigation ends 10 s after stopping at the destination'
+  assert at(32)['status'] == 'noDestination'
 
 
 def test_arrival_does_not_override_a_newer_destination(tmp_path, route):
@@ -400,3 +400,88 @@ def test_located_reports_the_chosen_source(monkeypatch, native, source, control)
   assert (chosen in module.CONTROL_SOURCES) is control
   monkeypatch.setattr(module, 'select_source', lambda _sm, _now, phone_fix=None: None)
   assert module.located(None, 6) == (None, None) and module.location(None, 6) is None
+
+
+# 10-31 (Mat #car: reroute loops, routes that never end). The route runs east from (0, 0) to the destination (.01, 0).
+S = 1_000_000_000
+
+
+def guide(tmp_path, route):
+  owner, executor = configured(tmp_path), Executor()
+  runtime = RouteRuntime(owner, engine=SimpleNamespace(fetch=None), executor=executor)
+  def at(t, lon, lat=0., speed=10., bearing=90., drive=1_000_000_000, fresh=True):
+    stamp = int(t * S) - 1_000_000 if fresh else 1
+    return runtime.update(int(t * S), (stamp, (lon, lat), speed, bearing), drive)
+  at(10, .001)
+  executor.jobs[0].set_result(route)
+  assert at(11, .001)['status'] == 'guiding'
+  return owner, executor, runtime, at
+
+
+def test_off_route_asks_for_exactly_one_reroute_then_rejoins(tmp_path, route):
+  owner, executor, runtime, at = guide(tmp_path, route)
+  for t in range(22, 26):        # a wrong turn: 200 m north of the line, heading north
+    at(t, .003, .0018, bearing=0.)
+  assert at(26, .003, .0018, bearing=0.)['status'] == 'routing'
+  assert at(27, .003, .0018, bearing=0.)['status'] == 'routing'
+  assert len(executor.jobs) == 2
+  executor.jobs[1].set_result(route)   # the new route (same line here) arrives while still off it
+  for t in range(28, 46):
+    assert at(t, .003, .0018, bearing=0.)['status'] == 'guiding', t
+  assert len(executor.jobs) == 2, 'no second reroute inside the grace/gap window'
+  for t in range(46, 60):        # back on the route
+    assert at(t, .004 + (t - 46) * .0001, 0.)['status'] == 'guiding'
+  assert len(executor.jobs) == 2
+
+
+def test_a_low_speed_heading_swing_is_not_off_route(tmp_path, route):
+  _, executor, _, at = guide(tmp_path, route)
+  for t in range(22, 40):        # creeping through a turn / lot with GPS heading swinging
+    assert at(t, .002, speed=3., bearing=200.)['status'] == 'guiding'
+  assert len(executor.jobs) == 1
+
+
+def test_pulling_off_the_road_at_the_destination_arrives_instead_of_rerouting(tmp_path, route):
+  owner, executor, _, at = guide(tmp_path, route)
+  for t in range(22, 28):        # into a driveway 45 m north of the end, heading north
+    assert at(t, .01, .0004, speed=4., bearing=0.)['status'] == 'guiding'
+  at(28, .01, .0004, speed=0.)
+  assert at(33, .01, .0004, speed=0.)['status'] == 'arrived'
+  at(38, .01, .0004, speed=0.)
+  assert owner.read()['destination'] is None
+  assert len(executor.jobs) == 1, 'no reroute at the destination'
+
+
+def test_arrival_keeps_counting_through_a_gps_outage(tmp_path, route):
+  owner, _, _, at = guide(tmp_path, route)
+  at(20, .01, speed=0.)
+  for t in range(21, 31):        # u-blox at 0 sats: only stale fixes
+    at(t, .01, speed=0., fresh=False)
+  assert owner.read()['destination'] is None
+
+
+def test_a_drive_that_ended_at_the_destination_does_not_resume_next_drive(tmp_path, route):
+  owner, executor, _, at = guide(tmp_path, route)
+  at(20, .0099, speed=0.)        # stopped 11 m short, key off 3 s later (before END_ROUTE_NS)
+  at(23, .0099, speed=0., drive=0)
+  assert owner.read()['destination'] is not None, 'key-off alone is not an arrival'
+  at(3600, .0099, speed=0., drive=3_600_000_000_000)
+  assert owner.read()['destination'] is None
+  assert at(3601, .0099, speed=0., drive=3_600_000_000_000)['status'] == 'noDestination'
+  assert len(executor.jobs) == 1
+
+
+def test_a_drive_that_ended_elsewhere_resumes_next_drive(tmp_path, route):
+  owner, executor, _, at = guide(tmp_path, route)
+  at(20, .005, speed=0.)
+  at(3600, .005, speed=0., drive=3_600_000_000_000)
+  assert owner.read()['destination'] is not None
+  assert len(executor.jobs) == 2, 'a new drive fetches from the new position'
+
+
+def test_a_device_state_blip_does_not_refetch_the_route(tmp_path, route):
+  _, executor, _, at = guide(tmp_path, route)
+  at(20, .003)
+  at(21, .0031, drive=0)
+  assert at(22, .0032)['status'] == 'guiding'
+  assert len(executor.jobs) == 1

@@ -16,7 +16,12 @@ from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SERVICES, bearing
 # (phoneGps, e.g. the Accord head unit filling the comma's u-blox outages) still guides, but only for display.
 CONTROL_SOURCES = ("comma", "car")
 ARRIVED_NS = 5_000_000_000      # stopped at the destination this long shows "You have arrived"
-END_ROUTE_NS = 15_000_000_000   # ...and this long ends navigation, like tapping End navigation
+END_ROUTE_NS = 10_000_000_000   # ...and this long ends navigation, like tapping End navigation
+# 10-31 (Mat #car: "auto-rerouting has problems"; HU black box 12:27:56 + 12:28:07 = two reroutes 11 s apart):
+OFF_ROUTE_NS = 4_000_000_000        # off the route this long (fresh fixes only) asks for a new route
+REROUTE_GRACE_NS = 10_000_000_000   # a just-fetched route is not judged off-route for this long
+REROUTE_GAP_NS = 20_000_000_000     # at most one reroute per this long; meanwhile the old route keeps guiding
+KEY_END_M = 60.                     # a drive that ended this close to the route's end does not resume it next drive
 
 
 def located(sm, now_ns: int, phone_fix=None):
@@ -52,6 +57,9 @@ class RouteRuntime:
     self.arrived_since = 0
     self.ended_revision = None
     self.hud_route = None
+    self.route_since = 0          # when the current route started guiding (reroute grace)
+    self.rerouted_at = 0          # last off-route refetch
+    self.last_end_m = float('inf')  # last fresh fix's distance to the route end, for the key-cycle check
     self.session = uuid.uuid4().hex
 
   def update(self, now_ns: int, position, drive_id: int, control_source: bool = True) -> dict:
@@ -61,12 +69,19 @@ class RouteRuntime:
         self.owner.position_store.record({'longitude': coordinates[0], 'latitude': coordinates[1], 'bearing': bearing})
     if position is None:
       self.owner.position_store.flush()
-    settings = self.owner.read_routing()
-    selected = settings['destination']
-    destination_key = None if selected is None else (selected['id'], selected['longitude'], selected['latitude'])
-    exclusions = tuple(value for key, value in ROUTE_AVOIDANCES.items() if settings[key])
-    key = settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive_id, exclusions
+    # 10-31: a deviceState blip (drive_id 0 for a moment) or key-off is not a new drive; only a new start is.
+    # Before, each 0 <-> id flip dropped the route and fetched it again mid-drive ("Rerouting" with no reason).
+    drive = drive_id or (self.key[3] if self.key is not None else 0)
+    settings, key, exclusions = self._routing(drive)
     if key != self.key:
+      # 10-31: a drive that ended parked at the destination (arrival missed in a GPS gap, or key-off before
+      # END_ROUTE_NS) must not resume guiding to the same place on the next drive.
+      if (self.key is not None and self.key[:3] == key[:3] and self.key[4:] == key[4:] and self.key[3] != drive
+          and key[2] is not None and self.last_end_m < KEY_END_M):
+        self._end_route(settings['revision'])
+        settings, key, exclusions = self._routing(drive)
+      self.last_end_m = float('inf')
+      self.rerouted_at = 0
       self.key, self.route = key, None
       self.routes = []
       self.preview_only = False
@@ -103,6 +118,7 @@ class RouteRuntime:
       selected_route = self.routes[index] if type(index) is int and 0 <= index < len(self.routes) else self.routes[0]
       if selected_route is not self.route:
         self.off_route_since = self.arrived_since = 0
+        self.route_since = now_ns
       self.route = selected_route
     if base_status != 'waitingForLocation':
       return result
@@ -129,9 +145,15 @@ class RouteRuntime:
       return result
     progress = self.route.progress(coordinates, speed, bearing)
     fresh = now_ns <= stamp + GPS_MAX_AGE_NS
-    self.off_route_since = (self.off_route_since or now_ns) if fresh and progress.off_route else 0
-    self.arrived_since = (self.arrived_since or now_ns) if fresh and progress.arrived else 0
-    if self.off_route_since and now_ns - self.off_route_since >= 2_000_000_000:
+    graced = self.route_since and now_ns - self.route_since < REROUTE_GRACE_NS
+    self.off_route_since = (self.off_route_since or now_ns) if fresh and progress.off_route and not graced else 0
+    # A stale fix (u-blox outage) neither starts nor cancels arrival: stopped at the door, the clock keeps running.
+    if fresh:
+      self.arrived_since = (self.arrived_since or now_ns) if progress.arrived else 0
+      self.last_end_m = progress.end_m
+    if (self.off_route_since and now_ns - self.off_route_since >= OFF_ROUTE_NS and not self.arrived_since
+        and (not self.rerouted_at or now_ns - self.rerouted_at >= REROUTE_GAP_NS)):
+      self.rerouted_at = now_ns
       self.route = None
       self.routes = []
       result['status'] = 'routing'
@@ -150,6 +172,13 @@ class RouteRuntime:
                   nextManeuver=progress.next_maneuver, route=self.route.preview(),
                   controlValid=bool(control_source and speed is not None and fresh and drive_id > 0 and not progress.off_route and not progress.arrived and stamp >= drive_id))
     return result
+
+  def _routing(self, drive: int):
+    settings = self.owner.read_routing()
+    selected = settings['destination']
+    destination_key = None if selected is None else (selected['id'], selected['longitude'], selected['latitude'])
+    exclusions = tuple(value for key, value in ROUTE_AVOIDANCES.items() if settings[key])
+    return settings, (settings['enabled'], hashlib.sha256(settings['token'].encode()).digest(), destination_key, drive, exclusions), exclusions
 
   def _end_route(self, revision: str) -> None:
     # Once per destination; a concurrent change (new destination, Galaxy edit) wins over arrival.
