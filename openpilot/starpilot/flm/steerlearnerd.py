@@ -40,9 +40,11 @@ class _SourceDelivery:
     if sm.updated['deviceMotion']:
       self.pose_header = int(sm.logMonoTime['deviceMotion'])
 
-  def next(self, sm, *, pending_evidence=()):
+  def next(self, sm, *, pending_evidence=(), retained_evidence=False):
     if not self.pending:
-      if pending_evidence:
+      if retained_evidence:
+        sm.update(0)  # Process our retained FIFO heads before waiting again.
+      elif pending_evidence:
         # A received pose may still need a genuinely newer consumed state.
         # Poll existing tapes without consuming/reordering their FIFO heads.
         sockets = (sm.sock['deviceMotion'], *pending_evidence)
@@ -536,8 +538,9 @@ def run(
         pending_stamp = getattr(pending_poses[0], 'mono_ns', 0)
         pending_now = clock()
         pending_fresh = type(pending_stamp) is int and 0 < pending_stamp <= pending_now <= pending_stamp + MAX_GAP_NS
-      delivered_pose_header = (source_delivery.next(sm, pending_evidence=(control_socket, applied_socket))
-                               if pending_fresh else source_delivery.next(sm))
+      retained_evidence = any(head is not None for head in drain_state.heads)
+      delivered_pose_header = source_delivery.next(sm,
+        pending_evidence=(control_socket, applied_socket) if pending_fresh else (), retained_evidence=retained_evidence)
       source_rejected = False
       now = clock()
       # This is an ORIGINAL header from the real poll or an already consumed
@@ -697,7 +700,8 @@ def run(
               return
           _collect_applied_output(collector, applied, sm, CP, received_now)
 
-      drain_pair(control_socket, control, applied_socket, output, messaging.recv_one_or_none, sink, now, drain_state)
+      drain_pair(control_socket, control, applied_socket, output, messaging.recv_one_or_none, sink, now, drain_state,
+        budget_ns=5_000_000 if live_actor is not None else None)
       if collector is not None:
         # Decoding queued frames may outlast the sampled shared inputs. Consume
         # real pending deliveries before pose/native checks; keep their original

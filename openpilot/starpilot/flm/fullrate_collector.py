@@ -11,6 +11,7 @@ from collections import Counter, OrderedDict, deque
 from openpilot.starpilot.flm.torque_eligibility import asynchronous_hint, bounded_context_output, exact_unclipped_pair, consumed_sources_current
 from openpilot.starpilot.flm.native_refinement_wire import valid_inputs
 
+import time
 from dataclasses import dataclass, replace
 import math
 import re
@@ -923,9 +924,11 @@ class PairedDrainState:
   def __init__(self, control_socket, applied_socket):
     self.sockets = (control_socket, applied_socket)
     self.heads: tuple = (None, None)
+    self.counts = (0, 0)
+    self.exhausted = (False, False)
 
 
-def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns, state=None):
+def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns, state=None, *, budget_ns=None, clock=time.monotonic_ns):
   """Merge two bounded FIFO tapes by their original publisher headers.
 
   Only the two queue heads compete; never sort a producer's own tape. A held
@@ -937,17 +940,27 @@ def drain_pair(control_socket, control, applied_socket, applied, receive, collec
   A persistent state retains only the two already-read heads at an overrun.
   Their original wire and clocks are checked again on the next bounded drain.
   """
+  if budget_ns is not None and (state is None or type(budget_ns) is not int or budget_ns <= 0):
+    raise ValueError('time-sliced drain requires persistent state and a positive budget')
+  deadline = None if budget_ns is None else clock() + budget_ns
   sockets, callbacks = (control_socket, applied_socket), (control, applied)
   if state is None:
     state = PairedDrainState(*sockets)
   pending = list(state.heads)
   state.heads = (None, None)
-  counts = [0, 0]
+  counts = list(state.counts)
+  exhausted = list(state.exhausted)
+  state.counts = (0, 0)
+  state.exhausted = (False, False)
+  processed = 0
 
   def head(index):
+    if exhausted[index]:
+      return None
     event = pending[index][0] if pending[index] is not None else receive(sockets[index])
     pending[index] = None
     if event is None:
+      exhausted[index] = True
       return None
     _check_evidence_wire(event)
     stamp = event.logMonoTime
@@ -965,10 +978,17 @@ def drain_pair(control_socket, control, applied_socket, applied, receive, collec
     head(0)
     head(1)
     while pending[0] is not None or pending[1] is not None:
+      if processed and deadline is not None and clock() >= deadline:
+        # Yield scheduling only. Preserve original FIFO heads and the SAME
+        # per-stream overrun count; a slice cannot renew evidence or a batch.
+        state.heads, state.counts = tuple(pending), (counts[0], counts[1])
+        state.exhausted = (exhausted[0], exhausted[1])
+        return False
       index = 0 if pending[1] is None or (pending[0] is not None and pending[0][1] <= pending[1][1]) else 1
       event, _stamp = pending[index]
       callbacks[index](event, collector, now_ns)
       counts[index] += 1
+      processed += 1
       pending[index] = None
       head(index)
   except _DrainOverrun:
