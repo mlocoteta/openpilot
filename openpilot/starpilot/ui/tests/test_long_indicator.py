@@ -1,5 +1,6 @@
 from dataclasses import replace
 from types import SimpleNamespace as NS
+from typing import cast
 from unittest.mock import Mock
 
 import pyray as rl
@@ -9,7 +10,7 @@ from openpilot.selfdrive.ui.mici.onroad import long_indicator as native
 from openpilot.starpilot.ui import onroad_personality as indicator
 from openpilot.starpilot.ui.onroad_customization import default_document
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
-from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.traffic_status import TrafficDisplay
 
 
@@ -22,7 +23,7 @@ def road(**changes):
 def display(monkeypatch):
   monkeypatch.setattr(indicator.gui_app, 'texture', lambda path: NS(path=path, width=200, height=200))
   monkeypatch.setattr(rl, 'get_time', lambda: 1.)
-  fonts = NS(profile=Profile.COMPACT, measure=Mock(return_value=NS(width=20)), draw=Mock())
+  fonts = cast(BitmapFonts, NS(profile=Profile.COMPACT, measure=Mock(return_value=NS(width=20)), draw=Mock()))
   widget = indicator.PersonalityWidget(fonts)
   widget._draw_centered = Mock()
   return widget

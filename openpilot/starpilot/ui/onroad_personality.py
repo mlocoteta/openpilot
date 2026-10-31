@@ -3,9 +3,7 @@
 import pyray as rl
 
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
-from openpilot.starpilot.ui.onroad_customization import placement, widget_size
-from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, is_lane_change_notice
+from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadState, is_lane_change_notice, personality_bounds
 from openpilot.starpilot.ui.onroad_widget_style import draw_widget_frame
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.system.ui.lib.application import gui_app
@@ -41,21 +39,13 @@ class PersonalityWidget:
 
   def render(self, state: OnroadState) -> None:
     profile = self.fonts.profile if self.fonts is not None else Profile.COMPACT
-    position = placement(state.customization, profile, 'following_distance')
+    bounds = personality_bounds(profile, state)
     routine = state.alert.size == AlertSize.NONE or is_lane_change_notice(state.alert)
-    if (not position['enabled'] or state.appearance.camera_view == CameraViewChoice.DRIVER or state.reverse_driver_camera or
-        profile == Profile.COMPACT and position['x'] < 476 and not routine):
+    if bounds is None or profile == Profile.COMPACT and bounds[0] < 476 and not routine:
       return
-    width, height = widget_size(state.customization, profile, 'following_distance')
-    rect = rl.Rectangle(position['x'], position['y'], width, height)
-    if profile == Profile.LARGE and state.right_hand_drive:
-      from openpilot.starpilot.ui.onroad_customization import PROFILES
-      from openpilot.starpilot.ui.onroad_dm import monitor_bounds
-      default = PROFILES['large']['widgets']['following_distance']['default']
-      monitor = placement(state.customization, profile, 'driver_monitor')
-      monitor_default = PROFILES['large']['widgets']['driver_monitor']['default']
-      if all(position[axis] == default[axis] and monitor[axis] == monitor_default[axis] for axis in ('x', 'y')):
-        rect.x = monitor_bounds(state.customization, profile, True).x - 32 - width
+    left, top, right, bottom = bounds
+    width, height = right - left, bottom - top
+    rect = rl.Rectangle(left, top, width, height)
     draw_widget_frame(rect, state.customization, profile, 'following_distance')
     scale = width / 60
     label = ({'active': 'TRF', 'paused': 'PAUSE', 'off': 'OFF'}.get(state.traffic_display.state)
@@ -74,6 +64,7 @@ class PersonalityWidget:
   def draw(self, rect: rl.Rectangle, *, personality: int, has_lead: bool, longitudinal_active: bool,
            traffic_mode: bool = False, gas_override: bool = False, visible: bool = True, fit: bool = True) -> None:
     self._prepare()
+    assert self._lead_car is not None
     alpha = self._alpha_filter.update(visible)
     engaged_lead = has_lead and longitudinal_active
     white_target = 0.0 if engaged_lead else (1.0 if has_lead else 0.35)

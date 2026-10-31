@@ -13,8 +13,10 @@ from openpilot.starpilot.controllers.tests.test_wheel_actions import Publisher, 
 from openpilot.starpilot.controllers.wheel_actions import WheelPublisher, WheelConsumer
 from openpilot.starpilot.favorites.actions import BOOKMARK, SET_SPEED, TRAFFIC, FORCE_COAST
 from openpilot.starpilot.favorites.owner import FavoritesOwner, default_slots
-from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
-from openpilot.starpilot.ui.shell import ShellMode
+from openpilot.starpilot.ui.onroad_state import OnroadInput, OnroadState, SpeedLimitObservation, personality_bounds
+from openpilot.starpilot.ui.presentation import Profile
+from openpilot.starpilot.ui.settings_state import Destination
+from openpilot.starpilot.ui.shell import ShellMode, ShellRequest
 
 
 @pytest.fixture
@@ -269,7 +271,8 @@ def test_personality_cache_rejects_unusable_selfdrive_state(personality_session,
 
 
 @pytest.mark.parametrize('profile', ['c4', 'c3'])
-def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(personality_session, monkeypatch, profile):
+@pytest.mark.parametrize('input_kind', ['wheel', 'tap'])
+def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(personality_session, monkeypatch, profile, input_kind):
   import pyray as rl
   from dataclasses import replace
   from openpilot.selfdrive.ui.layouts.settings import common
@@ -279,7 +282,6 @@ def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(pers
   from openpilot.starpilot.controllers.tests.test_wheel_actions import state
   from openpilot.starpilot.favorites.actions import CYCLE_PERSONALITY, EXPERIMENTAL
   from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
-  from openpilot.starpilot.ui.presentation import Profile
   from openpilot.system.ui.lib.application import gui_app
 
   runtime, session, ui, _, clock = personality_session
@@ -292,6 +294,7 @@ def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(pers
   panel = compact.TogglesLayoutMici() if profile == 'c4' else large.TogglesLayout()
   panel.set_visible(False)
   session.profile = Profile.COMPACT if profile == 'c4' else Profile.LARGE
+  session.selected = Destination.STAR
   del vars(session)['_favorite_authority']  # Exercise the real runtime admission.
   shown = [OnroadState(True, True, 15, 80, SpeedLimitObservation(),
                       alert=OnroadAlert(AlertSize.MID, 'Standard', 'Driving Personality',
@@ -299,6 +302,7 @@ def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(pers
   vars(session)['snapshot'] = lambda *_: NS(onroad=shown[0])
   session._native_favorite_actions = lambda: session.native_favorite_actions(
     lambda: True, panel.request_personality, lambda: True)
+  touch = OnroadInput(lambda action: session._emit(ShellRequest('onroad', action)), session.profile)
   actions = session._native_favorite_actions()
   assert actions[CYCLE_PERSONALITY].available and actions[CYCLE_PERSONALITY].invoke()
   assert ui.params.get('LongitudinalPersonality') == 2
@@ -313,13 +317,24 @@ def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(pers
     clock[0] = NOW + sequence * 5_000_000
     for name in ui.sm:
       ui.sm.logMonoTime[name], ui.sm.recv_time[name] = clock[0], clock[0] / 1e9
-    source.observe(ui.params, ui.CP, state(True), now_ns=clock[0] - 1_000_000, drive_id=DRIVE)
-    commands = source.observe(ui.params, ui.CP, state(False), now_ns=clock[0], drive_id=DRIVE)
-    assert commands == (('DistanceButtonControl', 1),)
-    source.publish(commands, ui.CP, publisher, now_ns=clock[0], drive_id=DRIVE,
-                   source_car_ns=clock[0], source_control_ns=clock[0])
-    queue.append(messaging.log_from_bytes(publisher.events[-1][1]))
-    session._poll_wheel(clock[0])
+    if input_kind == 'wheel':
+      source.observe(ui.params, ui.CP, state(True), now_ns=clock[0] - 1_000_000, drive_id=DRIVE)
+      commands = source.observe(ui.params, ui.CP, state(False), now_ns=clock[0], drive_id=DRIVE)
+      assert commands == (('DistanceButtonControl', 1),)
+      source.publish(commands, ui.CP, publisher, now_ns=clock[0], drive_id=DRIVE,
+                     source_car_ns=clock[0], source_control_ns=clock[0])
+      queue.append(messaging.log_from_bytes(publisher.events[-1][1]))
+      session._poll_wheel(clock[0])
+    else:
+      bounds = personality_bounds(session.profile, shown[0])
+      assert bounds is not None
+      left, top, right, bottom = bounds
+      point = (left + right) / 2, (top + bottom) / 2
+      before = ui.params.get('LongitudinalPersonality')
+      touch.press(*point, shown[0])
+      assert ui.params.get('LongitudinalPersonality') == before
+      touch.release(*point, shown[0])
+      assert session._request_emitted
     assert ui.params.get('LongitudinalPersonality') == expected
     assert ui.personality == 1  # No selfdriveState acknowledgement between presses.
 
@@ -339,3 +354,35 @@ def test_rapid_personality_cycles_accept_own_notice_and_reject_safety_alert(pers
   path.write_bytes(b'bad')
   assert not actions[CYCLE_PERSONALITY].invoke()
   assert path.read_bytes() == b'bad'
+
+
+@pytest.mark.parametrize('profile', list(Profile))
+@pytest.mark.parametrize('blocked', ['safe_mode', 'no_longitudinal', 'no_car', 'replay', 'offroad', 'invalid_saved'])
+def test_personality_tap_rechecks_wheel_authority_on_release(native_session, profile, blocked):
+  _, session, ui, _, calls = native_session
+  session.profile, session.selected = profile, Destination.STAR
+  del vars(session)['_favorite_authority']
+  ui.params.put('LongitudinalPersonality', 1, block=True)
+  state = session.snapshot(ShellMode.ONROAD).onroad
+  touch = OnroadInput(lambda action: session._emit(ShellRequest('onroad', action)), profile)
+  bounds = personality_bounds(profile, state)
+  assert bounds is not None
+  left, top, right, bottom = bounds
+  point = (left + right) / 2, (top + bottom) / 2
+  touch.press(*point, state)
+  if blocked == 'safe_mode':
+    ui.params.put_bool('SafeMode', True, block=True)
+  elif blocked == 'no_longitudinal':
+    ui.has_longitudinal_control = False
+  elif blocked == 'no_car':
+    ui.CP = None
+  elif blocked == 'replay':
+    ui.replay_clock = object()
+  elif blocked == 'offroad':
+    session._mode = ShellMode.HOME
+  else:
+    Path(ui.params.get_param_path('LongitudinalPersonality')).write_bytes(b'bad')
+  touch.release(*point, state)
+  assert session._request_emitted and calls == []
+  path = Path(ui.params.get_param_path('LongitudinalPersonality'))
+  assert path.read_bytes() == (b'bad' if blocked == 'invalid_saved' else b'1')

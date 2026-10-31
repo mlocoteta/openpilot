@@ -1455,6 +1455,11 @@ class StarShellSession:
     self._request_emitted = True
     previous_destination = self.selected
     action = request.action
+    if request.source == 'onroad' and getattr(action, 'kind', None) == 'cycle_personality':
+      self._native_favorite_actions()
+      if self._wheel_personality is not None:
+        self._wheel_personality()
+      return
     if request.source == "onroad" and getattr(action, "kind", None) == "set_experimental":
       binding = self._native_favorite_actions().get(EXPERIMENTAL)
       if not (binding is not None and binding.available and binding.invoke is not None and
