@@ -57,11 +57,11 @@ def owner(sm, cp, *, metric=False, resume=None):
   instance.slc_producer_session, instance.slc_cruise_event_id = 'card-producer', 0
   instance.slc_receipts = []
   instance.v_cruise_helper = cruise.VCruiseHelper(cp)
-  instance.vehicle_startup = SimpleNamespace(consume_cruise_resume=lambda: resume)
+  instance.vehicle_startup = Mock(consume_cruise_resume=lambda: resume)
   evidence = sm['slcDashboardObservation']
   observation = SimpleNamespace(status=Status.VALID, speed_mps=float(evidence.speedMps), episode=int(evidence.episode),
     observed_ns=int(evidence.observedMonoTime), valid_until_ns=int(evidence.validUntilMonoTime))
-  instance.CI = SimpleNamespace(CS=SimpleNamespace(dashboard_limit=SimpleNamespace(observation=observation)))
+  instance.CI = Mock(CS=SimpleNamespace(dashboard_limit=SimpleNamespace(observation=observation)))
   return instance
 
 

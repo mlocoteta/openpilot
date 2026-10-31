@@ -303,7 +303,7 @@ class VCruiseHelper:
   def initialize_v_cruise(self, CS, experimental_mode: bool, *, resume: bool | None = None,
                           initial_speed: object = V_CRUISE_INITIAL, slc_target_mps: float | None = None, is_metric: bool = False) -> bool:
     """Return whether fresh SET adopts the qualified current SLC limit."""
-    if (not self.CP.openpilotLongitudinalControl or type(slc_target_mps) not in (int, float) or
+    if (not self.CP.openpilotLongitudinalControl or slc_target_mps is None or type(slc_target_mps) not in (int, float) or
         not math.isfinite(slc_target_mps) or not V_CRUISE_MIN / 3.6 - 1e-5 <= slc_target_mps <= V_CRUISE_MAX / 3.6 + 1e-5):
       slc_target_mps = None
     # PCM initializes when SLC does not own SET.

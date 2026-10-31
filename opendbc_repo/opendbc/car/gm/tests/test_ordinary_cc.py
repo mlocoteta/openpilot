@@ -422,7 +422,7 @@ class TestOrdinaryCc(unittest.TestCase):
       ci = CarInterface(cp)
       owner = LatControlTorque(cp, ci, .01)
       self.assertEqual(owner.controller_policy, 'ordinary_cc')
-      self.assertEqual(owner.pid._k_p, ([0], [.6]))
+      self.assertEqual(owner.pid._k_p, [[0.0], [.6]])
       self.assertEqual(owner.pid._k_i, ([0], [.35]))
       standard = LatControlTorque(cp, ci, .01, controller_mode=ControllerMode.STANDARD)
       self.assertIsNone(standard.starpilot_extension)
