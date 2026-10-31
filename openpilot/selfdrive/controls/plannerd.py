@@ -440,6 +440,8 @@ def starpilot_main():
   if conditional_host is not None:
     subscribed_services.append('starpilotRadarState')
   optional_slc = ['slcDashboardObservation', 'slcVisionObservation', 'mapdOut', 'starpilotCarState'] if slc_available else []
+  if slc_available and feature_enabled(params, CP, 'aol', os.environ):
+    optional_slc.append('aolAxisState')
   subscribed_services.extend(optional_slc)
   subscribed_services.append('starpilotNavigation')
   optional_conditional = ['starpilotNavigation'] + (['starpilotRadarState'] if conditional_host is not None else []) + optional_slc

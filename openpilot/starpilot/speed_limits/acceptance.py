@@ -424,6 +424,9 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     return finish("accepted", target=previous_target())
   confirmation = policy.confirm_higher if previous_speed is None or candidate.speed_mps > previous_speed else (
     policy.confirm_lower if candidate.speed_mps < previous_speed else policy.confirm_lower or policy.confirm_higher)
+  if confirmation and not authority.can_control:
+    state = replace(state, pending=None, timer_running=False)
+    return finish("inactive")
   if not new_limit and old.pending is not None and old.pending.automatic == (not confirmation):
     pending = replace(old.pending, candidate=candidate)
     if old.timer_running:
@@ -452,9 +455,6 @@ def step(state: State, observation: Observation, authority: Authority, policy: P
     elif old.presentation is None or old.presentation.candidate != candidate:
       receipt = replace(receipt, status="different_presentation")
     else:
-      # The driver is always asked, even with only lateral or stock ACC active; the
-      # choice is recorded as accepted history and only commands a target when
-      # this system owns longitudinal control.
       receipt = replace(receipt, consumed=True, status=action.kind.value)
       if action.kind is ActionKind.ACCEPT:
         state, history = _accept(state, candidate, now_ns)

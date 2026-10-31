@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.selfdrive.car.cruise import V_CRUISE_MIN, V_CRUISE_MAX
+from openpilot.starpilot.aol.runtime import current_axis
 from openpilot.starpilot.speed_limits import acceptance as acc
 from openpilot.starpilot.speed_limits import action_arbitration as arb
 from openpilot.starpilot.speed_limits import composition as comp
@@ -384,6 +385,9 @@ class Runtime:
                      selfdrive.enabled and car_fresh and selfdrive_fresh)
     long_enabled = bool(car_fresh and controls_fresh and selfdrive_fresh and car_control_fresh and
                         selfdrive.enabled and sm['carControl'].enabled)
+    if 'aolAxisState' in sm.logMonoTime:
+      axis = current_axis(sm, now_ns=now_ns)
+      long_enabled = long_enabled and bool(axis is not None and axis.nativeAcknowledged and axis.desiredLongitudinal)
     lateral = bool(car_control_fresh and sm['carControl'].latActive and selfdrive_fresh)
     authority = _authority(CP, sm, host_long, lateral, long_enabled=long_enabled)
     authority = replace(authority, accelerator_override=bool(CP.openpilotLongitudinalControl and long_enabled and car_state.gasPressed))
@@ -415,7 +419,8 @@ class Runtime:
         current_way_id=self.map_source.way_id, seconds=self.settings.advance_seconds,
         speed_mps=float(car_state.vEgo) if ego_valid else None,
         standstill=bool(getattr(car_state, 'standstill', False)) or str(getattr(car_state, 'gearShifter', '')) == 'reverse',
-        can_offer=self.settings.enabled and authority.can_control and not host.force_decel, now_ns=now_ns)
+        can_offer=self.settings.enabled and authority.can_control and not host.force_decel,
+        confirmation_active=authority.can_control, now_ns=now_ns)
     return replace(frame, adoption_observations=proposals, confirmation_started_ns=self.advance.started_ns)
 
   def _action(self, request: Action | None, now_ns: int) -> tuple[acc.DriverAction | None, acc.AdoptRequest | None, int | None]:

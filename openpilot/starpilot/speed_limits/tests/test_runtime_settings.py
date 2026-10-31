@@ -36,7 +36,7 @@ class RuntimeSettingsTests(unittest.TestCase):
                                 authority, policy, now_ns=1)
               self.assertEqual(result.state.accepted, accepted)
               self.assertIsNone(result.history_write)
-              self.assertIsNotNone(result.state.pending)
+              self.assertEqual(result.state.pending is not None, authority.can_control)
               self.assertEqual(result.control_target_mps, 20. if accepted is not None and authority.can_control else None)
 
   def test_fresh_vision_display_default_preserves_explicit_saved_choices(self):

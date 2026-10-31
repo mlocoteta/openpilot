@@ -54,8 +54,12 @@ The source and arrow share a centered row; all sign contents use the same geomet
 on both screens. Small arrows are baked at double resolution and text is aligned
 to final pixels for clear native rendering.
 Steering-wheel + accepts and − declines. Tapping the sign opens the same
-Accept / Reject choices on either native screen. A pending manual choice expires
-after ten monotonic seconds, including time without active longitudinal control.
+Accept / Reject choices on either native screen. Manual confirmations appear only
+while system longitudinal control is engaged, including a temporary accelerator
+override. Disengaged and AOL lateral-only modes keep displaying limits without
+prompting. Losing longitudinal engagement cancels the pending choice without
+declining it; re-engaging starts a fresh choice if needed. A pending manual choice
+expires after ten monotonic seconds while engaged.
 Decline and timeout leave set speed unchanged. An action at the exact deadline
 can still complete its presented decision; a later action cannot accept it.
 
@@ -83,8 +87,10 @@ This is approximate timing, not a promise to reach the target speed at the sign.
 The first offer latches one boundary encounter. Slowing or stopping does not
 retract it or restart the existing ten-second confirmation deadline. Source loss
 removes authority and hides the pending prompt; fresh recovery of the same
-boundary uses the original deadline and a current presentation. Decline, expiry,
-manual override and completed application survive the boundary becoming current.
+boundary uses the original deadline and a current presentation. Losing longitudinal
+engagement cancels an unanswered choice; re-engaging starts a fresh deadline.
+Decline, expiry, manual override and completed application survive the boundary
+becoming current.
 An unchanged approach limit cannot be offered again solely because the preview
 is lost or disabled. Current-source evidence, command freshness, expected SET,
 driver-button checks and Toyota's native capacity/release checks still apply.

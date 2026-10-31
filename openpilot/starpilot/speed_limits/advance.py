@@ -12,7 +12,7 @@ class Encounter:
   from_mps: float
   speed_mps: float
   way_id: int
-  started_ns: int
+  started_ns: int | None
   crossed: bool = False
   declined: bool = False
   withdrawn: bool = False
@@ -40,10 +40,16 @@ class Advance:
         self.encounter.accepted_ns = None
 
   def propose(self, observations, policy, upcoming: Upcoming | None, *, current_way_id: int,
-              seconds: int, speed_mps: float | None, standstill: bool, can_offer: bool, now_ns: int):
+              seconds: int, speed_mps: float | None, standstill: bool, can_offer: bool,
+              confirmation_active: bool, now_ns: int):
     self.boundary_id, self.started_ns = '', None
     current = observations[sel.Source.MAP].candidate
     encounter = self.encounter
+    if encounter is not None and not encounter.declined and encounter.accepted_ns is None:
+      if not confirmation_active:
+        encounter.started_ns = None
+      elif encounter.started_ns is None:
+        encounter.started_ns = now_ns
     if current is None:
       if encounter is not None and not encounter.crossed:
         return {source: acc.Observation(acc.ObservationKind.UNKNOWN)

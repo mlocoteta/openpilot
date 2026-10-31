@@ -40,10 +40,30 @@ def test_closed_and_open_card_share_anchor_and_physically_scaled_targets(profile
 
 
 @pytest.mark.parametrize('profile', list(Profile))
+@pytest.mark.parametrize('lateral', [False, True])
+def test_disengaged_and_aol_views_cancel_confirmation_but_keep_the_sign(profile, lateral):
+  current, emitted = state(), []
+  touch = OnroadInput(emitted.append, profile)
+  tap_sign(touch, current)
+  assert touch.present(current).slc_prompt_open
+  inactive = replace(current, longitudinal_active=False, lateral_active=lateral)
+  assert not manual_slc_confirmation(profile, inactive)
+  assert not touch.present(inactive).slc_prompt_open
+  assert not slc_controls(profile, inactive)
+  assert speed_limit_bounds(profile, inactive) is not None
+  assert not emitted
+
+
+@pytest.mark.parametrize('profile', list(Profile))
+def test_accelerator_override_keeps_confirmation_visible(profile):
+  current = replace(state(), longitudinal_active=False, longitudinal_overridden=True)
+  assert manual_slc_confirmation(profile, current)
+
+
+@pytest.mark.parametrize('profile', list(Profile))
 @pytest.mark.parametrize('action', [SlcActionKind.ACCEPT, SlcActionKind.REJECT])
 def test_touch_choice_remains_available_without_wheel_confirmation(profile, action):
-  current = replace(state(), longitudinal_active=False, slc_system_long_available=False,
-                    slc_wheel_confirmation_available=False)
+  current = replace(state(), slc_wheel_confirmation_available=False)
   emitted = []
   touch = OnroadInput(emitted.append, profile)
   tap_sign(touch, current)

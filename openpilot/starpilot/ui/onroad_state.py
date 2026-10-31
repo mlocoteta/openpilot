@@ -264,7 +264,8 @@ class OnroadRequest:
 def manual_slc_confirmation(profile: Profile, state: OnroadState) -> bool:
   obs = state.speed_limit
   widget = 'speed_limit' if profile == Profile.COMPACT else 'cruise_limits'
-  return bool(state.alert.size == AlertSize.NONE and state.toyota_cruise_status not in TOYOTA_NOTICE_STATUSES and
+  return bool((state.longitudinal_active or state.longitudinal_overridden) and
+              state.alert.size == AlertSize.NONE and state.toyota_cruise_status not in TOYOTA_NOTICE_STATUSES and
               (profile != Profile.COMPACT or not state.reverse_driver_camera and state.appearance.camera_view != CameraViewChoice.DRIVER) and
               obs.kind == ObservationKind.VALID and obs.action_enabled and not obs.automatic_adoption_pending and
               obs.pending_speed_limit_mps is not None and obs.pending_speed_limit_mps > 0 and

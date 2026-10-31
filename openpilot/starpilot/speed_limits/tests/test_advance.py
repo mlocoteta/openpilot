@@ -138,6 +138,7 @@ def test_confirmation_latches_on_slowdown_and_stop_then_times_out_once():
   drive = Drive(confirm=True)
   first = drive.tick().message.slcState
   start = drive.runtime.advance.encounter.started_ns
+  assert start is not None
   slower = drive.tick(speed=1., distance=59.).message.slcState
   stopped = drive.tick(speed=0., stopped=True, distance=59.).message.slcState
   assert first.decisionId == slower.decisionId == stopped.decisionId
@@ -152,6 +153,7 @@ def test_exact_deadline_action_wins_and_crossing_does_not_repeat(kind):
   drive = Drive(confirm=True)
   state = drive.tick().message.slcState
   start = drive.runtime.advance.encounter.started_ns
+  assert start is not None
   action = drive.action(state, kind)
   output = drive.tick(at=start+acc.CONFIRMATION_NS, action=action)
   assert output.message.slcState.actionStatus == kind
@@ -166,12 +168,37 @@ def test_recovery_renews_presentation_without_restarting_confirmation():
   drive = Drive(confirm=True)
   first = drive.tick().message.slcState
   start = drive.runtime.advance.encounter.started_ns
+  assert start is not None
   lost = drive.tick(alive=False)
   assert not lost.message.slcState.hasPending and lost.command is None
   recovered = drive.tick(at=start+9_000_000_000, producer=42).message.slcState
   assert recovered.hasPending and recovered.presentationId != first.presentationId
   expired = drive.tick(at=start+acc.CONFIRMATION_NS+1)
   assert not expired.message.slcState.hasPending and expired.command is None
+
+
+def test_disengagement_cancels_early_confirmation_and_reengagement_gets_a_fresh_deadline():
+  drive = Drive(confirm=True)
+  first = drive.tick().message.slcState
+  start = drive.now
+  drive.sm['carControl'].enabled = drive.sm['carControl'].longActive = False
+  drive.sm['selfdriveState'].enabled = False
+  drive.sm['controlsState'].longControlState = 'off'
+  inactive = drive.tick(at=start+2_000_000_000)
+  assert not inactive.message.slcState.hasPending and inactive.command is None
+  assert not drive.runtime.advance.encounter.declined
+  drive.sm['carControl'].enabled = drive.sm['carControl'].longActive = True
+  drive.sm['selfdriveState'].enabled = True
+  drive.sm['controlsState'].longControlState = 'pid'
+  resumed = drive.tick(at=start+20_000_000_000).message.slcState
+  assert resumed.hasPending and resumed.decisionId != first.decisionId
+  assert resumed.pendingSinceMonoTime == drive.now
+  restarted = drive.now
+  stale_action = drive.tick(action=drive.action(first, 'accept'))
+  assert stale_action.message.slcState.hasPending and stale_action.command is None
+  assert drive.tick(at=restarted+9_000_000_000).message.slcState.hasPending
+  assert not drive.tick(at=restarted+acc.CONFIRMATION_NS).message.slcState.hasPending
+  assert drive.runtime.advance.encounter.declined
 
 
 def test_fresh_different_boundary_supersedes_without_accepting_stale_action():
