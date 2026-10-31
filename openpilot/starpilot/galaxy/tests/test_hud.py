@@ -15,7 +15,10 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.hud import (SERVICES, TI_SAFETY_PARAM, FuelTrip, Hud, HudReading, MessagingHudReader, empty, extract,
-                                           fuel_count, fuel_level, ti_car, tracks)
+                                           fuel_count, fuel_level, ti_car, tracks, RouteAhead, ModelLanes, door_bits,
+                                           doors_frame, stop_point)
+from openpilot.starpilot.navigation.owner import NavigationOwner
+from openpilot.starpilot.navigation.route_engine import hud_extras
 from openpilot.starpilot.galaxy.server import make_server
 
 CONTRACT_KEYS = {'schemaVersion', 'state', 'sessionId', 'seq', 'ageSeconds', 'error', *empty()}
@@ -109,7 +112,8 @@ class HudV2Test(unittest.TestCase):
     self.assertEqual(len(model['path']), 14)
     self.assertEqual(out['road'], {'lanes': 3, 'width': 11.1, 'name': 'NY-347'})
     self.assertEqual([t['id'] for t in out['tracks']], [4, 5])   # sorted by distance
-    self.assertEqual(out['tracks'][1], {'id': 5, 'dRel': 60.0, 'yRel': -3.4, 'vRel': -2.0, 'vLead': 27.0, 'stopped': False})
+    self.assertEqual(out['tracks'][1], {'id': 5, 'dRel': 60.0, 'yRel': -3.4, 'vRel': -2.0, 'vLead': 27.0, 'stopped': False,
+                                          'lane': -1})
     self.assertIsNone(out['fuel'])
     json.dumps(out)
 
@@ -236,6 +240,124 @@ class FuelTest(unittest.TestCase):
     self.assertTrue(reader._fuel_car(nine))
     self.assertFalse(reader._fuel_car(civic))
     self.assertFalse(reader._fuel_car(None))
+
+
+def plan_event(speeds, v0=10.0):
+  """modelV2 with a plan whose velocity.x follows `speeds` on a 4 m position grid."""
+  msg = model_event()
+  msg.modelV2.velocity.x = list(speeds)
+  msg.modelV2.velocity.y = [0.0] * len(speeds)
+  msg.modelV2.velocity.z = [0.0] * len(speeds)
+  return msg
+
+
+def nav_event(status='guiding', remaining=1000.0, frame=1):
+  msg = messaging.new_message('starpilotNavigation', valid=True)
+  msg.starpilotNavigation = {'navigation': {'version': 2, 'status': status, 'frameMonoTime': frame,
+                                            'instruction': {'remainingDistanceMeters': remaining}}}
+  return msg.as_reader().starpilotNavigation
+
+
+def mapbox_steps():
+  lanes = [{'indications': ['left'], 'valid': True, 'active': True, 'valid_indication': 'left'},
+           {'indications': ['straight', 'left'], 'valid': True, 'active': False, 'valid_indication': 'straight'},
+           {'indications': ['straight'], 'valid': False, 'active': False}]
+  return [
+    {'intersections': [{'location': [-72.9, 40.9], 'geometry_index': 0},
+                       {'location': [-72.9, 40.901], 'geometry_index': 1, 'traffic_signal': True},
+                       {'location': [-72.9, 40.902], 'geometry_index': 2, 'stop_sign': True, 'traffic_signal': False},
+                       {'location': [-72.9, 40.903], 'traffic_signal': True}]},   # no geometry_index: left out
+    {'intersections': [{'location': [-72.9, 40.905], 'geometry_index': 4, 'lanes': lanes, 'railway_crossing': True}]},
+    {'intersections': [{'location': [-72.9, 40.906], 'geometry_index': 5,
+                        'lanes': [{'indications': ['left'], 'valid': True}]}]},   # no 'active': whole lanes null
+  ]
+
+
+class HudV3Test(unittest.TestCase):
+  def test_stop_point(self):
+    model = plan_event([10.0, 8.0, 6.0, 4.0, 2.0, 0.0] + [0.0] * 27).as_reader().modelV2
+    stop = stop_point(model, 10.0, None, True, True)
+    self.assertEqual(stop, {'distM': 19.0, 'kind': 'stopLine', 'followed': True, 'shouldStop': False})   # 0.5 m/s at 3/4 of 16..20 m
+    self.assertEqual(stop_point(model, 10.0, {'dRel': 25.0}, True, True)['kind'], 'lead')
+    self.assertEqual(stop_point(model, 10.0, {'dRel': 40.0}, True, True)['kind'], 'stopLine')
+    self.assertFalse(stop_point(model, 10.0, None, False, True)['followed'])
+    self.assertIsNone(stop_point(model, 10.0, None, None, True)['followed'])
+    self.assertIsNone(stop_point(model, 0.5, None, True, True))   # stopped: nothing to show
+    self.assertIsNone(stop_point(plan_event([0.2] * 33).as_reader().modelV2, 2.0, None, True, True))
+    self.assertIsNone(stop_point(plan_event([30.0] * 33).as_reader().modelV2, 30.0, None, True, True))
+    self.assertIsNone(stop_point(plan_event([10.0] * 5).as_reader().modelV2, 10.0, None, True, True))   # unequal lengths
+
+  def test_track_and_ego_lanes(self):
+    lanes = ModelLanes(model_event().as_reader().modelV2)
+    self.assertEqual([lanes.lane_of(20.0, y) for y in (-8.0, -3.0, 0.0, 3.0, 8.0)], [-2, -1, 0, 1, 2])
+    self.assertEqual(lanes.ego(), {'fromLeft': 1, 'fromRight': None})   # left edge 1.44 lanes out, right 1.58: can't tell
+    weak = ModelLanes(model_event(probs=(0.1, 0.1, 0.9, 0.1)).as_reader().modelV2)
+    self.assertEqual([round(y, 2) for y in weak.bounds(0.0)], [-5.55, -1.85, 1.8, 5.5])   # ego-left from the path, outer lines one lane out
+    self.assertIsNone(weak.ego())
+    self.assertIsNone(ModelLanes(None).lane_of(10.0, 0.0))
+    self.assertIsNone(ModelLanes(model_event(stds=(1.5, 1.5)).as_reader().modelV2).ego())
+
+  def test_v3_projection(self):
+    msg = plan_event([10.0, 8.0, 6.0, 4.0, 2.0, 0.0] + [0.0] * 27)
+    msg.modelV2.meta.laneChangeState = 'laneChangeStarting'
+    msg.modelV2.meta.laneChangeDirection = 'left'
+    cc = event('carControl', latActive=True)
+    cc.carControl.hudControl.leadDistanceBars = 2
+    msgs, fresh = drive(modelV2=msg, carControl=cc,
+                        carState=event('carState', vEgo=1.0, gearShifter='reverse', doorOpen=True, seatbeltUnlatched=True))
+    msgs['radarState'] = None
+    fresh['radarState'] = False
+    doors = door_bits(bytes([0, 0, 0, 0, 0b0010_0000, 0b10, 0, 0]))
+    out = extract(msgs, fresh, doors=doors, route={'ahead': [], 'lanes': None})
+    self.assertEqual(set(out), set(empty()))
+    self.assertEqual(out['stop'], {'distM': 19.0, 'kind': 'stopLine', 'followed': False, 'shouldStop': False})
+    self.assertEqual(out['laneChange'], {'state': 'laneChangeStarting', 'direction': 'left'})
+    self.assertEqual((out['gearLetter'], out['distanceBars'], out['seatbelt']), ('R', 2, {'driverUnlatched': True}))
+    self.assertEqual(out['doors'], {'any': True, 'fl': True, 'fr': False, 'rl': False, 'rr': False, 'trunk': True})
+    self.assertEqual((out['ahead'], out['lanes']), ([], None))
+    json.dumps(out)
+    msgs, fresh = drive(carState=event('carState', vEgo=20.0, gearShifter='eco', doorOpen=False))
+    out = extract(msgs, fresh, doors=doors)
+    self.assertEqual(out['doors'], {'any': False, 'fl': None, 'fr': None, 'rl': None, 'rr': None, 'trunk': None})   # moving
+    self.assertIsNone(out['gearLetter'])
+    for key in ('stop', 'laneEgo', 'laneChange', 'distanceBars', 'ahead', 'lanes'):
+      self.assertIsNone(out[key], key)
+
+  def test_doors_can(self):
+    self.assertIsNone(door_bits(b'\x00' * 5))
+    batches = [[frame(0x405, 0, bytes(8))], [frame(0x405, 2, bytes([0, 0, 0, 0, 0xE0, 3]))], [frame(0x324, 0, bytes(8))]]
+    self.assertEqual(doors_frame(batches), bytes(8))   # bus 2 copy ignored
+    self.assertIsNone(doors_frame([[frame(0x324, 0, bytes(8))]]))
+
+  def test_route_extras_from_mapbox_steps(self):
+    controls, lanes = hud_extras(mapbox_steps(), [0.0, 100.0, 200.0, 300.0, 400.0, 500.0], 1000.0, [0.0, 800.0, 900.0])
+    self.assertEqual([(c['kind'], c['alongM']) for c in controls], [('signal', 200.0), ('stop', 400.0), ('rail', 800.0)])
+    self.assertEqual(lanes[0]['alongM'], 800.0)
+    self.assertEqual(lanes[0]['lanes'], [{'ind': ['left'], 'valid': True, 'active': True},
+                                         {'ind': ['straight', 'left'], 'valid': True, 'active': False, 'use': 'straight'},
+                                         {'ind': ['straight'], 'valid': False, 'active': False}])
+    self.assertEqual(lanes[1], {'alongM': 900.0, 'lanes': None})
+    self.assertEqual(hud_extras([{'intersections': 'bad'}], [0.0, 1.0], 1.0, [0.0]), ([], []))
+
+  def test_route_ahead_reads_the_navigation_file(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      owner = NavigationOwner(root=Path(tmp) / 'nav', transient_root=Path(tmp) / 'shm')
+      controls, lanes = hud_extras(mapbox_steps(), [0.0, 100.0, 200.0, 300.0, 400.0, 500.0], 1000.0, [0.0, 800.0, 900.0])
+      owner.record_hud_route({'end': 1000.0, 'controls': controls, 'lanes': lanes})
+      ahead = RouteAhead(path=Path(tmp) / 'shm' / 'hud-route.cache')
+      self.assertIsNone(ahead.value(None, 10.0, 0.0))
+      self.assertIsNone(ahead.value(nav_event(status='routing'), 10.0, 0.0))
+      self.assertIsNone(ahead.value(nav_event(remaining=1100.0), 10.0, 0.0))   # a different, longer route
+      out = ahead.value(nav_event(remaining=850.0), 10.0, 10.0)   # along 150 m
+      self.assertEqual([(row['kind'], row['distM']) for row in out['ahead']], [('signal', 50.0), ('stop', 250.0), ('rail', 650.0)])
+      self.assertEqual(out['ahead'][0]['lat'], 40.901)
+      self.assertEqual(out['lanes']['distM'], 650.0)
+      out = ahead.value(nav_event(remaining=850.0), 10.0, 11.0)   # same message, dead-reckoned 10 m
+      self.assertEqual(out['ahead'][0]['distM'], 40.0)
+      out = ahead.value(nav_event(remaining=150.0, frame=2), 10.0, 12.0)   # along 850: next maneuver has no lane data
+      self.assertEqual((out['ahead'], out['lanes']), ([], None))
+      (Path(tmp) / 'shm' / 'hud-route.cache').unlink()
+      self.assertIsNone(ahead.value(nav_event(remaining=150.0, frame=3), 10.0, 13.0))
 
 
 class HudProjectionTest(unittest.TestCase):
@@ -421,7 +543,7 @@ class HudWorkerTest(unittest.TestCase):
         while source.snapshot()['state'] != 'current' and time.monotonic() < deadline:
           time.sleep(0.005)
         current = source.snapshot()
-        self.assertEqual((current['state'], current['onroad'], current['schemaVersion']), ('current', False, 2))
+        self.assertEqual((current['state'], current['onroad'], current['schemaVersion']), ('current', False, 3))
         self.assertGreaterEqual(current['seq'], 1)
         time.sleep(0.15)
         self.assertTrue(readers[0].closed)
@@ -625,6 +747,8 @@ class HudHttpTest(unittest.TestCase):
     reader = object.__new__(MessagingHudReader)
     reader.sm = Cached()
     reader.seen_moving, reader.fuel, reader.can_sock = {}, FuelTrip(), None
+    reader.doors = reader.doors_at = None
+    reader.route = RouteAhead(path=None)
     reader.params = None
     reader.is_metric = True
     reader.car_params = None
