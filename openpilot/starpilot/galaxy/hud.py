@@ -1005,6 +1005,9 @@ class Hud:
         state = 'unavailable'
       return {
         'schemaVersion': 3,
+        # Accord: this build takes the head unit's GPS (POST /api/companion/location) for navigation only (never
+        # controlValid); the head unit posts its fixes only to a comma that says so.
+        'huGps': 'navOnly',
         'state': state,
         'sessionId': self.session_id,
         'seq': self.seq,
