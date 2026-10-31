@@ -210,7 +210,7 @@ class FeatureSettingsView:
           elif row.page and value is None:
             self._center("Open >", DETAIL_SIZE, action, TEXT_PRIMARY if row.available or row.choices == ("Off", "On") else TEXT_MUTED)
           elif _confirmation(row):
-            if row.key in ("torque_adopt", "slc_adopt"):
+            if row.key == "torque_adopt":
               action = "Adopt…"
             elif row.key in ("torque_rebase", "torque_gain_rebase"):
               action = "Review…"

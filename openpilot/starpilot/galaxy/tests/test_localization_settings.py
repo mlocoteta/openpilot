@@ -38,16 +38,15 @@ def test_real_gateway_units_and_wheel_side_without_a_vehicle(tmp_path):
   assert params.get_bool("IsRhdDetected")
 
 
-def test_localization_preserves_offsets_and_legacy_values(tmp_path):
+def test_localization_preserves_current_offsets(tmp_path):
   params = Params(str(tmp_path))
   params.put_bool("IsMetric", False, block=True)
-  params.put("Offset1", 5.0, block=True)
+  document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (5 * od.MPH_TO_MPS, 0, 0, 0, 0, 0, 0))
+  params.put(DOCUMENT_KEY, od.to_value(document), block=True)
   params.put_bool("SpeedLimitController", False, block=True)
   owner = LocalizationSettingsOwner(params, lambda: True, lambda: True)
   assert owner.apply(FeatureSettingsRequest("IsMetric", b"0", "On"))
-  document = od.decode(Path(params.get_param_path(DOCUMENT_KEY)).read_bytes())
-  assert document == od.adopt_legacy(False, (5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
-  assert Path(params.get_param_path("Offset1")).read_bytes() == b"5.0"
+  assert od.decode(Path(params.get_param_path(DOCUMENT_KEY)).read_bytes()) == document
   assert owner.apply(FeatureSettingsRequest("IsMetric", b"1", "Off"))
   assert od.decode(Path(params.get_param_path(DOCUMENT_KEY)).read_bytes()) == document
 
@@ -86,14 +85,16 @@ def test_units_without_offsets_work_onroad_but_wheel_side_waits(tmp_path):
   assert not Path(params.get_param_path(DOCUMENT_KEY)).exists()
 
 
-def test_legacy_offsets_explain_the_one_time_park_requirement(tmp_path):
+def test_retired_offsets_do_not_require_parking_or_migration_to_change_units(tmp_path):
   params = Params(str(tmp_path))
-  params.put("Offset1", 5.0, block=True)
+  Path(params.get_param_path("Offset1")).write_bytes(b"5.0")
   owner = LocalizationSettingsOwner(params, lambda: True, lambda: False)
   row = owner.snapshot().rows[0]
-  assert not row.available and "Park once" in row.reason
-  assert not owner.apply(FeatureSettingsRequest("IsMetric", None, "On"))
-  assert not params.get_bool("IsMetric")
+  assert row.available
+  assert owner.apply(FeatureSettingsRequest("IsMetric", None, "On"))
+  assert params.get_bool("IsMetric")
+  assert not Path(params.get_param_path(DOCUMENT_KEY)).exists()
+  assert Path(params.get_param_path("Offset1")).read_bytes() == b"5.0"
 
 
 @pytest.mark.parametrize("name,code", [("English", "en"), ("日本語", "ja"), ("한국어", "ko"),

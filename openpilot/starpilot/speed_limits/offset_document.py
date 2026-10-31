@@ -1,4 +1,4 @@
-"""Strict SI authority for adopted SLC offsets; legacy source bytes stay untouched."""
+"""Speed-limit offset ranges and adjustments stored in fixed SI units."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class OffsetDocument:
 
 @dataclass(frozen=True)
 class NeedsReview:
-  """A unit change with corrupt saved control settings must not restore control."""
+  """Saved offsets require an explicit reset before control can resume."""
 
 
 NEEDS_REVIEW = NeedsReview()
@@ -40,12 +40,10 @@ def _finite(value: object) -> float:
   return float(value)
 
 
-def adopt_legacy(metric: bool, offsets: tuple[object, ...]) -> OffsetDocument:
-  if type(metric) is not bool or len(offsets) != 7:
-    raise ValueError('invalid legacy SLC offsets or units')
-  conversion = KPH_TO_MPS if metric else MPH_TO_MPS
-  bounds = METRIC_BOUNDS if metric else IMPERIAL_BOUNDS
-  return OffsetDocument(bounds, tuple(_finite(_finite(value) * conversion) for value in offsets))
+def default_document(metric: bool) -> OffsetDocument:
+  if type(metric) is not bool:
+    raise ValueError('invalid SLC offset units')
+  return OffsetDocument(METRIC_BOUNDS if metric else IMPERIAL_BOUNDS, (0.0,) * 7)
 
 
 def validate(value: object) -> OffsetDocument | NeedsReview:

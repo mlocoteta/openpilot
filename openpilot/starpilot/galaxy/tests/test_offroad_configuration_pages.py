@@ -78,9 +78,9 @@ class TestOffroadConfigurationPages(unittest.TestCase):
     self.assertFalse(context.cp.openpilotLongitudinalControl)
     self.assertTrue(context.configuration_longitudinal)
     page = self.page('slc')
-    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Adopt fixed offsets')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'].endswith('offset'))
     self.assertTrue(page['rows'][index]['available'])
-    intent = self.gateway.preview(page['view'], index, 0, 'session', b'generation')
+    intent = self.gateway.preview(page['view'], index, 0, 'session', b'generation', value=3)
     self.assertTrue(self.gateway.confirm(intent['intent'], 'session', b'generation'))
     self.assertTrue(next(row for row in self.page('slc')['rows'] if row['label'] == 'Speed Limit Controller')['available'])
     self.assertFalse(self.params.get_bool('AlphaLongitudinalEnabled'))
@@ -97,8 +97,8 @@ class TestOffroadConfigurationPages(unittest.TestCase):
 
   def test_saved_and_manual_contexts_expose_expected_core_settings(self):
     offsets = self.page('slc')
-    index = next(i for i, row in enumerate(offsets['rows']) if row['label'] == 'Adopt fixed offsets')
-    intent = self.gateway.preview(offsets['view'], index, 0, 'session', b'generation')
+    index = next(i for i, row in enumerate(offsets['rows']) if row['label'].endswith('offset'))
+    intent = self.gateway.preview(offsets['view'], index, 0, 'session', b'generation', value=3)
     self.assertTrue(self.gateway.confirm(intent['intent'], 'session', b'generation'))
     expected = {
       'aol': ('Enable Always On Lateral', 'Brake pause below'),

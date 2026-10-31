@@ -137,9 +137,9 @@ class SettingsGatewayTest(unittest.TestCase):
     cp.carFingerprint = "TOYOTA_HIGHLANDER_TSS2"
     cp.pcmCruise = True
     page = self.page("slc")
-    index = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Adopt fixed offsets")
+    index = next(i for i, row in enumerate(page["rows"]) if row["label"].endswith("offset"))
     self.assertTrue(page["rows"][index]["available"])
-    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation)
+    intent = self.gateway.preview(page["view"], index, 0, self.session, self.generation, value=3)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
     row = next(row for row in self.page("slc")["rows"] if row["label"] == "Speed Limit Controller")
     self.assertTrue(row["available"])
@@ -219,7 +219,7 @@ class SettingsGatewayTest(unittest.TestCase):
 
   def test_direct_offset_slider_keeps_si_units_and_range(self):
     from openpilot.starpilot.speed_limits import offset_document as od
-    self.params.put("SLCOffsetSchedule", od.to_value(od.adopt_legacy(False, (0.0,) * 7)), block=True)
+    self.params.put("SLCOffsetSchedule", od.to_value(od.default_document(False)), block=True)
     page = self.page("slc")
     index = next(i for i, row in enumerate(page["rows"]) if row["label"].endswith("offset"))
     self.assertEqual((page["rows"][index]["minimum"], page["rows"][index]["maximum"]), (-25, 99))
@@ -791,7 +791,7 @@ class SettingsGatewayTest(unittest.TestCase):
     self.assertFalse(self.gateway.confirm(intent["intent"], self.session, self.generation))
     self.assertFalse(self.params.get_bool("LaneCentering"))
 
-  def test_slc_adoption_long_preset_and_lane_change_use_owner(self):
+  def test_slc_first_edit_long_preset_and_lane_change_use_owner(self):
     from opendbc.car.car_helpers import interfaces
     from opendbc.car.toyota.values import CAR as TOYOTA
 
@@ -800,10 +800,13 @@ class SettingsGatewayTest(unittest.TestCase):
     cp.pcmCruise = False
     self.context.value = replace(self.context.value, cp=cp)
     slc = self.page("slc")
-    adopt = next(i for i, row in enumerate(slc["rows"]) if row["label"] == "Adopt fixed offsets")
-    intent = self.gateway.preview(slc["view"], adopt, 0, self.session, self.generation)
+    self.assertFalse(any(row["label"] == "Adopt fixed offsets" for row in slc["rows"]))
+    offset = next(i for i, row in enumerate(slc["rows"]) if row["label"].endswith("offset"))
+    self.assertEqual(slc["rows"][offset]["value"], "0")
+    intent = self.gateway.preview(slc["view"], offset, 0, self.session, self.generation, value=3)
     self.assertTrue(self.gateway.confirm(intent["intent"], self.session, self.generation))
     assert read_saved(self.params, "SLCOffsetSchedule", 4096)[0] is not None
+    self.assertAlmostEqual(self.params.get("SLCOffsetSchedule")["offsets_mps"][0], 3 * .44704)
     page = self.page("aggressive/acceleration")
     preset = next(i for i, row in enumerate(page["rows"]) if row["label"] == "Preset")
     intent = self.gateway.preview(page["view"], preset, 1, self.session, self.generation)

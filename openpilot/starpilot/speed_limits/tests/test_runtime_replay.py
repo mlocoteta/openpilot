@@ -1116,7 +1116,6 @@ class RuntimeReplayTests(unittest.TestCase):
       params.put('SLCFallback', 2, block=True)
       params.put('SLCPriority1', 'Map Data', block=True)
       params.put('SLCPriority2', 'Dashboard', block=True)
-      params.put('Offset3', 5.0, block=True)
       restored = read_params(params)
       self.assertTrue(restored.enabled)
       self.assertTrue(restored.acceptance.confirm_lower)

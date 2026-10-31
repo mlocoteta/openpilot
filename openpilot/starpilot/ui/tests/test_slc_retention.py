@@ -36,15 +36,12 @@ def published_cruise_mph(mph, *, software_target=True, metric=False):
   return wire_kph * (1 / 3.6) / MPH
 
 
-@pytest.mark.parametrize('document', [False, True])
 @pytest.mark.parametrize('offset,delta', [(-25, 0), (-30, 0), (-24, 2), (-5, 0)])
-def test_negative_offsets_cannot_remove_the_native_slc_ceiling(tmp_path, document, offset, delta):
+def test_negative_offsets_cannot_remove_the_native_slc_ceiling(tmp_path, offset, delta):
   drive = RetentionDrive(tmp_path)
   params = Params(str(tmp_path))
-  if document:
-    params.put('SLCOffsetSchedule', od.to_value(od.adopt_legacy(False, (offset, 0, 0, 0, 0, 0, 0))), block=True)
-  else:
-    params.put('Offset1', float(offset), block=True)
+  document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (offset * MPH, 0, 0, 0, 0, 0, 0))
+  params.put('SLCOffsetSchedule', od.to_value(document), block=True)
   drive.runtime = Runtime(read_params(params))
   drive.sm['carState'].vEgoCluster += delta
   output, _, target = drive.step(0, limit=25)
@@ -71,7 +68,8 @@ def test_live_offset_edits_keep_the_accepted_limit_and_native_ceiling(tmp_path, 
   accepted = output.result.state.acceptance.accepted
   session = runtime.session_id
   for milliseconds, offset in ((1000, 5), (2000, -5)):
-    params.put('SLCOffsetSchedule', od.to_value(od.adopt_legacy(False, (0, 0, 0, offset, 0, 0, 0))), block=True)
+    document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, 0, offset * MPH, 0, 0, 0))
+    params.put('SLCOffsetSchedule', od.to_value(document), block=True)
     receipt = object()
     actions, cruise = [object()], [receipt]
     refreshed, changed = lifecycle.refresh(NOW + milliseconds * 1_000_000, pending_actions=actions, pending_cruise=cruise)
@@ -101,7 +99,8 @@ def test_offset_edits_invalidate_old_prompts_without_accepting_a_new_limit(tmp_p
     drive.step(50, request=Action(runtime.session_id, 1, first.message.slcState.decisionId, first.message.slcState.presentationId, 'accept'))
   old, _, _ = drive.step(100, limit=50)
   old_id = old.message.slcState.decisionId
-  params.put('SLCOffsetSchedule', od.to_value(od.adopt_legacy(False, (0, 0, 0, 5, 0, 0, 0))), block=True)
+  document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, 0, 5 * MPH, 0, 0, 0))
+  params.put('SLCOffsetSchedule', od.to_value(document), block=True)
   assert lifecycle.refresh(NOW + 1_000_000_000)[0] is runtime
   stale = Action(runtime.session_id, 2, old_id, old.message.slcState.presentationId, 'accept')
   output, _, target = drive.step(1000, limit=50, request=stale)
@@ -125,7 +124,8 @@ def test_offset_edits_preserve_rejected_limits(tmp_path):
   proposed, _, _ = drive.step(100, limit=50)
   drive.step(150, limit=50, request=Action(runtime.session_id, 2, proposed.message.slcState.decisionId, proposed.message.slcState.presentationId, 'reject'))
   rejected = runtime.state.acceptance.rejected
-  params.put('SLCOffsetSchedule', od.to_value(od.adopt_legacy(False, (0, 0, 0, 5, 0, 0, 0))), block=True)
+  document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, 0, 5 * MPH, 0, 0, 0))
+  params.put('SLCOffsetSchedule', od.to_value(document), block=True)
   assert lifecycle.refresh(NOW + 1_000_000_000)[0] is runtime
   output, _, target = drive.step(1000, limit=50)
   assert not output.message.slcState.hasPending
@@ -203,7 +203,7 @@ def test_compact_rejection_or_timeout_keeps_set_speed_until_adoption(tmp_path, a
   from openpilot.starpilot.ui.tests.test_slc_ui_actions import tap_sign, tap_control
   drive = RetentionDrive(tmp_path, confirm=True)
   params = Params(str(tmp_path))
-  params.put('SLCOffsetSchedule', od.to_value(od.adopt_legacy(False, (5.0,) * 7)), block=True)
+  params.put('SLCOffsetSchedule', od.to_value(od.OffsetDocument(od.IMPERIAL_BOUNDS, tuple(value * od.MPH_TO_MPS for value in (5.0,) * 7))), block=True)
   drive.runtime = Runtime(read_params(params))
   drive.ui.is_metric = metric
   first, _, _ = drive.step(0)

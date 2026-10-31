@@ -4,8 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from openpilot.common.params import Params
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.starpilot.speed_limits import acceptance as acc
+from openpilot.starpilot.speed_limits import offset_document as od
 from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS, parse, read_params
 
 
@@ -60,8 +61,7 @@ class RuntimeSettingsTests(unittest.TestCase):
       self.assertEqual(Path(params.get_param_path('SLCPriority2')).read_bytes(), b'Map Data')
 
   def test_corrupt_saved_values_disable_control_without_rewriting(self):
-    cases = {'SLCConfirmation': b'invalid',
-             'Offset3': b'bad', 'IsMetric': b'2', 'SLCPriority1': b'\xff'}
+    cases = {'SLCConfirmation': b'invalid', 'IsMetric': b'2', 'SLCPriority1': b'\xff'}
     for key, raw in cases.items():
       with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
         params = Params(directory)
@@ -90,7 +90,8 @@ class RuntimeSettingsTests(unittest.TestCase):
       params.put_bool('SLCConfirmation', True, block=True)
       params.put_bool('SLCConfirmationLower', True, block=True)
       params.put('SLCFallback', 0, block=True)
-      params.put('Offset3', -5.0, block=True)
+      document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, -5 * MPH_TO_MPS, 0, 0, 0, 0))
+      params.put('SLCOffsetSchedule', od.to_value(document), block=True)
       settings = read_params(params)
       self.assertTrue(settings.enabled)
       self.assertFalse(settings.errors)
@@ -114,12 +115,31 @@ class RuntimeSettingsTests(unittest.TestCase):
       for old in (0, 1, 2, None, 'broken'):
         self.assertEqual(parse({'SpeedLimitController': True, 'SLCFallback': old}), baseline)
 
-  def test_nonfinite_or_unrepresentable_offset_disables_control(self):
+  def test_nonfinite_or_unrepresentable_current_offset_disables_control(self):
     for value in (float('nan'), float('inf'), 10 ** 1000):
       with self.subTest(kind=type(value).__name__):
-        settings = parse({'SpeedLimitController': True, 'Offset3': value})
+        document = od.OffsetDocument(od.IMPERIAL_BOUNDS, (0, 0, value, 0, 0, 0, 0))
+        settings = parse({'SpeedLimitController': True, 'SLCOffsetSchedule': document})
         self.assertFalse(settings.enabled)
         self.assertTrue(settings.errors)
+
+  def test_retired_offsets_are_unregistered_and_ignored_with_zero_defaults(self):
+    for metric in (False, True):
+      with self.subTest(metric=metric), tempfile.TemporaryDirectory() as directory:
+        params = Params(directory)
+        params.put_bool('SpeedLimitController', True, block=True)
+        params.put_bool('IsMetric', metric, block=True)
+        for index in range(1, 8):
+          key = f'Offset{index}'
+          with self.assertRaises(UnknownKeyName):
+            params.check_key(key)
+          Path(params.get_param_path(key)).write_bytes(b'3' if index % 2 else b'broken')
+        settings = read_params(params)
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.offsets, od.default_document(metric).schedule())
+        self.assertFalse(Path(params.get_param_path('SLCOffsetSchedule')).exists())
+        for retired in (3, float('nan'), 'broken', 10 ** 1000):
+          self.assertEqual(parse({'SpeedLimitController': True, 'IsMetric': metric, 'Offset1': retired}), settings)
 
 
 if __name__ == '__main__':

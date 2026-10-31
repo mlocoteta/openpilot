@@ -4,6 +4,7 @@ Rows and their availability still come from the canonical feature owners.
 This presentation catalog supplies the purpose before any genuine prerequisite.
 """
 from openpilot.starpilot.ui.long_profile_feature import CATEGORY_HELP, VALUE_HELP
+from openpilot.starpilot.ui.feature_settings_state import SLC_OFFSET_KEYS
 
 DESCRIPTIONS = {
   'DisengageOnAccelerator': 'When enabled, pressing the accelerator pedal will disengage openpilot.',
@@ -66,7 +67,6 @@ DESCRIPTIONS = {
   'SLCAdvanceSeconds': 'Offers mapped limits early using road distance and current speed. Existing adoption and confirmation settings still apply.',
   'SLCPriority1': 'Chooses the first source checked for a fresh speed limit.',
   'SLCPriority2': 'Chooses the source used when the primary source has no fresh speed limit.',
-  'slc_adopt': 'Keeps the current speed-limit offset schedule fixed when display units change.',
   'slc_reset': 'Resets saved speed-limit offsets while retaining valid configured speed ranges.',
   'reset_driver_monitoring': 'Clear saved wheel-side detection. Automatic detection restarts on the next drive.',
   'AlwaysAllowUploads': 'Allows queued full logs and videos to upload over metered networks. This uses mobile data.',
@@ -216,7 +216,7 @@ def purpose(row):
     suffix = next((name for name in VALUE_HELP if key.endswith(name)), None)
     value = VALUE_HELP.get(suffix)
     return value + ' Blends toward Relaxed as speed rises in Traffic mode.' if value and key.startswith('Traffic') else value
-  if key in tuple('Offset'+str(index) for index in range(1, 8)):
+  if key in SLC_OFFSET_KEYS:
     return 'Adds or subtracts this offset from the accepted speed limit within the displayed speed range.'
   if key.startswith('long_repair:'):
     return 'Restores the default value of this invalid longitudinal setting.'

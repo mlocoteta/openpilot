@@ -34,7 +34,7 @@ from openpilot.starpilot.longitudinal.profile_document import (
   synchronise_profile_document_enabled,
 )
 from openpilot.starpilot.ui.feature_settings_state import (
-  FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, SLC_CONFIRM_ACTIONS, TORQUE_CONFIRM_ACTIONS,
+  FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, SLC_CONFIRM_ACTIONS, SLC_OFFSET_KEYS, TORQUE_CONFIRM_ACTIONS,
 )
 from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS
 from openpilot.starpilot.aol.vehicle import policy_for as aol_policy_for
@@ -644,7 +644,7 @@ class FeatureSettingsOwner:
       return "Vision"
     if key == "IsMetric":
       return "0"
-    if key.startswith("Offset") or key in ("ForceStopDistanceOffset", "SLCAdvanceSeconds"):
+    if key in SLC_OFFSET_KEYS or key in ("ForceStopDistanceOffset", "SLCAdvanceSeconds"):
       return "0"
     value = self.params.get_default_value(key)
     return str(value) if value is not None else ""
@@ -1443,7 +1443,7 @@ class FeatureSettingsOwner:
       return self.traffic_profiles.apply(request)
     if key in TORQUE_CONFIRM_ACTIONS or key.startswith("torque:"):
       return self.torque.apply(request)
-    if key in SLC_CONFIRM_ACTIONS or key in ("Offset1", "Offset2", "Offset3", "Offset4", "Offset5", "Offset6", "Offset7"):
+    if key in SLC_CONFIRM_ACTIONS or key in SLC_OFFSET_KEYS:
       return self.slc_offsets.apply(request)
     if is_long_confirm_action(key):
       return self.long_profiles.apply(request)

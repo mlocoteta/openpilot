@@ -192,9 +192,7 @@ class ValueEditorTests(unittest.TestCase):
 
   def test_slc_steps_keep_direction_and_presets_keep_exact_source_guards(self):
     self.session.feature_page = FeaturePage.SLC
-    adopt = next(row for row in self.session.feature_snapshot().rows if row.key == "slc_adopt")
-    self.assertTrue(self.owner.apply(replace(row_request(adopt, "confirm"), confirmation=True)))
-    editor = self.open_feature("Offset2")
+    editor = self.open_feature("slc:offset:2")
     row = editor.rows[0]
     self.assertEqual(value_request(editor, FeatureUiAction("change", row, 1)).direction, 1)
     self.tap(editor, value_buttons(editor, row, feature_row_top(editor))[-1][1], self.session._feature_ui)

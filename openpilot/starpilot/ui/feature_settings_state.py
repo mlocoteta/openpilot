@@ -65,7 +65,8 @@ class FeaturePage(StrEnum):
 
 
 TORQUE_CONFIRM_ACTIONS = frozenset(("torque_adopt", "torque_reset", "torque_reset_profile", "torque_rebase", "torque_prepare_firestar", "torque_gain_rebase"))
-SLC_CONFIRM_ACTIONS = frozenset(("slc_adopt", "slc_reset"))
+SLC_CONFIRM_ACTIONS = frozenset(("slc_reset",))
+SLC_OFFSET_KEYS = tuple(f"slc:offset:{index}" for index in range(1, 8))
 LANE_CHANGE_CONFIRM_ACTIONS = frozenset(("lane_change:reset",))
 CURVE_CONFIRM_ACTIONS = frozenset(("curve_reset",))
 CONDITIONAL_CONFIRM_ACTIONS = frozenset(("conditional:reset", "conditional:manual_reset"))
@@ -527,7 +528,7 @@ def row_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest | 
   """Bind a press to the displayed source, never a later refreshed value."""
   if not row.available:
     return None
-  if row.key in ("Offset1", "Offset2", "Offset3", "Offset4", "Offset5", "Offset6", "Offset7"):
+  if row.key in SLC_OFFSET_KEYS:
     if direction not in (-1, 1):
       return None
     return FeatureSettingsRequest(row.key, row.source, "", related_source=row.related_source,

@@ -148,7 +148,7 @@ def _onroad_preference(page: str, key: str) -> bool:
   # multi-key reset/repair operations need the offroad transaction boundary;
   # their owners independently recheck that requirement at commit time.
   return bool(page not in ("developer", "power") and key and key != SETUP_ACTION and key not in (
-    "IsRhdDetected", "AlphaLongitudinalEnabled", "reset_profiles", "curve_reset", "slc_adopt", "slc_reset",
+    "IsRhdDetected", "AlphaLongitudinalEnabled", "reset_profiles", "curve_reset", "slc_reset",
     "conditional:reset", "conditional:manual_reset",
   ) and not is_long_confirm_action(key) and not key.startswith("torque_repair:"))
 
@@ -445,8 +445,6 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
     return "Save these source-image crop positions? Confirm alignment on the device before using the preview."
   if key.startswith(PIP_FORMAT_PREFIX):
     return f"{row.label}? This replaces the saved crop; check alignment on the device."
-  if key == "slc_adopt":
-    return "Keep these saved offsets and speed ranges when units change? Prior saved values remain but become inactive."
   if key == "slc_reset":
     return f"Reset speed-limit offsets to zero? {row.value}. Saved control may resume if its switch is on."
   if key == "curve_reset":

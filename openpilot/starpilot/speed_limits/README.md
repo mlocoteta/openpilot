@@ -125,6 +125,15 @@ saved bytes for older versions; current code neither reads nor writes it.
 Missing, 0, 1, 2 and malformed old values all use the same behavior above.
 Old Quick Select assignments remain saved but unavailable.
 
+Offsets use only the saved `SLCOffsetSchedule`, with fixed physical speed ranges
+and adjustments. Without a saved schedule, all seven ranges start at zero and
+can be edited immediately in Galaxy, Large UI, or Compact UI. Retired
+`Offset1`–`Offset7` values are ignored; users with only those values must configure
+their offsets again. Existing schedules are preserved, including across display
+unit changes. There is no separate offset-adoption step.
+Converted offsets display as whole mph or km/h, and edits use whole units.
+Unit switches retain the saved precision so repeated conversions do not drift.
+
 Offset-only edits preserve accepted and
 rejected state and renew action identities. A changed offset can update the set
 speed of the accepted current limit; source loss defers this command until that

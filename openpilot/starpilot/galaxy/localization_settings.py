@@ -5,7 +5,6 @@ from importlib.resources import files
 
 from openpilot.starpilot.saved_document import commit_exact
 from openpilot.starpilot.saved_source import read_saved
-from openpilot.starpilot.speed_limits import offset_document as od
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 from openpilot.starpilot.ui.slc_offset_feature import SlcOffsetOwner
 
@@ -32,13 +31,6 @@ class LocalizationSettingsOwner:
       raw, readable = read_saved(self.params, key, 8)
       valid = readable and raw in (None, b"0", b"1")
       allowed = self.authorized() if key == "IsMetric" else self._wheel_side_allowed()
-      if key == "IsMetric":
-        saved = self.units.snapshot()
-        custom_offsets = isinstance(saved.document, od.OffsetDocument) and any(saved.document.offsets_mps)
-        preserving = saved.raw_document is None and (custom_offsets or saved.raw_control not in (None, b"0"))
-        if preserving and not self.parked():
-          allowed = False
-          reason = "Park once to preserve your saved speed-limit offsets before switching units."
       if key == "IsRhdDetected" and not allowed:
         reason = "Park the vehicle and close driver camera preview before changing the steering-wheel side."
       rows.append(FeatureRow(key, label, ("On" if raw == b"1" else "Off") if valid else "Invalid saved value",
