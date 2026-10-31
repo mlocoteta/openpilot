@@ -29,6 +29,7 @@ MAX_DOCUMENT = 256 * 1024
 MAX_RESPONSE = 8 * 1024 * 1024
 SEARCH_TTL = 180
 ACTIVE_TTL = 12 * 60 * 60
+HUD_ROUTE_FILE = "hud-route.cache"
 MAX_SEARCHES = 32
 TILE_CACHE_TTL = 15 * 60
 TILE_CACHE_ENTRIES = 256
@@ -110,6 +111,15 @@ def response_json(session, url: str, params: dict) -> dict:
     if isinstance(exc, ValidationError):
       raise
     raise ValidationError('The map service could not complete this request') from None
+
+
+def hud_route_path(root: Path | None = None) -> Path | None:
+  """Where NavigationOwner.record_hud_route writes on Linux (the device); None elsewhere."""
+  if sys.platform != "linux":
+    return None
+  root = Path(root) if root is not None else starpilot_storage_root() / 'navigation'
+  identity = hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:24]
+  return Path("/dev/shm") / ("starpilot-navigation-" + identity) / HUD_ROUTE_FILE
 
 
 class NavigationOwner:
@@ -401,6 +411,18 @@ class NavigationOwner:
         os.replace(name, self.transient_root / 'routes.cache')
       finally:
         Path(name).unlink(missing_ok=True)
+
+  def record_hud_route(self, value: dict) -> None:
+    """Galaxy HUD v3: signals/lanes of the route being guided, written once per route (hud.RouteAhead reads it)."""
+    directory = self._temporary_directory()
+    os.close(directory)
+    fd, name = tempfile.mkstemp(dir=self.transient_root, prefix='.hud-route-')
+    try:
+      with os.fdopen(fd, 'w') as out:
+        json.dump(value, out, allow_nan=False, separators=(',', ':'))
+      os.replace(name, self.transient_root / HUD_ROUTE_FILE)
+    finally:
+      Path(name).unlink(missing_ok=True)
 
   def select_route(self, index, expected_revision, authorized):
     if self.read()['revision'] != expected_revision:
