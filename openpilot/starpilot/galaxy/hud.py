@@ -12,11 +12,20 @@ Schema 2 (F29, Accord head unit, accord-head-unit/upper-screen/HUD-V2.md) adds, 
 - tracks (v2.1): credible radarTracks points, moving with us or stopped after being seen moving
 - fuel (v2.2, Accord 9G only): the car's own trip-fuel counter (CAN 0x324 bytes 2-3) as mL + mpg; v2.3 adds the tank
   level (CAN 0x1A6 byte 3): levelRaw/levelPct/levelGal/rangeMi
+
+Schema 3 ("Tesla extras", accord-head-unit/state/handoff/hud-extras-contract.md), all optional, null = unknown:
+- stop: the model plan's stop point (modelV2 velocity.x first below 0.5 m/s); never a light colour
+- tracks[].lane, laneEgo, laneChange: lane of each radar track and of the car from the model lines, modelV2.meta lane change
+- gearLetter, doors (Accord 9G per-door/trunk from CAN 0x405 while slow), seatbelt (driver only), distanceBars
+- ahead / lanes: next traffic controls and lane guidance from the route the navigation process already fetched
 """
 
+from bisect import bisect_right
 from collections import deque
 
+import json
 import math
+import os
 import secrets
 import threading
 import time
@@ -30,11 +39,12 @@ CLIENT_IDLE_S = 6.0
 STALE_AFTER_S = 1.5
 SOURCE_MAX_AGE_S = 1.0
 # Slow publishers get a wider window; carParams (0.02 Hz) is per-drive static data.
-MAX_AGE_S = {'deviceState': 2.0, 'chestnutState': 1.5, 'peripheralState': 2.0}
+MAX_AGE_S = {'deviceState': 2.0, 'chestnutState': 1.5, 'peripheralState': 2.0, 'starpilotNavigation': 1.5}
 STATIC_SERVICES = ('carParams',)
 PARAMS_RETRY_S = 10.0
 SERVICES = ('deviceState', 'selfdriveState', 'carState', 'carControl', 'radarState', 'slcState',
-            'chestnutState', 'drivingModelData', 'peripheralState', 'carParams', 'modelV2', 'radarTracks', 'mapdOut')
+            'chestnutState', 'drivingModelData', 'peripheralState', 'carParams', 'modelV2', 'radarTracks', 'mapdOut',
+            'starpilotNavigation')
 
 # v2 model geometry: every other point of the 33-point modelV2 grid -> 14 points, x 0..~126 m.
 MODEL_IDX = tuple(range(0, 27, 2))
@@ -83,6 +93,38 @@ ALERT_STATUS = ('normal', 'userPrompt', 'critical')
 ALERT_SIZE = ('none', 'small', 'mid', 'full')
 PERSONALITIES = ('aggressive', 'standard', 'relaxed')
 
+# v3 stop point: the model plan's speed falls below STOP_V within STOP_MAX_M; a radar lead within STOP_LEAD_M of it
+# means the car is stopping behind that car, not at a line.
+STOP_V = 0.5
+STOP_MIN_V_EGO = 1.0
+STOP_MAX_M = 150.0
+STOP_LEAD_M = 8.0
+# v3 lanes: radar dRel is measured at the bumper, the model at the camera (verified 10-26: leadOne in lane 0 for 95 %).
+CAMERA_TO_RADAR_M = 1.52
+LINE_MIN_PROB = 0.3
+HALF_LANE_M = 1.85
+LANE_M = 3.7
+LANE_EGO_X = 10.0
+LANE_WIDTH_RANGE = (2.8, 4.5)
+EDGE_MAX_STD = 1.0
+EDGE_LANE_MAX = 0.55     # edge lane: road edge within 0.55 lane widths of our own line (a shoulder)
+SECOND_LANE = (1.15, 1.55)
+LANE_CHANGE_STATES = ('off', 'preLaneChange', 'laneChangeStarting', 'laneChangeFinishing')
+LANE_CHANGE_DIRECTIONS = ('none', 'left', 'right')
+GEAR_LETTERS = {'park': 'P', 'reverse': 'R', 'neutral': 'N', 'drive': 'D', 'sport': 'S', 'low': 'L'}
+# v3 doors (Accord 9G): CAN 0x405 DOORS_STATUS (~3 Hz, bus 0) bits 37-41 = FL FR RL RR trunk; read only below DOORS_MAX_V.
+DOORS_ADDR = 0x405
+DOORS_MAX_V = 2.5
+DOORS_MAX_AGE_S = 2.0
+DOOR_BITS = (('fl', 4, 5), ('fr', 4, 6), ('rl', 4, 7), ('rr', 5, 0), ('trunk', 5, 1))
+# v3 route extras: the navigation process's per-route file; navigation wire version 2.
+NAV_VERSION = 2
+ROUTE_FILE_MAX = 2 * 1024 * 1024
+ROUTE_MATCH_M = 50.0
+ROUTE_DEAD_RECKON_S = 1.5
+AHEAD_MAX = 3
+AHEAD_MAX_M = 2000.0
+
 
 def empty():
   return {
@@ -98,6 +140,8 @@ def empty():
     'blinker': None, 'gear': None,
     'batteryVolts': None,
     'model': None, 'road': None, 'tracks': None, 'fuel': None,
+    'stop': None, 'laneEgo': None, 'laneChange': None, 'gearLetter': None, 'doors': None, 'seatbelt': None,
+    'distanceBars': None, 'ahead': None, 'lanes': None,
   }
 
 
@@ -267,6 +311,250 @@ def tracks(radar_tracks, v_ego, seen_moving):
   for gone in [track_id for track_id in seen_moving if track_id not in live]:
     del seen_moving[gone]
   return out[:TRACKS_MAX]
+
+
+def _interp(x, xs, ys):
+  """Linear interpolation clamped at both ends; xs ascending."""
+  if x <= xs[0]:
+    return ys[0]
+  for i in range(1, len(xs)):
+    if x <= xs[i]:
+      span = xs[i] - xs[i - 1]
+      return ys[i] if span <= 0 else ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / span
+  return ys[-1]
+
+
+def _xy(xyz):
+  """(xs, ys) float lists of a modelV2 XYZTData, or None when short, unequal or non-finite."""
+  try:
+    xs, ys = [finite(v) for v in _field(xyz, 'x')], [finite(v) for v in _field(xyz, 'y')]
+  except (TypeError, ValueError):
+    return None
+  if len(xs) < 2 or len(xs) != len(ys) or any(v is None for v in xs + ys):
+    return None
+  return xs, ys
+
+
+class ModelLanes:
+  """The model's lane lines (y right-positive) for v3 lane tests; .ok is False when the model has no usable lines."""
+
+  def __init__(self, model):
+    self.lines = [_xy(line) for line in (_field(model, 'laneLines') or [])] if model is not None else []
+    self.edges = [_xy(edge) for edge in (_field(model, 'roadEdges') or [])] if model is not None else []
+    self.path = _xy(_field(model, 'position')) if model is not None else None
+    probs = _field(model, 'laneLineProbs') if model is not None else None
+    stds = _field(model, 'roadEdgeStds') if model is not None else None
+    try:
+      self.probs = [finite(p) for p in probs] if probs is not None else []
+      self.stds = [finite(s) for s in stds] if stds is not None else []
+    except (TypeError, ValueError):
+      self.probs, self.stds = [], []
+    self.ok = len(self.lines) == 4 and len(self.probs) == 4 and all(line is not None for line in self.lines) \
+      and all(p is not None for p in self.probs)
+
+  def _line_y(self, i, x):
+    xs, ys = self.lines[i]
+    return _interp(x, xs, ys)
+
+  def bounds(self, x):
+    """[outer-left, ego-left, ego-right, outer-right] y at x. Lines under LINE_MIN_PROB fall back to the path +-1.85 m
+    (ego) or one lane further out (outer); None when the ego lane can't be placed."""
+    if not self.ok:
+      return None
+    path_y = _interp(x, *self.path) if self.path is not None else None
+    ys = [self._line_y(i, x) if self.probs[i] >= LINE_MIN_PROB else None for i in range(4)]
+    if ys[1] is None:
+      ys[1] = path_y - HALF_LANE_M if path_y is not None else None
+    if ys[2] is None:
+      ys[2] = path_y + HALF_LANE_M if path_y is not None else None
+    if ys[1] is None or ys[2] is None or ys[2] <= ys[1]:
+      return None
+    if ys[0] is None or ys[0] >= ys[1]:
+      ys[0] = ys[1] - LANE_M
+    if ys[3] is None or ys[3] <= ys[2]:
+      ys[3] = ys[2] + LANE_M
+    return ys
+
+  def lane_of(self, x, y):
+    """-2..2 lane of a point (0 = ours), or None."""
+    b = self.bounds(x)
+    if b is None:
+      return None
+    if y < b[0]:
+      return -2
+    if y < b[1]:
+      return -1
+    if y <= b[2]:
+      return 0
+    return 1 if y <= b[3] else 2
+
+  def ego(self):
+    """{'fromLeft', 'fromRight'}: 0 = edge lane, 1 = second lane, None = can't tell; None when neither side can."""
+    if not self.ok or len(self.edges) != 2 or any(edge is None for edge in self.edges) or len(self.stds) != 2:
+      return None
+    if self.probs[1] < LINE_MIN_PROB or self.probs[2] < LINE_MIN_PROB:
+      return None
+    left, right = self._line_y(1, LANE_EGO_X), self._line_y(2, LANE_EGO_X)
+    width = right - left
+    if not LANE_WIDTH_RANGE[0] <= width <= LANE_WIDTH_RANGE[1]:
+      return None
+    gaps = (left - _interp(LANE_EGO_X, *self.edges[0]), _interp(LANE_EGO_X, *self.edges[1]) - right)
+    out = []
+    for gap, std in zip(gaps, self.stds, strict=True):
+      ratio = gap / width
+      if std is None or std > EDGE_MAX_STD or ratio < 0:
+        out.append(None)
+      elif ratio < EDGE_LANE_MAX:
+        out.append(0)
+      elif SECOND_LANE[0] <= ratio < SECOND_LANE[1]:
+        out.append(1)
+      else:
+        out.append(None)
+    return None if out == [None, None] else {'fromLeft': out[0], 'fromRight': out[1]}
+
+
+def track_lanes(items, lanes):
+  """Adds 'lane' to each tracks() item (null when the model can't place it)."""
+  for item in items:
+    item['lane'] = lanes.lane_of(item['dRel'] + CAMERA_TO_RADAR_M, item['yRel']) if lanes is not None else None
+  return items
+
+
+def stop_point(model, v_ego, lead, experimental, active):
+  """v3 stop: where the model plan's speed first drops below STOP_V (interpolated), or None."""
+  if v_ego is None or v_ego < STOP_MIN_V_EGO:
+    return None
+  position, velocity = _field(model, 'position'), _field(model, 'velocity')
+  try:
+    xs = [finite(v) for v in _field(position, 'x')]
+    vs = [finite(v) for v in _field(velocity, 'x')]
+  except (TypeError, ValueError):
+    return None
+  if len(xs) < 2 or len(xs) != len(vs) or any(v is None for v in xs + vs):
+    return None
+  dist = None
+  for i in range(1, len(vs)):
+    if vs[i] < STOP_V:
+      if vs[i - 1] < STOP_V:
+        return None   # the plan starts stopped: no stop point ahead to show
+      frac = (vs[i - 1] - STOP_V) / (vs[i - 1] - vs[i])
+      dist = xs[i - 1] + frac * (xs[i] - xs[i - 1])
+      break
+  if dist is None or not 0 < dist <= STOP_MAX_M:
+    return None
+  behind_lead = lead is not None and lead.get('dRel') is not None and lead['dRel'] <= dist + STOP_LEAD_M
+  followed = None if experimental is None or active is None else bool(experimental and active)
+  return {'distM': round(dist, 1), 'kind': 'lead' if behind_lead else 'stopLine', 'followed': followed,
+          'shouldStop': _bool(_field(model, 'action'), 'shouldStop')}
+
+
+def _lane_change(model):
+  meta = _field(model, 'meta')
+  state, direction = _enum(meta, 'laneChangeState'), _enum(meta, 'laneChangeDirection')
+  if state not in LANE_CHANGE_STATES or direction not in LANE_CHANGE_DIRECTIONS:
+    return None
+  return {'state': state, 'direction': direction}
+
+
+def door_bits(data):
+  """{fl, fr, rl, rr, trunk} booleans from a 0x405 payload, or None when short."""
+  if data is None or len(data) < 6:
+    return None
+  return {name: bool(data[byte] >> bit & 1) for name, byte, bit in DOOR_BITS}
+
+
+def doors_frame(batches):
+  """Newest 0x405 payload in drained CAN batches (all of them: the message is ~3 Hz), or None."""
+  for can in reversed(batches):
+    try:
+      for frame in can:
+        if frame.address == DOORS_ADDR and frame.src == FUEL_BUS:
+          return bytes(frame.dat)
+    except (AttributeError, TypeError, ValueError):
+      continue
+  return None
+
+
+def _doors(car_state, v_ego, per_door):
+  """v3 doors: 'any' from carState; per-door/trunk only when slow and a fresh 0x405 reading was passed in."""
+  any_open = _bool(car_state, 'doorOpen')
+  if any_open is None:
+    return None
+  slow = v_ego is not None and v_ego < DOORS_MAX_V
+  bits = per_door if slow and isinstance(per_door, dict) else {}
+  return {'any': any_open, **{name: bits.get(name) for name, _, _ in DOOR_BITS}}
+
+
+class RouteAhead:
+  """v3 ahead/lanes: the guided route's controls + maneuver lanes (written once per route by the navigation process),
+  placed with starpilotNavigation's remaining distance (1 Hz) dead-reckoned with vEgo between messages."""
+
+  def __init__(self, path=None):
+    if path is None:
+      try:
+        from openpilot.starpilot.navigation.owner import hud_route_path
+        path = hud_route_path()
+      except Exception:
+        path = None
+    self.path = path
+    self.key = None
+    self.route = None
+    self.frame = None
+    self.base = None   # (along m, monotonic s) at the newest navigation message
+
+  def _load(self):
+    try:
+      info = os.stat(self.path)
+    except (OSError, TypeError):
+      self.key = self.route = None
+      return None
+    key = (info.st_ino, info.st_mtime_ns, info.st_size)
+    if key != self.key:
+      self.key = key
+      try:
+        with open(self.path, 'rb') as source:
+          value = json.loads(source.read(ROUTE_FILE_MAX + 1))
+        end = finite(value['end'])
+        controls, lanes = value['controls'], value['lanes']
+        self.route = (end, controls, [row['alongM'] for row in controls], lanes) \
+          if end is not None and isinstance(controls, list) and isinstance(lanes, list) else None
+      except (OSError, ValueError, KeyError, TypeError):
+        self.route = None
+    return self.route
+
+  def value(self, nav, v_ego, now):
+    state = _field(nav, 'navigation') if nav is not None else None
+    if state is None or _field(state, 'version') != NAV_VERSION or _text(state, 'status', 20) != 'guiding':
+      self.frame = self.base = None
+      return None
+    route = self._load()
+    remaining = finite(_field(_field(state, 'instruction'), 'remainingDistanceMeters'))
+    if route is None or remaining is None:
+      return None
+    end, controls, alongs, maneuvers = route
+    if remaining > end + ROUTE_MATCH_M:
+      return None   # a status from a different (longer) route than the file: never mix the two
+    frame = _field(state, 'frameMonoTime')
+    if frame != self.frame or self.base is None:
+      self.frame, self.base = frame, (end - remaining, now)
+    along = self.base[0] + (v_ego or 0.0) * min(max(0.0, now - self.base[1]), ROUTE_DEAD_RECKON_S)
+    ahead = []
+    for i in range(bisect_right(alongs, along), len(controls)):
+      dist = alongs[i] - along
+      if dist > AHEAD_MAX_M or len(ahead) >= AHEAD_MAX:
+        break
+      row = controls[i]
+      ahead.append({'kind': row['kind'], 'distM': round(dist, 1), 'lat': row['lat'], 'lon': row['lon']})
+    lanes = None
+    upcoming = next((row for row in maneuvers if row['alongM'] > along), None)
+    if upcoming is not None and upcoming['lanes'] and upcoming['alongM'] - along <= AHEAD_MAX_M:
+      lanes = {'distM': round(upcoming['alongM'] - along, 1), 'lanes': upcoming['lanes']}
+    return {'ahead': ahead, 'lanes': lanes}
+
+
+def _distance_bars(car_control):
+  bars = _field(_field(car_control, 'hudControl'), 'leadDistanceBars')
+  return bars if isinstance(bars, int) and not isinstance(bars, bool) and 1 <= bars <= 4 else None
 
 
 class FuelTrip:
@@ -445,11 +733,13 @@ def _egpu(msgs, fresh, onroad):
   return result
 
 
-def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None):
+def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None, doors=None, route=None):
   """Project a fixed allowlist; missing or stale services stay null, never zero.
 
   msgs: service -> capnp reader (or None); fresh: service -> bool. seen_moving: the caller's v2.1 track memory
-  (a fresh dict when omitted); fuel: the v2.2 object from FuelTrip.value(), passed through.
+  (a fresh dict when omitted); fuel: the v2.2 object from FuelTrip.value(), passed through. doors: v3 per-door dict
+  from door_bits() of a 0x405 frame at most DOORS_MAX_AGE_S old (None otherwise); route: {'ahead', 'lanes'} from
+  the navigation route (None when not guiding).
   """
   result = empty()
   result['isMetric'] = is_metric if isinstance(is_metric, bool) else None
@@ -479,6 +769,12 @@ def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None):
     if left is not None and right is not None:
       result['blinker'] = 'both' if left and right else 'left' if left else 'right' if right else 'none'
     result['gear'] = _enum(car_state, 'gearShifter')
+    result['gearLetter'] = GEAR_LETTERS.get(result['gear'])
+    result['doors'] = _doors(car_state, v_ego, doors)
+    unlatched = _bool(car_state, 'seatbeltUnlatched')
+    result['seatbelt'] = {'driverUnlatched': unlatched} if unlatched is not None else None
+  if fresh.get('carControl'):
+    result['distanceBars'] = _distance_bars(msgs.get('carControl'))
 
   if fresh.get('radarState'):
     result['lead'] = _lead(msgs.get('radarState'))
@@ -494,13 +790,23 @@ def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None):
     mv = finite(_field(msgs.get('peripheralState'), 'voltage'))
     if mv is not None and BATTERY_MV_RANGE[0] <= mv <= BATTERY_MV_RANGE[1]:
       result['batteryVolts'] = round(mv / 1000, 2)
+  lanes = None
   if fresh.get('modelV2'):
-    result['model'] = _model(msgs.get('modelV2'))
+    model = msgs.get('modelV2')
+    result['model'] = _model(model)
+    lanes = ModelLanes(model)
+    result['laneEgo'] = lanes.ego()
+    result['laneChange'] = _lane_change(model)
+    result['stop'] = stop_point(model, result['vEgo'], result['lead'], result['experimental'], result['active'])
   if fresh.get('mapdOut'):
     result['road'] = _road(msgs.get('mapdOut'))
   if fresh.get('radarTracks') and result['vEgo'] is not None:
-    result['tracks'] = tracks(msgs.get('radarTracks'), result['vEgo'], {} if seen_moving is None else seen_moving)
+    found = tracks(msgs.get('radarTracks'), result['vEgo'], {} if seen_moving is None else seen_moving)
+    result['tracks'] = track_lanes(found, lanes) if found is not None else None
   result['fuel'] = fuel if isinstance(fuel, dict) else None
+  if isinstance(route, dict):
+    result['ahead'] = route.get('ahead')
+    result['lanes'] = route.get('lanes')
   return result
 
 
@@ -541,6 +847,9 @@ class MessagingHudReader:
     self.sm = messaging.SubMaster(list(SERVICES))
     self.seen_moving = {}
     self.fuel = FUEL
+    self.doors = None
+    self.doors_at = None
+    self.route = RouteAhead()
     self.can_sock = None
     self.params = _read_params()
     self.is_metric = None
@@ -610,18 +919,25 @@ class MessagingHudReader:
       onroad = fresh['deviceState'] and _bool(sm['deviceState'], 'started') is True
       cached = self._cached_car_params(now) if onroad else None
       msgs['carParams'], fresh['carParams'] = cached, cached is not None
-    fuel = None
+    fuel = doors = None
     if self._fuel_car(msgs['carParams']):
       device = msgs['deviceState']
       onroad = _bool(device, 'started') if device is not None else None
       car_state = msgs['carState']
       v_ego = finite(_field(car_state, 'vEgo')) if car_state is not None else None
-      count, level = self._fuel_frames() if onroad else (None, None)
+      slow = v_ego is not None and v_ego < DOORS_MAX_V
+      count, level, door_data = self._fuel_frames(slow) if onroad else (None, None, None)
       self.fuel.update(count, v_ego, now, onroad)
       if onroad is True:
         self.fuel.update_level(level, now)
       fuel = self.fuel.value()
-    values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel)
+      if door_data is not None:
+        self.doors, self.doors_at = door_bits(door_data), now
+      if self.doors is not None and self.doors_at is not None and now - self.doors_at <= DOORS_MAX_AGE_S:
+        doors = self.doors
+    car_state = msgs['carState']
+    route = self.route.value(msgs['starpilotNavigation'], finite(_field(car_state, 'vEgo')) if car_state is not None else None, now)
+    values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel, doors, route)
     current = core_fresh(values, fresh)
     core = ('selfdriveState', 'carState') if values['onroad'] else ('deviceState',)
     source_age = max(ages[key] for key in core) if current else None
@@ -631,19 +947,21 @@ class MessagingHudReader:
   def _fuel_car(self, car_params):
     return car_params is not None and _text(car_params, 'carFingerprint', 60) == FUEL_CAR
 
-  def _fuel_frames(self):
-    """Drain the raw (non-conflated) CAN queue once: (newest 0x324 counter, newest 0x1A6 level), None when absent."""
+  def _fuel_frames(self, slow=False):
+    """Drain the raw (non-conflated) CAN queue once: (newest 0x324 counter, newest 0x1A6 level, newest 0x405 payload),
+    None when absent. Only the newest FUEL_SCAN_BATCHES are parsed, all of them while slow (doors are ~3 Hz)."""
     try:
       if self.can_sock is None:
         self.can_sock = self.messaging.sub_sock('can', conflate=False)
+      raws = self.messaging.drain_sock_raw(self.can_sock)
       batches = []
-      for raw in self.messaging.drain_sock_raw(self.can_sock)[-FUEL_SCAN_BATCHES:]:
+      for raw in raws if slow else raws[-FUEL_SCAN_BATCHES:]:
         event = self.messaging.log_from_bytes(raw)
         if event.which() == 'can':
           batches.append(event.can)
-      return fuel_count(batches), fuel_level(batches)
+      return fuel_count(batches), fuel_level(batches), doors_frame(batches) if slow else None
     except Exception:
-      return None, None
+      return None, None, None
 
   def close(self):
     self.sm = None
@@ -686,7 +1004,7 @@ class Hud:
       if expired and self.error:
         state = 'unavailable'
       return {
-        'schemaVersion': 2,
+        'schemaVersion': 3,
         'state': state,
         'sessionId': self.session_id,
         'seq': self.seq,
