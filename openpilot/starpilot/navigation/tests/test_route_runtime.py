@@ -57,7 +57,7 @@ def test_navigation_forwards_new_phone_fixes_without_waiting_for_heartbeat(monke
   monkeypatch.setattr(module, 'RouteRuntime', lambda _owner: runtime)
   monkeypatch.setattr(module.time, 'monotonic_ns', now)
   monkeypatch.setattr(module, 'read_phone_gps', read_phone)
-  monkeypatch.setattr(module, 'location', lambda _sm, _now, fix: fix)
+  monkeypatch.setattr(module, 'located', lambda _sm, _now, fix: ('phone' if fix else None, fix))
   monkeypatch.setattr(module, 'publish_status', lambda _pm, _value, fix: published.append((frame[0], fix)))
   monkeypatch.setattr(messaging, 'SubMaster', lambda _services: Master())
   monkeypatch.setattr(messaging, 'PubMaster', lambda _services: None)
@@ -377,3 +377,26 @@ def test_held_phone_position_cannot_authorize_stale_navigation_control(tmp_path,
   runtime.route = route
   result = runtime.update(14_000_000_000, position, 1)
   assert result['status'] == 'guiding' and not result['controlValid']
+
+
+def test_phone_or_head_unit_fix_guides_but_never_authorizes_control(tmp_path, route):
+  runtime = RouteRuntime(configured(tmp_path), executor=Executor())
+  runtime.update(10_000_000_000, (10_000_000_000, (.005, 0.), 5., 90.), 1)
+  runtime.route = route
+  position = (11_000_000_000, (.005, 0.), 5., 90.)
+  shown = runtime.update(11_000_000_000, position, 1, control_source=False)
+  assert shown['status'] == 'guiding' and shown['instruction']['text'] == 'Turn right on First Street'
+  assert not shown['controlValid']
+  assert runtime.update(11_100_000_000, position, 1)['controlValid']
+
+
+@pytest.mark.parametrize('native, source, control', [(True, 'comma', True), (False, 'phone', False)])
+def test_located_reports_the_chosen_source(monkeypatch, native, source, control):
+  from openpilot.starpilot.navigation import runtime as module
+  gps = SimpleNamespace(longitude=1., latitude=2., speed=3., bearingDeg=float('nan'), bearingAccuracyDeg=0.)
+  monkeypatch.setattr(module, 'select_source', lambda _sm, _now, phone_fix=None: (source, (5, gps)))
+  chosen, position = module.located(None, 6, phone_fix=(5, gps))
+  assert chosen == source and position == (5, (1., 2.), 3., None)
+  assert (chosen in module.CONTROL_SOURCES) is control
+  monkeypatch.setattr(module, 'select_source', lambda _sm, _now, phone_fix=None: None)
+  assert module.located(None, 6) == (None, None) and module.location(None, 6) is None
