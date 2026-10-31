@@ -44,6 +44,57 @@ def modifier(value) -> str:
     'sharp left', 'sharpLeft').replace('sharp right', 'sharpRight')
 
 
+CONTROL_KINDS = (('traffic_signal', 'signal'), ('stop_sign', 'stop'), ('yield_sign', 'yield'), ('railway_crossing', 'rail'))
+MAX_CONTROLS = 2048
+MAX_LANES = 8
+
+
+def _lanes(rows):
+  """Directions v5 intersection lanes -> HUD lanes, or None unless every lane is complete (never partial)."""
+  if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_LANES:
+    return None
+  out = []
+  for row in rows:
+    indications = row.get('indications') if isinstance(row, dict) else None
+    if (not isinstance(indications, list) or not indications or not all(isinstance(v, str) and v for v in indications) or
+        type(row.get('valid')) is not bool or type(row.get('active')) is not bool):
+      return None
+    lane = {'ind': [v[:20] for v in indications[:4]], 'valid': row['valid'], 'active': row['active']}
+    use = row.get('valid_indication')
+    if isinstance(use, str) and use and indications != [use]:
+      lane['use'] = use[:20]
+    out.append(lane)
+  return out
+
+
+def hud_extras(steps, cumulative, end, starts):
+  """Traffic controls (signal/stop/yield/rail) and per-maneuver lanes from the steps the route already has. Intersections
+  are placed by their documented geometry_index; ones without a usable index are left out rather than guessed. Never
+  raises: a route without these fields simply has none."""
+  controls, lanes = [], []
+  try:
+    scale = end / max(cumulative[-1], 1.)
+    for index, step in enumerate(steps):
+      intersections = step.get('intersections') or []
+      for position, row in enumerate(intersections):
+        if position == 0 and index > 0:
+          # The maneuver point of this step: its lanes are the lane guidance for that maneuver.
+          lanes.append({'alongM': round(starts[index], 1), 'lanes': _lanes(row.get('lanes'))})
+        kind = next((name for key, name in CONTROL_KINDS if row.get(key) is True), None)
+        geometry_index = row.get('geometry_index')
+        if kind is None or type(geometry_index) is not int or not 0 <= geometry_index < len(cumulative):
+          continue
+        location = point(row['location'])
+        controls.append({'kind': kind, 'lat': round(location[1], 5), 'lon': round(location[0], 5),
+                         'alongM': round(cumulative[geometry_index] * scale, 1)})
+        if len(controls) >= MAX_CONTROLS:
+          break
+  except (KeyError, TypeError, AttributeError, ValidationError):
+    return [], []
+  controls.sort(key=lambda row: row['alongM'])
+  return controls, lanes
+
+
 @dataclass(frozen=True)
 class Step:
   start: float
@@ -94,6 +145,11 @@ class NavigationRoute:
       self.starts = [step.start for step in self.steps]
     except (KeyError, TypeError, IndexError, AttributeError):
       raise ValidationError('The map service returned an incomplete route') from None
+    self.controls, self.maneuver_lanes = hud_extras(data['legs'][0]['steps'], self.cumulative, self.steps[-1].end, self.starts)
+
+  def hud_route(self) -> dict:
+    """Galaxy HUD v3 extras for this route (along-route metres on the step-distance scale used by progress())."""
+    return {'end': self.steps[-1].end, 'controls': self.controls, 'lanes': self.maneuver_lanes}
 
   def preview(self) -> list[dict]:
     stride = max(1, math.ceil((len(self.points) - 1) / 511))
