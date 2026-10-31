@@ -67,6 +67,7 @@ class RouteRuntime:
     self.off_route_since = 0
     self.arrived_since = 0
     self.ended_revision = None
+    self.hud_route = None
     self.session = uuid.uuid4().hex
     self.drive = 0
     self.drive_fix = None
@@ -177,6 +178,13 @@ class RouteRuntime:
     self._traffic_eta(now_ns, credentials[1], coordinates, speed, bearing, settings['destination'], exclusions, progress.instruction)
     if self.arrived_since and now_ns - self.arrived_since >= END_ROUTE_NS:
       self._end_route(settings['revision'])
+    if self.hud_route is not self.route:
+      # Galaxy HUD v3: once per guided route, before the first status that guides along it.
+      try:
+        self.owner.record_hud_route(self.route.hud_route())
+        self.hud_route = self.route
+      except (OSError, ValueError, AttributeError):
+        pass
     result.update(status='arrived' if arrived else 'guiding', instruction=progress.instruction,
                   nextManeuver=progress.next_maneuver, route=self.route.preview(),
                   controlValid=bool(speed is not None and fresh and drive_id > 0 and not progress.off_route and not arriving and stamp >= drive_id))
