@@ -84,6 +84,22 @@ def test_upcoming_approval_keeps_native_capacity_and_release_checks(helper):
   assert helper.toyota.status == 'ready' and helper.toyota.can_apply(70./3.6)
 
 
+def test_engagement_adoption_waits_for_native_capacity_and_release(helper):
+  helper.toyota.engaged = False
+  update(helper, state(native=60.))
+  before = helper.v_cruise_kph
+  assert helper.initialize_v_cruise(state(), False, resume=False, slc_target_mps=70 / 3.6, is_metric=True)
+  assert helper.v_cruise_kph == before  # Existing Toyota preparation owns application.
+  approved = approval(70.)
+  approved.actionStatus, approved.actionSequenceId = 'adopt', 1
+  update(helper, state(native=60.), approved)
+  assert helper.toyota.status == 'raise_dash' and not helper.toyota.can_apply(70 / 3.6)
+  update(helper, state(native=80., button='accelCruise'), approved)
+  assert helper.toyota.status == 'release_plus'
+  update(helper, state(native=80., button='accelCruise', pressed=False), approved)
+  assert helper.toyota.status == 'ready' and helper.toyota.can_apply(70 / 3.6)
+
+
 @pytest.fixture(params=[False, True], ids=['normal-steps', 'swapped-steps'])
 def swap(helper, tmp_path, request):
   params = Params(str(tmp_path))

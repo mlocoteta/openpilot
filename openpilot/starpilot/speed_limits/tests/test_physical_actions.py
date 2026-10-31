@@ -61,3 +61,22 @@ def test_preserve_authority_and_configuration_barriers(sm, long_active, after_ns
 
 def test_fresh_post_configuration_decision_qualifies(sm):
   assert physical_actions.pending_confirmation(sm, NOW, long_active=True, after_ns=NOW - 1) is not None
+
+
+@pytest.mark.parametrize('field,value', [
+  ('enabled', False), ('displayOnly', True), ('observationKind', 'stale'), ('source', 'online'),
+  ('presentationId', 0), ('frameMonoTime', NOW - physical_actions.STATE_MAX_AGE_NS - 1),
+  ('hasPresentationAdjustedLimit', False), ('presentationAdjustedLimit', 0.),
+  ('presentationAdjustedLimit', math.nan), ('presentationAdjustedLimit', math.inf),
+  ('presentationAdjustedLimit', 146 / 3.6), ('presentationAdjustedLimit', 7 / 3.6),
+])
+def test_engagement_rejects_unqualified_current_target(sm, field, value):
+  sm['slcState'].hasPresentationAdjustedLimit, sm['slcState'].presentationAdjustedLimit = True, 25.
+  setattr(sm['slcState'], field, value)
+  assert physical_actions.engagement_state(sm, None, 'card', NOW) is None
+
+
+@pytest.mark.parametrize('target', [8 / 3.6, 145 / 3.6])
+def test_engagement_accepts_float32_cruise_boundaries(sm, target):
+  sm['slcState'].hasPresentationAdjustedLimit, sm['slcState'].presentationAdjustedLimit = True, target
+  assert physical_actions.engagement_state(sm, None, 'card', NOW) is not None

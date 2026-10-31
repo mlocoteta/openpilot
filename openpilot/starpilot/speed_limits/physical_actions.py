@@ -65,6 +65,22 @@ def state_current(sm, observation, producer_session: str, now_ns: int):
   return state
 
 
+def engagement_state(sm, observation, producer_session: str, now_ns: int, *, after_ns: int = 0):
+  state = _current_state(sm, now_ns)
+  if (state is None or int(state.frameMonoTime) <= after_ns or int(state.presentationId) <= 0 or
+      str(state.source) == 'online' or not state.hasPresentationAdjustedLimit):
+    return None
+  if str(state.source) == 'dashboard' and (
+      observation is None or observation.observed_ns <= after_ns or not source_matches(state, observation, producer_session, now_ns)):
+    return None
+  if str(state.source) == 'vision' and not (
+      state.sourceProducerSessionId and state.sourceEpisode > 0 and
+      0 < state.sourceObservedMonoTime <= now_ns <= state.sourceValidUntilMonoTime):
+    return None
+  target = float(state.presentationAdjustedLimit)
+  return state if finite_speed(target) and V_CRUISE_MIN / 3.6 - 1e-5 <= target <= V_CRUISE_MAX / 3.6 + 1e-5 else None
+
+
 def pending_confirmation(sm, now_ns: int, *, long_active: bool,
                          after_ns: int = 0) -> SlcPendingConfirmation | None:
   if not long_active:

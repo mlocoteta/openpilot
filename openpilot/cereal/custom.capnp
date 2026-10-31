@@ -535,6 +535,7 @@ struct SlcCruiseEvent @0xcd96dafb67a082d0 {
     switchbackMode @9;
     wheelAction @10;
     teslaStockCruise @11;
+    engagementAdopt @12;
   }
 
   struct TrafficModeGesture {

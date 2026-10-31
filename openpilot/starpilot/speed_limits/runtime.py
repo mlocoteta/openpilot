@@ -253,27 +253,38 @@ class Runtime:
     self.ledger = completed.state
     return classified if not classified.errors and classified.change is not None else None
 
-  def _physical_action(self, event: CruiseEvent, sm, now_ns: int) -> tuple[acc.DriverAction | None, int | None]:
-    if (event.kind not in ('confirmationAccept', 'confirmationReject') or
+  def _physical_action(self, event: CruiseEvent, sm, now_ns: int) -> tuple[acc.DriverAction | None, acc.AdoptRequest | None, int | None]:
+    if (event.kind not in ('confirmationAccept', 'confirmationReject', 'engagementAdopt') or
         not self._event_current(event, sm, now_ns)):
-      return None, None
+      return None, None, None
     self._mark_event(event)
+    engagement = event.kind == 'engagementAdopt'
     pending = self.state.acceptance.pending
     shown = self.state.acceptance.presentation
-    if (event.session_id != self.session_id or pending is None or shown is None or
+    if shown is None and engagement:
+      shown = self.current_presentation
+    if (event.session_id != self.session_id or shown is None or
         event.producer_session != str(sm['slcDashboardObservation'].producerSessionId) or
-        event.decision_id != pending.decision_id or event.presentation_id != shown.presentation_id or
-        pending.candidate != shown.candidate or
-        event.button != ('accel' if event.kind == 'confirmationAccept' else 'decel')):
-      return None, None
+        event.presentation_id != shown.presentation_id or event.button != ('accel' if event.kind == 'confirmationAccept' else 'decel')):
+      return None, None, None
+    if engagement:
+      if (event.command_id != 0 or not _number(event.selected_mps, positive=True) or
+          not _number(float(sm['carState'].vCruise), positive=True) or
+          abs(float(sm['carState'].vCruise) / 3.6 - event.selected_mps) > 0.1):
+        return None, None, None
+    elif pending is None or event.decision_id != pending.decision_id or pending.candidate != shown.candidate:
+      return None, None, None
     action_id = self.ledger.last_action_id + 1
-    begun = arb.step(self.ledger, arb.BeginAction(self.session_id, action_id, arb.Origin.DRIVER_CRUISE,
-                                                  f'pending:{pending.decision_id}'), now_ns=now_ns)
+    context = f'presentation:{shown.presentation_id}' if engagement else f'pending:{pending.decision_id}'
+    begun = arb.step(self.ledger, arb.BeginAction(self.session_id, action_id, arb.Origin.DRIVER_CRUISE, context), now_ns=now_ns)
     self.ledger = begun.state
     if begun.errors or begun.status != 'begun':
-      return None, None
+      return None, None, None
+    if engagement:
+      return None, acc.AdoptRequest(self.session_id, action_id, shown.presentation_id, shown.candidate), action_id
+    assert pending is not None
     kind = acc.ActionKind.ACCEPT if event.kind == 'confirmationAccept' else acc.ActionKind.REJECT
-    return acc.DriverAction(self.session_id, action_id, pending.decision_id, kind), action_id
+    return acc.DriverAction(self.session_id, action_id, pending.decision_id, kind), None, action_id
 
   def _command_receipt(self, event: CruiseEvent, sm, now_ns: int) -> None:
     if (event.kind not in ('commandApplied', 'commandRejected') or
@@ -390,6 +401,11 @@ class Runtime:
                       ego, bool(car_state.gasPressed) if car_fresh else False, host, action=action, adopt=adopt,
                       classified_cruise=classified, is_metric=self.is_metric, set_speed_ready=self._set_speed_ready(sm))
     current = sel.select_limit(observations, self.settings.selection).observation.candidate
+    shown = self.state.acceptance.presentation
+    if self.advance.encounter is not None and shown is not None and current != self.last_received:
+      identity = self.state.acceptance.next_presentation_id
+      self.state = replace(self.state, acceptance=replace(self.state.acceptance,
+        presentation=acc.Presentation(identity, shown.candidate), next_presentation_id=identity+1))
     if (adopt is not None and self.advance.encounter is not None and
         adopt.candidate == self.last_received == current):
       self.advance.use_current(adopt.candidate)
@@ -413,11 +429,6 @@ class Runtime:
       shown = self.current_presentation
     if shown is None or shown.presentation_id != request.presentation_id:
       return None, None, None
-    if request.kind == 'adopt' and self.advance.encounter is not None and self.state.acceptance.pending is None and self.last_received is not None:
-      # The adopt wheel action still means the displayed current limit.
-      shown = replace(shown, candidate=self.last_received)
-      self.state = replace(self.state, acceptance=replace(self.state.acceptance, presentation=shown,
-        observation=acc.Observation(acc.ObservationKind.VALID, shown.candidate)))
     action_id = self.ledger.last_action_id + 1
     context = self.state.override.context
     context_id = context.context_id if context is not None else "slc-presentation"
@@ -445,7 +456,14 @@ class Runtime:
       self._command_receipt(cruise_event, sm, now_ns)
     action, adopt, action_id = self._action(request, now_ns)
     if cruise_event is not None and request is None:
-      action, action_id = self._physical_action(cruise_event, sm, now_ns)
+      action, adopt, action_id = self._physical_action(cruise_event, sm, now_ns)
+    if (adopt is not None and self.advance.encounter is not None and self.last_received is not None and
+        (request is None or self.state.acceptance.pending is None)):
+      # Explicit adoption uses the current road, including SET over an old early prompt.
+      shown = acc.Presentation(adopt.presentation_id, self.last_received)
+      adopt = replace(adopt, candidate=shown.candidate)
+      self.state = replace(self.state, acceptance=replace(self.state.acceptance, presentation=shown, pending=None, timer_running=False,
+        observation=acc.Observation(acc.ObservationKind.VALID, shown.candidate)))
     frame = self._frame(sm, CP, now_ns, now_boot_ns, action, adopt, classified)
     result = comp.step(self.state, frame)
     self.state = result.state

@@ -843,9 +843,24 @@ class Car:
                                        slc_enabled=getattr(self, 'slc_control_enabled', getattr(self, 'slc_replay', False)),
                                        slc_approved=approved)
     if self.sm['carControl'].enabled and not self.CC_prev.enabled:
+      initial = None
+      now_ns = int(self.can_log_mono_time) if REPLAY and hasattr(self, 'can_log_mono_time') else time.monotonic_ns()
+      if (getattr(self, 'slc_control_enabled', False) and self.CP.openpilotLongitudinalControl and
+          CS.canValid and not CS.canTimeout and CS.cruiseState.available and
+          self.sm.valid['carControl'] and self.sm.alive['carControl'] and
+          0 < int(self.sm.logMonoTime['carControl']) <= now_ns and
+          now_ns - int(self.sm.logMonoTime['carControl']) <= slc_physical.STATE_MAX_AGE_NS and
+          (self.sm['carControl'].longActive or CS.gasPressed)):
+        evidence = getattr(self.CI.CS, 'dashboard_limit', None)
+        initial = slc_physical.engagement_state(
+          self.sm, evidence.observation if evidence is not None else None, self.slc_producer_session,
+          now_ns, after_ns=getattr(self, 'slc_source_floor_ns', 0))
       # Initialization owns this edge; evaluate commands against its final speed.
-      self.v_cruise_helper.initialize_v_cruise(self.CS_prev, self.experimental_mode,
-                                            resume=self.vehicle_startup.consume_cruise_resume(), initial_speed=self.initial_cruise_speed)
+      adopted = self.v_cruise_helper.initialize_v_cruise(
+        self.CS_prev, self.experimental_mode, resume=self.vehicle_startup.consume_cruise_resume(), initial_speed=self.initial_cruise_speed,
+        slc_target_mps=float(initial.presentationAdjustedLimit) if initial is not None else None, is_metric=self.is_metric)
+      if adopted:
+        self.slc_receipts.append(('engagementAdopt', initial, 0.0, float(self.v_cruise_helper.v_cruise_kph / 3.6), now_ns))
 
   def aol_cancel_source(self, CS, now_ns: int) -> int:
     """Bind Cancel to this parsed CAN batch and its local monotonic receipt."""
@@ -1162,9 +1177,11 @@ class Car:
           record.button = 'accel'
         else:
           record.sessionId = str(detail.sessionId)
-          record.commandId = int(detail.commandId)
+          record.commandId = 0 if kind == 'engagementAdopt' else int(detail.commandId)
           record.decisionId = int(detail.decisionId)
           record.presentationId = int(detail.presentationId)
+          if kind == 'engagementAdopt':
+            record.button = 'decel'
         self.pm.send('slcCruiseEvent', event)
 
     if getattr(self, 'conditional_replay', False) and self.manual_receipt is not None:

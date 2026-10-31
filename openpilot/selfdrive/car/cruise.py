@@ -300,12 +300,15 @@ class VCruiseHelper:
       self.toyota.constrain(self)
       self.toyota.requested = (self.v_cruise_kph, self.v_cruise_cluster_kph)
 
-  def initialize_v_cruise(self, CS, experimental_mode: bool, *, resume: bool | None = None, initial_speed: object = V_CRUISE_INITIAL) -> None:
-    # initializing is handled by the PCM
-    if self.CP.pcmCruise:
-      return
-
-
+  def initialize_v_cruise(self, CS, experimental_mode: bool, *, resume: bool | None = None,
+                          initial_speed: object = V_CRUISE_INITIAL, slc_target_mps: float | None = None, is_metric: bool = False) -> bool:
+    """Return whether fresh SET adopts the qualified current SLC limit."""
+    if (not self.CP.openpilotLongitudinalControl or type(slc_target_mps) not in (int, float) or
+        not math.isfinite(slc_target_mps) or not V_CRUISE_MIN / 3.6 - 1e-5 <= slc_target_mps <= V_CRUISE_MAX / 3.6 + 1e-5):
+      slc_target_mps = None
+    # PCM initializes when SLC does not own SET.
+    if self.CP.pcmCruise and (not self.slc_pcm or slc_target_mps is None):
+      return False
     # A car-owned acknowledgment can outlive the physical button event.
     if resume is None:
       age = monotonic_ns() - self.pending_resume_ns
@@ -313,8 +316,17 @@ class VCruiseHelper:
         b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
     self.pending_resume_ns = 0
     if resume and self.v_cruise_initialized:
-      self.v_cruise_kph = self.v_cruise_kph_last
+      if not self.CP.pcmCruise:
+        self.v_cruise_kph = self.v_cruise_kph_last
+        self.v_cruise_cluster_kph = self.v_cruise_kph
+      return False
+    elif slc_target_mps is not None:
+      # Toyota still needs its native capacity/release approval before application.
+      if self.toyota is None:
+        self.apply_slc_target(slc_target_mps, is_metric)
+      return True
     else:
       self.v_cruise_kph = int(round(np.clip(max(CS.vEgo * CV.MS_TO_KPH, validated_initial_cruise_speed(initial_speed)), V_CRUISE_INITIAL, V_CRUISE_MAX)))
 
     self.v_cruise_cluster_kph = self.v_cruise_kph
+    return False
