@@ -563,11 +563,11 @@ class GlobalRuntime:
       self.snapshot = self.replay_inputs = ()
       return
     try:
-      from openpilot.starpilot.flm.controller_replay import capture_snapshot, frame_input
+      from openpilot.starpilot.flm.controller_replay import MAX_CHECKPOINT_NS, capture_snapshot, frame_input
 
       self.snapshot = ()
       if self.identity and self.descriptor.domain != 'ford_curvature' and (not self.snapshot_ns or self.frame_sequence != self.last_capture_frame + 1 or
-          self.now_ns - self.snapshot_ns >= 1_000_000_000):
+          self.now_ns - self.snapshot_ns >= MAX_CHECKPOINT_NS // 2):
         if self.descriptor.domain in ('torque', 'torque_pid'):
           self.snapshot = capture_snapshot(self.controller, vm).values
         else:
