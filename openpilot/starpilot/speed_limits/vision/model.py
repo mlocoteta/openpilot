@@ -302,7 +302,7 @@ class VisionModelCore:
     self.published_support_count = 0
 
   def reset(self) -> None:
-    """Discard evidence from a disconnected camera or a previous stream."""
+    """Discard evidence from a previous camera, stream or sign-unit setting."""
     self.history.clear()
     self.latest_detector_proposal = None
     self.published_speed_limit_mph = 0
@@ -341,7 +341,7 @@ class VisionModelCore:
     return self._publishable_detection(self._detect_sign_from_detector_classifier(frame_bgr))
 
   def observe(self, frame_bgr: np.ndarray, *, now: float) -> tuple[int, float, int, int] | None:
-    """Return the last confirmed limit until replacement or camera-session reset."""
+    """Return the confirmed sign numeral in the configured units until reset or replacement."""
     if not math.isfinite(now) or now <= 0:
       raise ValueError("Invalid observation time")
     detection = self.infer(frame_bgr)

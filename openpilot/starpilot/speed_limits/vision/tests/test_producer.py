@@ -1,6 +1,7 @@
 """Exercise the producer loop against the current camera API and typed wire."""
 
 from collections import deque
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, Mock, patch
@@ -9,6 +10,8 @@ import numpy as np
 
 from openpilot.cereal import messaging
 from openpilot.cereal.visionipc import VisionStreamType
+from openpilot.common.constants import CV
+from openpilot.common.params import Params
 from openpilot.starpilot.speed_limits.vision import producer
 from openpilot.starpilot.speed_limits.vision.model import Detection, VisionModelCore
 from openpilot.starpilot.speed_limits.vision.observation import vision_observation
@@ -60,9 +63,9 @@ class TestVisionProducer(unittest.TestCase):
 
     return next_pair
 
-  def run_frame(self, streams, *, completion_age_ns=10_000_000, model_states=None):
+  def run_frame(self, streams, *, completion_age_ns=10_000_000, model_states=None, metric=False, number=55):
     core = Mock(last_published_support_at=1., last_detection_at=0.)
-    core.observe.return_value = (55, 0.9, 2, 1)
+    core.observe.return_value = (number, 0.9, 2, 1)
     client = Mock()
     client.is_connected.return_value = True
     camera = Mock(return_value=client)
@@ -76,7 +79,7 @@ class TestVisionProducer(unittest.TestCase):
     clocks = [(1_000_000_000, 5_000_000_000), (1_000_000_000, 5_000_000_000),
               (1_000_000_000 + completion_age_ns, 5_000_000_000 + completion_age_ns)]
     with patch('msgq.visionipc.VisionIpcClient', camera), \
-         patch('openpilot.common.params.Params', return_value=SimpleNamespace(get_bool=lambda _: False)), \
+         patch('openpilot.common.params.Params', return_value=SimpleNamespace(get_bool=lambda _: metric)), \
          patch.object(messaging, 'PubMaster', return_value=SimpleNamespace(send=send)), \
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', return_value=(object(), 5_000_000_000, 12)), \
@@ -88,6 +91,13 @@ class TestVisionProducer(unittest.TestCase):
     if model_states is not None and len(model_states) == 1:
       convert.assert_not_called()
     return camera, core, messages
+
+  def test_recognized_sign_uses_metric_setting_at_the_source(self):
+    for metric in (False, True):
+      for number in (30, 50, 60, 80, 100):
+        with self.subTest(metric=metric, number=number):
+          _, _, messages = self.run_frame({VisionStreamType.VISION_STREAM_NARROW_ROAD}, metric=metric, number=number)
+          self.assertAlmostEqual(messages[0].speedMps, number * (CV.KPH_TO_MS if metric else CV.MPH_TO_MS), places=4)
 
   def test_actual_narrow_camera_api_and_compatible_road_wire_tag(self):
     for streams in ({VisionStreamType.VISION_STREAM_NARROW_ROAD},
@@ -382,9 +392,9 @@ class TestVisionProducer(unittest.TestCase):
     core.reset()
     self.assertEqual(core.last_detection_at, 0.)
 
-  def cooldown_messages(self, *, processing_ns=500_000_000, heartbeat_failure=None):
+  def cooldown_messages(self, *, processing_ns=500_000_000, heartbeat_failure=None, metric=False):
     core = VisionModelCore.__new__(VisionModelCore)
-    core.is_metric = False
+    core.is_metric = metric
     core.history = deque()
     core.reset()
     client = Mock()
@@ -430,7 +440,7 @@ class TestVisionProducer(unittest.TestCase):
       messages.append((wire, current[2]))
 
     with patch('msgq.visionipc.VisionIpcClient', camera), \
-         patch('openpilot.common.params.Params', return_value=SimpleNamespace(get_bool=lambda _: False)), \
+         patch('openpilot.common.params.Params', return_value=SimpleNamespace(get_bool=lambda _: metric)), \
          patch.object(messaging, 'PubMaster', return_value=SimpleNamespace(send=send)), \
          patch.object(producer, 'VisionModelCore', return_value=core), \
          patch.object(producer, '_camera_buffer', side_effect=receive), \
@@ -443,6 +453,93 @@ class TestVisionProducer(unittest.TestCase):
     self.assertEqual(infer.call_count, 2)
     self.assertEqual(convert.call_count, 2)
     return messages
+
+  def test_metric_heartbeat_keeps_the_original_conversion(self):
+    messages = self.cooldown_messages(metric=True)
+    self.assertGreater(len(messages), 2)
+    for event, _ in messages:
+      self.assertEqual(str(event.status), 'valid')
+      self.assertAlmostEqual(event.speedMps, 55 * CV.KPH_TO_MS, places=4)
+
+  def unit_change_messages(self, params, change_at):
+    core = VisionModelCore.__new__(VisionModelCore)
+    core.is_metric = params.get_bool('IsMetric')
+    core.history = deque()
+    core.reset()
+    initial_metric = core.is_metric
+    client = Mock()
+    client.is_connected.return_value = True
+    camera = Mock(return_value=client)
+    road = {VisionStreamType.VISION_STREAM_NARROW_ROAD}
+    sources = (1_000_000_000, 1_550_000_000, 1_800_000_000, 2_250_000_000,
+               3_500_000_000, 4_750_000_000, 5_550_000_000)
+    camera.available_streams.side_effect = [road] * len(sources) + [EndProducer()]
+    buffers = iter((object(), t + 4_000_000_000, i) for i, t in enumerate(sources))
+    current = [0, 0, 0]
+    messages = []
+
+    def change_units():
+      params.put_bool('IsMetric', not initial_metric, block=True)
+
+    def receive(_client):
+      buffer = next(buffers)
+      current[:] = [buffer[2], 0, sources[buffer[2]]]
+      return buffer
+
+    def clock_pair():
+      index, sample = current[:2]
+      now = sources[index] + (500_000_000 if sample >= 2 else 0)
+      if change_at == 'heartbeat' and index == 2 and sample == 1:
+        change_units()
+      self.sm.logMonoTime['drivingModelData'] = now
+      current[1] += 1
+      current[2] = now
+      return now, now + 4_000_000_000
+
+    def infer(_frame):
+      if current[0] == 3:
+        if change_at == 'inference':
+          change_units()
+        return None
+      return Detection(50, .9 if current[0] == 0 else .6)
+
+    def send(_service, event):
+      wire = messaging.log_from_bytes(event.to_bytes()).slcVisionObservation.vision
+      messages.append((wire, current[0], params.get_bool('IsMetric')))
+      if change_at == 'between_frames' and current[0] == 2:
+        change_units()
+
+    with patch('msgq.visionipc.VisionIpcClient', camera), \
+         patch('openpilot.common.params.Params', return_value=params), \
+         patch.object(messaging, 'PubMaster', return_value=SimpleNamespace(send=send)), \
+         patch.object(producer, 'VisionModelCore', return_value=core), \
+         patch.object(producer, '_camera_buffer', side_effect=receive), \
+         patch.object(producer, '_convert_camera_buffer', side_effect=lambda buffer: (np.zeros((2, 2, 3)), *buffer[1:])), \
+         patch.object(producer, 'clock_pair_ns', side_effect=clock_pair), \
+         patch.object(producer.time, 'sleep'), \
+         patch.object(core, 'infer', side_effect=infer), \
+         self.assertRaises(EndProducer):
+      producer.main()
+    self.assertEqual(core.is_metric, not initial_metric)
+    return messages
+
+  def test_live_unit_changes_discard_held_sign_and_require_fresh_consensus(self):
+    for initial_metric in (False, True):
+      for change_at in ('between_frames', 'inference', 'heartbeat'):
+        with self.subTest(initial_metric=initial_metric, change_at=change_at), TemporaryDirectory() as directory:
+          params = Params(directory)
+          params.put_bool('IsMetric', initial_metric, block=True)
+          messages = self.unit_change_messages(params, change_at)
+          valid = [(event, frame, metric) for event, frame, metric in messages if str(event.status) == 'valid']
+          for event, frame, metric in valid:
+            self.assertAlmostEqual(event.speedMps, 50 * (CV.KPH_TO_MS if metric else CV.MPH_TO_MS), places=4,
+                                   msg=(initial_metric, change_at, frame, metric))
+          after = [(event, frame) for event, frame, metric in valid if metric != initial_metric]
+          self.assertEqual([frame for _, frame in after], [5, 6])
+          self.assertNotEqual(valid[0][0].producerSessionId, after[0][0].producerSessionId)
+          self.assertEqual(after[0][0].supportCount, 2)
+          self.assertEqual(after[0][0].observedMonoTime, 4_750_000_000)
+          self.assertEqual(after[1][0].observedMonoTime, 4_750_000_000)
 
   def test_confirmed_camera_heartbeat_preserves_inference_expiry_and_health(self):
     messages = self.cooldown_messages()

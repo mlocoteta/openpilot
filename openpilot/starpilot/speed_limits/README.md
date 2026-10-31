@@ -178,6 +178,12 @@ and control qualification. Online providers are not connected as live control
 sources. See [selection](SELECTION.md), [Maps](MAP_SOURCE.md), and the pinned camera
 [model provenance](vision/assets/PROVENANCE.md).
 
+Vision interprets sign numerals using the existing Metric setting: km/h when on,
+mph when off. The producer converts once to m/s for both UI layouts and cruise SET.
+Changing Metric clears Vision's retained sign and supporting reads, including
+in-flight results and cached heartbeats; fresh evidence must confirm the next limit.
+The current applied SET remains unchanged by this reset.
+
 Every action binds the current session, decision and presentation. The causal ledger
 keeps consumed confirmation presses out of the ordinary cruise-button path, through
 held repeats and release. Accept and Reject cannot follow a replaced source
