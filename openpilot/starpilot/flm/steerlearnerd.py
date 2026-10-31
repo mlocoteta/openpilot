@@ -208,6 +208,30 @@ def _pause_historical_collector(collector, reason):
     replay.cached_validation = replay.cached_key = None
 
 
+def _early_tracking_offer(sm, cp, collector, actor, source, *, now_ns, clock):
+  """Renew an existing source-only trial from real new motion before FIFO work."""
+  if (collector is None or not collector.ready or actor is None or
+      getattr(actor, 'source_tracking', False) is not True or actor.ingress is None or
+      actor.certificate is None or actor.restore_pending or source is None or
+      not source.enabled or source.manual or not _source_config_known(source, now_ns)):
+    return None
+  from openpilot.starpilot.flm.native_health import current_native_health
+  if not current_native_health(sm, cp, collector.ready[-1][0], now_ns):
+    return None
+  from openpilot.starpilot.flm.source_plant_runtime import observe
+  from openpilot.starpilot.flm.live_tracking_response import validate_response_witness
+  observe(sm, cp, collector, now_ns, True)
+  current = clock()
+  offer = actor._current_publication_offer(current)
+  if offer is None:
+    return None
+  pose = validate_response_witness(offer.response_witness, actor.certificate.binding, current).last_pose_ns
+  if pose <= actor.last_publication_pose_ns:
+    return None
+  actor.last_publication_pose_ns = pose
+  return offer
+
+
 def tracking_message(source, *, now_ns, current_native, offer=None, restore=None):
   """Serialize existing owned evidence; never renew a trial or physical lease."""
   from openpilot.starpilot.flm.live_trial_wire import write_tracking_source, write_trial, write_restore
@@ -557,6 +581,24 @@ def run(
           study_health_control = previous
         collector._learning_current_native_allowed = bool(source_valid and previous is not None and
           current_native_health(sm, CP, previous, now))
+
+      # Only an already-existing source-only owner may renew here. Actual
+      # observe/witness/native/source gates stay intact; no numerical work or
+      # stale pose is promoted. The full post-drain path remains below.
+      if (live_offer is not None and live_actor is not None and live_history.offer is None and
+          source_valid and tracking_pose_header > previous_tracking_pose_header):
+        early = _early_tracking_offer(sm, CP, collector, live_actor, source, now_ns=now, clock=clock)
+        if early is not None:
+          live_offer = early
+          source_valid, early_now = source_current()
+          early_native = bool(source_valid and collector is not None and collector.ready and
+            current_native_health(sm, CP, collector.ready[-1][0], early_now))
+          early_message = tracking_message(source, now_ns=early_now, current_native=early_native, offer=live_offer)
+          if live_offer is not None and int(early_message.starpilotSteeringTracking.trial.version) == 1:
+            live_actor.mark_publication(live_offer)
+          pm.send('starpilotSteeringTracking', early_message)
+          next_tracking_status_ns = early_now + 50_000_000
+          previous_tracking_pose_header = tracking_pose_header
 
       native_refreshed = False
 

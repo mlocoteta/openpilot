@@ -163,6 +163,8 @@ class RawBlock:
 
 
 class FullrateCollector:
+  _calibration_generation: str
+
   def __init__(self, adapter):
     self.adapter = adapter
     self.live_tracking = None
