@@ -10,19 +10,27 @@ from openpilot.starpilot.navigation.owner import ConflictError, NavigationOwner,
 from openpilot.starpilot.navigation.route_engine import MapboxRouteEngine
 
 from openpilot.starpilot.gps.phone import read_phone_gps
-from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SERVICES, bearing, select_location
+from openpilot.starpilot.gps.source import GPS_MAX_AGE_NS, GPS_SERVICES, bearing, select_source
 
+# Only the comma's own (or the car's) GPS may authorize route advice to modeld/plannerd. A phone or head-unit fix
+# (phoneGps, e.g. the Accord head unit filling the comma's u-blox outages) still guides, but only for display.
+CONTROL_SOURCES = ("comma", "car")
 ARRIVED_NS = 5_000_000_000      # stopped at the destination this long shows "You have arrived"
 END_ROUTE_NS = 15_000_000_000   # ...and this long ends navigation, like tapping End navigation
 
 
-def location(sm, now_ns: int, phone_fix=None):
-  fix = select_location(sm, now_ns, phone_fix=phone_fix)
-  if fix is None:
-    return None
-  stamp, gps = fix
+def located(sm, now_ns: int, phone_fix=None):
+  """(source, position): source is comma|car|phone, or (None, None) without a usable fix."""
+  selected = select_source(sm, now_ns, phone_fix=phone_fix)
+  if selected is None:
+    return None, None
+  source, (stamp, gps) = selected
   speed = max(0., gps.speed) if math.isfinite(gps.speed) else None
-  return stamp, (gps.longitude, gps.latitude), speed, bearing(gps)
+  return source, (stamp, (gps.longitude, gps.latitude), speed, bearing(gps))
+
+
+def location(sm, now_ns: int, phone_fix=None):
+  return located(sm, now_ns, phone_fix)[1]
 
 
 class RouteRuntime:
@@ -46,7 +54,7 @@ class RouteRuntime:
     self.hud_route = None
     self.session = uuid.uuid4().hex
 
-  def update(self, now_ns: int, position, drive_id: int) -> dict:
+  def update(self, now_ns: int, position, drive_id: int, control_source: bool = True) -> dict:
     if position is not None:
       stamp, coordinates, _, bearing = position
       if 0 < stamp <= now_ns <= stamp + GPS_MAX_AGE_NS:
@@ -140,7 +148,7 @@ class RouteRuntime:
         pass
     result.update(status='arrived' if arrived else 'guiding', instruction=progress.instruction,
                   nextManeuver=progress.next_maneuver, route=self.route.preview(),
-                  controlValid=bool(speed is not None and fresh and drive_id > 0 and not progress.off_route and not progress.arrived and stamp >= drive_id))
+                  controlValid=bool(control_source and speed is not None and fresh and drive_id > 0 and not progress.off_route and not progress.arrived and stamp >= drive_id))
     return result
 
   def _end_route(self, revision: str) -> None:
@@ -199,7 +207,8 @@ def main():
         if now >= next_update_ns or phone_stamp != last_phone_stamp:
           next_update_ns = now + 1_000_000_000
           last_phone_stamp = phone_stamp
-          value = runtime.update(now, location(sm, now, phone_fix), drive_id)
+          source, position = located(sm, now, phone_fix)
+          value = runtime.update(now, position, drive_id, source in CONTROL_SOURCES)
           publish_status(pm, value, phone_fix)
       except (ValidationError, OSError, ValueError):
         cloudlog.warning('navigation settings or route unavailable')
