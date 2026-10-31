@@ -286,7 +286,7 @@ def test_actual_soundd_callback_plays_one_complete_prompt_during_repeated_select
   daemon.current_volume = 1.0
   daemon.pending_stop = False
   daemon.loaded_sounds = {AudibleAlert.prompt: np.full(4800, .25, dtype=np.float32)}
-  daemon.pack_loader = SimpleNamespace(is_builtin=lambda _: False)
+  daemon.pack_loader = Mock(is_builtin=Mock(return_value=False))
   daemon.saved_volumes = {'PromptVolume': 100}
   daemon.update_alert = Mock(wraps=daemon.update_alert)
   audio.sound = daemon
