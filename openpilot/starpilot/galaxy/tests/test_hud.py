@@ -21,7 +21,7 @@ from openpilot.starpilot.navigation.owner import NavigationOwner
 from openpilot.starpilot.navigation.route_engine import hud_extras
 from openpilot.starpilot.galaxy.server import make_server
 
-CONTRACT_KEYS = {'schemaVersion', 'state', 'sessionId', 'seq', 'ageSeconds', 'error', *empty()}
+CONTRACT_KEYS = {'schemaVersion', 'huGps', 'state', 'sessionId', 'seq', 'ageSeconds', 'error', *empty()}
 
 
 def event(service, **fields):
@@ -544,6 +544,7 @@ class HudWorkerTest(unittest.TestCase):
           time.sleep(0.005)
         current = source.snapshot()
         self.assertEqual((current['state'], current['onroad'], current['schemaVersion']), ('current', False, 3))
+        self.assertEqual(current['huGps'], 'navOnly')   # head-unit GPS is nav-only on this build
         self.assertGreaterEqual(current['seq'], 1)
         time.sleep(0.15)
         self.assertTrue(readers[0].closed)
