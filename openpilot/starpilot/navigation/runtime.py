@@ -125,6 +125,11 @@ class RouteRuntime:
     if position is None:
       if self.route is not None:
         result['route'] = self.route.preview()
+        # 10-31: the fix dropped while stopped at the destination (u-blox outages at the door): arrival still ends.
+        if self.arrived_since and now_ns - self.arrived_since >= ARRIVED_NS:
+          result['status'] = 'arrived'
+          if now_ns - self.arrived_since >= END_ROUTE_NS:
+            self._end_route(settings['revision'])
       else:
         saved = self.owner.position_store.read()
         if saved is not None:

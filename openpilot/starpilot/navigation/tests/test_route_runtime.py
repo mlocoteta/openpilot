@@ -460,6 +460,14 @@ def test_arrival_keeps_counting_through_a_gps_outage(tmp_path, route):
   assert owner.read()['destination'] is None
 
 
+def test_arrival_ends_when_the_fix_drops_out_at_the_door(tmp_path, route):
+  owner, _, runtime, at = guide(tmp_path, route)
+  at(20, .01, speed=0.)
+  for t in range(21, 31):        # no fix at all (select_source found nothing)
+    runtime.update(t * S, None, 1_000_000_000)
+  assert owner.read()['destination'] is None
+
+
 def test_a_drive_that_ended_at_the_destination_does_not_resume_next_drive(tmp_path, route):
   owner, executor, _, at = guide(tmp_path, route)
   at(20, .0099, speed=0.)        # stopped 11 m short, key off 3 s later (before END_ROUTE_NS)
