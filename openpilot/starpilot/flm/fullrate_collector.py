@@ -928,7 +928,8 @@ class PairedDrainState:
     self.exhausted = (False, False)
 
 
-def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns, state=None, *, budget_ns=None, clock=time.monotonic_ns):
+def drain_pair(control_socket, control, applied_socket, applied, receive, collector, now_ns, state=None, *,
+               budget_ns=None, yield_requested=None, clock=time.monotonic_ns):
   """Merge two bounded FIFO tapes by their original publisher headers.
 
   Only the two queue heads compete; never sort a producer's own tape. A held
@@ -940,7 +941,9 @@ def drain_pair(control_socket, control, applied_socket, applied, receive, collec
   A persistent state retains only the two already-read heads at an overrun.
   Their original wire and clocks are checked again on the next bounded drain.
   """
-  if budget_ns is not None and (state is None or type(budget_ns) is not int or budget_ns <= 0):
+  if (budget_ns is not None or yield_requested is not None) and state is None:
+    raise ValueError('yielding drain requires persistent FIFO state')
+  if budget_ns is not None and (type(budget_ns) is not int or budget_ns <= 0):
     raise ValueError('time-sliced drain requires persistent state and a positive budget')
   deadline = None if budget_ns is None else clock() + budget_ns
   sockets, callbacks = (control_socket, applied_socket), (control, applied)
@@ -978,7 +981,8 @@ def drain_pair(control_socket, control, applied_socket, applied, receive, collec
     head(0)
     head(1)
     while pending[0] is not None or pending[1] is not None:
-      if processed and deadline is not None and clock() >= deadline:
+      if processed and ((deadline is not None and clock() >= deadline) or
+                        (yield_requested is not None and yield_requested())):
         # Yield scheduling only. Preserve original FIFO heads and the SAME
         # per-stream overrun count; a slice cannot renew evidence or a batch.
         state.heads, state.counts = tuple(pending), (counts[0], counts[1])

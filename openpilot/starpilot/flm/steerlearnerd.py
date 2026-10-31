@@ -33,12 +33,27 @@ class _SourceDelivery:
     self.pose_header = 0
     self.evidence_poller = None
     self.evidence_sockets = ()
+    self.motion_poller = self.motion_socket = None
 
   def refresh(self, sm):
     sm.update(0)
     self.pending = self.pending or any(sm.updated.values())
     if sm.updated['deviceMotion']:
       self.pose_header = int(sm.logMonoTime['deviceMotion'])
+
+  def motion_pending(self, sm):
+    # Scheduling hint only: poll readiness without consuming or inventing a pose.
+    if self.pose_header:
+      return True
+    try:
+      socket = sm.sock['deviceMotion']
+      if self.motion_poller is None or self.motion_socket is not socket:
+        self.motion_poller = messaging.Poller()
+        self.motion_poller.registerSocket(socket)
+        self.motion_socket = socket
+      return bool(self.motion_poller.poll(0))
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+      return False  # Ordinary bounded draining and live admission still run.
 
   def next(self, sm, *, pending_evidence=(), retained_evidence=False):
     if not self.pending:
@@ -701,7 +716,8 @@ def run(
           _collect_applied_output(collector, applied, sm, CP, received_now)
 
       drain_pair(control_socket, control, applied_socket, output, messaging.recv_one_or_none, sink, now, drain_state,
-        budget_ns=5_000_000 if live_actor is not None else None)
+        budget_ns=5_000_000 if live_actor is not None and (tracking_pose_header or pending_fresh) else None,
+        yield_requested=(lambda: source_delivery.motion_pending(sm)) if live_actor is not None else None)
       if collector is not None:
         # Decoding queued frames may outlast the sampled shared inputs. Consume
         # real pending deliveries before pose/native checks; keep their original

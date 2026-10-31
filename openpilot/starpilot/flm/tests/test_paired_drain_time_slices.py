@@ -137,3 +137,47 @@ def test_retained_head_wakes_source_receiver_without_waiting_for_another_pose():
   receiver = _SourceDelivery()
   assert receiver.next(sm,retained_evidence=True) == BASE
   assert calls == [0] and not receiver.pending and receiver.pose_header == 0
+
+
+def test_new_pose_interrupts_busy_drain_and_absent_pose_does_not_fragment_it():
+  rows = [[small_event(BASE+2*i+side)for i in range(6)]for side in(0,1)]
+  sockets,receive,_ = transport(*rows)
+  state = PairedDrainState(*sockets)
+  collector = FullrateCollector(SyntheticAdapter())
+  seen = []
+  pose_waiting = [False]
+
+  def callback(event,_current,_stamp):
+    seen.append(event)
+    if len(seen)==2:
+      pose_waiting[0]=True
+
+  def consume():
+    return module.drain_pair(sockets[0],callback,sockets[1],callback,receive,collector,BASE,state,
+      yield_requested=lambda:pose_waiting[0])
+
+  assert not consume() and len(seen)==2 and collector.dropped==0
+  pose_waiting[0]=False
+  assert consume() and len(seen)==12 and collector.dropped==0
+  assert [event.logMonoTime for event in seen]==list(range(BASE,BASE+12))
+
+
+def test_motion_readiness_hint_never_consumes_or_modifies_source_state():
+  from unittest.mock import Mock,patch
+  from openpilot.starpilot.flm.steerlearnerd import _SourceDelivery
+  from openpilot.starpilot.flm import steerlearnerd
+  socket=object()
+  sm=SimpleNamespace(sock={'deviceMotion':socket},updated={'deviceMotion':False},
+    logMonoTime={'deviceMotion':BASE},freq_ok={'deviceMotion':False})
+  receiver=_SourceDelivery()
+  poller=Mock()
+  poller.poll.side_effect=[[],[socket]]
+  with patch.object(steerlearnerd.messaging,'Poller',return_value=poller):
+    assert not receiver.motion_pending(sm)
+    assert receiver.motion_pending(sm)
+  poller.registerSocket.assert_called_once_with(socket)
+  assert [call.args for call in poller.poll.call_args_list]==[(0,),(0,)]
+  assert sm.updated=={'deviceMotion':False} and sm.logMonoTime=={'deviceMotion':BASE}
+  assert sm.freq_ok=={'deviceMotion':False}
+  receiver.pose_header=BASE
+  assert receiver.motion_pending(sm) and poller.poll.call_count==2
