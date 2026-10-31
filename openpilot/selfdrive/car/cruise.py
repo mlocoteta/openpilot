@@ -302,7 +302,7 @@ class VCruiseHelper:
 
   def initialize_v_cruise(self, CS, experimental_mode: bool, *, resume: bool | None = None,
                           initial_speed: object = V_CRUISE_INITIAL, slc_target_mps: float | None = None, is_metric: bool = False) -> bool:
-    """Return whether fresh SET adopts the qualified current SLC limit."""
+    """Return whether engagement adopts the qualified current SLC limit."""
     if (not self.CP.openpilotLongitudinalControl or slc_target_mps is None or type(slc_target_mps) not in (int, float) or
         not math.isfinite(slc_target_mps) or not V_CRUISE_MIN / 3.6 - 1e-5 <= slc_target_mps <= V_CRUISE_MAX / 3.6 + 1e-5):
       slc_target_mps = None
@@ -315,7 +315,7 @@ class VCruiseHelper:
       resume = (0 < self.pending_resume_ns and 0 <= age <= 500_000_000) or any(
         b.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for b in CS.buttonEvents)
     self.pending_resume_ns = 0
-    if resume and self.v_cruise_initialized:
+    if slc_target_mps is None and resume and self.v_cruise_initialized:
       if not self.CP.pcmCruise:
         self.v_cruise_kph = self.v_cruise_kph_last
         self.v_cruise_cluster_kph = self.v_cruise_kph

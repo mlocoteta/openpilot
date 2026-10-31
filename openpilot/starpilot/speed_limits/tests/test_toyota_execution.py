@@ -84,11 +84,13 @@ def test_upcoming_approval_keeps_native_capacity_and_release_checks(helper):
   assert helper.toyota.status == 'ready' and helper.toyota.can_apply(70./3.6)
 
 
-def test_engagement_adoption_waits_for_native_capacity_and_release(helper):
+@pytest.mark.parametrize('resume', [False, True, None], ids=['set', 'resume-hint', 'resume-button'])
+def test_engagement_adoption_waits_for_native_capacity_and_release(helper, resume):
   helper.toyota.engaged = False
-  update(helper, state(native=60.))
+  cs = state(native=60., button='decelCruise' if resume is False else 'accelCruise')
+  update(helper, cs)
   before = helper.v_cruise_kph
-  assert helper.initialize_v_cruise(state(), False, resume=False, slc_target_mps=70 / 3.6, is_metric=True)
+  assert helper.initialize_v_cruise(cs, False, resume=resume, slc_target_mps=70 / 3.6, is_metric=True)
   assert helper.v_cruise_kph == before  # Existing Toyota preparation owns application.
   approved = approval(70.)
   approved.actionStatus, approved.actionSequenceId = 'adopt', 1
@@ -98,6 +100,8 @@ def test_engagement_adoption_waits_for_native_capacity_and_release(helper):
   assert helper.toyota.status == 'release_plus'
   update(helper, state(native=80., button='accelCruise', pressed=False), approved)
   assert helper.toyota.status == 'ready' and helper.toyota.can_apply(70 / 3.6)
+  helper.apply_slc_target(70 / 3.6, True)
+  assert helper.v_cruise_kph == 70. and helper.slc_cruise_change is None
 
 
 @pytest.fixture(params=[False, True], ids=['normal-steps', 'swapped-steps'])

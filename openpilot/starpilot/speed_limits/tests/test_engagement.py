@@ -1,4 +1,4 @@
-"""A qualified current limit is ready before fresh SET, with RESUME preserved."""
+"""SET and RES adopt qualified current limits, with normal resume as fallback."""
 from collections import deque
 from dataclasses import replace
 from types import SimpleNamespace
@@ -85,14 +85,21 @@ def receipt(instance, *, now=START + 10_000_000, event_id=1):
 
 
 @pytest.mark.parametrize('confirmation', [False, True])
+@pytest.mark.parametrize('pcm', [False, True])
+@pytest.mark.parametrize('resume,previous', [(False, cruise.V_CRUISE_UNSET), (True, 30.), (None, 105.)],
+                         ids=['set', 'resume-hint', 'resume-button'])
 @pytest.mark.parametrize('metric,limit,offset', [(False, 45., 5.), (False, 20., -2.), (False, 55., -.4),
                                               (True, 72., 5.), (True, 30., -2.), (True, 72., -.4)])
-def test_prepared_limit_initializes_set_once_and_adopts_it(metric, limit, offset, confirmation):
+def test_prepared_limit_initializes_set_once_and_adopts_it(metric, limit, offset, confirmation, pcm, resume, previous):
   runtime, sm, cp = drive(metric=metric, limit=limit, offset=offset, confirmation=confirmation)
+  cp.pcmCruise = pcm
   prepared = sm['slcState']
   assert prepared.observationKind == 'valid' and prepared.hasPresentationAdjustedLimit
   assert not sm['carControl'].enabled and prepared.presentationId > 0
-  instance = owner(sm, cp, metric=metric)
+  instance = owner(sm, cp, metric=metric, resume=resume)
+  instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = previous
+  if resume is None:
+    instance.CS_prev.buttonEvents = [car.CarState.ButtonEvent(type='accelCruise', pressed=False)]
   engage(instance)
   expected = cruise.slc_target_kph(float(prepared.presentationAdjustedLimit), metric)
   assert instance.v_cruise_helper.v_cruise_kph == expected
@@ -109,9 +116,12 @@ def test_prepared_limit_initializes_set_once_and_adopts_it(metric, limit, offset
 
 
 @pytest.mark.parametrize('invalid', ['disabled', 'stale', 'unknown', 'stock-long', 'can-fault', 'wrong-episode', 'configuration'])
-def test_unavailable_limit_keeps_normal_initialization(invalid):
+@pytest.mark.parametrize('resume', [False, True])
+def test_unavailable_limit_keeps_normal_initialization(invalid, resume):
   _, sm, cp = drive()
-  instance = owner(sm, cp)
+  instance = owner(sm, cp, resume=resume)
+  if resume:
+    instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   if invalid == 'disabled':
     instance.slc_control_enabled = False
   elif invalid == 'stale':
@@ -127,7 +137,7 @@ def test_unavailable_limit_keeps_normal_initialization(invalid):
   else:
     instance.slc_source_floor_ns = START
   engage(instance)
-  assert instance.v_cruise_helper.v_cruise_kph == 72.  # Existing vEgo-based initialization.
+  assert instance.v_cruise_helper.v_cruise_kph == (105. if resume else 72.)
   assert instance.slc_receipts == []
 
 
@@ -142,8 +152,9 @@ def test_first_engagement_without_limit_keeps_default_floor():
 
 
 @pytest.mark.parametrize('resume', [True, None])
-def test_resume_restores_previous_set_instead_of_available_limit(resume):
+def test_resume_restores_previous_set_without_available_limit(resume):
   _, sm, cp = drive()
+  sm['slcState'].observationKind = 'unknown'
   instance = owner(sm, cp, resume=resume)
   instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   if resume is None:
@@ -212,7 +223,8 @@ def test_initializer_rejects_invalid_targets(target):
   assert helper.v_cruise_kph == cruise.V_CRUISE_INITIAL
 
 
-def test_set_reengagement_clears_previous_decline():
+@pytest.mark.parametrize('resume', [False, True])
+def test_reengagement_clears_previous_decline(resume):
   runtime, sm, cp = drive()
   sm['carControl'].enabled = sm['carControl'].longActive = True
   sm.advance(START + 1_000_000)
@@ -222,16 +234,19 @@ def test_set_reengagement_clears_previous_decline():
     request=Action(runtime.session_id, 1, pending.decisionId, pending.presentationId, 'reject'))
   assert not rejected.message.slcState.hasPending and not rejected.message.slcState.hasAccepted
   sm.data['slcState'] = rejected.message.slcState
-  instance = owner(sm, cp)
+  instance = owner(sm, cp, resume=resume)
+  if resume:
+    instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   engage(instance)
   adopted = runtime.step(sm, cp, now_ns=START + 10_000_000, cruise_event=receipt(instance))
   assert adopted.message.slcState.actionStatus == 'adopt' and adopted.message.slcState.hasAccepted
   assert not adopted.message.slcState.hasPending and adopted.command is None
 
 
-def test_set_reengagement_clears_override_even_after_previous_application():
+@pytest.mark.parametrize('resume', [False, True])
+def test_reengagement_clears_override_even_after_previous_application(resume):
   runtime, sm, cp = drive()
-  instance = owner(sm, cp)
+  instance = owner(sm, cp, resume=resume)
   engage(instance)
   runtime.step(sm, cp, now_ns=START + 10_000_000, cruise_event=receipt(instance))
   previous = float(sm['carState'].vCruise) / 3.6
@@ -252,7 +267,8 @@ def test_set_reengagement_clears_override_even_after_previous_application():
 
 @pytest.mark.parametrize('source', ['Maps', 'Vision'])
 @pytest.mark.parametrize('dashboard_available', [True, False])
-def test_engagement_uses_existing_priority_and_qualified_secondary_source(source, dashboard_available):
+@pytest.mark.parametrize('resume', [False, True])
+def test_engagement_uses_existing_priority_and_qualified_secondary_source(source, dashboard_available, resume):
   runtime, sm, cp = drive()
   boot = START + 4_000_000_000
   settings = replace(runtime.settings, selection=parse({'SLCPriority1': 'Dashboard', 'SLCPriority2': source}).selection)
@@ -276,7 +292,9 @@ def test_engagement_uses_existing_priority_and_qualified_secondary_source(source
   expected_source = 'dashboard' if dashboard_available else ('map' if source == 'Maps' else 'vision')
   assert prepared.source == expected_source and prepared.hasPresentationAdjustedLimit
   sm.data['slcState'] = prepared
-  instance = owner(sm, cp)
+  instance = owner(sm, cp, resume=resume)
+  if resume:
+    instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   engage(instance)
   expected = cruise.slc_target_kph(float(prepared.presentationAdjustedLimit), False)
   assert instance.v_cruise_helper.v_cruise_kph == expected
@@ -288,7 +306,8 @@ def test_engagement_uses_existing_priority_and_qualified_secondary_source(source
 
 
 @pytest.mark.parametrize('confirmation', [False, True])
-def test_set_engagement_uses_current_limit_over_previous_early_proposal(confirmation):
+@pytest.mark.parametrize('resume', [False, True])
+def test_engagement_uses_current_limit_over_previous_early_proposal(confirmation, resume):
   from openpilot.starpilot.speed_limits.tests.test_advance import Drive
   preview = Drive(confirm=confirmation)
   output = preview.tick()
@@ -299,7 +318,9 @@ def test_set_engagement_uses_current_limit_over_previous_early_proposal(confirma
   sm.data['slcState'] = prepared
   sm.valid['slcState'] = sm.alive['slcState'] = True
   sm.logMonoTime['slcState'] = preview.now
-  instance = owner(sm, cp, metric=True)
+  instance = owner(sm, cp, metric=True, resume=resume)
+  if resume:
+    instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   stamp = preview.now + 10_000_000
   engage(instance, now=stamp)
   assert instance.v_cruise_helper.v_cruise_kph == 79.
@@ -310,7 +331,8 @@ def test_set_engagement_uses_current_limit_over_previous_early_proposal(confirma
 
 
 @pytest.mark.parametrize('current', [20., 25.])
-def test_delayed_engagement_is_bound_to_current_limit(current):
+@pytest.mark.parametrize('resume', [False, True])
+def test_delayed_engagement_is_bound_to_current_limit(current, resume):
   from openpilot.starpilot.speed_limits.tests.test_advance import Drive
   preview = Drive(confirm=True)
   assert preview.tick().message.slcState.upcomingBoundaryId
@@ -320,7 +342,9 @@ def test_delayed_engagement_is_bound_to_current_limit(current):
   sm.data['slcState'] = prepared
   sm.valid['slcState'] = sm.alive['slcState'] = True
   sm.logMonoTime['slcState'] = preview.now
-  instance = owner(sm, cp, metric=True)
+  instance = owner(sm, cp, metric=True, resume=resume)
+  if resume:
+    instance.v_cruise_helper.v_cruise_kph = instance.v_cruise_helper.v_cruise_cluster_kph = 105.
   stamp = preview.now + 10_000_000
   engage(instance, now=stamp)
   event = receipt(instance, now=stamp)

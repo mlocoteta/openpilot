@@ -9,12 +9,12 @@ Lead, curve, stop and actuator safety constraints retain their existing owners.
 
 ## New limits and adoption
 
-On fresh SET engagement, a currently qualified limit from the selected source
+On SET or RES engagement, a currently qualified limit from the selected source
 initializes SET with its existing offset and mph/km/h rounding, even with Automatic
 adoption off. Sources keep updating while disengaged. This explicit adoption clears
 the matching prompt, decline or set-speed override; later limits keep the normal
-confirmation policy. RESUME restores the previous SET. Without a qualified current
-limit, normal cruise initialization applies. An early Maps proposal does not replace
+confirmation policy. Without a qualified current limit, RESUME restores the previous
+SET and normal SET initialization applies. An early Maps proposal does not replace
 the current road's limit at engagement. Toyota still requires native cruise capacity
 and release approval before applying the target.
 
