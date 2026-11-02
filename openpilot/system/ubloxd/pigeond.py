@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+import termios
 import time
 import signal
 import struct
@@ -26,6 +27,15 @@ UBLOX_SOS_ACK = b"\xb5\x62\x09\x14\x08\x00\x02\x00\x00\x00\x01\x00\x00\x00"
 UBLOX_SOS_NACK = b"\xb5\x62\x09\x14\x08\x00\x02\x00\x00\x00\x00\x00\x00\x00"
 UBLOX_BACKUP_RESTORE_MSG = b"\xb5\x62\x09\x14\x08\x00\x03"
 UBLOX_ASSIST_ACK = b"\xb5\x62\x13\x60\x08\x00"
+
+# Accord port (2026-11-02): a failing AssistNow download retried every 10 s on Wi-Fi lined up with "received invalid
+# data from ublox" -> init() -> a u-blox power cycle (117 of 118 multi-minute GPS outages). One stray 0x00 (a UART
+# overrun/break byte, copied verbatim by the real-raw tty) no longer power-cycles the receiver: only a ublox that sent
+# no valid UBX frame for UBLOX_DEAD_TIMEOUT s does. AssistNow skips while there is a fix and backs off after failures.
+UBLOX_DEAD_TIMEOUT = 5.0  # s without a valid UBX frame before re-initing (it outputs several frames per second)
+ASSIST_RETRY_MIN = 10.  # s, first retry after a failed AssistNow download (upstream retried every 10 s forever)
+ASSIST_RETRY_MAX = 600.  # s, backoff cap
+FIX_MAX_AGE = 2.  # s, a gpsLocationExternal fix this fresh means AssistNow has nothing to add
 
 def set_power(enabled: bool) -> None:
   gpio_init(GPIO.UBLOX_SAFEBOOT_N, True)
@@ -74,9 +84,85 @@ def get_assistnow_messages() -> list[bytes]:
   return msgs
 
 
+def ubx_frame_ends(dat: bytes) -> tuple[int, int]:
+  """Scan dat for UBX frames with a valid checksum. Returns (valid frame count, offset where unscanned data starts):
+  the start of a trailing frame that isn't complete yet, else len(dat)."""
+  count = 0
+  i = dat.find(b"\xB5\x62")
+  while i >= 0:
+    if len(dat) < i + 6:
+      return count, i
+    end = i + 6 + (dat[i + 4] | dat[i + 5] << 8) + 2
+    if end > len(dat):
+      return count, i
+    if add_ubx_checksum(dat[i:end - 2]) == dat[i:end]:
+      count += 1
+      i = dat.find(b"\xB5\x62", end)
+    else:
+      i = dat.find(b"\xB5\x62", i + 1)
+  return count, len(dat)
+
+
+class UbxWatchdog:
+  """Tracks the last valid UBX frame; the receiver counts as dead only after `timeout` s without one."""
+  def __init__(self, now: float, timeout: float = UBLOX_DEAD_TIMEOUT):
+    self.timeout = timeout
+    self.tail = b''
+    self.last_valid = now
+
+  def reset(self, now: float) -> None:
+    self.tail = b''
+    self.last_valid = now
+
+  def feed(self, dat: bytes, now: float) -> None:
+    buf = self.tail + dat
+    count, rest = ubx_frame_ends(buf)
+    if count:
+      self.last_valid = now
+    self.tail = buf[rest:][-0x2000:]
+
+  def dead(self, now: float) -> bool:
+    return now - self.last_valid > self.timeout
+
+
+class AssistBackoff:
+  """When the next AssistNow download may run: right away at first, then exponential backoff after failures."""
+  def __init__(self, base: float = ASSIST_RETRY_MIN, cap: float = ASSIST_RETRY_MAX):
+    self.base, self.cap = base, cap
+    self.failures = 0
+    self.next_at = 0.
+
+  def due(self, now: float) -> bool:
+    return now >= self.next_at
+
+  def failed(self, now: float) -> float:
+    delay = min(self.cap, self.base * 2 ** self.failures)
+    self.failures += 1
+    self.next_at = now + delay
+    return delay
+
+
+def has_recent_fix(sm, now: float) -> bool:
+  return bool(sm.seen['gpsLocationExternal'] and now - sm.recv_time['gpsLocationExternal'] < FIX_MAX_AGE and
+              sm['gpsLocationExternal'].hasFix)
+
+
+def ignore_line_errors(tty: Serial) -> None:
+  # IGNBRK|IGNPAR: drop break and parity/framing-error bytes instead of reading them as 0x00. Serial reconfigures
+  # iflag to 0 on every baud change, so this is re-applied after each one. On drivers whose tty runs real-raw
+  # (serial core) the line discipline copies flagged bytes anyway; UbxWatchdog is the protection that matters.
+  try:
+    attrs = termios.tcgetattr(tty.fd)
+    attrs[0] |= termios.IGNBRK | termios.IGNPAR
+    termios.tcsetattr(tty.fd, termios.TCSANOW, attrs)
+  except (termios.error, OSError):
+    cloudlog.exception("pigeond: could not set IGNBRK|IGNPAR")
+
+
 class TTYPigeon:
   def __init__(self):
     self.tty = Serial(UBLOX_TTY, baudrate=9600, timeout=0)
+    ignore_line_errors(self.tty)
 
   def send(self, dat: bytes) -> None:
     self.tty.write(dat)
@@ -92,6 +178,7 @@ class TTYPigeon:
 
   def set_baud(self, baud: int) -> None:
     self.tty.baudrate = baud
+    ignore_line_errors(self.tty)
 
   def wait_for_ack(self, ack: bytes = UBLOX_ACK, nack: bytes = UBLOX_NACK, timeout: float = 0.5) -> bool:
     dat = b''
@@ -313,20 +400,25 @@ def run_receiving(duration: int = 0):
 
   start_time = time.monotonic()
   last_almanac_save = time.monotonic()
+  watchdog = UbxWatchdog(time.monotonic())
   assist_attempted = False
   assist_messages = None
 
   def download_assistnow() -> None:
     nonlocal assist_messages
-    sm = messaging.SubMaster(['deviceState'])
+    sm = messaging.SubMaster(['deviceState', 'gpsLocationExternal'])
+    backoff = AssistBackoff()
     while assist_messages is None:
       sm.update(1000)
+      now = time.monotonic()
+      if not backoff.due(now) or has_recent_fix(sm, now):
+        continue
       if system_time_valid() and sm['deviceState'].networkType != log.DeviceState.NetworkType.none:
         try:
           assist_messages = get_assistnow_messages()
         except Exception:
-          cloudlog.warning("failed to get AssistNow messages")
-      time.sleep(10.)
+          delay = backoff.failed(now)
+          cloudlog.warning(f"failed to get AssistNow messages, next try in {delay:.0f} s")
   threading.Thread(target=download_assistnow, daemon=True).start()
 
   while (duration == 0) or (time.monotonic() - start_time < duration):
@@ -339,15 +431,20 @@ def run_receiving(duration: int = 0):
         cloudlog.warning("AssistNow messages sent")
       except Exception:
         cloudlog.warning("failed to send AssistNow messages")
+      watchdog.reset(time.monotonic())  # the ACK waits consumed the receiver's output
 
     dat = pigeon.receive()
-    if len(dat) > 0:
-      if dat[0] == 0x00:
-        cloudlog.warning("received invalid data from ublox, re-initing!")
-        init(pigeon)
-        assist_attempted = False
-        continue
+    now = time.monotonic()
+    watchdog.feed(dat, now)
+    if watchdog.dead(now):
+      cloudlog.warning(f"no valid data from ublox for {UBLOX_DEAD_TIMEOUT:.0f} s, re-initing!")
+      init(pigeon)
+      watchdog.reset(time.monotonic())
+      assist_attempted = False
+      continue
 
+    dat = dat.lstrip(b"\x00")  # stray overrun/break bytes; ubloxd resyncs on the UBX header
+    if len(dat) > 0:
       # send out to socket
       msg = messaging.new_message('ubloxRaw', len(dat), valid=True)
       msg.ubloxRaw = dat[:]
@@ -357,6 +454,7 @@ def run_receiving(duration: int = 0):
       if (time.monotonic() - last_almanac_save) > 60*5:
         save_almanac(pigeon)
         last_almanac_save = time.monotonic()
+        watchdog.reset(time.monotonic())
     else:
       # prevent locking up a CPU core if ublox disconnects
       time.sleep(0.001)
