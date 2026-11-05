@@ -3,6 +3,8 @@ import time
 from dataclasses import dataclass
 from collections.abc import Callable
 from openpilot.cereal import log
+from openpilot.common.hardware import HARDWARE
+from openpilot.selfdrive.ui.lib.cell_status import CellStatus, cell_status
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos, FONT_SCALE
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -14,6 +16,9 @@ METRIC_HEIGHT = 126
 METRIC_WIDTH = 240
 METRIC_MARGIN = 30
 FONT_SIZE = 35
+
+CELL_FONT_SIZE = 30
+MODEM_READ_INTERVAL = 2.0  # s; /dev/shm/modem is a small tmpfs JSON, only read while Wi-Fi/ETH is active
 
 SETTINGS_BTN = rl.Rectangle(50, 35, 200, 117)
 HOME_BTN = rl.Rectangle(60, 860, 180, 180)
@@ -67,6 +72,9 @@ class Sidebar(Widget):
     super().__init__()
     self._net_type = NETWORK_TYPES[NetworkType.none]
     self._net_strength = 0
+    self._cell: CellStatus | None = None
+    self._modem_state: dict = {}
+    self._modem_read_t = -MODEM_READ_INTERVAL
 
     self._temp_status = MetricData(tr_noop("TEMP"), tr_noop("--"), Colors.GOOD)
     self._panda_status = MetricData(tr_noop("VEHICLE"), tr_noop("ONLINE"), Colors.GOOD)
@@ -117,6 +125,19 @@ class Sidebar(Widget):
     self._net_type = NETWORK_TYPES.get(device_state.networkType.raw, tr_noop("Unknown"))
     strength = device_state.networkStrength
     self._net_strength = max(0, min(5, strength.raw + 1)) if strength.raw > 0 else 0
+    self._cell = cell_status(device_state.networkType, self._read_modem_state(device_state.networkType))
+
+  def _read_modem_state(self, network_type) -> dict:
+    if network_type not in (NetworkType.wifi, NetworkType.ethernet):
+      return {}
+    now = time.monotonic()
+    if now - self._modem_read_t >= MODEM_READ_INTERVAL:
+      self._modem_read_t = now
+      try:
+        self._modem_state = HARDWARE.get_modem_state()
+      except Exception:
+        self._modem_state = {}
+    return self._modem_state
 
   def _update_temperature_status(self, device_state):
     temperature = device_state.maxTempC
@@ -194,6 +215,24 @@ class Sidebar(Widget):
     text_y = rect.y + 247
     text_pos = rl.Vector2(rect.x + 58, text_y)
     rl.draw_text_ex(self._font_regular, tr(self._net_type), text_pos, FONT_SIZE, 0, Colors.WHITE)
+
+    # Accord: cell status under Wi-Fi/ETH ("+ LTE" + bars, or "No LTE" / "No SIM")
+    if self._cell is not None:
+      self._draw_cell_status(rect.x + 58, text_y + 44)
+
+  def _draw_cell_status(self, x: float, y: float):
+    cell = self._cell
+    assert cell is not None
+    if cell.kind != "cell":
+      rl.draw_text_ex(self._font_regular, tr(cell.label), rl.Vector2(x, y), CELL_FONT_SIZE, 0, Colors.WARNING)
+      return
+    text = "+ " + cell.label
+    rl.draw_text_ex(self._font_regular, text, rl.Vector2(x, y), CELL_FONT_SIZE, 0, Colors.WHITE)
+    dot, spacing = 14, 19
+    dx = x + measure_text_cached(self._font_regular, text, CELL_FONT_SIZE).x + 14
+    cy = int(y + CELL_FONT_SIZE * FONT_SCALE / 2)
+    for i in range(5):
+      rl.draw_circle(int(dx + i * spacing + dot // 2), cy, dot // 2, Colors.WHITE if i < cell.bars else Colors.GRAY)
 
   def _draw_metrics(self, rect: rl.Rectangle):
     metrics = [(self._temp_status, 338), (self._panda_status, 496), (self._connect_status, 654)]
