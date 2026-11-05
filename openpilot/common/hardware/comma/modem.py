@@ -64,6 +64,7 @@ INITIAL_STATE: dict[str, object] = {
   "signal_strength": 0, "signal_quality": 0,
   "network_type": "unknown", "operator": "", "band": "", "channel": 0,
   "registration": "unknown", "temperatures": [], "extra": "",
+  "sim": "unknown",  # Accord: "absent" = modem answers (IMEI) but no ICCID; "ready" once identity is read
   "tx_bytes": 0, "rx_bytes": 0,
 }
 
@@ -338,6 +339,10 @@ class Modem:
     identity = self._read_identity()
     if not identity["iccid"] or not identity["imei"]:
       logging.warning(f"identity read incomplete: {identity}, retrying")
+      # Accord: modem answers but the SIM doesn't -> let the UI say "No SIM" (published only on change)
+      sim = "absent" if identity["imei"] and not identity["iccid"] else "unknown"
+      if sim != self.S.get("sim"):
+        self._publish_state(sim=sim, imei=identity["imei"])
       return State.INITIALIZING
 
     self._configure_modem(identity["modem_version"])
@@ -350,7 +355,7 @@ class Modem:
     logging.info(f"APN '{self._apn or '(network-provided)'}' written to CID {DIAL_CID}, roaming={'on' if self._roaming_allowed else 'off'}")
 
     self._sim_change = False  # clear since we just re-read identity with the new SIM
-    self._publish_state(**identity)
+    self._publish_state(**identity, sim="ready")
     return State.SEARCHING
 
   def _read_identity(self):
