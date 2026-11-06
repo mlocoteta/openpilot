@@ -5,6 +5,7 @@ from enum import StrEnum
 from collections.abc import Callable
 
 from openpilot.selfdrive.ui.lib.cell_status import CellStatus
+from openpilot.starpilot.ui.sim_check import SimCheckView
 from openpilot.starpilot.ui.presentation import Profile
 
 
@@ -20,6 +21,7 @@ class HomeActionKind(StrEnum):
   OPEN_TOGGLES = "open_toggles"
   OPEN_PAIRING = "open_pairing"
   SET_EXPERIMENTAL = "set_experimental"
+  CHECK_SIM = "check_sim"  # Accord: tap on the sidebar network block
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ class HomeState:
   network: str = "none"
   network_strength: int = 0
   cell: "CellStatus | None" = None  # Accord: second line under Wi-Fi/ETH (+ LTE / No LTE / No SIM)
+  sim_check: "SimCheckView | None" = None  # Accord: "Checking SIM..." / result flash after a tap
   temperature_c: float | None = None
   vehicle_online: bool = True
   connection: str = "OFFLINE"
@@ -144,6 +147,8 @@ class HomeInput:
       self.emit(HomeAction(HomeActionKind.OPEN_TOGGLES))
     elif 1370 <= px <= 2120 and 145 <= py <= 270 and 1370 <= x <= 2120 and 145 <= y <= 270:
       self.emit(HomeAction(HomeActionKind.OPEN_TOGGLES))
+    elif 30 <= px <= 290 and 185 <= py <= 328 and 30 <= x <= 290 and 185 <= y <= 328:
+      self.emit(HomeAction(HomeActionKind.CHECK_SIM))
     elif not state.paired and 1370 <= px <= 2120 and 300 <= py <= 430 and 1370 <= x <= 2120 and 300 <= y <= 430:
       self.emit(HomeAction(HomeActionKind.OPEN_PAIRING))
 
