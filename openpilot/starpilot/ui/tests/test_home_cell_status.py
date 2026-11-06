@@ -15,6 +15,10 @@ NO_LTE = {"state": "SEARCHING", "registration": "searching", "sim": "ready"}
 NO_SIM = {"state": "INITIALIZING", "sim": "absent"}
 
 
+def rgba(color):
+  return tuple(color) if isinstance(color, tuple) else (color.r, color.g, color.b, color.a)
+
+
 class Modem:
   def __init__(self, value):
     self.value, self.reads = value, 0
@@ -99,14 +103,14 @@ class HomeCellDrawTests(unittest.TestCase):
     self.assertGreater(texts[1].args[4], texts[0].args[4])  # below the Wi-Fi label
     small = [c for c in circles if c.args[2] == 7]
     self.assertEqual(len(small), 5)
-    self.assertEqual(sum(rl.color_to_int(c.args[3]) == rl.color_to_int(rl.WHITE) for c in small), 3)
+    self.assertEqual(sum(rgba(c.args[3]) == rgba(rl.WHITE) for c in small), 3)
 
   def test_warning_lines_are_yellow(self):
     for label, kind in (("No LTE", "no_cell"), ("No SIM", "no_sim")):
       with self.subTest(label=label):
         texts, circles = self.draw(CellStatus(kind, label, 0))
         self.assertEqual(texts[1].args[0], label)
-        self.assertEqual(rl.color_to_int(texts[1].args[5]), rl.color_to_int((218, 202, 37, 255)))
+        self.assertEqual(rgba(texts[1].args[5]), (218, 202, 37, 255))
         self.assertEqual(len([c for c in circles if c.args[2] == 7]), 0)
 
   def test_no_cell_status_keeps_stock_sidebar(self):
