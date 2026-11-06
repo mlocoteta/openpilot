@@ -24,6 +24,8 @@ from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 BLUETOOTH_COLORS = {"off": rl.Color(255, 255, 255, 102), "on": rl.Color(255, 255, 255, 230), "connected": rl.Color(0, 130, 252, 230)}
 JETLINK_COLORS = {"plugged": rl.Color(160, 160, 160, 255), "connected": rl.Color(70, 200, 110, 255)}
 CELL_WARNING = rl.Color(218, 202, 37, 255)
+SIM_CHECKING = rl.Color(120, 190, 255, 255)
+SIM_FLASH = (0, 130, 252)  # Accord: result highlight after a tapped SIM check (blue; yellow if no reply)
 
 
 def draw_jetlink(rect: rl.Rectangle, state: str) -> None:
@@ -145,6 +147,10 @@ class HomeView:
                   rl.Rectangle(pair.x + 35, pair.y + 10, pair.width - 70, pair.height - 20))
 
   def _sidebar(self, state: HomeState):
+    check = state.sim_check
+    if check is not None and check.phase != "checking" and check.highlight > 0:
+      rgb = SIM_FLASH if check.phase == "done" else (110, 110, 110)
+      rl.draw_rectangle_rounded(rl.Rectangle(34, 186, 236, 138), 0.2, 10, rl.Color(*rgb, int(150 * check.highlight)))
     self._icon("images/button_settings.png", 200, 117, 50, 35)
     self._icon("images/button_home.png", 180, 180, 60, 860)
     for index in range(5):
@@ -152,7 +158,11 @@ class HomeView:
       rl.draw_circle(71 + index * 37, 209, 13, color)
     network_labels = {"none": "--", "wifi": "Wi-Fi", "ethernet": "ETH", "cell2G": "2G", "cell3G": "3G", "cell4G": "LTE", "cell5G": "5G"}
     self._text(network_labels.get(state.network, "Unknown"), FontRole.NORMAL, 35, 58, 247)
-    if state.cell is not None:
+    if check is not None and check.phase == "checking":
+      self._text("Checking SIM...", FontRole.NORMAL, 30, 58, 291, SIM_CHECKING)
+    elif check is not None and check.phase == "no_reply":
+      self._text("No reply", FontRole.NORMAL, 30, 58, 291, CELL_WARNING)
+    elif state.cell is not None:
       self._cell_line(state.cell, 58, 291)
     temperature = "--"
     if state.temperature_c is not None:
