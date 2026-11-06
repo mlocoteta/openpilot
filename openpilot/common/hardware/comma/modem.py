@@ -29,6 +29,11 @@ AT_PORT = "/dev/modem_at0"
 PPP_PORT = "/dev/modem_at1"
 STATE_PATH = "/dev/shm/modem"
 AT_LOCK = "/dev/shm/modem.lock"  # shared with LPA
+# Accord: the Home sidebar writes a request id here when the network block is tapped; the daemon re-checks the SIM
+# (offroad only, at most once per SIM_CHECK_MIN_INTERVAL) and echoes the id as sim_check_id with a bumped sim_check.
+SIM_CHECK_PATH = "/dev/shm/modem_sim_check"
+SIM_CHECK_MIN_INTERVAL = 10.0  # s
+SIM_CHECK_READY_WAIT = 8.0  # s for the SIM to answer after AT+CFUN=1
 AT_INIT = [
   "ATE0",       # disable command echo
   "ATV1",       # verbose result codes (CONNECT/BUSY/NO CARRIER, not numeric)
@@ -218,6 +223,9 @@ class Modem:
     self._roaming_allowed = True
     self.running = True
     self.S = INITIAL_STATE.copy()
+    self._sim_checks = 0
+    self._last_at_error = ""
+    self._sim_check_t: float | None = None
 
   @staticmethod
   def _read_param(key):
@@ -250,6 +258,8 @@ class Modem:
   def _publish_state(self, **kwargs):
     self.S.update(kwargs)
     self.S["seconds_since_boot"] = time.monotonic()
+    if self._sim_checks:  # survives the INITIAL_STATE reset on reconnect
+      self.S["sim_check"] = self._sim_checks
     with tempfile.NamedTemporaryFile(mode="w", dir="/dev/shm", delete=False) as f:
       json.dump(self.S, f, indent=2)
     os.chmod(f.name, 0o644)
@@ -257,11 +267,13 @@ class Modem:
 
   def _at(self, cmd):
     """Send AT command, return response lines. [] on error or if LPA holds port."""
+    self._last_at_error = ""
     fd = os.open(AT_LOCK, os.O_CREAT | os.O_RDWR, 0o666)
     try:
       fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
       os.close(fd)
+      self._last_at_error = "busy"
       return []
     try:
       with _serial_port(AT_PORT, 9600) as serial_fd:
@@ -284,6 +296,7 @@ class Modem:
           lines.append(line)
         return lines
     except (RuntimeError, TimeoutError, OSError) as e:
+      self._last_at_error = str(e)
       logging.info(f"AT {cmd} failed: {e}")
       return []
     finally:
@@ -444,6 +457,71 @@ class Modem:
       logging.info("cellular data disabled")
       return True
     return False
+
+  @staticmethod
+  def _take_sim_check_request() -> str | None:
+    try:
+      with open(SIM_CHECK_PATH) as f:
+        request_id = f.read().strip()[:64]
+      os.remove(SIM_CHECK_PATH)
+    except FileNotFoundError:
+      return None
+    except OSError as e:
+      logging.warning(f"SIM check request unreadable: {e}")
+      return None
+    return request_id or "?"
+
+  def _sim_status(self) -> str:
+    """AT+CPIN?: "ready", "absent" (+CME ERROR 10, also what a card without ATR reports) or "unknown"."""
+    if any("READY" in line for line in self._at("AT+CPIN?")):
+      return "ready"
+    return "absent" if self._last_at_error == "+CME ERROR: 10" else "unknown"
+
+  def _handle_sim_check(self, state: State):
+    """Accord: Home sidebar tap -> power-cycle the SIM (only while it isn't working) and re-read it.
+
+    Always republishes with the request id so the UI can end "Checking SIM...", even when nothing changed.
+    Ignored onroad and within SIM_CHECK_MIN_INTERVAL of the previous check (the UI then times out)."""
+    request_id = self._take_sim_check_request()
+    if request_id is None:
+      return
+    if self._read_param("IsOnroad") == "1":
+      logging.info("SIM check ignored: onroad")
+      return
+    now = time.monotonic()
+    if self._sim_check_t is not None and now - self._sim_check_t < SIM_CHECK_MIN_INTERVAL:
+      logging.info("SIM check ignored: rate limit")
+      return
+    self._sim_check_t = now
+    working = state != State.INITIALIZING and self.S.get("sim") == "ready"
+    if not working:
+      # a SIM that is already registered/connected is left alone; only a missing/unread one gets power-cycled
+      logging.info("SIM check: power-cycling the SIM (AT+CFUN=0/1)")
+      self._at("AT+CFUN=0")
+      time.sleep(1.0)
+      for _ in range(3):  # never leave the radio off
+        self._at("AT+CFUN=1")
+        if not self._last_at_error:
+          break
+        time.sleep(1.0)
+    sim = self._sim_status()
+    deadline = time.monotonic() + SIM_CHECK_READY_WAIT
+    while not working and sim != "ready" and time.monotonic() < deadline:
+      time.sleep(1.0)
+      sim = self._sim_status()
+    update: dict = {}
+    if working:
+      update["sim"] = "ready" if sim != "absent" else "absent"
+    else:
+      identity = self._read_identity()
+      update["imei"] = identity["imei"] or self.S.get("imei", "")
+      if identity["iccid"] and identity["imei"]:
+        update["sim"] = "ready"  # the next _do_initializing finishes setup
+      elif identity["imei"] or sim == "absent":
+        update["sim"] = "absent"
+    self._sim_checks += 1
+    logging.info(f"SIM check {self._sim_checks}: cpin={sim} -> {update}")
+    self._publish_state(**update, sim_check_id=request_id, sim_check_t=time.monotonic())
 
   def _check_iccid(self, state):
     if state in (State.INITIALIZING, State.DISCONNECTING) or not self.S["iccid"]:
@@ -607,6 +685,7 @@ class Modem:
     while self.running:
       try:
         self._check_iccid(state)
+        self._handle_sim_check(state)
         prev = state
         state = handlers[state]()
         if state != prev:
