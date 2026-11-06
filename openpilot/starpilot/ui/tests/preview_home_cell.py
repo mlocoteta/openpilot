@@ -12,6 +12,7 @@ from openpilot.selfdrive.ui.lib.cell_status import CellStatus
 from openpilot.starpilot.ui.home import HomeView
 from openpilot.starpilot.ui.preview_home import reference_state
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile, default_font_directory
+from openpilot.starpilot.ui.sim_check import SimCheckView
 
 ASSETS = Path(__file__).resolve().parents[3] / "selfdrive/assets"
 STATES = {
@@ -19,6 +20,11 @@ STATES = {
   "home_wifi_no_lte": ("wifi", 5, CellStatus("no_cell", "No LTE", 0)),
   "home_wifi_no_sim": ("wifi", 5, CellStatus("no_sim", "No SIM", 0)),
   "home_lte_only": ("cell4G", 3, None),
+  # tap on the network block: "Checking SIM..." until the modem answers, then the result flashes
+  "home_sim_checking": ("wifi", 5, CellStatus("no_sim", "No SIM", 0), SimCheckView("checking", 1.0)),
+  "home_sim_checked_flash": ("wifi", 5, CellStatus("no_sim", "No SIM", 0), SimCheckView("done", 0.9)),
+  "home_sim_checked_lte_flash": ("wifi", 4, CellStatus("cell", "LTE", 4), SimCheckView("done", 0.9)),
+  "home_sim_no_reply": ("wifi", 5, CellStatus("no_sim", "No SIM", 0), SimCheckView("no_reply", 0.9)),
 }
 
 
@@ -33,8 +39,9 @@ def main(out: Path) -> None:
     with BitmapFonts(profile, default_font_directory()) as fonts:
       view = HomeView(fonts, ASSETS)
       try:
-        for name, (network, strength, cell) in STATES.items():
-          state = replace(reference_state(), network=network, network_strength=strength, cell=cell, connection="ONLINE")
+        for name, (network, strength, cell, *check) in STATES.items():
+          state = replace(reference_state(), network=network, network_strength=strength, cell=cell, connection="ONLINE",
+                          sim_check=check[0] if check else None)
           rl.begin_texture_mode(target)
           rl.clear_background(rl.BLACK)
           view.render(state)
