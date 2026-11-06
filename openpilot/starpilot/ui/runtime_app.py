@@ -1493,6 +1493,9 @@ class StarShellSession:
         self._on_pairing()
       elif action.kind == HomeActionKind.OPEN_PAIRING:
         self._unavailable("device pairing")
+      elif action.kind == HomeActionKind.CHECK_SIM:
+        if self.adapter.sim_check.request():  # Accord: the modem daemon re-checks the SIM (offroad only)
+          self._snapshot_cache = None
       else:
         self._unavailable("experimental mode owner")
     elif request.source == "settings":
