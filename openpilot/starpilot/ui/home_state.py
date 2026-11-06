@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from collections.abc import Callable
 
+from openpilot.selfdrive.ui.lib.cell_status import CellStatus
 from openpilot.starpilot.ui.presentation import Profile
 
 
@@ -67,6 +68,7 @@ class HomeState:
   paired: bool = True
   network: str = "none"
   network_strength: int = 0
+  cell: "CellStatus | None" = None  # Accord: second line under Wi-Fi/ETH (+ LTE / No LTE / No SIM)
   temperature_c: float | None = None
   vehicle_online: bool = True
   connection: str = "OFFLINE"
