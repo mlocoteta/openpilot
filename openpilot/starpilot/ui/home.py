@@ -23,6 +23,7 @@ from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 
 BLUETOOTH_COLORS = {"off": rl.Color(255, 255, 255, 102), "on": rl.Color(255, 255, 255, 230), "connected": rl.Color(0, 130, 252, 230)}
 JETLINK_COLORS = {"plugged": rl.Color(160, 160, 160, 255), "connected": rl.Color(70, 200, 110, 255)}
+CELL_WARNING = rl.Color(218, 202, 37, 255)
 
 
 def draw_jetlink(rect: rl.Rectangle, state: str) -> None:
@@ -151,6 +152,8 @@ class HomeView:
       rl.draw_circle(71 + index * 37, 209, 13, color)
     network_labels = {"none": "--", "wifi": "Wi-Fi", "ethernet": "ETH", "cell2G": "2G", "cell3G": "3G", "cell4G": "LTE", "cell5G": "5G"}
     self._text(network_labels.get(state.network, "Unknown"), FontRole.NORMAL, 35, 58, 247)
+    if state.cell is not None:
+      self._cell_line(state.cell, 58, 291)
     temperature = "--"
     if state.temperature_c is not None:
       temperature = f"{state.temperature_c:.0f}°C" if state.metric else f"{state.temperature_c * 1.8 + 32:.0f}°F"
@@ -172,6 +175,18 @@ class HomeView:
     if state.recording_audio:
       rl.draw_rectangle_rounded(rl.Rectangle(170, 245, 75, 40), 1, 10, rl.Color(201, 34, 49, 255))
       self._icon("icons/microphone.png", 30, 30, 192.5, 250)
+
+  def _cell_line(self, cell, x: float, y: float):
+    """Accord: cell status under Wi-Fi/ETH: "+ LTE" + 5 small bars, or yellow "No LTE" / "No SIM"."""
+    if cell.kind != "cell":
+      self._text(cell.label, FontRole.NORMAL, 30, x, y, CELL_WARNING)
+      return
+    text = "+ " + cell.label
+    self._text(text, FontRole.NORMAL, 30, x, y)
+    dx = x + self._measure(text, FontRole.NORMAL, 30).width + 14
+    cy = y + 30 * self.fonts.profile.font_scale / 2
+    for index in range(5):
+      rl.draw_circle(int(dx + index * 19 + 7), int(cy), 7, rl.WHITE if index < cell.bars else rl.Color(84, 84, 84, 255))
 
   def _mode_banner(self, state: HomeState, rect: rl.Rectangle):
     clip.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
