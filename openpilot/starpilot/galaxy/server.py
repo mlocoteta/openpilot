@@ -41,6 +41,7 @@ from openpilot.starpilot.sentry_mode.notifications import NotificationOwner, Not
 from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
 from openpilot.starpilot.galaxy.map_operations import MapOperationError, MapOperations, validate_action
 from openpilot.starpilot.galaxy.hud import Hud
+from openpilot.starpilot.galaxy.scene import HZ_DEFAULT, HZ_RANGE, SceneStreams
 from openpilot.starpilot.galaxy.plots import Plots
 from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareUnavailable
 from openpilot.starpilot.galaxy.web_manifest import web_manifest
@@ -101,7 +102,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 starport_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
                 local_access=None, tmux_live=None, starport_logs=None, starport_log_sender=None, hotspot=None, toyota_tools=None,
                 replay_client=None, replay_root=None,
-                spotify_setup=None, companion=None, phone_location=None, reverse_proxy=None, local_hostnames=None, sound_preview=None):
+                spotify_setup=None, companion=None, phone_location=None, reverse_proxy=None, local_hostnames=None, sound_preview=None, scene=None):
   from openpilot.starpilot.galaxy.local_hostnames import LocalHostnames
   hostname_source = local_hostnames if local_hostnames is not None else LocalHostnames(clock=clock)
   from openpilot.starpilot.galaxy.companion import CompanionRegistry, APK_PATH
@@ -243,6 +244,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   plots_lock = threading.Lock()
   hud_source = hud
   hud_lock = threading.Lock()
+  scene_source = scene
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   starport_setup_source = starport_setup
@@ -466,6 +468,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         hud_source = Hud()
         server.hud_source = hud_source
     return hud_source.snapshot()
+
+  def scene_streams():
+    nonlocal scene_source
+    with hud_lock:
+      if scene_source is None:
+        scene_source = SceneStreams()
+        server.scene_source = scene_source
+    return scene_source
 
   def local_media():
     nonlocal recording_media_source
@@ -1467,6 +1477,39 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.json(200, result)
+      elif path == '/api/hud/scene':
+        if not self.require_session():
+          return
+        try:
+          query = parse_qs(urlsplit(self.path).query, max_num_fields=2)
+          if set(query) - {'hz'}:
+            raise ValueError
+          hz = min(max(int(query.get('hz', [HZ_DEFAULT])[0]), HZ_RANGE[0]), HZ_RANGE[1])
+        except (ValueError, TypeError):
+          self.json(400, {'error': 'hz must be an integer 5..20'})
+          return
+        try:
+          source = scene_streams()
+          admitted = source.acquire()
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Scene stream is unavailable'})
+          return
+        if not admitted:
+          self.json(429, {'error': 'Too many scene streams'})
+          return
+        try:
+          self.close_connection = True
+          self.send_response(200)
+          self.send_header('Content-Type', 'application/x-ndjson')
+          self.send_header('Cache-Control', 'no-store')
+          self.send_header('X-Content-Type-Options', 'nosniff')
+          self.end_headers()
+          if self.command != 'HEAD':
+            source.stream(self.wfile.write, hz, stopped=lambda: getattr(self.server, '_draining', False))
+        except (OSError, ValueError):
+          pass    # the client went away (broken pipe, reset, 4 s send timeout)
+        finally:
+          source.release()
       elif path == '/api/favorites/slots':
         if not self.require_session():
           return
@@ -3037,6 +3080,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.plots_source = plot_source
   if hud_source is not None:
     server.hud_source = hud_source
+  if scene_source is not None:
+    server.scene_source = scene_source
   if settings_gateway is not None:
     server.settings_source = settings_gateway
   if toyota_source is not None:
