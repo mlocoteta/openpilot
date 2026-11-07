@@ -136,6 +136,8 @@ class Allow:
       if p == "/api/navigation/action":
         a = body.get("action") if isinstance(body, dict) else None
         return None if a in NAV_ACTIONS else "navigation action not allowed"
+      if p == "/api/hud/personality":   # Accord 4.2 speed profiles v1 (Galaxy validates the name + rate)
+        return None
       return None if p == "/api/navigation/search" else "not on the CommaLink allowlist"
     return "not on the CommaLink allowlist"
 
