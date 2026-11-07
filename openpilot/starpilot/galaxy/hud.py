@@ -135,6 +135,7 @@ def empty():
     'steering': {'latActive': None, 'source': 'unknown', 'detail': None, 'fault': None},
     'alert': None,
     'experimental': None, 'personality': None,
+    'personalityWrite': True,   # Accord 4.2: POST /api/hud/personality exists on this build (the head unit enables tap-to-change)
     'slc': None,
     'egpu': None,
     'blinker': None, 'gear': None,
