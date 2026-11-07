@@ -62,6 +62,9 @@ from openpilot.starpilot.controllers.transport import (ControllerBusy, Controlle
 from openpilot.starpilot.models.runtime import ModelStatusSource
 from openpilot.starpilot.audio.downloads import SoundDownloads, SoundDownloadError
 
+# Accord 4.2: /api/hud/personality names -> log.LongitudinalPersonality values (cereal: aggressive 0, standard 1, relaxed 2)
+HUD_PERSONALITIES = {'aggressive': 0, 'standard': 1, 'relaxed': 2}
+
 
 WEB = Path(__file__).resolve().parent / 'web'
 INSTANCE = secrets.token_hex(8)
@@ -232,6 +235,8 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   session_lock = threading.Lock()
   sample_lock = threading.Lock()
   effect_lock = threading.Lock()
+  hud_personality_lock = threading.Lock()
+  hud_personality_at = [0.0]
   settings_lock = threading.Lock()
   models_lock = threading.Lock()
   settings_gateway = settings
@@ -1730,7 +1735,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if self.require_session():
           self.json(404, {'error': 'Not found'})
         return
-      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
+      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location', '/api/hud/personality',
                       '/api/connect/proxy', '/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
@@ -1787,6 +1792,26 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
+        return
+      if path == '/api/hud/personality':
+        # Accord (Botty Car 4.2 speed profiles v1): the head unit picks the driving personality. Same param write as the
+        # wheel distance button (selfdrived re-reads LongitudinalPersonality every 0.1 s); never touches MAX or any tune.
+        if not self.require_session():
+          return
+        value = HUD_PERSONALITIES.get(payload.get('personality') if isinstance(payload, dict) else None)
+        if value is None:
+          self.json(400, {'error': 'personality must be relaxed, standard or aggressive'})
+          return
+        with hud_personality_lock:
+          now = time.monotonic()
+          if now - hud_personality_at[0] < 1.0:
+            self.json(429, {'error': 'One personality change per second'})
+            return
+          hud_personality_at[0] = now
+          from openpilot.common.params import Params
+          Params().put('LongitudinalPersonality', value)
+        cloudlog.info(f"galaxy: hud personality -> {payload['personality']}")
+        self.json(200, {'personality': payload['personality']})
         return
       if path == '/api/companion/location':
         if getattr(self.server, 'remote_transport', False) or not self.direct_local():
