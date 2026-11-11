@@ -28,6 +28,7 @@ from opendbc.car.gm.longitudinal import (
 from openpilot.starpilot.longitudinal.vehicle_policy import installed_policy_for
 from openpilot.starpilot.longitudinal.profile_runtime import ProfileHost, active_personality_id
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
+from opendbc.car.honda import cruise_brake_deadband as honda_cbd
 
 
 class ResumeFreshness:
@@ -86,6 +87,9 @@ class LongitudinalInputs:
     self.toyota_sienna_production = toyota_production and str(self.CP.carFingerprint) == SIENNA_4G
     self.ioniq6_start_enabled = ioniq6_start_eligible(self.CP)
     self.force_stop_distance_braking = distance_braking_eligible(self.CP)
+    self.honda_cruise_enabled = honda_cbd.eligible(self.CP)
+    self.honda_cruise_param = True
+    self.honda_cruise_frame = 0
     gm_policy = gm_pedal_policy_for(self.CP)
     self.gm_start_enabled = gm_policy is not None and gm_policy.friction_variant
     installed_policy = installed_policy_for(self.CP)
@@ -135,6 +139,9 @@ class LongitudinalInputs:
   def optional_services(self):
     if self.force_stop_distance_braking:
       return ['radarState', 'deviceState', 'starpilotLongitudinalPlan'] + (['slcState'] if self.ev9_long_enabled else [])
+    # getattr: upstream's tests build LongitudinalInputs with __new__ (extension_helpers.attach_inputs)
+    if getattr(self, 'honda_cruise_enabled', False):
+      return ['radarState', 'deviceState', 'slcState']
     if (self.toyota_sienna_replay or self.toyota_sienna_production or self.toyota_corolla_stop or
         self.ioniq6_start_enabled or self.gm_start_enabled or self.gm_volt_enabled or self.gm_euv_enabled or
         self.gm_cc_enabled or self.gm_cc_stop_enabled or self.gm_ascm_enabled or self.gm_suburban_enabled):
@@ -181,12 +188,33 @@ class LongitudinalInputs:
                 if self.blended_longitudinal_enabled and self.sm.all_checks(['longitudinalPlan'])
                 else cc_evidence.has_lead if cc_evidence is not None else volt_observation[0]
                 if volt_observation is not None else None),
+      honda_cruise=self._honda_cruise_inputs() if getattr(self, 'honda_cruise_enabled', False) and active else None,
       vehicle_stop_evidence=cc_evidence if cc_evidence is not None else self._gm_suburban_evidence()
         if self.gm_suburban_enabled and active else self._gm_ascm_evidence()
         if self.gm_ascm_enabled and active else self._gm_euv_evidence()
         if self.gm_euv_enabled and active else self._gm_volt_stop_from_observation(volt_observation),
     )
 
+
+  def _honda_cruise_inputs(self):
+    """Accord 9G cruise-hold brake deadband inputs, same rules as card's feed (cruise_brake_caller.py)."""
+    if self.honda_cruise_frame % 100 == 0:
+      try:
+        self.honda_cruise_param = bool(self.params.get_bool("AccordCruiseBrakeDeadband"))
+      except Exception:
+        self.honda_cruise_param = True
+    self.honda_cruise_frame += 1
+    sm = self.sm
+    if not self.honda_cruise_param or not sm.all_checks(['carState', 'longitudinalPlan']):
+      return None
+    try:
+      if not (sm.seen['radarState'] and sm.valid['radarState'] and sm.alive['radarState']):
+        return None
+      slc = sm['slcState'] if sm.seen['slcState'] and sm.valid['slcState'] else None
+      cs = sm['carState']
+      return honda_cbd.plan_inputs(float(cs.vEgo), float(cs.vCruise), sm['longitudinalPlan'], sm['radarState'], slc)
+    except (AttributeError, KeyError, TypeError, ValueError):
+      return None
 
   def resume_sources_current(self):
     return self.resume_freshness.current(self.sm)
