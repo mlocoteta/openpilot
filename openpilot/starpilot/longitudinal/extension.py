@@ -9,6 +9,7 @@ from openpilot.starpilot.longitudinal.ioniq6_start import Ioniq6StartPolicy, Sta
 from openpilot.starpilot.longitudinal.vehicle_policy import policy_for as vehicle_policy_for, stopping_decel_rate, stopping_policy_for
 from opendbc.car.gm.longitudinal import GMPedalStartPolicy, volt_sng_resume_policy_for
 from opendbc.car.gm.bolt_mode import policy_for as bolt_mode_policy_for
+from opendbc.car.honda import cruise_brake_deadband as honda_cbd
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
@@ -26,6 +27,8 @@ class LongitudinalContext:
   profile_max_accel: float | None = None
   faster_takeoffs: bool = False
   force_stop_braking: bool = False
+  # Accord 9G pedal: cruise-hold brake deadband plan inputs (cruise_brake_deadband.plan_inputs + enabled), or None
+  honda_cruise: dict | None = None
 
 
 class LongitudinalExtension:
@@ -43,6 +46,7 @@ class LongitudinalExtension:
     self.toyota_output = ToyotaOutputPolicy(CP) if toyota_production or development_enabled(CP) else None
     self.ioniq6_start = Ioniq6StartPolicy() if ioniq6_start_eligible(CP) else None
     self.force_stop_distance_braking = distance_braking_eligible(CP)
+    self.honda_cruise = HondaCruiseHold() if honda_cbd.eligible(CP) else None
     self.vehicle_target = getattr(self.vehicle_policy, "target", None)
     self.kp = self.vehicle_policy.kp if self.vehicle_policy is not None else 0.0
     self.ki = getattr(self.vehicle_policy, "ki", None)
@@ -57,6 +61,8 @@ class LongitudinalExtension:
     return self.resume_policy(default, True, inputs.resume_sources_current())
 
   def reset(self, *, reset_start=True):
+    if self.honda_cruise is not None:
+      self.honda_cruise.reset()
     if self.vehicle_policy is not None:
       self.vehicle_policy.reset()
     if self.toyota_output is not None:
@@ -145,6 +151,8 @@ class LongitudinalExtension:
       feedforward, stop_freeze = self.stopping_policy.prepare_pid(pid, a_target, error, CS, context)
       freeze_integrator |= stop_freeze
     freeze_integrator |= self.bolt_mode is not None and self.bolt_mode.leaving_experimental
+    if self.honda_cruise is not None:
+      freeze_integrator |= self.honda_cruise.freeze(pid, feedforward, error, CS, last_output, context.honda_cruise)
     return feedforward, freeze_integrator
 
   def shape_output(self, output_accel, a_target, error, CS, last_output, previous_state, should_stop, context):
@@ -160,10 +168,30 @@ class LongitudinalExtension:
     return output_accel
 
 
+class HondaCruiseHold:
+  """LongControl's copy of the Accord 9G cruise-hold brake deadband (card/carcontroller hold the friction brake off).
+  While its copy suppresses, the pedal is the only actuator and it closes at pedal_close_accel(): don't let I wind the
+  output below that, or the brake would come on hard when the deadband releases. Returns True to freeze I."""
+  def __init__(self):
+    self.gate = honda_cbd.CruiseBrakeDeadband()
+
+  def reset(self):
+    self.gate.reset()
+
+  def freeze(self, pid, feedforward, error, CS, last_output, inputs):
+    if inputs is None:
+      self.gate.set_plan(False)
+    else:
+      self.gate.set_plan(True, **inputs)
+    self.gate.update(True, CS.vEgo, last_output, honda_cbd.friction_request(last_output, CS.vEgo), DT_CTRL)
+    return bool(self.gate.suppressing and error < 0.0 and pid.i + feedforward <= honda_cbd.pedal_close_accel(CS.vEgo))
+
+
 def create_extension(cp, startup_preferences=None):
   extension = LongitudinalExtension(cp, startup_preferences)
   if (extension.vehicle_policy is None and extension.toyota_output is None and extension.ioniq6_start is None and
       extension.bolt_mode is None and extension.stopping_policy is None and extension.stopping_decel_rate == 1.0 and
+      extension.honda_cruise is None and
       not extension.ignore_cruise_standstill and not extension.force_stop_distance_braking):
     return None
   return extension
