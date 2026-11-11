@@ -5,6 +5,7 @@ from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, struc
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_stock_qualified
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
+from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
@@ -104,6 +105,10 @@ class CarController(CarControllerBase):
     self.interceptor_learning_params = None
     self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
     self.ti = TorqueInterceptor(CP) if ti_qualified(CP) else None
+    # Accord 9G pedal long: hold the friction brake off at a steady cruise (set-speed brake taps). card.py feeds it the
+    # plan (starpilot/car/honda/cruise_brake_caller.py); None on every other car.
+    self.cruise_brake_deadband = (CruiseBrakeDeadband() if self.nidec_interceptor is not None and
+                                  CP.carFingerprint == CAR.HONDA_ACCORD_9G else None)
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -248,6 +253,13 @@ class CarController(CarControllerBase):
                                                         self.stopping_counter, self.CP, gas_force=gas_force, braking=braking))
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
+          if self.cruise_brake_deadband is not None:
+            brake_limit = self.cruise_brake_deadband.update(
+              CC.longActive and actuators.longControlState == LongCtrlState.pid, CS.out.vEgo, accel, float(apply_brake),
+              2 * DT_CTRL)
+            if brake_limit is not None:
+              # the pedal still follows accel (it closes on its own), only the friction brake is held off
+              apply_brake = min(apply_brake, brake_limit)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
           pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
 
