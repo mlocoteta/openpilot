@@ -92,6 +92,36 @@ TI_SUSTAINED_LIMIT_FRAMES = 10
 # Live params cadence (6.x controlsd: every 100th frame, ~1 s).
 TI_LIVE_PARAMS_INTERVAL = 100
 
+# ---- 2026-11-11 feed-forward tuning (all opt-in; the defaults reproduce the controller above exactly) ----
+# TIOffsetFF: constant lateral-accel offset added to the feed-forward (m/s^2, signed). The 9G TI needs about
+# -0.10..-0.15 of full-scale torque to hold a straight, unbanked line, which the integrator carried
+# (I mean -0.14/-0.16/-0.18 m/s^2 at 30-45/45-60/60+ mph on Nov 5-11). It is scheduled by speed like the
+# measured integrator bias, so city driving is untouched. Recommended trial value -0.15.
+TI_OFFSET_FF_SPEED_BP = [8.0, 11.0, 17.0, 22.0]  # m/s (18 / 25 / 38 / 49 mph)
+TI_OFFSET_FF_SPEED_V = [0.0, 0.45, 0.85, 1.0]
+TI_OFFSET_FF_LIMIT = 0.4
+# TIRollCompRatio: share of road roll (roll * g) the feed-forward subtracts. 1.0 = as before; the logs fit
+# 0.74-0.88 (Nov 8-11: 0.81 at 30-45 mph, 0.74 at 45-60). Recommended trial value 0.8.
+TI_ROLL_RATIO_MIN, TI_ROLL_RATIO_MAX = 0.5, 1.0
+# TIFrictionHighway: friction feed-forward amplitude above 45 mph (blended in from 38 mph). 0 = off (SteerFriction
+# everywhere). The on-centre EPS dead band is 0.29-0.50 of full-scale torque wide; SteerFriction 0.19 covers about
+# half. Candidates 0.25 / 0.30 (replay: 0.30 cuts tracking error 14 %, raises torque spread 20 %).
+TI_FRICTION_HWY_SPEED_BP = [17.0, 20.0]  # m/s (38 -> 45 mph)
+TI_FRICTION_HWY_MIN, TI_FRICTION_HWY_MAX = 0.10, 0.40
+# TIABEnabled: interleaved A/B. The three settings above apply only in B slots; A slots run the baseline.
+# Slots alternate every TI_AB_SLOT_S of time.monotonic() (= the logMonoTime clock), so the slot of any logged
+# frame is floor(logMonoTime / 1e9 / TI_AB_SLOT_S) % 2 (1 = B). Changes ramp over TI_AB_RAMP_S.
+TI_AB_SLOT_S = 300.0
+TI_AB_RAMP_S = 2.0
+
+
+def ti_ab_slot_is_b(mono_s: float) -> bool:
+  return int(mono_s // TI_AB_SLOT_S) % 2 == 1
+
+
+def ti_offset_ff_scale(v_ego: float) -> float:
+  return float(np.interp(v_ego, TI_OFFSET_FF_SPEED_BP, TI_OFFSET_FF_SPEED_V))
+
 # Sigmoid+linear torque curve: torque(x) = b*sign(a*x)*(sigmoid(|a*x|) - 0.5) + c*x, x = lateral accel.
 # Slope at x=0 is a*b/4 + c. Defaults are the code defaults of 6.x (used when a param is unset/invalid).
 TI_SIGMOID_DEFAULT = (15.0, 0.72, 0.16)
@@ -283,6 +313,15 @@ class LatControlTorqueTI(LatControl):
     self.feedforward = 0.0
     self.unwind_detected = False
 
+    # Feed-forward tuning (TIOffsetFF / TIRollCompRatio / TIFrictionHighway / TIABEnabled), see the constants.
+    self.offset_ff = 0.0
+    self.roll_comp_ratio = 1.0
+    self.friction_hwy = 0.0
+    self.ab_enabled = False
+    self.ab_slot_b = False
+    self.ab_weight = 1.0  # 0 = baseline, 1 = the configured values
+    self._mono = time.monotonic  # replaceable clock (tests / replay)
+
     self._frame = 0
     self._kp = None
     self._error_logged_time = -1e9
@@ -352,6 +391,8 @@ class LatControlTorqueTI(LatControl):
                                     lp.get_float("TILowSpeedDampingMax") or 0.12,
                                     lp.get_bool("TILowSpeedCenterDampingEnabled"),
                                     lp.get_float("TILowSpeedCenterDampingMaxReduction") or 0.62)
+      self.update_ff_tuning(lp.get_optional_float("TIOffsetFF"), lp.get_optional_float("TIRollCompRatio"),
+                            lp.get_optional_float("TIFrictionHighway"), lp.get_bool("TIABEnabled"))
     except Exception:
       # Keep the last good values, but never fail silently (rate-limited).
       now = time.monotonic()
@@ -375,6 +416,36 @@ class LatControlTorqueTI(LatControl):
       self.honda_accord_damping_prev_error = 0.0
       self.honda_accord_damping_prev_setpoint = 0.0
       self.honda_accord_damping_hold_frames = 0
+
+  def update_ff_tuning(self, offset_ff, roll_ratio, friction_hwy, ab_enabled=False):
+    """Unset, non-finite or out-of-range values fall back to the baseline (offset 0, ratio 1, friction off)."""
+    offset_ff, roll_ratio, friction_hwy = (v if v is not None and math.isfinite(v) else None for v in (offset_ff, roll_ratio, friction_hwy))
+    self.offset_ff = float(np.clip(offset_ff, -TI_OFFSET_FF_LIMIT, TI_OFFSET_FF_LIMIT)) if offset_ff else 0.0
+    self.roll_comp_ratio = (float(np.clip(roll_ratio, TI_ROLL_RATIO_MIN, TI_ROLL_RATIO_MAX))
+                            if roll_ratio is not None and roll_ratio > 0.0 else 1.0)
+    self.friction_hwy = (float(np.clip(friction_hwy, TI_FRICTION_HWY_MIN, TI_FRICTION_HWY_MAX))
+                         if friction_hwy is not None and friction_hwy > 0.0 else 0.0)
+    self.ab_enabled = bool(ab_enabled)
+
+  @property
+  def ff_tuning_configured(self) -> bool:
+    return self.offset_ff != 0.0 or self.roll_comp_ratio != 1.0 or self.friction_hwy > 0.0
+
+  def _update_ab_weight(self) -> float:
+    """Blend weight of the configured tuning: 1 without A/B, else ramps to 1 in B slots and to 0 in A slots."""
+    if not self.ab_enabled:
+      self.ab_slot_b = False
+      self.ab_weight = 1.0
+      return 1.0
+    slot_b = ti_ab_slot_is_b(self._mono())
+    if slot_b != self.ab_slot_b:
+      self.ab_slot_b = slot_b
+      cloudlog.event("ti_ab_slot", slot="B" if slot_b else "A", offset_ff=self.offset_ff, roll_ratio=self.roll_comp_ratio,
+                     friction_hwy=self.friction_hwy)
+    target = 1.0 if slot_b else 0.0
+    step = self.dt / TI_AB_RAMP_S
+    self.ab_weight = float(np.clip(target, self.ab_weight - step, self.ab_weight + step))
+    return self.ab_weight
 
   # ---- soft recapture ----
   def set_ti_driver_override(self, override):
@@ -458,8 +529,11 @@ class LatControlTorqueTI(LatControl):
       if self.prev_steering_pressed and not CS.steeringPressed:
         self.pid.i *= self.steer_release_i_decay
 
+      tuning_weight = self._update_ab_weight() if self.ff_tuning_configured else 0.0
       roll_offset_fade = np.interp(CS.vEgo, FF_ROLL_OFFSET_FADE_BP, FF_ROLL_OFFSET_FADE_V)
       roll_compensation = params.roll * ACCELERATION_DUE_TO_GRAVITY * roll_offset_fade
+      if tuning_weight > 0.0 and self.roll_comp_ratio != 1.0:
+        roll_compensation *= 1.0 + tuning_weight * (self.roll_comp_ratio - 1.0)
       curvature_deadzone = abs(VM.calc_curvature(math.radians(self.steering_angle_deadzone_deg), CS.vEgo, 0.0))
       lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
@@ -495,8 +569,14 @@ class LatControlTorqueTI(LatControl):
       friction_jerk_deadzone = get_center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint)
       friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
       friction_scale = ti_low_speed_gain_scale
-      ff += friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold,
-                                          self.torque_params)
+      friction_ff = friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
+                                                  friction_threshold, self.torque_params)
+      if tuning_weight > 0.0 and self.friction_hwy > 0.0 and self.torque_params.friction > 0.0:
+        hwy = tuning_weight * float(np.interp(CS.vEgo, TI_FRICTION_HWY_SPEED_BP, [0.0, 1.0]))
+        friction_ff *= 1.0 + hwy * (self.friction_hwy / float(self.torque_params.friction) - 1.0)
+      ff += friction_ff
+      if tuning_weight > 0.0 and self.offset_ff != 0.0:
+        ff += tuning_weight * self.offset_ff * ti_offset_ff_scale(CS.vEgo)
 
       if CS.vEgo < self.low_speed_reset_threshold:
         self.pid.reset()

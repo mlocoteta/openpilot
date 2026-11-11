@@ -488,3 +488,138 @@ def test_controls_hook_reads_carcontrol_carstate_and_caroutput():
   CO.actuatorsOutput.torque = 0.0
   assert not controller.controls_steer_limited(CC, CS, CO)
   assert list(controller._ti_torque_requests)[-1] == pytest.approx(0.3)
+
+
+# ---- feed-forward tuning: TIOffsetFF / TIRollCompRatio / TIFrictionHighway / TIABEnabled (2026-11-11) ----
+
+def ff_run(v_ego=25.0, roll=0.02, frames=150, angle=-0.5, curvature=0.0, clock=None, **values):
+  controller, VM, CS, lp = build(**values)
+  if clock is not None:
+    controller._mono = clock
+  controller.refresh_live_params()
+  CS.vEgo = v_ego
+  CS.steeringAngleDeg = angle
+  lp.roll = roll
+  out = []
+  for _ in range(frames):
+    torque, _, lac_log = controller.update(True, CS, VM, lp, False, curvature, False, 0.4)
+    out.append((torque, lac_log.p, lac_log.i, lac_log.f, controller.feedforward))
+  return controller, out
+
+
+def test_ff_tuning_defaults_are_the_baseline():
+  base_ctrl, base = ff_run()
+  assert not base_ctrl.ff_tuning_configured
+  for values in ({"TIOffsetFF": 0.0, "TIRollCompRatio": 1.0, "TIFrictionHighway": 0.0, "TIABEnabled": False},
+                 {"TIOffsetFF": None, "TIRollCompRatio": None, "TIFrictionHighway": None},
+                 {"TIOffsetFF": float("nan"), "TIRollCompRatio": float("inf"), "TIFrictionHighway": -1.0},
+                 {"TIABEnabled": True}):  # A/B with nothing configured changes nothing
+    ctrl, out = ff_run(**values)
+    assert not ctrl.ff_tuning_configured
+    assert out == base  # bit-identical
+
+
+def test_ff_tuning_values_are_bounded():
+  controller, *_ = build()
+  controller.update_ff_tuning(-3.0, 0.1, 2.0)
+  assert (controller.offset_ff, controller.roll_comp_ratio, controller.friction_hwy) == (-0.4, 0.5, 0.4)
+  controller.update_ff_tuning(0.5, 1.7, 0.01)
+  assert (controller.offset_ff, controller.roll_comp_ratio, controller.friction_hwy) == (0.4, 1.0, 0.1)
+
+
+def test_offset_ff_adds_the_scheduled_offset_to_the_feedforward():
+  for v_ego, scale in ((5.0, 0.0), (11.0, 0.45), (17.0, 0.85), (30.0, 1.0)):
+    _, base = ff_run(v_ego=v_ego, frames=1)
+    _, cand = ff_run(v_ego=v_ego, frames=1, TIOffsetFF=-0.15)
+    assert cand[0][4] - base[0][4] == pytest.approx(-0.15 * scale)
+    assert ti.ti_offset_ff_scale(v_ego) == pytest.approx(scale)
+
+
+def test_offset_ff_relieves_the_integrator():
+  # A car that needs a constant offset: hold the measured lat accel at the setpoint, the integrator stays where
+  # the feed-forward leaves it. With the offset the feed-forward carries part of the bias.
+  _, base = ff_run(frames=300)
+  _, cand = ff_run(frames=300, TIOffsetFF=-0.15)
+  assert cand[-1][4] < base[-1][4]
+  assert cand[-1][0] > base[-1][0]  # returned torque is -output: more negative lat accel -> larger returned torque
+
+
+def test_roll_ratio_scales_only_the_roll_term():
+  _, base = ff_run(frames=1, roll=0.03)
+  _, cand = ff_run(frames=1, roll=0.03, TIRollCompRatio=0.8)
+  assert cand[0][4] - base[0][4] == pytest.approx(0.2 * 0.03 * 9.81, rel=1e-3)
+  _, flat_base = ff_run(frames=1, roll=0.0)
+  _, flat_cand = ff_run(frames=1, roll=0.0, TIRollCompRatio=0.8)
+  assert flat_cand == flat_base
+
+
+def test_friction_highway_scales_friction_above_45_mph_only():
+  # error large enough to saturate the friction relay
+  for v_ego, hwy in ((12.0, 0.0), (18.5, 0.5), (25.0, 1.0)):
+    b_ctrl, base = ff_run(v_ego=v_ego, frames=1, roll=0.0, angle=-3.0, SteerFriction=0.19)
+    c_ctrl, cand = ff_run(v_ego=v_ego, frames=1, roll=0.0, angle=-3.0, SteerFriction=0.19, TIFrictionHighway=0.30)
+    fric_base = base[0][4]
+    ratio = 1.0 + hwy * (0.30 / float(b_ctrl.torque_params.friction) - 1.0)
+    assert cand[0][4] == pytest.approx(fric_base * ratio, rel=1e-6, abs=1e-9)
+
+
+class _Clock:
+  def __init__(self, t):
+    self.t = t
+
+  def __call__(self):
+    return self.t
+
+
+def test_ab_alternates_every_slot_and_ramps():
+  clock = _Clock(ti.TI_AB_SLOT_S * 10 + 1.0)  # slot 10 = A (baseline)
+  ctrl, out = ff_run(frames=5, clock=clock, TIOffsetFF=-0.15, TIABEnabled=True)
+  _, base = ff_run(frames=5)
+  assert not ctrl.ab_slot_b and ctrl.ab_weight < 1.0
+  # starts at weight 1 and ramps towards the baseline at 1/TI_AB_RAMP_S per second
+  assert ctrl.ab_weight == pytest.approx(1.0 - 5 * DT_CTRL / ti.TI_AB_RAMP_S)
+  clock.t = ti.TI_AB_SLOT_S * 11 + 1.0  # B
+  for _ in range(int(ti.TI_AB_RAMP_S / DT_CTRL) + 5):
+    ctrl.update(True, *_ff_inputs(ctrl))
+  assert ctrl.ab_slot_b and ctrl.ab_weight == 1.0
+  clock.t = ti.TI_AB_SLOT_S * 12 + 1.0  # A again
+  for _ in range(int(ti.TI_AB_RAMP_S / DT_CTRL) + 5):
+    ctrl.update(True, *_ff_inputs(ctrl))
+  assert not ctrl.ab_slot_b and ctrl.ab_weight == 0.0
+  assert ti.ti_ab_slot_is_b(ti.TI_AB_SLOT_S * 3 + 0.5) and not ti.ti_ab_slot_is_b(ti.TI_AB_SLOT_S * 4 + 0.5)
+
+
+def _ff_inputs(ctrl):
+  cp = ti_cp()
+  VM = VehicleModel(cp)
+  CS = car.CarState.new_message()
+  CS.vEgo = 25.0
+  CS.steeringAngleDeg = -0.5
+  lp = log.VehicleParameters.new_message()
+  lp.steerRatio = cp.steerRatio
+  lp.stiffnessFactor = 1.0
+  return CS, VM, lp, False, 0.0, False, 0.4
+
+
+def test_ab_slot_a_at_weight_zero_matches_the_baseline_feedforward():
+  clock = _Clock(ti.TI_AB_SLOT_S * 10 + 1.0)
+  ctrl, _ = ff_run(frames=1, clock=clock, TIOffsetFF=-0.15, TIRollCompRatio=0.8, TIFrictionHighway=0.3, TIABEnabled=True)
+  ctrl.ab_weight = 0.0
+  base_ctrl, *_ = build()
+  base_ctrl.refresh_live_params()
+  CS, VM, lp, *_rest = _ff_inputs(ctrl)
+  lp.roll = 0.02
+  for c in (ctrl, base_ctrl):
+    c.update(True, CS, VM, lp, False, 0.0, False, 0.4)
+  assert ctrl.feedforward == pytest.approx(base_ctrl.feedforward, abs=1e-6)
+
+
+def test_ff_tuning_params_are_read_live():
+  params = FakeParams()
+  controller, VM, CS, lp = build(params=params)
+  assert controller.offset_ff == 0.0
+  params.values.update(TIOffsetFF=-0.15, TIRollCompRatio=0.8, TIFrictionHighway=0.25, TIABEnabled=True)
+  CS.vEgo = 25.0
+  for _ in range(TI_LIVE_PARAMS_INTERVAL):
+    controller.update(True, CS, VM, lp, False, 0.0, False, 0.4)
+  assert (controller.offset_ff, controller.roll_comp_ratio, controller.friction_hwy, controller.ab_enabled) == (-0.15, 0.8, 0.25, True)
