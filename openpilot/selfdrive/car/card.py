@@ -169,6 +169,7 @@ class Car:
   aol_process_fault_context = None
   curve_replay = False
   car_params_published = False
+  honda_cruise_brake_feed = None
 
   def __init__(self, CI=None, RI: RadarInterfaceBase | None = None, startup_owner=None) -> None:
     prewarm_cache_contracts(("CarParamsCache", "CarParamsPersistent", "CarParamsPrevRoute"))
@@ -458,6 +459,8 @@ class Car:
       self.RI, self.CP, cp_bytes, startup_preferences.tesla_preap_radar)
     from openpilot.starpilot.car.subaru.smoothing import install as install_subaru_smoothing
     install_subaru_smoothing(self.CP, cp_bytes, startup_preferences.subaru_smoothing, self.params)
+    from openpilot.starpilot.car.honda.cruise_brake_caller import install as install_honda_cruise_brake
+    self.honda_cruise_brake_feed = install_honda_cruise_brake(self)
     self.params.put("CarParams", cp_bytes, block=True)
     put_cache(self.params, "CarParamsCache", self.CP)
     put_cache(self.params, "CarParamsPersistent", self.CP)
@@ -1846,6 +1849,8 @@ class Car:
         update_subaru_sng(self, CS, CC, now_nanos)
         from openpilot.starpilot.car.subaru.stop_start_caller import update as update_subaru_startup
         update_subaru_startup(self, now_nanos)
+      if self.honda_cruise_brake_feed is not None:
+        self.honda_cruise_brake_feed.update(CS)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos)
       self.publish_sendcan(can_sends, valid=CS.canValid)
       if learning_snapshot is not None and self.learning_send_committed_mono_ns:
