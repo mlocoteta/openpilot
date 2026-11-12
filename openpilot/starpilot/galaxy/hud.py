@@ -1,9 +1,11 @@
 """Bounded, read-only driving snapshot for an external head-unit HUD.
 
 Modeled on plots.py: the worker owns its IPC sockets, no subscription exists
-until an authenticated request arrives, and the worker leaves after six seconds
+until an authenticated request arrives, and the worker leaves after thirty seconds
 without a viewer. Requests are served from the last cached projection. Absent or
-stale inputs stay null; nothing here writes Params, files or logs.
+stale inputs stay null, except onroad/engaged/vEgo, which stay at the last real sample while
+state is 'stale' (onroadAgeSeconds says how old). Nothing here writes Params or files; the only log
+is one 'galaxy.hud.stale' cloudlog line per current->stale transition (at most once per 10 s).
 
 Schema 2 (F29, Accord head unit, accord-head-unit/upper-screen/HUD-V2.md) adds, all optional:
 - model: modelV2 laneLines/laneLineProbs/roadEdges/roadEdgeStds/position as 14 [x fwd m, y m] points (grid 0,2,..,26)
@@ -31,11 +33,14 @@ import threading
 import time
 from dataclasses import dataclass
 
+from openpilot.common.swaglog import cloudlog
 from openpilot.starpilot.galaxy.plots import CLOCK_PAIR_MAX_SKEW_NS, finite, paired_boot_offset_ns
 
 
 SAMPLE_INTERVAL_S = 0.25
-CLIENT_IDLE_S = 6.0
+CLIENT_IDLE_S = 30.0
+STALE_LOG_MIN_S = 10.0
+DOORS_SCAN_BATCHES = 40     # slow: 0x405 is ~3 Hz, so the newest 40 batches always hold one
 STALE_AFTER_S = 1.5
 SOURCE_MAX_AGE_S = 1.0
 # Slow publishers get a wider window; carParams (0.02 Hz) is per-drive static data.
@@ -143,6 +148,7 @@ def empty():
     'model': None, 'road': None, 'tracks': None, 'fuel': None,
     'stop': None, 'laneEgo': None, 'laneChange': None, 'gearLetter': None, 'doors': None, 'seatbelt': None,
     'distanceBars': None, 'ahead': None, 'lanes': None,
+    'onroadAgeSeconds': None,
   }
 
 
@@ -950,13 +956,13 @@ class MessagingHudReader:
 
   def _fuel_frames(self, slow=False):
     """Drain the raw (non-conflated) CAN queue once: (newest 0x324 counter, newest 0x1A6 level, newest 0x405 payload),
-    None when absent. Only the newest FUEL_SCAN_BATCHES are parsed, all of them while slow (doors are ~3 Hz)."""
+    None when absent. Only the newest FUEL_SCAN_BATCHES are parsed, DOORS_SCAN_BATCHES while slow (doors are ~3 Hz)."""
     try:
       if self.can_sock is None:
         self.can_sock = self.messaging.sub_sock('can', conflate=False)
       raws = self.messaging.drain_sock_raw(self.can_sock)
       batches = []
-      for raw in raws if slow else raws[-FUEL_SCAN_BATCHES:]:
+      for raw in raws[-(DOORS_SCAN_BATCHES if slow else FUEL_SCAN_BATCHES):]:
         event = self.messaging.log_from_bytes(raw)
         if event.which() == 'can':
           batches.append(event.can)
@@ -987,6 +993,9 @@ class Hud:
     self.current = False
     self.error = ''
     self.closed = False
+    self.last_good = None       # (time, onroad, engaged, vEgo) of the last real sample; survives worker exit
+    self.last_state = None
+    self.last_stale_log = None
 
   def snapshot(self):
     now = self.clock()
@@ -1002,9 +1011,16 @@ class Hud:
       age = sample_age + self.source_age_seconds if sample_age is not None and self.source_age_seconds is not None else None
       expired = self.values is None or sample_age is None or sample_age > STALE_AFTER_S
       state = 'current' if not expired and self.current and age is not None and age <= STALE_AFTER_S else 'stale'
-      if expired and self.error:
+      if expired and self.error and self.last_good is None:
         state = 'unavailable'
-      return {
+      known = self.last_good if expired else None
+      if state == 'stale' and self.last_state == 'current' and (
+          self.last_stale_log is None or now - self.last_stale_log >= STALE_LOG_MIN_S):
+        self.last_stale_log = now
+        cloudlog.warning(f'galaxy.hud.stale sample_age={sample_age}')
+      self.last_state = state
+      onroad_age = max(0.0, now - self.last_good[0]) if self.last_good else None
+      out = {
         'schemaVersion': 3,
         # Accord: this build takes the head unit's GPS (POST /api/companion/location) for navigation only (never
         # controlValid); the head unit posts its fixes only to a comma that says so.
@@ -1016,6 +1032,10 @@ class Hud:
         **(empty() if expired else self.values),
         'error': self.error if expired else '',
       }
+      out['onroadAgeSeconds'] = math.ceil(onroad_age * 1000) / 1000 if onroad_age is not None else None
+      if known is not None:
+        out['onroad'], out['engaged'], out['vEgo'] = known[1], known[2], known[3]
+      return out
 
   def _run(self):
     reader = None
@@ -1032,6 +1052,8 @@ class Hud:
             self.values = reading.values
             self.current = reading.fresh
             self.last_sample = self.clock()
+            if reading.values and reading.values.get('onroad') is not None:
+              self.last_good = (self.last_sample, reading.values['onroad'], reading.values.get('engaged'), reading.values.get('vEgo'))
             self.source_age_seconds = (
               reading.source_age_seconds + max(0.0, self.last_sample - sample_started) if reading.source_age_seconds is not None else None
             )
