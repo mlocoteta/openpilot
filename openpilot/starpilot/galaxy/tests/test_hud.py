@@ -551,7 +551,8 @@ class HudWorkerTest(unittest.TestCase):
         self.assertIsNone(source.worker)
         idle = source.snapshot()
         self.assertEqual(idle['state'], 'stale')
-        self.assertIsNone(idle['onroad'])
+        self.assertIs(idle['onroad'], False)   # sticky: last real onroad kept on idle exit
+        self.assertIsNotNone(idle['onroadAgeSeconds'])
         deadline = time.monotonic() + 1
         while len(readers) < 2 and time.monotonic() < deadline:
           time.sleep(0.005)
@@ -559,6 +560,101 @@ class HudWorkerTest(unittest.TestCase):
       finally:
         source.close()
     self.assertTrue(readers[-1].closed)
+
+  def test_never_sampled_has_null_age(self):
+    source = Hud(reader_factory=lambda: (_ for _ in ()).throw(OSError('x')))
+    try:
+      first = source.snapshot()
+      self.assertIsNone(first['onroadAgeSeconds'])
+      self.assertIsNone(first['onroad'])
+    finally:
+      source.close()
+
+  def test_idle_constants(self):
+    from openpilot.starpilot.galaxy import hud
+    self.assertEqual(hud.CLIENT_IDLE_S, 30.0)
+    self.assertEqual(hud.DOORS_SCAN_BATCHES, 40)
+
+  def test_stale_logs_once_per_transition_rate_limited(self):
+    now = [100.0]
+
+    class Reader:
+      def sample(self, timestamp):
+        return HudReading({**empty(), 'onroad': True, 'engaged': True, 'vEgo': 5.0}, True, 0.0, (1,))
+
+      def close(self):
+        pass
+
+    source = Hud(reader_factory=Reader, clock=lambda: now[0])
+    with mock.patch('openpilot.starpilot.galaxy.hud.SAMPLE_INTERVAL_S', 5.0), \
+         mock.patch('openpilot.starpilot.galaxy.hud.cloudlog') as log:
+      try:
+        source.snapshot()
+        deadline = time.monotonic() + 1
+        while source.snapshot()['state'] != 'current' and time.monotonic() < deadline:
+          time.sleep(0.005)
+        now[0] += 2.0
+        self.assertEqual(source.snapshot()['state'], 'stale')
+        source.snapshot()
+        self.assertEqual(log.warning.call_count, 1)
+        self.assertIn('galaxy.hud.stale', log.warning.call_args[0][0])
+        self.assertIn('sample_age', log.warning.call_args[0][0])
+        # back to current then stale again within 10 s: suppressed
+        source.last_sample = now[0]
+        self.assertEqual(source.snapshot()['state'], 'current')
+        now[0] += 2.0
+        self.assertEqual(source.snapshot()['state'], 'stale')
+        self.assertEqual(log.warning.call_count, 1)
+        source.last_sample = now[0]
+        source.snapshot()
+        now[0] += 12.0
+        source.snapshot()
+        self.assertEqual(log.warning.call_count, 2)  # >10 s since the last line: logs again
+        source.snapshot()
+        self.assertEqual(log.warning.call_count, 2)  # staying stale does not log
+      finally:
+        source.close()
+
+  def test_sticky_survives_cleared_values_and_error(self):
+    now = [100.0]
+    calls = [0]
+
+    class Reader:
+      def sample(self, timestamp):
+        calls[0] += 1
+        if calls[0] > 1:
+          raise OSError('gone')
+        return HudReading({**empty(), 'onroad': True, 'engaged': False, 'vEgo': 3.0}, True, 0.0, (1,))
+
+      def close(self):
+        pass
+
+    source = Hud(reader_factory=Reader, clock=lambda: now[0])
+    with mock.patch('openpilot.starpilot.galaxy.hud.SAMPLE_INTERVAL_S', 0.01):
+      try:
+        source.snapshot()
+        deadline = time.monotonic() + 1
+        while calls[0] < 3 and time.monotonic() < deadline:
+          time.sleep(0.005)
+        now[0] += 0.5
+        result = source.snapshot()
+        self.assertEqual((result['state'], result['onroad'], result['engaged'], result['vEgo']), ('stale', True, False, 3.0))
+        self.assertEqual(result['error'], 'OSError')
+      finally:
+        source.close()
+
+  def test_doors_batches_bounded(self):
+    reader = MessagingHudReader.__new__(MessagingHudReader)
+    seen = []
+    reader.can_sock = object()
+    reader.messaging = NS(
+      drain_sock_raw=lambda sock: list(range(100)),
+      log_from_bytes=lambda raw: (seen.append(raw), NS(which=lambda: 'other'))[1])
+    reader._fuel_frames(slow=True)
+    self.assertEqual(seen, list(range(60, 100)))
+    seen.clear()
+    reader._fuel_frames(slow=False)
+    self.assertEqual(seen, list(range(88, 100)))
 
   def test_reader_error_is_unavailable(self):
     class Broken:
@@ -600,7 +696,10 @@ class HudWorkerTest(unittest.TestCase):
         self.assertEqual((aged['state'], aged['vEgo']), ('stale', 12.0))
         now[0] += 0.2
         expired = source.snapshot()
-        self.assertEqual((expired['state'], expired['vEgo']), ('stale', None))
+        self.assertEqual((expired['state'], expired['vEgo'], expired['onroad']), ('stale', 12.0, True))
+        self.assertAlmostEqual(expired['onroadAgeSeconds'], 1.6, places=1)
+        self.assertIsNone(expired['vCruise'])
+        self.assertIsNone(expired['lead'])
       finally:
         source.close()
 
