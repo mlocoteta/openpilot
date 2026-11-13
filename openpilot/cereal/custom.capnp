@@ -222,6 +222,17 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   feedbackPublication @37 :FeedbackPublication;
   steeringLimitInfo @39 :StarPilotCarControl.SteeringLimitInfo;
   toyotaCruise @38 :ToyotaCruise;
+  ssv3 @40 :Ssv3Status;  # Accord 9G SSV3 board, only published once firmware >= 3 is seen
+
+  struct Ssv3Status {
+    firmwareVersion @0 :UInt8;  # SS_STATUS.VERSION_NUM
+    hardwareRev @1 :UInt8;
+    epsLkasAck @2 :Bool;  # STEER_STATUS.EPS_LKAS_ACK: EPS reports LKAS engaged (~120 ms lag)
+    cameraFault @3 :Bool;  # STEER_STATUS.CAMERA_FAULT (meaning not confirmed; logged only)
+    motorTorque @4 :Int16;  # STEER_MOTOR_TORQUE.MOTOR_TORQUE, signed on firmware 3
+    lkasBlocked @5 :Bool;  # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
+    options @6 :UInt8;  # 0xE4 byte 2 option bits actually sent
+  }
 
   struct ToyotaCruise {
     version @0 :UInt16;
