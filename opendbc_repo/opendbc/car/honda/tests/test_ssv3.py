@@ -270,3 +270,23 @@ def test_no_option_bits_can_come_from_anywhere_but_the_controller():
   body = re.search(r"def create_steering_control\(.*?\n\n\n", src, re.S).group(0)
   for name in ("TORQUE_BLEND_DISABLE", "TX_ALL_LKAS_DATA", "LSB_TOGGLE_DISABLE", "ZERO_TORQUE_KEEPS_LKAS_ON"):
     assert name not in body
+
+
+def test_firmware3_drops_back_to_firmware2_when_520_stops():
+  ci = CarInterface(accord())
+  packer = CANPacker(ACCORD_DBC)
+  ci.CC.ssv3.requested_options = Ssv3Option.LSB_TOGGLE_DISABLE
+  cc = structs.CarControl(latActive=True, enabled=True)
+  opts = []
+  for tick in range(200):
+    board = [(400, fw3_400(tick, lkas_ack=True), 0), (427, fw3_427(tick, -60), 0)]
+    if tick < 60 and tick % 10 == 0:
+      board.append((520, ss_status(tick // 10, 3), 0))
+    t = 1_000_000_000 + tick * 10_000_000
+    cs = ci.update([(t, car_frames(packer, tick, board))])
+    _, sends = ci.apply(cc.as_reader(), t)
+    opts.append(next(f for f in sends if f[0] == 0xE4)[1][2] & 0x0F)
+  assert opts[30] == Ssv3Option.LSB_TOGGLE_DISABLE
+  # last 520 at tick 50; firmware 3 must be gone 0.5 s later and stay gone
+  assert all(o == 0 for o in opts[102:])
+  assert not ci.CS.ssv3.fw3 and cs.steeringTorqueEps == 0 and not ci.CS.ssv3.eps_lkas_ack

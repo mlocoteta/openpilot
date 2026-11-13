@@ -11,7 +11,9 @@ SS_STATUS.VERSION_NUM >= 3:
   * 0xE4 byte 2 bits 0-3 are board options. On firmware 2, bit 0 disables torque limiting and bit 1
     turns on an old debug frame, so they must never be non-zero unless firmware 3 has been seen.
 
-Firmware-2 boards (and boards with no 520 at all) see exactly what upstream sends: the 0xE4 bytes are
+Firmware 3 needs FW3_CONFIRM_FRAMES valid 520 frames with VERSION_NUM >= 3 and is dropped again when 520
+stops for FW3_LOST_FRAMES (or reports < 3). Firmware-2 boards (and boards with no 520 at all) see exactly
+what upstream sends: the 0xE4 bytes are
 untouched unless firmware 3 was seen AND an option was requested, and the extra frames are read by a
 separate advisory parser whose validity never reaches carState.canValid / canTimeout.
 """
@@ -26,8 +28,11 @@ STEERING_CONTROL_ADDR = 0xE4
 SS_STATUS_ADDR = 520
 FW3 = 3
 # Consecutive checksum/counter-valid SS_STATUS frames with VERSION_NUM >= 3 before firmware 3 is
-# believed (0.3 s at 10 Hz). Latched for the drive: the board can only be reflashed offroad.
+# believed (0.3 s at 10 Hz).
 FW3_CONFIRM_FRAMES = 3
+# carState frames (100 Hz) without a valid SS_STATUS after which firmware-2 treatment returns (0.5 s =
+# 5 missed 10 Hz frames). Nothing is kept across ignition cycles: every drive starts as firmware 2.
+FW3_LOST_FRAMES = 50
 
 
 class Ssv3Option:
@@ -84,15 +89,32 @@ class Ssv3CarState:
     self.camera_fault = False
     self.motor_torque = 0
     self.lkas_blocked = False   # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
+    self.frames_since_520 = 0
+
+  def _drop_to_fw2(self):
+    # SS_STATUS stopped (or reported < 3): firmware-2 treatment, no options, no fw3 fields
+    self.fw3 = False
+    self.fw3_count = 0
+    self.eps_lkas_ack = False
+    self.camera_fault = False
+    self.motor_torque = 0
 
   def update(self, cp_ssv3, cp_pt, ret: structs.CarState) -> None:
     # vl_all only holds this update's checksum/counter-valid frames; vl keeps stale/default values.
     versions = cp_ssv3.vl_all["SS_STATUS"]["VERSION_NUM"]
+    if versions:
+      self.frames_since_520 = 0
+    else:
+      self.frames_since_520 += 1
+      if self.frames_since_520 > FW3_LOST_FRAMES and self.fw3:
+        self._drop_to_fw2()
     for v in versions:
       self.version = int(v)
       self.fw3_count = self.fw3_count + 1 if self.version >= FW3 else 0
       if self.fw3_count >= FW3_CONFIRM_FRAMES:
         self.fw3 = True
+      elif self.version < FW3 and self.fw3:
+        self._drop_to_fw2()
     if versions:
       self.hardware_rev = int(cp_ssv3.vl["SS_STATUS"]["HARDWARE_REV"])
       self.lkas_blocked = bool(cp_ssv3.vl["SS_STATUS"]["LKAS_ALLOWED"])
