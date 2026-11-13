@@ -24,25 +24,31 @@ def cp_9g():
   return CarInterface.get_params(CAR.HONDA_ACCORD_9G, gen_empty_fingerprint(), [], False, False, False)
 
 
-def fp(ssv3: bool):
+def fp(ssv3: bool, ti: bool = False):
   f = gen_empty_fingerprint()
   if ssv3:
     f[0][0x190] = 5
+  if ti:
+    f[0][0x24A] = 8
   return f
 
 
 def test_startup_selection_ti_unchanged_and_fallback():
   ti_bit = 4096
-  for prefs, ssv3, ti in (
+  for prefs, ssv3, ti, *rest in (
     (VehicleStartupPreferences(honda_torque_interceptor=True), True, True),        # today
     (VehicleStartupPreferences(honda_torque_interceptor=True, honda_ti_missing=True), True, False),
     (VehicleStartupPreferences(honda_torque_interceptor=True, honda_ti_missing=True), False, True),
     (VehicleStartupPreferences(honda_torque_interceptor=True, honda_board_override="ssv3"), True, False),
     (VehicleStartupPreferences(honda_torque_interceptor=False), True, False),
+    # TI switch off = SSV3 only, even with a talking TI and the "ti" override
+    (VehicleStartupPreferences(honda_torque_interceptor=False), True, False, True),
+    (VehicleStartupPreferences(honda_torque_interceptor=False, honda_board_override="ti"), True, False, True),
+    (VehicleStartupPreferences(honda_torque_interceptor=True), True, True, True),
   ):
     cp = cp_9g()
     base = int(cp.safetyConfigs[0].safetyParam)
-    prefs.prepare(cp, fingerprints=fp(ssv3))
+    prefs.prepare(cp, fingerprints=fp(ssv3, *rest))
     assert bool(int(cp.safetyConfigs[0].safetyParam) & ti_bit) is ti
     if not ti:
       assert int(cp.safetyConfigs[0].safetyParam) == base
