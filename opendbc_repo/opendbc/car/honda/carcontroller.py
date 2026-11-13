@@ -190,8 +190,9 @@ class CarController(CarControllerBase):
       if self.frame % 10 == 0:
         can_sends.append(make_tester_present_msg(0x18DAB0F1, 1, suppress_response=True))
 
-    # Send steering command. On the TI car 0xE4 reaches no EPS: it carries zero torque
-    # (request still follows latActive) and the torque goes to the TI board on 0x249.
+    # Send steering command. On the TI path 0xE4 carries zero torque (request still follows latActive) and
+    # the torque goes to the TI board on 0x249; an SSV3 that is also fitted gets the zero torque and keeps
+    # the EPS in LKAS-off. No SSV3 option bits on this path (self.ssv3 is None).
     if self.ti is not None:
       ti_apply_steer, ti_option = self.ti.update(CC, CS, torque_cmd)
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))

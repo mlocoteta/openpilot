@@ -1,8 +1,11 @@
 """Honda 9G Accord gen1 Torque Interceptor (TI).
 
-The 9G Accord has no factory LKAS, so 0xE4 STEERING_CONTROL reaches nothing. Lateral exists
-only through an aftermarket TI board on bus 0: openpilot sends 0x249 TI_STEERING_CONTROL and
-the board reports 0x24A TI_FEEDBACK. Everything TI-specific lives in this module; the shared
+The 9G Accord has no factory LKAS. On the TI path lateral goes only through the aftermarket TI
+board on bus 0: openpilot sends 0x249 TI_STEERING_CONTROL and the board reports 0x24A TI_FEEDBACK.
+0xE4 STEERING_CONTROL still goes out with zero torque and the request bit following latActive. With
+an SSV3 serial-steering board fitted (Mat's car) 0xE4 reaches the SSV3, which then holds the EPS in
+LKAS-off, so the TI is the only actuator; the SSV3 ignores 0x249. SSV3 option bits are never sent
+on the TI path (ssv3.py objects are not built there). Everything TI-specific lives in this module; the shared
 Honda files only construct these classes when ti_qualified(CP) holds.
 
 Switching TI on is a startup decision (apply_torque_interceptor, called from openpilot's vehicle
