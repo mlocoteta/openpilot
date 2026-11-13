@@ -238,6 +238,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   effect_lock = threading.Lock()
   hud_personality_lock = threading.Lock()
   hud_personality_at = [0.0]
+  hud_board_at = [0.0]
   settings_lock = threading.Lock()
   models_lock = threading.Lock()
   settings_gateway = settings
@@ -1721,7 +1722,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if self.require_session():
           self.json(404, {'error': 'Not found'})
         return
-      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location', '/api/hud/personality',
+      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location', '/api/hud/personality', '/api/hud/steeringBoard',
                       '/api/connect/proxy', '/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/reset-default', '/api/settings/restore', '/api/recordings/action',
@@ -1779,6 +1780,28 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
+        return
+      if path == '/api/hud/steeringBoard':
+        # 9G Accord: pick TI or SSV3 steering from the head unit. Params only; the car reads them once at the next car
+        # start (opendbc/car/honda/steering_board.py), never mid-drive. ssv3 = TI switch off = SSV3 only.
+        if not self.require_session():
+          return
+        board = payload.get('board') if isinstance(payload, dict) else None
+        if board not in ('ti', 'ssv3'):
+          self.json(400, {'error': 'board must be ti or ssv3'})
+          return
+        with hud_personality_lock:
+          now = time.monotonic()
+          if now - hud_board_at[0] < 1.0:
+            self.json(429, {'error': 'One steering board change per second'})
+            return
+          hud_board_at[0] = now
+          from openpilot.common.params import Params
+          params = Params()
+          params.put_bool('TorqueInterceptorEnabled', board == 'ti')
+          params.put('AccordSteeringBoard', 'auto')
+        cloudlog.info(f"galaxy: hud steering board -> {board} (next start)")
+        self.json(200, {'applied': 'next_start', 'board': board})
         return
       if path == '/api/hud/personality':
         # Accord (Botty Car 4.2 speed profiles v1): the head unit picks the driving personality. Same param write as the
