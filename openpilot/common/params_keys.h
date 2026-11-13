@@ -43,6 +43,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RadarRecoveryAlert", {PERSISTENT, BOOL, "0"}},
     {"HondaBoschARadar", {PERSISTENT, BOOL, "1"}},
     {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "0"}},
+    // 9G steering board: "ti" / "ssv3" force a board, anything else = auto (opendbc/car/honda/steering_board.py)
+    {"AccordSteeringBoard", {PERSISTENT, STRING, "auto"}},
+    {"TorqueInterceptorMissing", {PERSISTENT, BOOL, "0"}},
     // Honda 9G Accord TI lateral controller (F03). Names, formats and defaults as on 6.x.
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1"}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1"}},
