@@ -10,6 +10,7 @@ from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HondaFlags, Crui
                                                  GearShifter, CarControllerParams
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.honda.torque_interceptor import TiCarState, ti_can_messages, ti_qualified
+from opendbc.car.honda.ssv3 import SSV3_PARSER_BUS, Ssv3CarState, ssv3_can_parser, ssv3_qualified
 from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, honda_sign, parser_expiry
 from opendbc.can.dbc import DBC as CANDBC
 
@@ -40,6 +41,7 @@ class CarState(CarStateBase):
 
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
     self.ti = TiCarState() if ti_qualified(CP) else None
+    self.ssv3 = Ssv3CarState() if ssv3_qualified(CP) and self.ti is None else None
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -179,6 +181,9 @@ class CarState(CarStateBase):
       # TI dropped out of RUN mid-drive: openpilot is not steering -> "Steering Temporarily Unavailable"
       if self.ti.locked_out:
         ret.steerFaultTemporary = True
+    if self.ssv3 is not None:
+      # SSV3 firmware 3 extras, gated on SS_STATUS.VERSION_NUM >= 3 (opendbc/car/honda/ssv3.py)
+      self.ssv3.update(can_parsers[SSV3_PARSER_BUS], cp, ret)
 
     if self.CP.flags & HondaFlags.BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
@@ -272,5 +277,7 @@ class CarState(CarStateBase):
       parsers[Bus.pt].message_states[0x201].ignore_counter = True
     if CP.flags & HondaFlags.HAS_BSM:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)
+    if ssv3_qualified(CP) and not ti_qualified(CP):
+      parsers[SSV3_PARSER_BUS] = ssv3_can_parser(CP, dbc_name)
 
     return parsers
