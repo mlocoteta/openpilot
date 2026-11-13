@@ -50,6 +50,9 @@ class VehicleStartupPreferences:
   gm_cancel_remap: bool = False
   vw_stock_long: bool = field(default=False, kw_only=True)
   honda_torque_interceptor: bool = False
+  # 9G TI -> SSV3 fallback inputs (opendbc/car/honda/steering_board.py); decided in prepare() with the fingerprint
+  honda_board_override: str = ""
+  honda_ti_missing: bool = False
 
   @classmethod
   def read(cls, params, *, enabled: bool):
@@ -77,6 +80,13 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       honda_ti = False
     try:
+      raw_board, board_readable = read_saved(params, "AccordSteeringBoard", 16)
+      honda_board = raw_board.decode("ascii", "replace") if board_readable and raw_board else ""
+      raw_missing, missing_readable = read_saved(params, "TorqueInterceptorMissing", 8)
+      honda_ti_missing = missing_readable and raw_missing == b"1"
+    except (OSError, TypeError, ValueError):
+      honda_board, honda_ti_missing = "", False
+    try:
       raw, readable = read_saved(params, "DisableOpenpilotLongitudinal", 8)
       disable_bolt = not readable or raw not in (None, b"0")
     except (OSError, TypeError, ValueError):
@@ -96,6 +106,7 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       return cls(vw_stock_long=vw_stock_long,
                  subaru_smoothing=smoothing, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, honda_torque_interceptor=honda_ti,
+               honda_board_override=honda_board, honda_ti_missing=honda_ti_missing,
                  tesla_preap_stock=preap_stock,
                  tesla_preap_radar=radar, tesla_preap_pedal=pedal,
                  gm_camera_pedal=False, toyota_filter=False)
@@ -140,6 +151,7 @@ class VehicleStartupPreferences:
                toyota_filter=bool(enabled and not disable_bolt and readable and safe in (None, b"0")),
                turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
                gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar, honda_torque_interceptor=honda_ti,
+               honda_board_override=honda_board, honda_ti_missing=honda_ti_missing,
                tesla_preap_stock=preap_stock, tesla_preap_radar=radar, tesla_preap_pedal=pedal)
 
   def _prepare_honda_radar(self, cp) -> None:
@@ -188,6 +200,22 @@ class VehicleStartupPreferences:
     if not self.gm_camera_pedal and (camera_acc_pedal_profile(cp) is not None or volt_cc_pedal_profile(cp) is not None):
       prepare_disable_longitudinal(cp, True)
 
+  def honda_ti_selected(self, cp, fingerprints) -> bool:
+    """9G: TI or SSV3 for this drive (steering_board.select_ti). Other Hondas: the TI switch (a no-op there)."""
+    from opendbc.car.honda.values import CAR
+    if cp.carFingerprint != CAR.HONDA_ACCORD_9G:
+      return self.honda_torque_interceptor
+    from opendbc.car.honda.steering_board import select_ti, ssv3_present
+    use_ti, reason = select_ti(self.honda_torque_interceptor, self.honda_board_override, self.honda_ti_missing,
+                               ssv3_present(fingerprints))
+    try:
+      from openpilot.common.swaglog import cloudlog
+      cloudlog.event("accord_steering_board", ti=use_ti, reason=reason, ti_enabled=self.honda_torque_interceptor,
+                     override=self.honda_board_override, ti_missing=self.honda_ti_missing)
+    except Exception:
+      pass
+    return use_ti
+
   def prepare(self, cp, *, fingerprints=None):
     from opendbc.car.volkswagen.meb_modes import prepare_stock as prepare_meb_stock
     prepare_meb_stock(cp, self.disable_bolt_long or self.vw_stock_long)
@@ -202,7 +230,7 @@ class VehicleStartupPreferences:
     if cp.brand == "honda":
       # Before CarState/CarController exist: both select the TI path from this safety bit.
       from opendbc.car.honda.torque_interceptor import apply_torque_interceptor
-      apply_torque_interceptor(cp, self.honda_torque_interceptor)
+      apply_torque_interceptor(cp, self.honda_ti_selected(cp, fingerprints))
     from opendbc.car.gm.values import apply_gm_auto_hold, apply_volt_one_pedal
     from openpilot.starpilot.car.tesla.preap_preferences import prepare_stock
     prepare_stock(cp, self.tesla_preap_stock, self.tesla_preap_radar, self.tesla_preap_pedal)
