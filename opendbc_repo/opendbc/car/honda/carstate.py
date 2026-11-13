@@ -11,6 +11,7 @@ from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HondaFlags, Crui
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.honda.torque_interceptor import TiCarState, ti_can_messages, ti_qualified
 from opendbc.car.honda.ssv3 import SSV3_PARSER_BUS, Ssv3CarState, ssv3_can_parser, ssv3_qualified
+from opendbc.car.honda.steering_board import TiPresence
 from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, honda_sign, parser_expiry
 from opendbc.can.dbc import DBC as CANDBC
 
@@ -42,6 +43,8 @@ class CarState(CarStateBase):
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
     self.ti = TiCarState() if ti_qualified(CP) else None
     self.ssv3 = Ssv3CarState() if ssv3_qualified(CP) and self.ti is None else None
+    # TI drive: notices a removed TI (no TI_FEEDBACK while the SSV3 reports) -> steering_board.py
+    self.ti_presence = TiPresence() if self.ti is not None else None
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -180,6 +183,9 @@ class CarState(CarStateBase):
       ret.steeringTorque, ret.steeringPressed = self.ti.update(cp, ret.steeringTorque, STEER_THRESHOLD.get(self.CP.carFingerprint, 1200))
       # TI dropped out of RUN mid-drive: openpilot is not steering -> "Steering Temporarily Unavailable"
       if self.ti.locked_out:
+        ret.steerFaultTemporary = True
+      # TI never answered but the SSV3 is on the bus: nothing steers this drive; the next start uses the SSV3
+      if self.ti_presence.update(self.ti.feedback_seen, bool(cp.vl_all["STEER_STATUS"]["STEER_STATUS"])):
         ret.steerFaultTemporary = True
     if self.ssv3 is not None:
       # SSV3 firmware 3 extras, gated on SS_STATUS.VERSION_NUM >= 3 (opendbc/car/honda/ssv3.py)
