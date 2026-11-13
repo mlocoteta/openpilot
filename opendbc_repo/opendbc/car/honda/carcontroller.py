@@ -8,6 +8,7 @@ from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
+from opendbc.car.honda.ssv3 import Ssv3Controller, ssv3_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -103,6 +104,8 @@ class CarController(CarControllerBase):
     self.nidec_interceptor = NidecInterceptor(CP) if interceptor_qualified(CP) else None
     self.interceptor_learning_params = None
     self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
+    # 9G SSV3 board: firmware-3 option bits in 0xE4, only once firmware 3 is seen (opendbc/car/honda/ssv3.py)
+    self.ssv3 = Ssv3Controller() if ssv3_qualified(CP) else None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -177,6 +180,8 @@ class CarController(CarControllerBase):
 
     # Send steering command.
     can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    if self.ssv3 is not None:
+      self.ssv3.apply(can_sends, CS, self.CAN.lkas)
     if _projection is not None:
       _projection.emit('honda.STEERING_CONTROL', apply_torque, CC.latActive, can_sends[-1])
 

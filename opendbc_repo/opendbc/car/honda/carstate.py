@@ -9,6 +9,7 @@ from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HondaFlags, CruiseButtons, CruiseSettings, \
                                                  GearShifter, CarControllerParams
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.honda.ssv3 import SSV3_PARSER_BUS, Ssv3CarState, ssv3_can_parser, ssv3_qualified
 from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, honda_sign, parser_expiry
 from opendbc.can.dbc import DBC as CANDBC
 
@@ -38,6 +39,7 @@ class CarState(CarStateBase):
     self.brake_error_msg = "HYBRID_BRAKE_ERROR" if CP.flags & HondaFlags.HYBRID else "STANDSTILL"
 
     self.steer_status_values = defaultdict(lambda: "UNKNOWN", can_define.dv["STEER_STATUS"]["STEER_STATUS"])
+    self.ssv3 = Ssv3CarState() if ssv3_qualified(CP) else None
 
     self.brake_switch_prev = False
     self.brake_switch_active = False
@@ -172,6 +174,9 @@ class CarState(CarStateBase):
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
+    if self.ssv3 is not None:
+      # SSV3 firmware 3 extras, gated on SS_STATUS.VERSION_NUM >= 3 (opendbc/car/honda/ssv3.py)
+      self.ssv3.update(can_parsers[SSV3_PARSER_BUS], cp, ret)
 
     if self.CP.flags & HondaFlags.BOSCH:
       # The PCM always manages its own cruise control state, but doesn't publish it
@@ -263,5 +268,7 @@ class CarState(CarStateBase):
       parsers[Bus.pt].message_states[0x201].ignore_counter = True
     if CP.flags & HondaFlags.HAS_BSM:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)
+    if ssv3_qualified(CP):
+      parsers[SSV3_PARSER_BUS] = ssv3_can_parser(CP, dbc_name)
 
     return parsers
