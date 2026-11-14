@@ -270,5 +270,30 @@ class SteeringBoardHudTest(unittest.TestCase):
     self.assertIsNone(empty()['openpilotEnabled'])
 
 
+class DataloggerModeTest(unittest.TestCase):
+  """openpilotEnabled false = OpenpilotEnabledToggle off. What must keep running (Mat: the comma just records)."""
+  def test_processes_not_gated_on_the_toggle(self):
+    from openpilot.system.manager.process_config import managed_processes
+    class P:
+      def get_bool(self, key, block=False):
+        return {'OpenpilotEnabledToggle': False}.get(key, False)
+      def put_bool(self, *a, **k):
+        pass
+      def get(self, key, *a, **k):
+        return None
+    cp = types.SimpleNamespace(notCar=False, passive=True)
+    for name in ('galaxy', 'loggerd', 'card', 'selfdrived', 'pandad'):
+      self.assertTrue(managed_processes[name].should_run(True, P(), cp), name)
+    self.assertTrue(managed_processes['galaxy'].should_run(False, P(), cp))   # offroad too: the head unit can re-enable
+
+  def test_card_goes_passive_with_no_output(self):
+    import inspect
+    from openpilot.selfdrive.car import card
+    src = inspect.getsource(card)
+    self.assertIn('controller_available = self.CI.CC is not None and openpilot_enabled_toggle', src)
+    self.assertIn('safety_config.safetyModel = structs.CarParams.SafetyModel.noOutput', src)
+    self.assertIn('if not self.CP.passive and initialized:\n      self.controls_update(', src)
+
+
 if __name__ == '__main__':
   unittest.main()
