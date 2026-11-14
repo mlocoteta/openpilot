@@ -923,6 +923,13 @@ def _read_params():
 FUEL = FuelTrip()
 
 
+def last_drive_car_params_bytes(params):
+  """CarParams bytes of the last drive. card saves CarParamsPersistent in the schema-cache envelope (put_cache:
+  SPCACHE magic + header), not raw capnp, so it is read with get_cache; a stale/incompatible value is a miss (None)."""
+  from openpilot.starpilot.schema_cache import get_cache
+  return get_cache(params, 'CarParamsPersistent')
+
+
 class MessagingHudReader:
   def __init__(self):
     from openpilot.cereal import messaging
@@ -1080,7 +1087,7 @@ class MessagingHudReader:
       self.last_drive_cp_at = now
       try:
         from opendbc.car.structs import car
-        raw = self.params.get('CarParamsPersistent')
+        raw = last_drive_car_params_bytes(self.params)
         self.last_drive_cp = self.messaging.log_from_bytes(raw, car.CarParams) if raw else None
       except Exception:
         self.last_drive_cp = None

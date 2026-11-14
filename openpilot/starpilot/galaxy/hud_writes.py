@@ -61,11 +61,11 @@ def configured_board(params):
 def last_drive_board(params):
   """Board of the last drive from CarParamsPersistent (TI safety bit), None when unknown / not a 9G / openpilot off."""
   try:
-    raw = params.get('CarParamsPersistent')
+    from opendbc.car.structs import car
+    from openpilot.starpilot.galaxy.hud import TI_SAFETY_PARAM, last_drive_car_params_bytes
+    raw = last_drive_car_params_bytes(params)   # schema-cache envelope, not raw capnp
     if not raw:
       return None
-    from cereal import car
-    from openpilot.starpilot.galaxy.hud import TI_SAFETY_PARAM
     with car.CarParams.from_bytes(raw) as cp:
       if str(cp.carFingerprint) != 'HONDA_ACCORD_9G' or cp.passive:
         return None
