@@ -290,3 +290,26 @@ def test_firmware3_drops_back_to_firmware2_when_520_stops():
   # last 520 at tick 50; firmware 3 must be gone 0.5 s later and stay gone
   assert all(o == 0 for o in opts[102:])
   assert not ci.CS.ssv3.fw3 and cs.steeringTorqueEps == 0 and not ci.CS.ssv3.eps_lkas_ack
+
+
+def test_tx_all_lkas_data_is_never_sent():
+  # firmware agent 2026-11-14: never send bit 17 (fw3 sends raw frames anyway; fw2 drops 520 with it)
+  assert Ssv3Option.SENDABLE == 0x0D
+  ci = CarInterface(accord())
+  packer = CANPacker(ACCORD_DBC)
+  ci.CC.ssv3.requested_options = Ssv3Option.ALL
+  cc = structs.CarControl(latActive=True, enabled=True)
+  opts = []
+  for tick in range(60):
+    board = [(400, fw3_400(tick, lkas_ack=True), 0), (427, fw3_427(tick, -60), 0)]
+    if tick % 10 == 0:
+      board.append((520, ss_status(tick // 10, 3), 0))
+    t = 1_000_000_000 + tick * 10_000_000
+    ci.update([(t, car_frames(packer, tick, board))])
+    _, sends = ci.apply(cc.as_reader(), t)
+    opts.append(next(f for f in sends if f[0] == 0xE4)[1][2] & 0x0F)
+  assert ci.CS.ssv3.fw3
+  assert opts[-1] == Ssv3Option.SENDABLE
+  assert not any(o & Ssv3Option.TX_ALL_LKAS_DATA for o in opts)
+  ci.CC.ssv3.requested_options = Ssv3Option.TX_ALL_LKAS_DATA
+  assert ci.CC.ssv3.options(ci.CS) == 0
