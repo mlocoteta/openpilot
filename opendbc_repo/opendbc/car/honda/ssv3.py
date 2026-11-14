@@ -42,6 +42,9 @@ class Ssv3Option:
   LSB_TOGGLE_DISABLE = 0x04
   ZERO_TORQUE_KEEPS_LKAS_ON = 0x08
   ALL = 0x0F
+  # TX_ALL_LKAS_DATA is never sent (firmware agent, 2026-11-14): firmware 3 transmits 523/524 regardless,
+  # and on firmware 2 bit 17 silently drops frame 520. The param stays, but the bit never reaches the wire.
+  SENDABLE = ALL & ~TX_ALL_LKAS_DATA
 
 
 def ssv3_qualified(CP) -> bool:
@@ -138,7 +141,7 @@ class Ssv3Controller:
     ssv3 = getattr(CS, "ssv3", None)
     if ssv3 is None or not ssv3.fw3:
       return 0
-    return int(self.requested_options) & Ssv3Option.ALL
+    return int(self.requested_options) & Ssv3Option.SENDABLE
 
   def apply(self, can_sends, CS, lkas_bus: int) -> None:
     """Sets the option bits in this frame's 0xE4 (byte 2 low nibble) and redoes the Honda checksum.
