@@ -143,6 +143,8 @@ def empty():
     'personalityWrite': True,   # Accord 4.2: POST /api/hud/personality exists on this build (the head unit enables tap-to-change)
     'steeringBoard': None,      # 9G TI/SSV3: steering_board() below; null on other cars / before CarParams
     'steeringBoardWrite': True,  # POST /api/hud/steeringBoard exists on this build
+    'openpilotEnabled': None,   # openpilot_enabled() below: {configured, active, pendingRestart}; off = datalogger
+    'openpilotEnabledWrite': True,  # POST /api/hud/openpilotEnabled exists on this build
     'slc': None,
     'egpu': None,
     'blinker': None, 'gear': None,
@@ -207,8 +209,9 @@ def ti_car(car_params):
     return None
 
 
-# 9G steering board (opendbc/car/honda/steering_board.py). Presence = frame seen on bus 0 this drive (the TI only
-# talks once openpilot commands it, so on an SSV3-only drive a fitted TI reads tiPresent false).
+# 9G steering board (opendbc/car/honda/steering_board.py). Presence = frame seen on bus 0 this drive OR heard by card
+# within PRESENT_DAYS (AccordSteeringBoardSeen, starpilot/car/honda/steering_board_watch.py). The TI only talks once
+# openpilot commands it, so an SSV3-only drive never hears a fitted TI; the persisted record keeps it present.
 TI_FEEDBACK_ADDR = 0x24A
 SSV3_STATUS = ((0x190, 5), (0x208, 3))
 SSV3_VERSION_ADDR = 0x208
@@ -241,14 +244,41 @@ def configured_board(ti_enabled, override):
   return 'ti' if ti_enabled and override != 'ssv3' else 'ssv3'
 
 
-def steering_board(car_params, ti_enabled, override, seen):
-  """/api/hud steeringBoard: configured (next start), active (this drive), presence seen this drive, pendingRestart."""
+def _passive(car_params):
+  try:
+    return bool(car_params.passive)
+  except (AttributeError, RuntimeError, TypeError):
+    return None
+
+
+def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall=None):
+  """/api/hud steeringBoard: configured (next start), active (this / the last drive; null with openpilot off),
+  presence (this drive or card's record within PRESENT_DAYS), tiLastSeen / ssv3LastSeen (epoch s from card's record,
+  null = never heard; numbers because the head unit's 4.2.4 parser reads epoch s/ms), pendingRestart."""
+  from openpilot.starpilot.car.honda.steering_board_watch import parse_seen, seen_recently
   ti = ti_car(car_params)
-  active = None if ti is None else 'ti' if ti else 'ssv3'
+  active = None if ti is None or _passive(car_params) else 'ti' if ti else 'ssv3'
   configured = configured_board(ti_enabled, override)
   seen = seen or {}
-  return {'configured': configured, 'active': active, 'tiPresent': bool(seen.get('ti')), 'ssv3Present': bool(seen.get('ssv3')),
-          'ssv3Firmware': seen.get('version'),
+  record = parse_seen(record)
+  now_wall = time.time() if now_wall is None else now_wall
+  version = seen.get('version')
+  if version is None:
+    version = record['ssv3Firmware']
+  return {'configured': configured, 'active': active,
+          'tiPresent': bool(seen.get('ti')) or seen_recently(record, 'ti', now_wall),
+          'ssv3Present': bool(seen.get('ssv3')) or seen_recently(record, 'ssv3', now_wall),
+          'ssv3Firmware': version, 'tiLastSeen': record['ti'], 'ssv3LastSeen': record['ssv3'],
+          'pendingRestart': bool(configured is not None and active is not None and configured != active)}
+
+
+def openpilot_enabled(car_params, configured):
+  """/api/hud openpilotEnabled: configured = OpenpilotEnabledToggle (next start), active = not CarParams.passive of
+  this / the last drive (False = datalogger), pendingRestart when they differ."""
+  passive = _passive(car_params) if car_params is not None else None
+  active = None if passive is None else not passive
+  configured = configured if isinstance(configured, bool) else None
+  return {'configured': configured, 'active': active,
           'pendingRestart': bool(configured is not None and active is not None and configured != active)}
 
 
@@ -787,7 +817,7 @@ def _egpu(msgs, fresh, onroad):
   return result
 
 
-def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None, doors=None, route=None, board=None):
+def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None, doors=None, route=None, board=None, op_enabled=None):
   """Project a fixed allowlist; missing or stale services stay null, never zero.
 
   msgs: service -> capnp reader (or None); fresh: service -> bool. seen_moving: the caller's v2.1 track memory
@@ -859,6 +889,7 @@ def extract(msgs, fresh, is_metric=None, seen_moving=None, fuel=None, doors=None
     result['tracks'] = track_lanes(found, lanes) if found is not None else None
   result['fuel'] = fuel if isinstance(fuel, dict) else None
   result['steeringBoard'] = board if isinstance(board, dict) else None
+  result['openpilotEnabled'] = op_enabled if isinstance(op_enabled, dict) else None
   if isinstance(route, dict):
     result['ahead'] = route.get('ahead')
     result['lanes'] = route.get('lanes')
@@ -907,7 +938,9 @@ class MessagingHudReader:
     self.route = RouteAhead()
     self.can_sock = None
     self.board_seen = {}        # this drive: {'ti', 'ssv3', 'version'}; cleared offroad
-    self.board_params = (None, None)
+    self.board_params = (None, None, None, None)   # TorqueInterceptorEnabled, AccordSteeringBoard, Seen record, OpenpilotEnabledToggle
+    self.last_drive_cp = None
+    self.last_drive_cp_at = None
     self.board_params_at = None
     self.params = _read_params()
     self.is_metric = None
@@ -1004,10 +1037,13 @@ class MessagingHudReader:
     car_state = msgs['carState']
     route = self.route.value(msgs['starpilotNavigation'], finite(_field(car_state, 'vEgo')) if car_state is not None else None, now)
     board = None
-    if self._fuel_car(msgs['carParams']):
-      ti_enabled, override = self._board_params(now)
-      board = steering_board(msgs['carParams'], ti_enabled, override, self.board_seen)
-    values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel, doors, route, board)
+    # offroad (car in ACC: the head unit runs, card doesn't) both blocks fall back to the last drive's CarParams
+    board_cp = msgs['carParams'] if msgs['carParams'] is not None else self._last_drive_car_params(now)
+    ti_enabled, override, record, op_toggle = self._board_params(now)
+    if self._fuel_car(board_cp):
+      board = steering_board(board_cp, ti_enabled, override, self.board_seen, record)
+    op_enabled = openpilot_enabled(board_cp, op_toggle) if self.params is not None else None
+    values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel, doors, route, board, op_enabled)
     current = core_fresh(values, fresh)
     core = ('selfdriveState', 'carState') if values['onroad'] else ('deviceState',)
     source_age = max(ages[key] for key in core) if current else None
@@ -1015,18 +1051,40 @@ class MessagingHudReader:
     return HudReading(values, current, source_age, signature)
 
   def _board_params(self, now):
-    """(TorqueInterceptorEnabled, AccordSteeringBoard), re-read at most every BOARD_PARAMS_S."""
+    """(TorqueInterceptorEnabled, AccordSteeringBoard, AccordSteeringBoardSeen, OpenpilotEnabledToggle), re-read at most
+    every BOARD_PARAMS_S; an unreadable value is None."""
     if self.params is None:
-      return None, None
+      return None, None, None, None
     if self.board_params_at is None or now - self.board_params_at >= BOARD_PARAMS_S:
       self.board_params_at = now
-      try:
-        raw = self.params.get('AccordSteeringBoard')
-        override = raw.decode('ascii', 'replace') if isinstance(raw, bytes) else (raw or '')
-        self.board_params = (bool(self.params.get_bool('TorqueInterceptorEnabled')), override)
-      except Exception:
-        self.board_params = (None, None)
+      values = []
+      for read in (lambda: bool(self.params.get_bool('TorqueInterceptorEnabled')),
+                   lambda: self.params.get('AccordSteeringBoard'),
+                   lambda: self.params.get('AccordSteeringBoardSeen'),
+                   lambda: self.params.get('OpenpilotEnabledToggle')):
+        try:
+          values.append(read())
+        except Exception:
+          values.append(None)
+      ti_enabled, raw, record, toggle = values
+      override = raw.decode('ascii', 'replace') if isinstance(raw, bytes) else (raw or '')
+      toggle = True if toggle in (True, b'1', '1') else False if toggle in (False, b'0', '0') else None
+      self.board_params = (ti_enabled, override if ti_enabled is not None else None, record, toggle)
     return self.board_params
+
+  def _last_drive_car_params(self, now):
+    """CarParamsPersistent (the last drive's CarParams) for the offroad steeringBoard / openpilotEnabled blocks only."""
+    if self.params is None:
+      return None
+    if self.last_drive_cp_at is None or now - self.last_drive_cp_at >= PARAMS_RETRY_S:
+      self.last_drive_cp_at = now
+      try:
+        from opendbc.car.structs import car
+        raw = self.params.get('CarParamsPersistent')
+        self.last_drive_cp = self.messaging.log_from_bytes(raw, car.CarParams) if raw else None
+      except Exception:
+        self.last_drive_cp = None
+    return self.last_drive_cp
 
   def _fuel_car(self, car_params):
     return car_params is not None and _text(car_params, 'carFingerprint', 60) == FUEL_CAR

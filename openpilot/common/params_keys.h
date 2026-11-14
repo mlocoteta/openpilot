@@ -46,6 +46,10 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     // 9G steering board: "ti" / "ssv3" force a board, anything else = auto (opendbc/car/honda/steering_board.py)
     {"AccordSteeringBoard", {PERSISTENT, STRING, "auto"}},
     {"TorqueInterceptorMissing", {PERSISTENT, BOOL, "0"}},
+    // 9G: last time each board was heard on bus 0 {"ti": epoch|null, "ssv3": epoch|null, "ssv3Firmware": n|null} (steering_board_watch)
+    {"AccordSteeringBoardSeen", {PERSISTENT, JSON}},
+    // board configured before the last head-unit switch: switching back to it is always allowed (galaxy/hud_writes)
+    {"AccordSteeringBoardPrevious", {PERSISTENT, STRING}},
     // Honda 9G Accord TI lateral controller (F03). Names, formats and defaults as on 6.x.
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1"}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1"}},

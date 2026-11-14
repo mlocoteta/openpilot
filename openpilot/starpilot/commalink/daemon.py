@@ -138,7 +138,7 @@ class Allow:
         return None if a in NAV_ACTIONS else "navigation action not allowed"
       if p == "/api/hud/personality":   # Accord 4.2 speed profiles v1 (Galaxy validates the name + rate)
         return None
-      if p == "/api/hud/steeringBoard":   # 9G TI/SSV3 choice for the next start (Galaxy validates + rate limits)
+      if p in ("/api/hud/steeringBoard", "/api/hud/openpilotEnabled"):   # next-start choices (Galaxy validates + rate limits)
         return None
       return None if p == "/api/navigation/search" else "not on the CommaLink allowlist"
     return "not on the CommaLink allowlist"
