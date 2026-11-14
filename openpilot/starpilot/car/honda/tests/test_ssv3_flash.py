@@ -110,6 +110,9 @@ class FakeTransport:
     out, self.board.out = self.board.out, []
     yield from out
 
+  def health(self):
+    return dict(IGN_ON)
+
   def close(self):
     self.set_mode("silent")
 
@@ -421,3 +424,29 @@ def test_panda_bus_transport(fake_time):
   assert sum(1 for c in p.calls if c[0] == "hb") == n + 1         # heartbeats keep the panda out of SILENT
   bus.close()
   assert p.calls[-1][:2] == ("mode", int(CarParams.SafetyModel.silent))
+
+
+def test_waits_for_the_board_to_power_up(fake_time):
+  # openpilot stopped while offroad, then the ignition goes ON (P, engine off): the board appears late
+  board, t = setup(fake_time, extra=[PARK_AUTO, STOPPED])
+  board.present = False
+  on_at = fake_time.t + 20.0
+  orig = board.tick
+
+  def tick():
+    if not board.present and fake_time.t >= on_at:
+      board.present = True
+      board.next_status = fake_time.t + 0.1
+    orig()
+  board.tick = tick
+  report = {}
+  assert sf.run_hello(t, report, None, wait_board=60) == 0      # health read after the wait: ignition on
+  assert report["health"]["ignition_line"] and report["before"]["parked"] is True
+
+
+def test_wait_board_gives_up(fake_time):
+  board, t = setup(fake_time, present=False)
+  start = fake_time.t
+  with pytest.raises(sf.GuardError, match="no SS_STATUS"):
+    sf.run_hello(t, {}, IGN_OFF, wait_board=10)
+  assert 10 <= fake_time.t - start < 15 and t.sent == []

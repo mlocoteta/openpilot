@@ -368,8 +368,20 @@ def wait_for_app(transport, before: dict, max_wait: float, step: float = 1.0, cl
 
 # ---------- modes ----------
 
-def run_hello(transport, report: dict, health: dict):
-  pre = listen(transport, 1.0)
+def wait_for_board(transport, wait: float, clock=None) -> BusSnapshot:
+  """Listen in 1 s windows until SS_STATUS (520) shows up or `wait` seconds pass. Lets the owner stop
+  openpilot while offroad, then turn the ignition to ON (engine off, P) to power the board."""
+  clock = clock or time.monotonic
+  start = clock()
+  snap = listen(transport, 1.0)
+  while SS_STATUS not in snap.last and clock() - start < wait:
+    snap = listen(transport, 1.0)
+  return snap
+
+
+def run_hello(transport, report: dict, health=None, wait_board: float = 0.0):
+  pre = wait_for_board(transport, wait_board)
+  health = transport.health() if health is None else health   # ignition may have changed while waiting
   report["before"] = pre.summary()
   report["health"] = {k: health.get(k) for k in ("ignition_line", "ignition_can", "voltage", "safety_mode", "controls_allowed")}
   before = check_bus_guards(pre, health)
@@ -408,13 +420,15 @@ def run_hello(transport, report: dict, health: dict):
   return 0
 
 
-def run_flash(transport, report: dict, health: dict, firmware: str, tools_dir: str):
+def run_flash(transport, report: dict, health, firmware: str, tools_dir: str, wait_board: float = 0.0):
   sys.path.insert(0, tools_dir)
   import flash_can   # noqa: E402  (LKAS_EPS_V3 tools/, copied next to this file)
   import ssv3_image  # noqa: E402
   app = ssv3_image.load_app(firmware)
   report["image"] = {"path": firmware, "bytes": len(app), "crc": f"{ssv3_image.stm32_crc(app):08x}"}
-  pre = listen(transport, 1.0)
+  pre = wait_for_board(transport, wait_board)
+  health = transport.health() if health is None else health
+  report["health"] = {k: health.get(k) for k in ("ignition_line", "ignition_can", "voltage", "safety_mode", "controls_allowed")}
   report["before"] = pre.summary()
   before = check_bus_guards(pre, health)
   report["guards"] = "passed"
@@ -444,6 +458,8 @@ def main(argv=None):
   ap.add_argument("--confirm-flash", action="store_true", help="required with --flash")
   ap.add_argument("--expected-build", type=int, help="FIRMWARE_BUILD the new image reports")
   ap.add_argument("--bus", type=int, default=0)
+  ap.add_argument("--wait-board", type=float, default=0.0,
+                  help="seconds to wait for the board's 520 (time to turn the ignition ON, engine off, P)")
   ap.add_argument("--report", default="-")
   ap.add_argument("--tools-dir", default=os.path.dirname(os.path.abspath(__file__)))
   args = ap.parse_args(argv)
@@ -457,15 +473,15 @@ def main(argv=None):
   try:
     check_host_guards()
     transport = PandaBus(args.bus)
-    health = transport.health()
     if args.info:
-      snap = listen(transport, 1.0)
+      snap = wait_for_board(transport, args.wait_board)
+      report["health"] = transport.health()
       report["before"] = snap.summary()
       rc = 0
     elif args.hello:
-      rc = run_hello(transport, report, health)
+      rc = run_hello(transport, report, None, args.wait_board)
     else:
-      rc = run_flash(transport, report, health, args.flash, args.tools_dir)
+      rc = run_flash(transport, report, None, args.flash, args.tools_dir, args.wait_board)
   except GuardError as e:
     report["refused"] = str(e)
     rc = 5
