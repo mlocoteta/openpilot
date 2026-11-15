@@ -43,6 +43,10 @@ class FakeParams:
     FakeParams.values[key] = value
     FakeParams.writes.append((key, value))
 
+  def remove(self, key):
+    FakeParams.values.pop(key, None)
+    FakeParams.writes.append((key, None))
+
 
 def parked(**extra):
   FakeParams.values = {'IsOffroad': True, 'IsEngaged': False, 'TorqueInterceptorEnabled': True, 'AccordSteeringBoard': 'auto',
@@ -114,24 +118,81 @@ class HudWritesServerTest(unittest.TestCase):
       self.assertEqual(self.req('POST', '/api/hud/steeringBoard', bad, self.cookie)[0], 400, bad)
     self.assertEqual(FakeParams.writes, [])
 
-  def test_409_onroad(self):
+  def test_onroad_write_is_staged_not_live(self):
     for offroad in (False, None):   # onroad, or IsOffroad missing (manager not up / unknown)
+      parked(AccordSteeringBoardSeen={'ti': NOW - DAY, 'ssv3': NOW - DAY, 'ssv3Firmware': 3})
       FakeParams.values['IsOffroad'] = offroad
-      status, body = self.board('ssv3')
-      self.assertEqual(status, 409, offroad); self.assertIn('offroad', body['error'])
-    self.assertEqual(FakeParams.writes, [])
+      self.assertEqual(self.board('ssv3'), (200, {'applied': 'next_start', 'board': 'ssv3', 'staged': True}), offroad)
+      self.assertEqual(self.enabled(False), (200, {'applied': 'next_start', 'enabled': False, 'staged': True}), offroad)
+      self.assertEqual(FakeParams.writes, [('AccordSteeringBoardPending', 'ssv3'), ('OpenpilotEnabledPending', '0')])
+      self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], True)    # live params untouched
+      self.assertIs(FakeParams.values['OpenpilotEnabledToggle'], True)
 
-  def test_409_engaged(self):
+  def test_engaged_write_is_staged(self):
     FakeParams.values['IsEngaged'] = True
-    self.assertEqual(self.board('ssv3')[0], 409)
+    self.assertEqual(self.board('ssv3')[1].get('staged'), True)
+    self.assertEqual(self.enabled(False)[1].get('staged'), True)
+    self.assertEqual([w[0] for w in FakeParams.writes], ['AccordSteeringBoardPending', 'OpenpilotEnabledPending'])
+
+  def test_reenable_onroad_is_staged(self):
+    parked(OpenpilotEnabledToggle=False); FakeParams.values['IsOffroad'] = False
+    self.assertEqual(self.enabled(True), (200, {'applied': 'next_start', 'enabled': True, 'staged': True}))
+    self.assertEqual(FakeParams.values['OpenpilotEnabledPending'], '1')
+    self.assertIs(FakeParams.values['OpenpilotEnabledToggle'], False)
+
+  def test_staged_applied_on_offroad(self):
+    FakeParams.values['IsOffroad'] = False
+    self.board('ssv3'); self.enabled(False)
+    self.assertEqual(hud_writes.apply_pending(FakeParams()), [])           # still onroad: nothing
+    self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], True)
+    FakeParams.values['IsOffroad'] = True; FakeParams.values['IsEngaged'] = True
+    self.assertEqual(hud_writes.apply_pending(FakeParams()), [])           # stale engaged flag: wait
+    FakeParams.values['IsEngaged'] = False
+    self.assertEqual(hud_writes.apply_pending(FakeParams()), ['AccordSteeringBoardPending', 'OpenpilotEnabledPending'])
+    self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], False)
+    self.assertEqual(FakeParams.values['AccordSteeringBoard'], 'auto')
+    self.assertEqual(FakeParams.values['AccordSteeringBoardPrevious'], 'ti')
+    self.assertIs(FakeParams.values['OpenpilotEnabledToggle'], False)
+    self.assertNotIn('AccordSteeringBoardPending', FakeParams.values)      # cleared
+    self.assertNotIn('OpenpilotEnabledPending', FakeParams.values)
+    self.assertEqual(hud_writes.apply_pending(FakeParams()), [])           # idempotent
+
+  def test_pending_applier_step(self):
+    FakeParams.values['IsOffroad'] = False
+    self.board('ssv3')
+    applier = hud_writes.PendingApplier(FakeParams)
+    applier.step(); self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], True)
+    FakeParams.values['IsOffroad'] = True
+    applier.step(); self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], False)
+
+  def test_offroad_write_supersedes_staged(self):
+    FakeParams.values['IsOffroad'] = False
+    self.board('ssv3'); self.enabled(False)
+    FakeParams.values['IsOffroad'] = True
+    self.assertEqual(self.board('ti'), (200, {'applied': 'next_start', 'board': 'ti'}))
+    self.assertEqual(self.enabled(True), (200, {'applied': 'next_start', 'enabled': True}))
+    self.assertNotIn('AccordSteeringBoardPending', FakeParams.values)
+    self.assertNotIn('OpenpilotEnabledPending', FakeParams.values)
+    self.assertEqual(hud_writes.apply_pending(FakeParams()), [])
+    self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], True)
+
+  def test_staged_switch_back_allowed(self):
+    # TI last seen 40 days ago, now configured SSV3: onroad switch to TI still staged (previous / last drive board)
+    parked(AccordSteeringBoardSeen={'ti': NOW - 40 * DAY, 'ssv3': NOW, 'ssv3Firmware': 3}, TorqueInterceptorEnabled=False,
+           AccordSteeringBoardPrevious='ti')
+    FakeParams.values['IsOffroad'] = False
+    self.assertEqual(self.board('ti'), (200, {'applied': 'next_start', 'board': 'ti', 'staged': True}))
+    parked(AccordSteeringBoardSeen={'ti': None, 'ssv3': NOW, 'ssv3Firmware': 3}, TorqueInterceptorEnabled=False)
+    FakeParams.values['IsOffroad'] = False
+    self.assertEqual(self.board('ti')[0], 409)     # board not fitted: refused onroad too
     self.assertEqual(FakeParams.writes, [])
 
-  def test_409_unreadable(self):
+  def test_unreadable_stages(self):
     for key in ('IsOffroad', 'IsEngaged'):
       FakeParams.unreadable = {key}
-      self.assertEqual(self.board('ssv3')[0], 409, key)
-      self.assertEqual(self.enabled(False)[0], 409, key)
-    self.assertEqual(FakeParams.writes, [])
+      self.assertEqual(self.board('ssv3')[1].get('staged'), True, key)
+      self.assertEqual(self.enabled(False)[1].get('staged'), True, key)
+    self.assertNotIn('TorqueInterceptorEnabled', [w[0] for w in FakeParams.writes])
 
   def test_409_absent_board(self):
     FakeParams.values['AccordSteeringBoardSeen'] = {'ti': NOW - DAY, 'ssv3': None, 'ssv3Firmware': None}
@@ -157,9 +218,11 @@ class HudWritesServerTest(unittest.TestCase):
       self.server, saved = server, self.server
       status, _, headers = self.req('GET', '/api/auth/session')
       self.cookie = headers['Set-Cookie'].split(';', 1)[0]
-      FakeParams.values['IsOffroad'] = False
-      self.assertEqual(self.board('ssv3')[0], 409)               # refusals don't use up the window
-      FakeParams.values['IsOffroad'] = True
+      FakeParams.values['AccordSteeringBoardSeen'] = {'ti': None, 'ssv3': None}
+      FakeParams.values['TorqueInterceptorEnabled'] = False
+      self.assertEqual(self.board('ti')[0], 409)                 # refusals don't use up the window
+      FakeParams.values['AccordSteeringBoardSeen'] = {'ti': NOW - DAY, 'ssv3': NOW - DAY}
+      FakeParams.values['TorqueInterceptorEnabled'] = True
       self.assertEqual(self.board('ssv3')[0], 200)
       self.assertEqual(self.board('ti')[0], 429)
       self.assertEqual(self.enabled(False)[0], 200)              # separate window per setting
@@ -199,11 +262,6 @@ class HudWritesServerTest(unittest.TestCase):
   def test_disable_refusals(self):
     for bad in ({'enabled': 'false'}, {'enabled': 0}, {}, {'enabled': None}):
       self.assertEqual(self.req('POST', '/api/hud/openpilotEnabled', bad, self.cookie)[0], 400, bad)
-    FakeParams.values['IsOffroad'] = False
-    self.assertEqual(self.enabled(False)[0], 409)
-    FakeParams.values['IsOffroad'] = True
-    FakeParams.values['IsEngaged'] = True
-    self.assertEqual(self.enabled(False)[0], 409)
     self.assertEqual(FakeParams.writes, [])
 
   def test_reenable_never_locked_out_offroad(self):
@@ -212,7 +270,8 @@ class HudWritesServerTest(unittest.TestCase):
     FakeParams.unreadable = {'IsEngaged', 'AccordSteeringBoardSeen', 'CarParamsPersistent'}
     self.assertEqual(self.enabled(True), (200, {'applied': 'next_start', 'enabled': True}))
     FakeParams.values['IsOffroad'] = False
-    self.assertEqual(self.enabled(True)[0], 409)   # still never while driving
+    self.assertEqual(self.enabled(True)[1].get('staged'), True)   # while driving: staged, not live
+    self.assertIs(FakeParams.values['OpenpilotEnabledToggle'], False)
 
   def test_commalink_allowlist(self):
     from openpilot.starpilot.commalink.daemon import Allow
@@ -238,7 +297,7 @@ class SteeringBoardHudTest(unittest.TestCase):
                                    safetyConfigs=[types.SimpleNamespace(safetyModel='hondaNidec', safetyParam=param)])
     on_ti = steering_board(cp(548 | TI_SAFETY_PARAM), False, 'auto', {'ti': True, 'ssv3': True, 'version': 3}, None, NOW)
     self.assertEqual(on_ti, {'configured': 'ssv3', 'active': 'ti', 'tiPresent': True, 'ssv3Present': True, 'ssv3Firmware': 3,
-                             'tiLastSeen': None, 'ssv3LastSeen': None, 'pendingRestart': True})
+                             'tiLastSeen': None, 'ssv3LastSeen': None, 'staged': None, 'pendingRestart': True})
     same = steering_board(cp(548), False, '', {'ssv3': True}, None, NOW)
     self.assertEqual((same['active'], same['pendingRestart'], same['tiPresent'], same['ssv3Firmware']), ('ssv3', False, False, None))
     self.assertEqual(steering_board(cp(548), True, 'ssv3', {}, None, NOW)['configured'], 'ssv3')
@@ -246,6 +305,18 @@ class SteeringBoardHudTest(unittest.TestCase):
     self.assertEqual((unknown['configured'], unknown['active'], unknown['pendingRestart']), (None, None, False))
     self.assertTrue(empty()['steeringBoardWrite'])
     self.assertIsNone(empty()['steeringBoard'])
+
+  def test_staged_blocks(self):
+    from openpilot.starpilot.galaxy.hud import steering_board, openpilot_enabled
+    cp = types.SimpleNamespace(brand='honda', passive=False, safetyConfigs=[types.SimpleNamespace(safetyModel='hondaNidec', safetyParam=548)])
+    b = steering_board(cp, False, 'auto', {}, None, NOW, staged='ti')
+    self.assertEqual((b['configured'], b['active'], b['staged'], b['pendingRestart']), ('ssv3', 'ssv3', 'ti', True))
+    self.assertIsNone(steering_board(cp, False, 'auto', {}, None, NOW, staged='bogus')['staged'])
+    self.assertFalse(steering_board(cp, False, 'auto', {}, None, NOW)['pendingRestart'])
+    o = openpilot_enabled(cp, True, False)
+    self.assertEqual(o, {'configured': True, 'active': True, 'staged': False, 'pendingRestart': True})   # staged False still pending
+    self.assertEqual(openpilot_enabled(cp, True), {'configured': True, 'active': True, 'staged': None, 'pendingRestart': False})
+    json.dumps(o)
 
   def test_persisted_presence(self):
     from openpilot.starpilot.galaxy.hud import steering_board
