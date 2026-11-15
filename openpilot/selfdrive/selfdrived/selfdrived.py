@@ -355,6 +355,10 @@ class SelfdriveD:
       show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed),
         drive_id=drive_id, eligible=eligible)
       self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
+      if self.CP.brand == 'honda':
+        from openpilot.starpilot.car.honda.ssv3_feed import blend_probe_alert_active
+        if blend_probe_alert_active(self.CP, self.sm):
+          self.events.add(EventName.ssv3BlendProbe)
       if show_low_speed:
         self.events.add(EventName.belowSteerSpeed)
       paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)

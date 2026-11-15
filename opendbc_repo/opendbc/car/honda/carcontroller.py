@@ -10,7 +10,7 @@ from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
-from opendbc.car.honda.ssv3 import Ssv3Controller, ssv3_qualified, ssv3_steer_command
+from opendbc.car.honda.ssv3 import ProbeInputs, ProbeState, Ssv3Controller, ssv3_qualified, ssv3_steer_command
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -158,6 +158,12 @@ class CarController(CarControllerBase):
     if _projection is not None:
       _projection.capture_honda(self.modified_civic_steering, CS)
     torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
+    if self.ssv3 is not None and (self.ssv3.requested_probe or self.ssv3.probe.state != ProbeState.IDLE):
+      # SSV3 path only (never TI): developer blend probe, default off. Replaces the torque value only; the rate limit
+      # below and the SSV3 command shaping still apply.
+      probe_torque = self.ssv3.probe.update(self.ssv3.requested_probe, ProbeInputs.from_car(CC, CS), self.params.STEER_MAX)
+      if probe_torque is not None:
+        torque_cmd = probe_torque
     limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
     _projection_previous = self.last_torque if _projection is not None else 0.
