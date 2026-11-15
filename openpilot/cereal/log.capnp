@@ -129,6 +129,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     aeb @92;
     userBookmark @95;
     userBookmarkNotPaired @104;
+    ssv3BlendProbe @105;  # Accord 9G SSV3 developer EPS torque-blend probe armed/running
     excessiveActuation @96;
     bigModelLoading @100;
     bigModelFailed @102;
