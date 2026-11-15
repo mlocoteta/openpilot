@@ -60,8 +60,9 @@ def test_other_hondas_unchanged():
 
 
 @pytest.mark.parametrize("firmware", (2, 3))
-@pytest.mark.parametrize("torque,expected", ((1.0, 239), (-1.0, -239), (0.5, 119), (-0.5, -119), (0.1, 23)))
+@pytest.mark.parametrize("torque,expected", ((1.0, 239), (-1.0, -239), (0.5, 120), (-0.5, -120), (0.1, 24)))
 def test_ssv3_sends_board_scaled_torque(firmware, torque, expected):
+  # the SSV3 path rounds to the nearest count (119.5 -> 120, 23.9 -> 24; ssv3_steer_command)
   # 0xE4 is positive when steering right, actuators.torque positive = left: sign flips
   torques = e4_torques(CarInterface(accord(False)), torque, firmware)
   assert torques[-1] == -expected
