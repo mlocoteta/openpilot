@@ -1924,7 +1924,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         with hud_personality_lock:
           from openpilot.common.params import Params
           params = Params()
-          reason = hud_writes.board_refusal(params, board) if board is not None else hud_writes.enabled_refusal(params, enabled)
+          # Not provably offroad (the comma reports onroad whenever the car is in accessory): stage, never change live params
+          staged = hud_writes.stage_needed(params, check_engaged=board is not None or not enabled)
+          reason = hud_writes.fitted_refusal(params, board) if board is not None else None
           if reason:
             self.json(409, {'error': reason})
             return
@@ -1933,15 +1935,27 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             return
           rate.mark()
           if board is not None:
-            hud_writes.write_board(params, board)
+            if staged:
+              hud_writes.stage_board(params, board)
+            else:
+              hud_writes.write_board(params, board)
+              hud_writes.clear_pending(params, hud_writes.BOARD_PENDING)
+          elif staged:
+            hud_writes.stage_enabled(params, enabled)
           else:
             params.put_bool('OpenpilotEnabledToggle', enabled)
+            hud_writes.clear_pending(params, hud_writes.ENABLED_PENDING)
+        note = ' (staged, applies next start)' if staged else ' (next start)'
+        body = {'applied': 'next_start'}
         if board is not None:
-          cloudlog.info(f"galaxy: hud steering board -> {board} (next start)")
-          self.json(200, {'applied': 'next_start', 'board': board})
+          cloudlog.info(f"galaxy: hud steering board -> {board}{note}")
+          body['board'] = board
         else:
-          cloudlog.info(f"galaxy: hud openpilot enabled -> {enabled} (next start)")
-          self.json(200, {'applied': 'next_start', 'enabled': enabled})
+          cloudlog.info(f"galaxy: hud openpilot enabled -> {enabled}{note}")
+          body['enabled'] = enabled
+        if staged:
+          body['staged'] = True
+        self.json(200, body)
         return
       if path == '/api/hud/personality':
         # Accord (Botty Car 4.2 speed profiles v1): the head unit picks the driving personality. Same param write as the
@@ -3320,6 +3334,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       from openpilot.starpilot.galaxy.starport_setup import remove_legacy_google_files
       remove_legacy_google_files()
   server.maintain_starport = maintain_starport
+  server.hud_write_lock = hud_personality_lock
   server.start_drive_history = lambda: statistics_owner().start()
   return server
 
@@ -3338,6 +3353,10 @@ def main():
   args = parser.parse_args()
   with make_server(port=args.port, host=args.host) as server:
     server.start_drive_history()
+    from openpilot.starpilot.galaxy.hud_writes import PendingApplier
+    from openpilot.common.params import Params
+    applier = PendingApplier(Params, log=cloudlog.info)
+    threading.Thread(target=applier.run, args=(server.hud_write_lock,), daemon=True, name='galaxy-hud-pending').start()
     print(f'Galaxy listening on {args.host}:{server.server_port}', flush=True)
     try:
       server.serve_forever()
