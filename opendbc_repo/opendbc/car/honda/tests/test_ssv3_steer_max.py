@@ -1,6 +1,6 @@
-"""9G SSV3 path: STEER_MAX 239 (the SSV3 board clamp), decided at startup from CarParams; the TI path keeps 2560.
+"""9G SSV3 path: STEER_MAX 240 (the SSV3 board clamp), decided at startup from CarParams; the TI path keeps 2560.
 
-The SSV3 (LKAS_EPS_V3 firmware 2 and 3) takes 0xE4 STEER_TORQUE as raw wire counts and clamps at 239, so the
+The SSV3 (LKAS_EPS_V3 firmware 2 and 3) takes 0xE4 STEER_TORQUE as raw wire counts and clamps at 240, so the
 old generic Honda 2560 scale saturated the board at ~9% of the command.
 """
 import pytest
@@ -43,8 +43,8 @@ def e4_torques(ci, torque, firmware, ticks=150, ti_feedback=False):
 
 def test_params_by_path():
   ssv3 = CarControllerParams(accord(False))
-  assert ssv3.STEER_MAX == SSV3_STEER_MAX == 239
-  assert ssv3.STEER_LOOKUP == ssv3.STEER_LOOKUP_V == [-239, 0, 239]
+  assert ssv3.STEER_MAX == SSV3_STEER_MAX == 240
+  assert ssv3.STEER_LOOKUP == ssv3.STEER_LOOKUP_V == [-240, 0, 240]
   ti_cp = accord(True)
   assert ti_qualified(ti_cp)
   ti = CarControllerParams(ti_cp)
@@ -60,18 +60,18 @@ def test_other_hondas_unchanged():
 
 
 @pytest.mark.parametrize("firmware", (2, 3))
-@pytest.mark.parametrize("torque,expected", ((1.0, 239), (-1.0, -239), (0.5, 120), (-0.5, -120), (0.1, 24)))
+@pytest.mark.parametrize("torque,expected", ((1.0, 240), (-1.0, -240), (0.5, 120), (-0.5, -120), (0.1, 24)))
 def test_ssv3_sends_board_scaled_torque(firmware, torque, expected):
   # the SSV3 path rounds to the nearest count (119.5 -> 120, 23.9 -> 24; ssv3_steer_command)
   # 0xE4 is positive when steering right, actuators.torque positive = left: sign flips
   torques = e4_torques(CarInterface(accord(False)), torque, firmware)
   assert torques[-1] == -expected
-  assert max(abs(x) for x in torques) == abs(expected) <= 239
+  assert max(abs(x) for x in torques) == abs(expected) <= 240
 
 
-def test_ssv3_full_command_never_exceeds_239():
+def test_ssv3_full_command_never_exceeds_240():
   torques = e4_torques(CarInterface(accord(False)), 1.0, 2, ticks=300)
-  assert min(torques) == -239 and max(torques) <= 0
+  assert min(torques) == -240 and max(torques) <= 0
 
 
 def test_ti_path_0xe4_still_zero_and_lookup_untouched():
