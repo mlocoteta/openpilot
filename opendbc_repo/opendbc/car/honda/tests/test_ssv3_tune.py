@@ -41,7 +41,7 @@ class Board:
   """onCanFrame(): steerRequest = requestBit && (torque != 0 || !ZERO_TORQUE_SENDS_OFF || zeroKeepsOn)."""
   def __init__(self):
     self.steer_command = 0
-    self.toggle = 0
+    self.last_sent = 0
 
   def on_0xe4(self, dat, driver_torque=0):
     request = bool(dat[2] & 0x80)
@@ -51,11 +51,12 @@ class Board:
     return request and (self.steer_command != 0 or zero_keeps)
 
   def wire(self):
-    # buildFrame() dither: a held v alternates with v - sign(v) (toward zero), outside the lead-in
+    # fw3 build 3 dither, applied AFTER the zero/LKAS-off decision in on_0xe4(): never the same non-zero value twice
+    # in a row; a repeat goes out one count closer to zero (held v -> v, v-1, v, v-1; held +-1 -> +-1, 0, +-1, 0)
     steer = self.steer_command
-    self.toggle ^= 1
-    if steer != 0 and self.toggle:
+    if steer != 0 and steer == self.last_sent:
       steer -= 1 if steer > 0 else -1
+    self.last_sent = steer
     return steer
 
 
@@ -147,16 +148,20 @@ def test_board_dither_toward_zero_never_crosses_zero():
   for v in list(range(-240, 0)) + list(range(1, 241)):
     b = Board()
     b.steer_command = v
-    seen = set()
+    seen = []
     for _ in range(4):
       w = b.wire()
-      seen.add(w)
+      seen.append(w)
       assert w * v >= 0, (v, w)          # same sign, or 0 for |v| = 1
       assert abs(w) <= abs(v) <= 240     # toward zero only, never above the 240 clamp
-    assert seen == {v, v - (1 if v > 0 else -1)}
+    step = 1 if v > 0 else -1
+    assert seen == [v, v - step, v, v - step]
   b = Board()
   b.steer_command = -1
-  assert {b.wire() for _ in range(4)} == {-1, 0}
+  assert [b.wire() for _ in range(4)] == [-1, 0, -1, 0]
+  # the dither comes after the LKAS decision: a wire 0 from a held +-1 still keeps the request on
+  assert b.on_0xe4((-1).to_bytes(2, "big", signed=True) + b"\x80")
+  assert b.wire() in (-1, 0)
 
 
 def test_board_clamps_at_240():
@@ -164,7 +169,7 @@ def test_board_clamps_at_240():
   for req in (300, 1000, 2047):
     for _ in range(5):
       b.on_0xe4(req.to_bytes(2, "big", signed=True) + b"\x80")
-    assert b.steer_command == 240 and {b.wire(), b.wire()} == {240, 239}
+    assert b.steer_command == 240 and [b.wire() for _ in range(4)] == [240, 239, 240, 239]
 
 
 # ---- through the real CarInterface ----
