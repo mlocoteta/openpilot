@@ -270,6 +270,7 @@ class HudWritesServerTest(unittest.TestCase):
     FakeParams.unreadable = {'IsEngaged', 'AccordSteeringBoardSeen', 'CarParamsPersistent'}
     self.assertEqual(self.enabled(True), (200, {'applied': 'next_start', 'enabled': True}))
     FakeParams.values['IsOffroad'] = False
+    FakeParams.values['OpenpilotEnabledToggle'] = False
     self.assertEqual(self.enabled(True)[1].get('staged'), True)   # while driving: staged, not live
     self.assertIs(FakeParams.values['OpenpilotEnabledToggle'], False)
 
