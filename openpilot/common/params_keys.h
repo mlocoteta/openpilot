@@ -50,6 +50,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AccordSteeringBoardSeen", {PERSISTENT, JSON}},
     // board configured before the last head-unit switch: switching back to it is always allowed (galaxy/hud_writes)
     {"AccordSteeringBoardPrevious", {PERSISTENT, STRING}},
+    // head-unit choices made while onroad / engaged: staged here, applied to the live params at the next offroad (galaxy/hud_writes)
+    {"AccordSteeringBoardPending", {PERSISTENT, STRING}},
+    {"OpenpilotEnabledPending", {PERSISTENT, STRING}},
     // Honda 9G Accord TI lateral controller (F03). Names, formats and defaults as on 6.x.
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1"}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1"}},
