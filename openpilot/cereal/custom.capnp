@@ -232,6 +232,14 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
     motorTorque @4 :Int16;  # STEER_MOTOR_TORQUE.MOTOR_TORQUE, signed on firmware 3
     lkasBlocked @5 :Bool;  # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
     options @6 :UInt8;  # 0xE4 byte 2 option bits actually sent
+    # Developer EPS torque-blend probe (SSV3BlendProbe; opendbc/car/honda/ssv3.py Ssv3BlendProbe)
+    blendProbeProgram @7 :UInt8;  # program id armed/running, 0 = off
+    blendProbeState @8 :UInt8;  # 0 idle, 1 armed, 2 hold (fixed command), 3 rest (normal control), 4 done
+    blendProbeWindow @9 :Int8;  # window index while hold/rest, -1 otherwise
+    blendProbeCommand @10 :Int16;  # 0xE4 wire counts held this frame (positive = right), 0 outside hold
+    blendProbeEnd @11 :UInt8;  # ProbeEnd: 1 completed, 2 latInactive, 3 brake, 4 gas, 5 cancel, 6 speed, 7 angle, 8 yaw, 9 epsFault, 10 timeLimit, 11 boardLost, 12 armTimeout, 13 badProgram, 14 stopped
+    blendProbeTime @12 :Float32;  # s since the first window started
+    steerStatus @13 :UInt8;  # raw 400 STEER_STATUS (EPS status bits)
   }
 
   struct ToyotaCruise {
