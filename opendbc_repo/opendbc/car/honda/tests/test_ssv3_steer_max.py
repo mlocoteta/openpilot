@@ -1,9 +1,9 @@
-"""9G SSV3: STEER_MAX 239 (the SSV3 board clamp) for every board firmware, fixed per platform at startup.
+"""9G SSV3: STEER_MAX 240 (the SSV3 board clamp) for every board firmware, fixed per platform at startup.
 
 Deliberate deviation from the firmware-2-identical rule of this branch (Mat, 2026-11-14): firmware 2 also clamps at
-239, so the old 2560 scale was wrong for it too. Not for upstreaming.
+240, so the old 2560 scale was wrong for it too. Not for upstreaming.
 
-The SSV3 (LKAS_EPS_V3 firmware 2 and 3) takes 0xE4 STEER_TORQUE as raw wire counts and clamps at 239, so the
+The SSV3 (LKAS_EPS_V3 firmware 2 and 3) takes 0xE4 STEER_TORQUE as raw wire counts and clamps at 240, so the
 old generic Honda 2560 scale saturated the board at ~9% of the command.
 """
 import pytest
@@ -40,8 +40,8 @@ def e4_torques(ci, torque, firmware, ticks=150):
 
 def test_params():
   ssv3 = CarControllerParams(accord())
-  assert ssv3.STEER_MAX == SSV3_STEER_MAX == 239
-  assert ssv3.STEER_LOOKUP == ssv3.STEER_LOOKUP_V == [-239, 0, 239]
+  assert ssv3.STEER_MAX == SSV3_STEER_MAX == 240
+  assert ssv3.STEER_LOOKUP == ssv3.STEER_LOOKUP_V == [-240, 0, 240]
   assert (ssv3.STEER_DELTA_UP, ssv3.STEER_DELTA_DOWN) == (3, 3)   # normalized rate limits unchanged
 
 
@@ -52,16 +52,16 @@ def test_other_hondas_unchanged():
 
 
 @pytest.mark.parametrize("firmware", (2, 3))
-@pytest.mark.parametrize("torque,expected", ((1.0, 239), (-1.0, -239), (0.5, 120), (-0.5, -120), (0.1, 24)))
+@pytest.mark.parametrize("torque,expected", ((1.0, 240), (-1.0, -240), (0.5, 120), (-0.5, -120), (0.1, 24)))
 def test_ssv3_sends_board_scaled_torque(firmware, torque, expected):
   # the SSV3 path rounds to the nearest count (119.5 -> 120, 23.9 -> 24; ssv3_steer_command)
   # 0xE4 is positive when steering right, actuators.torque positive = left: sign flips
   torques = e4_torques(CarInterface(accord()), torque, firmware)
   assert torques[-1] == -expected
-  assert max(abs(x) for x in torques) == abs(expected) <= 239
+  assert max(abs(x) for x in torques) == abs(expected) <= 240
 
 
-def test_ssv3_full_command_never_exceeds_239():
+def test_ssv3_full_command_never_exceeds_240():
   torques = e4_torques(CarInterface(accord()), 1.0, 2, ticks=300)
-  assert min(torques) == -239 and max(torques) <= 0
+  assert min(torques) == -240 and max(torques) <= 0
 

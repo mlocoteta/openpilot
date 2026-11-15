@@ -14,7 +14,7 @@ from opendbc.car.honda.values import CAR
 from opendbc.can import CANPacker
 
 # config.h
-STEER_MAX = 239
+STEER_MAX = 240
 STEER_DELTA = 100
 STEER_DRIVER_ALLOWANCE = 30
 STEER_DRIVER_MULTIPLIER = 18
@@ -39,7 +39,7 @@ class Board:
   """onCanFrame(): steerRequest = requestBit && (torque != 0 || !ZERO_TORQUE_SENDS_OFF || zeroKeepsOn)."""
   def __init__(self):
     self.steer_command = 0
-    self.last_lsb = 0
+    self.toggle = 0
 
   def on_0xe4(self, dat, driver_torque=0):
     request = bool(dat[2] & 0x80)
@@ -49,11 +49,11 @@ class Board:
     return request and (self.steer_command != 0 or zero_keeps)
 
   def wire(self):
-    # buildFrame() with STEER_LSB_TOGGLE = 1, outside the lead-in
+    # buildFrame() dither: a held v alternates with v - sign(v) (toward zero), outside the lead-in
     steer = self.steer_command
-    if steer != 0:
-      steer = (steer & ~1) | (self.last_lsb ^ 1)
-    self.last_lsb = steer & 1
+    self.toggle ^= 1
+    if steer != 0 and self.toggle:
+      steer -= 1 if steer > 0 else -1
     return steer
 
 
@@ -91,6 +91,7 @@ def test_other_hondas_untouched(identity):
   (0.0, True, 0, 1), (0.0, True, 5, 1), (0.0, True, -5, -1),
   (0.2, True, -5, 1), (-0.2, True, 5, -1), (0.49, True, 0, 1), (-0.49, True, 0, -1),
   (0.6, True, 0, 1), (-0.6, True, 0, -1), (1.4, True, 0, 1), (-1.6, True, 0, -2), (238.7, True, 0, 239), (-239.0, True, 0, -239),
+  (240.0, True, 0, 240), (-240.0, True, 0, -240),
   (0.0, False, 5, 0), (0.4, False, 5, 0), (-0.6, False, 0, -1), (71.7, False, 0, 72),
 ))
 def test_ssv3_steer_command(raw, lat, last, expected):
@@ -104,17 +105,28 @@ def test_rounding_is_symmetric():
     assert abs(ssv3_steer_command(raw, False, 0) - raw) <= 0.5
 
 
-def test_board_lsb_toggle_never_crosses_zero():
-  for v in list(range(-239, 0)) + list(range(1, 240)):
+def test_board_dither_toward_zero_never_crosses_zero():
+  for v in list(range(-240, 0)) + list(range(1, 241)):
     b = Board()
     b.steer_command = v
+    seen = set()
     for _ in range(4):
       w = b.wire()
-      assert w * v >= 0, (v, w)          # same sign, or 0 for v = +1
-      assert abs(w - v) <= 1
+      seen.add(w)
+      assert w * v >= 0, (v, w)          # same sign, or 0 for |v| = 1
+      assert abs(w) <= abs(v) <= 240     # toward zero only, never above the 240 clamp
+    assert seen == {v, v - (1 if v > 0 else -1)}
   b = Board()
   b.steer_command = -1
-  assert {b.wire() for _ in range(4)} == {-2, -1}
+  assert {b.wire() for _ in range(4)} == {-1, 0}
+
+
+def test_board_clamps_at_240():
+  b = Board()
+  for req in (300, 1000, 2047):
+    for _ in range(5):
+      b.on_0xe4(req.to_bytes(2, "big", signed=True) + b"\x80")
+    assert b.steer_command == 240 and {b.wire(), b.wire()} == {240, 239}
 
 
 # ---- through the real CarInterface ----

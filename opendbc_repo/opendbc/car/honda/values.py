@@ -12,7 +12,7 @@ VisualAlert = structs.CarControl.HUDControl.VisualAlert
 GearShifter = structs.CarState.GearShifter
 
 
-SSV3_STEER_MAX = 239  # 9G Accord SSV3 board clamp, STEER_TORQUE counts (firmware 2 and 3)
+SSV3_STEER_MAX = 240  # 9G Accord SSV3 board clamp, STEER_TORQUE counts (firmware 2 and 3)
 
 
 class CarControllerParams:
@@ -76,7 +76,7 @@ class CarControllerParams:
     apply_steering_profile(self, CP)
     if CP.carFingerprint == CAR.HONDA_ACCORD_9G:
       # 9G steers through the SSV3 board (every firmware): it takes STEER_TORQUE as raw wire counts and clamps at
-      # 239 (LKAS_EPS_V3 STEER_MAX), so full command = 239 instead of saturating at ~9% of 2560. Fixed per platform
+      # 240 (LKAS_EPS_V3 STEER_MAX), so full command = 240 instead of saturating at ~9% of 2560. Fixed per platform
       # at startup, never mid-drive.
       self.STEER_MAX = SSV3_STEER_MAX
       self.STEER_LOOKUP = [-SSV3_STEER_MAX, 0, SSV3_STEER_MAX]
