@@ -194,6 +194,23 @@ def run(ci, kind, ticks, options=0, request=True, torque=0.3):
   return states, e4
 
 
+def e4_fields(frame):
+  d = frame[1]
+  return int.from_bytes(d[0:2], "big", signed=True), d[2], d[3], d[4] >> 4
+
+
+def assert_same_but_ssv3_command(e4_new, e4_old):
+  """The SSV3 path rounds the torque and never sends an exact 0 while steering (ssv3_steer_command); every other
+  byte (request, option nibble, counter) is what upstream sends."""
+  assert len(e4_new) == len(e4_old)
+  for a, b in zip(e4_new, e4_old, strict=True):
+    (ta, b2a, b3a, ca), (tb, b2b, b3b, cb) = e4_fields(a), e4_fields(b)
+    assert (b2a, b3a, ca, a[0], a[2]) == (b2b, b3b, cb, b[0], b[2])
+    assert abs(ta - tb) <= 1
+    if b2a & 0x80:
+      assert ta != 0
+
+
 def upstream_ci():
   """The same car with the SSV3 additions switched off = Dom before this change."""
   ci = CarInterface(accord())
@@ -217,7 +234,8 @@ def test_firmware2_output_is_identical_with_every_option_requested(kind):
   ci_new = CarInterface(accord())
   states_new, e4_new = run(ci_new, kind, 300, options=Ssv3Option.ALL)
   states_old, e4_old = run(upstream_ci(), kind, 300)
-  assert e4_new == e4_old and len(e4_new) == 300
+  assert_same_but_ssv3_command(e4_new, e4_old)
+  assert len(e4_new) == 300
   assert all((f[1][2] & 0x0F) == 0 for f in e4_new)
   assert not ci_new.CS.ssv3.fw3
   for a, b in zip(states_new, states_old, strict=True):
@@ -229,7 +247,7 @@ def test_firmware2_output_is_identical_with_every_option_requested(kind):
 def test_firmware3_without_options_sends_upstream_bytes():
   _, e4_new = run(CarInterface(accord()), "fw3", 200)
   _, e4_old = run(upstream_ci(), "fw3", 200)
-  assert e4_new == e4_old
+  assert_same_but_ssv3_command(e4_new, e4_old)
 
 
 def test_firmware3_options_only_after_confirmation():
