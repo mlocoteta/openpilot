@@ -140,12 +140,16 @@ def apply_torque_interceptor(cp, requested: bool) -> None:
   """Startup only, before CarState/CarController exist. Sets or clears the TI safety bit."""
   if not ti_supported(cp):
     return
+  from opendbc.car.honda.ssv3 import apply_ssv3_lateral_tune, restore_shared_lateral_tune
   config = cp.safetyConfigs[0]
   if requested:
     config.safetyParam = int(config.safetyParam) | TI_SAFETY_PARAM
+    restore_shared_lateral_tune(cp)
     cp.steerActuatorDelay = TI_STEER_ACTUATOR_DELAY
   else:
     config.safetyParam = base_safety_param(config.safetyParam)
+    # SSV3 path (or no board): its own initial lateral tune; the TI keeps the shared params.toml tune.
+    apply_ssv3_lateral_tune(cp)
 
 
 def ti_output_headroom_limits(driver_torque_min, driver_torque_max, LIMITS):
