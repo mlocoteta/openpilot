@@ -218,6 +218,11 @@ class CarInterface(CarInterfaceBase):
     from opendbc.car.honda.parameter_profiles import apply_factory_profile
     apply_factory_profile(ret, candidate)
 
+    if candidate == CAR.HONDA_ACCORD_9G:
+      # the 9G steers through the SSV3 board here: its own initial lateral tune (opendbc/car/honda/ssv3.py)
+      from opendbc.car.honda.ssv3 import apply_ssv3_lateral_tune
+      apply_ssv3_lateral_tune(ret)
+
     if candidate == CAR.ACURA_RDX_3G_MMR:
       ret.dashcamOnly = is_release  # TODO: release from dashcam when there's enough driving data for torqued/paramsd to converge
 

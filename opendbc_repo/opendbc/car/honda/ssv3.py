@@ -34,6 +34,48 @@ FW3_CONFIRM_FRAMES = 3
 # 5 missed 10 Hz frames). Nothing is kept across ignition cycles: every drive starts as firmware 2.
 FW3_LOST_FRAMES = 50
 
+# Initial lateral tune for the SSV3 path (stock-LKAS dashcam drive 000000f3--740a520643, report
+# 2026-11-15-ssv3-initial-tune.md). Upstream's 9G tune is HONDA_ACCORD's via substitute.toml (LAF 1.69,
+# FRICTION 0.32): above the SSV3's plausible band (0.5-1.2) and ~3x its measured friction step. FRICTION is in normalized torque units (x239 counts).
+# torqued learns from these (its +-30 % / +-50 % windows: LAF 0.63-1.17, FRICTION 0.06-0.18).
+SSV3_LAT_ACCEL_FACTOR = 0.90
+SSV3_FRICTION = 0.12
+# Gives lagd an initial total of 0.40 s (+0.2 s), the lag the TI path learned.
+SSV3_STEER_ACTUATOR_DELAY = 0.20
+
+
+def apply_ssv3_lateral_tune(cp) -> None:
+  """Startup only (CarInterface._get_params): the 9G's lateral tune on this branch, where the 9G always
+  steers through the SSV3 (no TI support here)."""
+  if cp.carFingerprint != CAR.HONDA_ACCORD_9G or cp.lateralTuning.which() != 'torque':
+    return
+  cp.lateralTuning.torque.latAccelFactor = SSV3_LAT_ACCEL_FACTOR
+  cp.lateralTuning.torque.friction = SSV3_FRICTION
+  cp.steerActuatorDelay = SSV3_STEER_ACTUATOR_DELAY
+
+
+def ssv3_steer_command(raw: float, lat_active: bool, last_nonzero: int) -> int:
+  """0xE4 STEER_TORQUE for the SSV3 path from the unrounded lookup output `raw` (counts).
+
+  Rounded to the nearest count (the shared Honda path truncates toward zero, which sends 0 for every
+  |raw| < 1). While openpilot steers, an exact 0 is replaced by +-1: the board's steer-request decision is
+  `request && (torque != 0 || ZERO_TORQUE_KEEPS_LKAS_ON)` (bridge.cpp, ZERO_TORQUE_SENDS_OFF = 1 on firmware
+  2 and 3), so a 0 makes it send LKAS-off and restart the 50 ms lead-in plus the ~120 ms EPS ack. Sign: the
+  unrounded command, else the last non-zero command sent, else +1. The board's LSB toggle maps a held v to
+  {v & ~1, (v & ~1) | 1}: +1 -> 0/+1, -1 -> -2/-1, so it never crosses zero. Not lat_active: unchanged
+  (rounded; the controller sends 0 there anyway)."""
+  cmd = int(round(raw))
+  if lat_active and cmd == 0:
+    if raw > 0:
+      cmd = 1
+    elif raw < 0:
+      cmd = -1
+    else:
+      cmd = -1 if last_nonzero < 0 else 1
+  return cmd
+
+
+
 
 class Ssv3Option:
   # 0xE4 byte 2 bit masks (DBC bits 16-19, _steering_control_d_ssv3.dbc)

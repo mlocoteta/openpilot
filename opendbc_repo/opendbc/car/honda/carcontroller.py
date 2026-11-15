@@ -8,7 +8,7 @@ from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
-from opendbc.car.honda.ssv3 import Ssv3Controller, ssv3_qualified
+from opendbc.car.honda.ssv3 import Ssv3Controller, ssv3_qualified, ssv3_steer_command
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -106,6 +106,7 @@ class CarController(CarControllerBase):
     self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
     # 9G SSV3 board: firmware-3 option bits in 0xE4, only once firmware 3 is seen (opendbc/car/honda/ssv3.py)
     self.ssv3 = Ssv3Controller() if ssv3_qualified(CP) else None
+    self.ssv3_last_nonzero = 0
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -163,12 +164,19 @@ class CarController(CarControllerBase):
 
     # steer torque is converted back to CAN reference (positive when steering right)
     # Preserve integer CAN rounding while steering limits are owned by the platform.
-    apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX,
-                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V))
+    apply_torque_raw = np.interp(-limited_torque * self.params.STEER_MAX,
+                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V)
+    apply_torque = int(apply_torque_raw)
     if _projection is not None:
       _projection.input(apply_torque, self.params.STEER_MAX, _projection_previous, CS.out.steeringTorque, self.params,
                         limiter='normalized_rate', mapping='honda_lookup', codec_input=torque_cmd,
                         lookup_x=self.params.STEER_LOOKUP, lookup_y=self.params.STEER_LOOKUP_V, limited_input=limited_torque)
+    if self.ssv3 is not None:
+      # SSV3 only: round, and never an exact 0 while steering (the board would drop LKAS for ~170 ms).
+      # The projection keeps the shared codec value, so a frame this changes reads as limited there.
+      apply_torque = ssv3_steer_command(float(apply_torque_raw), CC.latActive, self.ssv3_last_nonzero)
+      self.ssv3_last_nonzero = apply_torque if CC.latActive and apply_torque != 0 else (
+        self.ssv3_last_nonzero if CC.latActive else 0)
 
     # Send CAN commands
     can_sends = []
