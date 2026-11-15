@@ -251,10 +251,11 @@ def _passive(car_params):
     return None
 
 
-def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall=None):
+def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall=None, staged=None):
   """/api/hud steeringBoard: configured (next start), active (this / the last drive; null with openpilot off),
   presence (this drive or card's record within PRESENT_DAYS), tiLastSeen / ssv3LastSeen (epoch s from card's record,
-  null = never heard; numbers because the head unit's 4.2.4 parser reads epoch s/ms), pendingRestart."""
+  null = never heard; numbers because the head unit's 4.2.4 parser reads epoch s/ms), staged (board chosen while onroad,
+  applied at the next offroad; null = none), pendingRestart (configured != active, or a staged value exists)."""
   from openpilot.starpilot.car.honda.steering_board_watch import parse_seen, seen_recently
   ti = ti_car(car_params)
   active = None if ti is None or _passive(car_params) else 'ti' if ti else 'ssv3'
@@ -269,17 +270,19 @@ def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall
           'tiPresent': bool(seen.get('ti')) or seen_recently(record, 'ti', now_wall),
           'ssv3Present': bool(seen.get('ssv3')) or seen_recently(record, 'ssv3', now_wall),
           'ssv3Firmware': version, 'tiLastSeen': record['ti'], 'ssv3LastSeen': record['ssv3'],
-          'pendingRestart': bool(configured is not None and active is not None and configured != active)}
+          'staged': staged if staged in ('ti', 'ssv3') else None,
+          'pendingRestart': bool((configured is not None and active is not None and configured != active) or staged in ('ti', 'ssv3'))}
 
 
-def openpilot_enabled(car_params, configured):
+def openpilot_enabled(car_params, configured, staged=None):
   """/api/hud openpilotEnabled: configured = OpenpilotEnabledToggle (next start), active = not CarParams.passive of
   this / the last drive (False = datalogger), pendingRestart when they differ."""
   passive = _passive(car_params) if car_params is not None else None
   active = None if passive is None else not passive
   configured = configured if isinstance(configured, bool) else None
-  return {'configured': configured, 'active': active,
-          'pendingRestart': bool(configured is not None and active is not None and configured != active)}
+  staged = staged if isinstance(staged, bool) else None
+  return {'configured': configured, 'active': active, 'staged': staged,
+          'pendingRestart': bool((configured is not None and active is not None and configured != active) or staged is not None)}
 
 
 def _steering(msgs, fresh, selfdrive_active):
@@ -931,6 +934,7 @@ def last_drive_car_params_bytes(params):
 
 
 class MessagingHudReader:
+  pending_params = (None, None)
   def __init__(self):
     from openpilot.cereal import messaging
 
@@ -949,6 +953,7 @@ class MessagingHudReader:
     self.last_drive_cp = None
     self.last_drive_cp_at = None
     self.board_params_at = None
+    self.pending_params = (None, None)   # staged AccordSteeringBoardPending ('ti'|'ssv3'), OpenpilotEnabledPending (bool)
     self.params = _read_params()
     self.is_metric = None
     self.car_params = None
@@ -1048,8 +1053,8 @@ class MessagingHudReader:
     board_cp = msgs['carParams'] if msgs['carParams'] is not None else self._last_drive_car_params(now)
     ti_enabled, override, record, op_toggle = self._board_params(now)
     if self._fuel_car(board_cp):
-      board = steering_board(board_cp, ti_enabled, override, self.board_seen, record)
-    op_enabled = openpilot_enabled(board_cp, op_toggle) if self.params is not None else None
+      board = steering_board(board_cp, ti_enabled, override, self.board_seen, record, staged=self.pending_params[0])
+    op_enabled = openpilot_enabled(board_cp, op_toggle, self.pending_params[1]) if self.params is not None else None
     values = extract(msgs, fresh, self.is_metric, self.seen_moving, fuel, doors, route, board, op_enabled)
     current = core_fresh(values, fresh)
     core = ('selfdriveState', 'carState') if values['onroad'] else ('deviceState',)
@@ -1077,6 +1082,8 @@ class MessagingHudReader:
       override = raw.decode('ascii', 'replace') if isinstance(raw, bytes) else (raw or '')
       toggle = True if toggle in (True, b'1', '1') else False if toggle in (False, b'0', '0') else None
       self.board_params = (ti_enabled, override if ti_enabled is not None else None, record, toggle)
+      from openpilot.starpilot.galaxy import hud_writes
+      self.pending_params = (hud_writes.pending_board(self.params), hud_writes.pending_enabled(self.params))
     return self.board_params
 
   def _last_drive_car_params(self, now):

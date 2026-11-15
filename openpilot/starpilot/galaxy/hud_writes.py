@@ -1,9 +1,12 @@
 """Head-unit writes that only apply at the next car start: steering board (9G TI/SSV3) and openpilot on/off.
 
 Both are params read once when card starts; the endpoints only decide whether a write is allowed now.
-Answers (galaxy server.py): 400 bad value, 409 {"error": reason} when not provably offroad / engaged / the board isn't
-fitted, 429 when the last accepted write of the same kind is under WRITE_GAP_S old, else 200
-{"applied": "next_start", ...}.
+Answers (galaxy server.py): 400 bad value, 409 {"error": reason} when the board isn't fitted, 429 when the last
+accepted write of the same kind is under WRITE_GAP_S old, else 200 {"applied": "next_start", ...}.
+Offroad (IsOffroad == 1, not engaged): the live params are written. Onroad / engaged / IsOffroad unreadable (the comma
+reports onroad whenever the car is in accessory): the value is STAGED instead (AccordSteeringBoardPending /
+OpenpilotEnabledPending) and the answer carries "staged": true; nothing live changes mid-drive. apply_pending() moves
+a staged value to the live params at the next provably-offroad moment (galaxy PendingApplier thread) and clears it.
 
 No lock-out:
 - steering board: a board is fitted when card heard it within PRESENT_DAYS (AccordSteeringBoardSeen, kept across
@@ -19,6 +22,8 @@ from openpilot.starpilot.car.honda.steering_board_watch import PRESENT_DAYS, SEE
 WRITE_GAP_S = 5.0
 BOARDS = ('ti', 'ssv3')
 PREVIOUS_PARAM = 'AccordSteeringBoardPrevious'
+BOARD_PENDING = 'AccordSteeringBoardPending'
+ENABLED_PENDING = 'OpenpilotEnabledPending'
 
 
 def _wall():
@@ -88,6 +93,11 @@ def board_refusal(params, board, now=None):
   reason = parked_refusal(params)
   if reason:
     return reason
+  return fitted_refusal(params, board, now)
+
+
+def fitted_refusal(params, board, now=None):
+  """None when `board` is fitted (or is always allowed: configured / last drive / previous), else the 409 reason."""
   if board in (configured_board(params), last_drive_board(params), previous_board(params)):
     return None
   try:
@@ -112,6 +122,99 @@ def write_board(params, board):
 def enabled_refusal(params, enabled):
   """openpilot on/off: off needs offroad + not engaged; on (back from datalogger) only needs offroad."""
   return parked_refusal(params, check_engaged=not enabled)
+
+
+def stage_needed(params, check_engaged=True):
+  """True when the write must be staged (not provably offroad / engaged)."""
+  return parked_refusal(params, check_engaged=check_engaged) is not None
+
+
+def _text(value):
+  return value.decode('ascii', 'replace') if isinstance(value, bytes) else value
+
+
+def pending_board(params):
+  try:
+    value = _text(params.get(BOARD_PENDING))
+  except Exception:
+    return None
+  return value if value in BOARDS else None
+
+
+def pending_enabled(params):
+  try:
+    value = _text(params.get(ENABLED_PENDING))
+  except Exception:
+    return None
+  return True if value == '1' else False if value == '0' else None
+
+
+def stage_board(params, board):
+  params.put(BOARD_PENDING, board)
+
+
+def stage_enabled(params, enabled):
+  params.put(ENABLED_PENDING, '1' if enabled else '0')
+
+
+def clear_pending(params, key):
+  try:
+    params.remove(key)
+  except Exception:
+    params.put(key, '')
+
+
+def apply_pending(params):
+  """Move staged values to the live params once provably offroad and not engaged. Returns the list of applied keys."""
+  applied = []
+  if parked_refusal(params) is not None:
+    return applied
+  board = pending_board(params)
+  if board is not None:
+    write_board(params, board)
+    clear_pending(params, BOARD_PENDING)
+    applied.append(BOARD_PENDING)
+  enabled = pending_enabled(params)
+  if enabled is not None:
+    params.put_bool('OpenpilotEnabledToggle', enabled)
+    clear_pending(params, ENABLED_PENDING)
+    applied.append(ENABLED_PENDING)
+  # anything else left in the keys (garbage) is cleared so it never reads as pending
+  for key, valid in ((BOARD_PENDING, board), (ENABLED_PENDING, enabled)):
+    if valid is None:
+      try:
+        if _text(params.get(key)):
+          clear_pending(params, key)
+      except Exception:
+        pass
+  return applied
+
+
+class PendingApplier:
+  """Polls apply_pending() so a staged value lands the moment the comma goes offroad (or at boot, if it is offroad)."""
+  def __init__(self, params_factory, interval=1.0, log=None):
+    self.params_factory = params_factory
+    self.interval = interval
+    self.log = log
+    self.stop = False
+
+  def step(self, lock=None):
+    try:
+      params = self.params_factory()
+      if lock is not None:
+        with lock:
+          applied = apply_pending(params)
+      else:
+        applied = apply_pending(params)
+      if applied and self.log:
+        self.log(f'galaxy: hud staged values applied at offroad: {applied}')
+    except Exception:
+      pass
+
+  def run(self, lock=None):
+    while not self.stop:
+      self.step(lock)
+      time.sleep(self.interval)
 
 
 class RateLimit:
