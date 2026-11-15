@@ -1918,12 +1918,14 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               hud_writes.stage_board(params, board)
             else:
               hud_writes.write_board(params, board)
-              hud_writes.clear_pending(params, hud_writes.BOARD_PENDING)
+              if hud_writes.pending_board(params) is not None:
+                hud_writes.clear_pending(params, hud_writes.BOARD_PENDING)
           elif staged:
             hud_writes.stage_enabled(params, enabled)
           else:
             params.put_bool('OpenpilotEnabledToggle', enabled)
-            hud_writes.clear_pending(params, hud_writes.ENABLED_PENDING)
+            if hud_writes.pending_enabled(params) is not None:
+              hud_writes.clear_pending(params, hud_writes.ENABLED_PENDING)
         note = ' (staged, applies next start)' if staged else ' (next start)'
         body = {'applied': 'next_start'}
         if board is not None:
