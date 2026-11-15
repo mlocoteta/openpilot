@@ -68,7 +68,7 @@ def test_offroad_blocks_from_put_cache_car_params(ti):
     board, op = values['steeringBoard'], values['openpilotEnabled']
     assert board is not None and op is not None
     assert board['active'] == ('ti' if ti else 'ssv3') and board['configured'] == ('ti' if ti else 'ssv3')
-    assert op == {'configured': True, 'active': True, 'pendingRestart': False}
+    assert op == {'configured': True, 'active': True, 'staged': None, 'pendingRestart': False}
     assert hud_writes.last_drive_board(params) == ('ti' if ti else 'ssv3')
 
 

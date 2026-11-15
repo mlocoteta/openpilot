@@ -333,9 +333,9 @@ class SteeringBoardHudTest(unittest.TestCase):
   def test_openpilot_disabled_drive(self):
     from openpilot.starpilot.galaxy.hud import empty, openpilot_enabled, steering_board
     passive = types.SimpleNamespace(brand='honda', passive=True, safetyConfigs=[types.SimpleNamespace(safetyModel='noOutput', safetyParam=0)])
-    self.assertEqual(openpilot_enabled(passive, False), {'configured': False, 'active': False, 'pendingRestart': False})
-    self.assertEqual(openpilot_enabled(passive, True), {'configured': True, 'active': False, 'pendingRestart': True})
-    self.assertEqual(openpilot_enabled(None, None), {'configured': None, 'active': None, 'pendingRestart': False})
+    self.assertEqual(openpilot_enabled(passive, False), {'configured': False, 'active': False, 'staged': None, 'pendingRestart': False})
+    self.assertEqual(openpilot_enabled(passive, True), {'configured': True, 'active': False, 'staged': None, 'pendingRestart': True})
+    self.assertEqual(openpilot_enabled(None, None), {'configured': None, 'active': None, 'staged': None, 'pendingRestart': False})
     self.assertIsNone(steering_board(passive, True, 'auto', {}, None, NOW)['active'])   # no board steers in datalogger mode
     self.assertTrue(empty()['openpilotEnabledWrite'])
     self.assertIsNone(empty()['openpilotEnabled'])
