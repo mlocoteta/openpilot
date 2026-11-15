@@ -37,7 +37,7 @@ FW3_LOST_FRAMES = 50
 # Initial lateral tune for the SSV3 path (stock-LKAS dashcam drive 000000f3--740a520643, report
 # 2026-11-15-ssv3-initial-tune.md). The shared HONDA_ACCORD_9G entry in params.toml is the TI tune
 # (TI_STEER_MAX 599 on a different actuator): its LAF 1.19 is at the top of the SSV3's plausible band and its
-# FRICTION 0.31 is ~3x the SSV3's measured friction step. FRICTION is in normalized torque units (x239 counts).
+# FRICTION 0.31 is ~3x the SSV3's measured friction step. FRICTION is in normalized torque units (x240 counts).
 # torqued learns from these (its +-30 % / +-50 % windows: LAF 0.63-1.17, FRICTION 0.06-0.18).
 SSV3_LAT_ACCEL_FACTOR = 0.90
 SSV3_FRICTION = 0.12
@@ -73,8 +73,9 @@ def ssv3_steer_command(raw: float, lat_active: bool, last_nonzero: int) -> int:
   |raw| < 1). While openpilot steers, an exact 0 is replaced by +-1: the board's steer-request decision is
   `request && (torque != 0 || ZERO_TORQUE_KEEPS_LKAS_ON)` (bridge.cpp, ZERO_TORQUE_SENDS_OFF = 1 on firmware
   2 and 3), so a 0 makes it send LKAS-off and restart the 50 ms lead-in plus the ~120 ms EPS ack. Sign: the
-  unrounded command, else the last non-zero command sent, else +1. The board's LSB toggle maps a held v to
-  {v & ~1, (v & ~1) | 1}: +1 -> 0/+1, -1 -> -2/-1, so it never crosses zero. Not lat_active: unchanged
+  unrounded command, else the last non-zero command sent, else +1. The board dithers a held v
+  between v and v - sign(v) (toward zero; it clamps at 240): +1 -> 1/0, -1 -> -1/0, 240 -> 240/239, so it
+  never crosses zero. Not lat_active: unchanged
   (rounded; the controller sends 0 there anyway)."""
   cmd = int(round(raw))
   if lat_active and cmd == 0:
