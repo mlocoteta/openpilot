@@ -146,6 +146,7 @@ class Ssv3CarState:
     self.motor_torque = 0
     self.lkas_blocked = False   # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
     self.frames_since_520 = 0
+    self.steer_status = 0       # raw 400 STEER_STATUS (EPS status bits), every firmware; blend probe abort input
 
   def _drop_to_fw2(self):
     # SS_STATUS stopped (or reported < 3): firmware-2 treatment, no options, no fw3 fields
@@ -174,6 +175,7 @@ class Ssv3CarState:
     if versions:
       self.hardware_rev = int(cp_ssv3.vl["SS_STATUS"]["HARDWARE_REV"])
       self.lkas_blocked = bool(cp_ssv3.vl["SS_STATUS"]["LKAS_ALLOWED"])
+    self.steer_status = int(cp_pt.vl["STEER_STATUS"]["STEER_STATUS"])
 
     if not self.fw3:
       return
@@ -189,6 +191,9 @@ class Ssv3Controller:
 
   def __init__(self):
     self.requested_options = 0
+    # Developer-only EPS torque-blend probe (SSV3BlendProbe, default 0 = off), set by the openpilot side.
+    self.requested_probe = 0
+    self.probe = Ssv3BlendProbe()
 
   def options(self, CS) -> int:
     ssv3 = getattr(CS, "ssv3", None)
@@ -205,6 +210,202 @@ class Ssv3Controller:
     for i, (addr, dat, bus) in enumerate(can_sends):
       if addr == STEERING_CONTROL_ADDR and bus == lkas_bus and len(dat) == 5:
         can_sends[i] = (addr, set_steering_options(dat, options), bus)
+
+
+# ---- EPS torque-blend probe (developer only; report 2026-11-15-ssv3-blend-test.md) ----
+#
+# While SSV3BlendProbe != 0 and every start condition has held for PROBE_ARM_SETTLE_S, openpilot's steer torque
+# is replaced by a FIXED 0xE4 command for PROBE_HOLD_S per window, with >= PROBE_REST_S of normal control between
+# windows. The driver holds the wheel and slowly ramps their own torque against / with it; the logs then show how
+# the EPS blends the two. The override is applied before the normal STEER_DELTA rate limit and the SSV3 command
+# shaping, so it changes the torque value only. Any abort condition ends the probe at once (normal control, rate
+# limited) and the openpilot side clears the param. Never on the TI path (Ssv3Controller exists only on the SSV3
+# path). TORQUE_BLEND_DISABLE is not touched here: it stays SSV3TorqueBlendDisable's (firmware 3 only).
+
+# Programs: 0xE4 STEER_TORQUE wire counts per window (positive = torque to the RIGHT, as the stock camera sends).
+PROBE_PROGRAMS = {
+  1: (60, -60, 120),
+  2: (-60, 60, -120),
+  3: (60,),
+  4: (-60,),
+  5: (120,),
+  6: (-120,),
+}
+PROBE_MAX_COUNTS = 120          # |command| never above this, whatever the table says
+PROBE_HOLD_S = 10.0             # one fixed-command window
+PROBE_REST_S = 5.0              # normal openpilot control between windows
+PROBE_TOTAL_S = 60.0            # hard limit from the first window's start
+PROBE_ARM_SETTLE_S = 2.0        # start conditions must hold this long before the first window
+PROBE_ARM_TIMEOUT_S = 120.0     # armed but never started -> give up and clear the param
+MPH = 0.44704
+PROBE_V_MIN = 10.0 * MPH        # abort outside [V_MIN, V_MAX]
+PROBE_V_MAX = 30.0 * MPH
+PROBE_START_V_MIN = 11.0 * MPH  # start only inside a narrower band, so a start never sits on an abort edge
+PROBE_START_V_MAX = 28.0 * MPH
+PROBE_START_ANGLE_DEG = 30.0    # |steering angle| to start
+PROBE_ABORT_ANGLE_DEG = 45.0
+PROBE_START_YAW = 0.05          # rad/s (calibrated yaw rate, CarControl.angularVelocity[2])
+PROBE_ABORT_YAW = 0.10          # ~5.7 deg/s; ~1 m/s^2 at 22 mph
+PROBE_DT = 0.01                 # CarController.update runs at 100 Hz
+
+
+class ProbeState:
+  IDLE = 0
+  ARMED = 1
+  HOLD = 2
+  REST = 3
+  DONE = 4
+
+
+class ProbeEnd:
+  NONE = 0
+  COMPLETED = 1
+  LAT_INACTIVE = 2
+  BRAKE = 3
+  GAS = 4
+  CANCEL = 5
+  SPEED = 6
+  ANGLE = 7
+  YAW = 8
+  EPS_FAULT = 9
+  TIME_LIMIT = 10
+  BOARD_LOST = 11
+  ARM_TIMEOUT = 12
+  BAD_PROGRAM = 13
+  STOPPED = 14     # param set back to 0 while running
+
+
+PROBE_END_NAMES = {v: k.lower() for k, v in vars(ProbeEnd).items() if not k.startswith('_')}
+
+
+class ProbeInputs:
+  __slots__ = ('lat_active', 'cancel', 'v_ego', 'angle_deg', 'yaw', 'brake', 'gas', 'steer_fault', 'steer_status', 'fw3')
+
+  def __init__(self, *, lat_active=False, cancel=False, v_ego=0.0, angle_deg=0.0, yaw=math.nan, brake=False, gas=False,
+               steer_fault=False, steer_status=0, fw3=False):
+    self.lat_active, self.cancel, self.v_ego, self.angle_deg, self.yaw = lat_active, cancel, v_ego, angle_deg, yaw
+    self.brake, self.gas, self.steer_fault, self.steer_status, self.fw3 = brake, gas, steer_fault, steer_status, fw3
+
+  @classmethod
+  def from_car(cls, CC, CS):
+    out = CS.out
+    av = list(CC.angularVelocity)
+    ssv3 = getattr(CS, 'ssv3', None)
+    return cls(lat_active=bool(CC.latActive), cancel=bool(CC.cruiseControl.cancel), v_ego=float(out.vEgo),
+               angle_deg=float(out.steeringAngleDeg), yaw=float(av[2]) if len(av) >= 3 else math.nan,
+               brake=bool(out.brakePressed), gas=bool(out.gasPressed),
+               steer_fault=bool(out.steerFaultTemporary or out.steerFaultPermanent),
+               steer_status=int(ssv3.steer_status) if ssv3 is not None else -1,
+               fw3=bool(ssv3 is not None and ssv3.fw3))
+
+
+def probe_abort_reason(i: ProbeInputs) -> int:
+  """Running-state abort check (every frame, in priority order). Missing/NaN inputs abort."""
+  if not i.lat_active:
+    return ProbeEnd.LAT_INACTIVE
+  if i.brake:
+    return ProbeEnd.BRAKE
+  if i.gas:
+    return ProbeEnd.GAS
+  if i.cancel:
+    return ProbeEnd.CANCEL
+  if not (PROBE_V_MIN <= i.v_ego <= PROBE_V_MAX):        # NaN fails too
+    return ProbeEnd.SPEED
+  if not abs(i.angle_deg) <= PROBE_ABORT_ANGLE_DEG:
+    return ProbeEnd.ANGLE
+  if not abs(i.yaw) <= PROBE_ABORT_YAW:
+    return ProbeEnd.YAW
+  if i.steer_fault or i.steer_status != 0:
+    return ProbeEnd.EPS_FAULT
+  if not i.fw3:
+    return ProbeEnd.BOARD_LOST
+  return ProbeEnd.NONE
+
+
+def probe_start_ok(i: ProbeInputs) -> bool:
+  return (probe_abort_reason(i) == ProbeEnd.NONE and PROBE_START_V_MIN <= i.v_ego <= PROBE_START_V_MAX and
+          abs(i.angle_deg) < PROBE_START_ANGLE_DEG and abs(i.yaw) < PROBE_START_YAW)
+
+
+class Ssv3BlendProbe:
+  """State machine; update() returns the normalized torque override (openpilot sign) or None for normal control."""
+
+  def __init__(self):
+    self.state = ProbeState.IDLE
+    self.end = ProbeEnd.NONE
+    self.program = 0
+    self.window = -1           # index into the program while HOLD/REST
+    self.command = 0           # wire counts of the current HOLD window, else 0
+    self.timer = 0             # frames in the current state
+    self.total = 0             # frames since the first window started
+    self.settle = 0            # consecutive frames with start conditions met (ARMED)
+
+  @property
+  def active(self) -> bool:
+    return self.state in (ProbeState.HOLD, ProbeState.REST)
+
+  @property
+  def finished(self) -> bool:
+    """Ended (completed or aborted): the openpilot side should clear SSV3BlendProbe."""
+    return self.state == ProbeState.DONE
+
+  def _finish(self, reason: int) -> None:
+    self.state, self.end, self.command, self.timer = ProbeState.DONE, reason, 0, 0
+
+  def update(self, program: int, inputs: ProbeInputs, steer_max: float):
+    program = int(program or 0)
+    if self.state == ProbeState.DONE:
+      if program == 0:          # latched until the param reads 0 again: a stale value can never re-arm it
+        self.__init__()
+      return None
+    if program == 0:
+      if self.active:
+        self._finish(ProbeEnd.STOPPED)
+        return None
+      self.__init__()
+      return None
+
+    if self.state == ProbeState.IDLE:
+      if program not in PROBE_PROGRAMS:
+        self.program = program
+        self._finish(ProbeEnd.BAD_PROGRAM)
+        return None
+      self.state, self.program, self.timer, self.settle = ProbeState.ARMED, program, 0, 0
+
+    if self.state == ProbeState.ARMED:
+      self.timer += 1
+      self.settle = self.settle + 1 if probe_start_ok(inputs) else 0
+      if self.settle >= round(PROBE_ARM_SETTLE_S / PROBE_DT):
+        self.state, self.window, self.timer, self.total = ProbeState.HOLD, 0, 0, 0
+      elif self.timer >= round(PROBE_ARM_TIMEOUT_S / PROBE_DT):
+        self._finish(ProbeEnd.ARM_TIMEOUT)
+        return None
+      else:
+        return None
+
+    # HOLD / REST
+    reason = probe_abort_reason(inputs)
+    if reason == ProbeEnd.NONE and self.total >= round(PROBE_TOTAL_S / PROBE_DT):
+      reason = ProbeEnd.TIME_LIMIT
+    if reason != ProbeEnd.NONE:
+      self._finish(reason)
+      return None
+    self.total += 1
+    self.timer += 1
+    windows = PROBE_PROGRAMS[self.program]
+    if self.state == ProbeState.HOLD and self.timer > round(PROBE_HOLD_S / PROBE_DT):
+      if self.window + 1 >= len(windows):
+        self._finish(ProbeEnd.COMPLETED)
+        return None
+      self.state, self.timer, self.command = ProbeState.REST, 1, 0
+    elif self.state == ProbeState.REST and self.timer > round(PROBE_REST_S / PROBE_DT):
+      self.state, self.timer, self.window = ProbeState.HOLD, 1, self.window + 1
+    if self.state == ProbeState.REST:
+      return None
+    counts = max(-PROBE_MAX_COUNTS, min(PROBE_MAX_COUNTS, int(windows[self.window])))
+    self.command = counts
+    # 0xE4 wire = -torque * STEER_MAX (CarController: interp(-limited_torque * STEER_MAX, ...))
+    return -counts / float(steer_max)
 
 
 def set_steering_options(dat: bytes, options: int) -> bytes:
