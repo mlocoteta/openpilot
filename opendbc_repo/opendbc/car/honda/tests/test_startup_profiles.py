@@ -65,6 +65,10 @@ def exercise_final_cp_publication_and_disabled_startup(identity, monkeypatch, fi
   if firmware and not automatic_firmware:
     assert initial.flags & HondaFlags.EPS_MODIFIED
     assert not initial.dashcamOnly
+  if identity == CAR.HONDA_ACCORD_9G:
+    # startup prepare() with the TI switch off (the default) selects the SSV3 path and its lateral tune
+    from opendbc.car.honda.ssv3 import apply_ssv3_lateral_tune
+    apply_ssv3_lateral_tune(initial)
   expected = initial.to_dict()
   with OpenpilotPrefix():
     saved = Params()
