@@ -78,3 +78,10 @@ def test_ti_path_0xe4_still_zero_and_lookup_untouched():
   ci = CarInterface(accord(True))
   assert ci.CC.params.STEER_MAX == 2560
   assert set(e4_torques(ci, 1.0, 2, ti_feedback=True)) == {0}
+
+
+@pytest.mark.parametrize("torque", (-0.9, -0.62, -0.3, -0.13, -0.04, 0.04, 0.13, 0.3, 0.62, 0.9))
+def test_ssv3_mapping_is_linear_240(torque):
+  # 2026-11-16: no TI/sigmoid curve between actuators.torque and 0xE4 on the SSV3 path, just -round(240 * torque).
+  torques = e4_torques(CarInterface(accord(False)), torque, 3, ticks=200)
+  assert torques[-1] == -round(240 * torque)
