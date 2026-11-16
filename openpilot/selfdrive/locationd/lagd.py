@@ -362,6 +362,16 @@ class LateralLagEstimator:
     return lag, corr, confidence
 
 
+def _tune_basis_changed(last_CP: car.CarParams, CP: car.CarParams) -> bool:
+  """9G Accord only: one fingerprint, two steering boards (TI / SSV3) whose lateral tune differs, and the SSV3 tune is
+  revised as it is measured. A cached delay learned under another tune basis is not this car's: start fresh."""
+  if CP.carFingerprint != "HONDA_ACCORD_9G" or CP.lateralTuning.which() != 'torque' or last_CP.lateralTuning.which() != 'torque':
+    return False
+  def basis(cp):
+    return (cp.lateralTuning.torque.latAccelFactor, cp.lateralTuning.torque.friction, cp.steerActuatorDelay)
+  return any(abs(a - b) > 1e-4 for a, b in zip(basis(last_CP), basis(CP), strict=True))
+
+
 def retrieve_initial_lag(params: Params, CP: car.CarParams):
   last_lag_data = get_cache(params, "LiveDelay")
   last_carparams_data = get_cache(params, "CarParamsPrevRoute")
@@ -372,6 +382,8 @@ def retrieve_initial_lag(params: Params, CP: car.CarParams):
         ld = last_lag_msg.lateralDelay
         if last_CP.carFingerprint != CP.carFingerprint:
           raise Exception("Car model mismatch")
+        if _tune_basis_changed(last_CP, CP):
+          raise Exception("Lateral tune basis changed")
 
         lag, valid_blocks, status, version = ld.lateralDelayEstimate, ld.validBlocks, ld.status, ld.version
         assert valid_blocks <= BLOCK_NUM, "Invalid number of valid blocks"
