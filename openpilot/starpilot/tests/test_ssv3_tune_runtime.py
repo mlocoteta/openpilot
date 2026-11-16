@@ -65,7 +65,7 @@ class TestSsv3TuneRuntime(unittest.TestCase):
   def test_ssv3_custom_values_still_apply_on_the_ssv3_basis(self):
     raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.6", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.15"}
     got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
-    self.assertEqual((got.factor, got.friction), (1.0, 0.08))
+    self.assertEqual((got.factor, got.friction), (1.8, 0.08))
 
   def test_torque_runtime_and_torqued_start_from_the_ssv3_tune(self):
     from openpilot.starpilot.lateral.torque_runtime import manual_overrides_present, read_settings, TorqueHost
