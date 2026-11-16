@@ -43,7 +43,7 @@ class TestSsv3TuneRuntime(unittest.TestCase):
   def test_prepare_picks_the_tune_with_the_board(self):
     ssv3 = VehicleStartupPreferences().prepare(accord())          # TI switch off = SSV3 only
     self.assertFalse(ti_qualified(ssv3))
-    for got, want in zip(tune(ssv3), (0.90, 0.12, SSV3_STEER_ACTUATOR_DELAY), strict=True):
+    for got, want in zip(tune(ssv3), (1.6, 0.15, SSV3_STEER_ACTUATOR_DELAY), strict=True):
       self.assertAlmostEqual(got, want, places=6)
     ti = VehicleStartupPreferences(honda_torque_interceptor=True).prepare(accord())
     self.assertTrue(ti_qualified(ti))
@@ -63,7 +63,7 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertEqual(other.friction, 0.19)
 
   def test_ssv3_custom_values_still_apply_on_the_ssv3_basis(self):
-    raw = {"SteerLatAccel": b"1.0", "SteerLatAccelStock": b"0.9", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.12"}
+    raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.6", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.15"}
     got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
     self.assertEqual((got.factor, got.friction), (1.0, 0.08))
 
@@ -78,10 +78,10 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertIsNone(settings.user_friction)
     self.assertFalse(manual_overrides_present(cp, self.params))
     est = TorqueEstimator(cp.as_reader())
-    self.assertAlmostEqual(est.offline_latAccelFactor, 0.90, places=6)
-    self.assertAlmostEqual(est.offline_friction, 0.12, places=6)
-    self.assertAlmostEqual(est.min_lataccel_factor, 0.63, places=5)
-    self.assertAlmostEqual(est.max_lataccel_factor, 1.17, places=5)
+    self.assertAlmostEqual(est.offline_latAccelFactor, 1.6, places=6)
+    self.assertAlmostEqual(est.offline_friction, 0.15, places=6)
+    self.assertAlmostEqual(est.min_lataccel_factor, 1.12, places=5)
+    self.assertAlmostEqual(est.max_lataccel_factor, 2.08, places=5)
 
 
 if __name__ == "__main__":
