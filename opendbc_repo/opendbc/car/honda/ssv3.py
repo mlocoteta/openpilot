@@ -40,9 +40,12 @@ FW3_LOST_FRAMES = 50
 # 2026-11-15-ssv3-initial-tune.md). The shared HONDA_ACCORD_9G entry in params.toml is the TI tune
 # (TI_STEER_MAX 599 on a different actuator): its LAF 1.19 is at the top of the SSV3's plausible band and its
 # FRICTION 0.31 is ~3x the SSV3's measured friction step. FRICTION is in normalized torque units (x240 counts).
-# torqued learns from these (its +-30 % / +-50 % windows: LAF 0.63-1.17, FRICTION 0.06-0.18).
-SSV3_LAT_ACCEL_FACTOR = 0.90
-SSV3_FRICTION = 0.12
+# torqued learns from these (its +-30 % / +-50 % windows).
+# 2026-11-16, after the first SSV3 openpilot-steered drive (report 2026-11-16-ssv3-first-drive.md): LAF 0.90 -> 1.6
+# (open-loop refit 1.4-1.8, torqued raw 2.4-2.8 pinned at the old window edge; windows now LAF 1.12-2.08) and
+# FRICTION 0.12 -> 0.15 (torqued raw 0.18-0.19; window 0.075-0.225).
+SSV3_LAT_ACCEL_FACTOR = 1.6
+SSV3_FRICTION = 0.15
 # Gives lagd an initial total of 0.40 s (+0.2 s), the lag the TI path learned.
 SSV3_STEER_ACTUATOR_DELAY = 0.20
 
