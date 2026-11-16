@@ -33,14 +33,17 @@ def good(**kw):
 # ---- limits and the program table ----
 
 def test_program_table_limits():
-  assert PROBE_MAX_COUNTS == 120
+  assert PROBE_MAX_COUNTS == 240
   for prog, windows in PROBE_PROGRAMS.items():
     assert prog > 0 and windows
     assert all(0 < abs(c) <= PROBE_MAX_COUNTS for c in windows), prog
     total = len(windows) * ssv3.PROBE_HOLD_S + (len(windows) - 1) * ssv3.PROBE_REST_S
     assert total <= ssv3.PROBE_TOTAL_S, prog
-  assert ssv3.PROBE_HOLD_S <= 10.0 and ssv3.PROBE_REST_S >= 5.0 and ssv3.PROBE_TOTAL_S <= 60.0
+  assert ssv3.PROBE_HOLD_S <= 10.0 and ssv3.PROBE_REST_S >= 5.0 and ssv3.PROBE_TOTAL_S <= 90.0
   assert PROBE_PROGRAMS[1] == (60, -60, 120)
+  assert PROBE_PROGRAMS[7] == (120, -120, 180, -180, 240)
+  assert ssv3.PROBE_V_MIN == 10 * ssv3.MPH and ssv3.PROBE_V_MAX == 52 * ssv3.MPH
+  assert ssv3.PROBE_START_V_MIN == 11 * ssv3.MPH and ssv3.PROBE_START_V_MAX == 50 * ssv3.MPH
 
 
 # ---- the state machine on its own ----
@@ -59,6 +62,8 @@ def test_program_table_limits():
   (dict(yaw=PROBE_ABORT_YAW + 0.001), ProbeEnd.YAW),
   (dict(yaw=-PROBE_ABORT_YAW - 0.001), ProbeEnd.YAW),
   (dict(yaw=math.nan), ProbeEnd.YAW),
+  (dict(v_ego=45 * ssv3.MPH, yaw=0.08), ProbeEnd.YAW),        # 0.08 * 20.1 m/s = 1.61 m/s^2
+  (dict(v_ego=45 * ssv3.MPH, yaw=-0.08), ProbeEnd.YAW),
   (dict(steer_fault=True), ProbeEnd.EPS_FAULT),
   (dict(steer_status=3), ProbeEnd.EPS_FAULT),
   (dict(steer_status=4), ProbeEnd.EPS_FAULT),
@@ -95,7 +100,7 @@ def test_param_back_to_zero_while_running_stops_it():
 
 
 def test_total_time_limit(monkeypatch):
-  monkeypatch.setitem(PROBE_PROGRAMS, 99, (60, -60, 60, -60, 60))   # 70 s if nothing stopped it
+  monkeypatch.setitem(PROBE_PROGRAMS, 99, (60,) * 8)   # 115 s if nothing stopped it
   p = Ssv3BlendProbe()
   for _ in range(SETTLE):
     p.update(99, good(), 240)
@@ -103,9 +108,9 @@ def test_total_time_limit(monkeypatch):
   while p.state != ProbeState.DONE:
     p.update(99, good(), 240)
     n += 1
-    assert n < 7000
+    assert n < 10000
   assert p.end == ProbeEnd.TIME_LIMIT
-  assert n == 6000            # 60 s of running frames (the first one was the settle frame), the next aborts
+  assert n == 9000            # 90 s of running frames (the first one was the settle frame), the next aborts
 
 
 def test_unknown_program_and_arm_timeout():
@@ -122,7 +127,7 @@ def test_unknown_program_and_arm_timeout():
 
 @pytest.mark.parametrize("change", (
   dict(angle_deg=30.0), dict(angle_deg=-31.0), dict(yaw=0.05), dict(yaw=-0.06), dict(v_ego=10.9 * ssv3.MPH),
-  dict(v_ego=28.1 * ssv3.MPH), dict(lat_active=False), dict(brake=True), dict(gas=True), dict(steer_status=3),
+  dict(v_ego=50.1 * ssv3.MPH), dict(lat_active=False), dict(brake=True), dict(gas=True), dict(steer_status=3),
   dict(fw3=False), dict(yaw=math.nan),
 ))
 def test_start_conditions(change):
@@ -160,7 +165,7 @@ def test_command_magnitude_clamped(monkeypatch):
   p = Ssv3BlendProbe()
   out = [p.update(98, good(), 240) for _ in range(SETTLE + 2 * HOLD + REST)]
   vals = {round(-v * 240) for v in out if v is not None}
-  assert vals == {120, -120}
+  assert vals == {240, -240}
 
 
 # ---- through the real CarInterface ----
@@ -268,10 +273,11 @@ ABORTS = (
   ("gas", dict(gas=True), ProbeEnd.GAS),
   ("cancel", dict(cancel=True), ProbeEnd.CANCEL),
   ("slow", dict(kph=12.0), ProbeEnd.SPEED),
-  ("fast", dict(kph=52.0), ProbeEnd.SPEED),
+  ("fast", dict(kph=86.0), ProbeEnd.SPEED),
   ("angle", dict(angle=50.0), ProbeEnd.ANGLE),
   ("angle_neg", dict(angle=-50.0), ProbeEnd.ANGLE),
-  ("yaw", dict(yaw=0.2), ProbeEnd.YAW),
+  ("yaw", dict(yaw=0.3), ProbeEnd.YAW),
+  ("lat_accel", dict(kph=72.0, yaw=0.08), ProbeEnd.YAW),
   ("yaw_missing", dict(yaw=None), ProbeEnd.YAW),
   ("eps_lockout", dict(eps_status=3), ProbeEnd.EPS_FAULT),
   ("eps_tmp_fault", dict(eps_status=6), ProbeEnd.EPS_FAULT),
@@ -343,3 +349,42 @@ def test_9g_pedal_flag_irrelevant():
   car = Car()
   assert not car.ci.CP.flags & HondaFlags.BOSCH
   assert car.ci.CC.ssv3 is not None and car.ci.CC.ssv3.requested_probe == 0
+
+
+# ---- program 7: highway band, up to the full 240 range ----
+
+def test_program_7_state_machine():
+  p = Ssv3BlendProbe()
+  for _ in range(SETTLE - 1):
+    p.update(7, good(v_ego=45 * ssv3.MPH), 240)
+  out = [p.update(7, good(v_ego=45 * ssv3.MPH), 240) for _ in range(5 * HOLD + 4 * REST + 5)]
+  expect = []
+  for c in (120, -120, 180, -180, 240):
+    expect += [-c / 240] * HOLD + [None] * REST
+  expect = expect[:-REST] + [None] * 5
+  assert out == expect
+  assert p.end == ProbeEnd.COMPLETED
+  assert (5 * 10 + 4 * 5) < ssv3.PROBE_TOTAL_S
+
+
+def test_program_7_through_carinterface_at_45_mph():
+  car = warmed()
+  for _ in range(150):                     # bring vEgo to 45 mph (72.4 kph)
+    car.step(kph=72.4)
+  armed = [car.step(program=7, kph=72.4)[1] for _ in range(SETTLE - 1)]
+  wire = [car.step(program=7, kph=72.4)[1] for _ in range(5 * HOLD + 4 * REST + 50)]
+  assert car.probe.end == ProbeEnd.COMPLETED, car.probe.end
+  seq = armed + wire
+  assert max(abs(b - a) for a, b in zip(seq, seq[1:])) <= 8        # STEER_DELTA unchanged
+  for k, c in enumerate((120, -120, 180, -180, 240)):
+    start = k * (HOLD + REST)
+    assert set(wire[start + 100 + 40:start + HOLD]) == {c}, (k, c)
+  assert max(abs(w) for w in wire) == 240
+
+
+def test_lat_accel_abort_is_speed_aware():
+  # same yaw rate: fine at 20 mph, over the limit at 45 mph
+  assert probe_abort_reason(good(v_ego=20 * ssv3.MPH, yaw=0.15)) == ProbeEnd.NONE
+  assert probe_abort_reason(good(v_ego=45 * ssv3.MPH, yaw=0.15)) == ProbeEnd.YAW
+  assert probe_abort_reason(good(v_ego=45 * ssv3.MPH, yaw=0.07)) == ProbeEnd.NONE
+  assert probe_abort_reason(good(v_ego=11 * ssv3.MPH, yaw=0.26)) == ProbeEnd.YAW     # absolute ceiling
