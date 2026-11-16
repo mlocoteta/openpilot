@@ -24,6 +24,8 @@ from opendbc.car import Bus, structs
 from opendbc.car.honda.hondacan import CanBus, honda_checksum
 from opendbc.car.honda.values import CAR
 
+ButtonType = structs.CarState.ButtonEvent.Type
+
 STEERING_CONTROL_ADDR = 0xE4
 SS_STATUS_ADDR = 520
 FW3 = 3
@@ -293,7 +295,10 @@ class ProbeInputs:
     out = CS.out
     av = list(CC.angularVelocity)
     ssv3 = getattr(CS, 'ssv3', None)
-    return cls(lat_active=bool(CC.latActive), cancel=bool(CC.cruiseControl.cancel), v_ego=float(out.vEgo),
+    # CC.cruiseControl.cancel is openpilot's own PCM command (controlsd: cruiseState.enabled and not CC.enabled), asserted
+    # continuously in always-on-lateral. A driver cancel is a CANCEL/MAIN press seen in CarState.buttonEvents.
+    cancel = any(b.pressed and b.type in (ButtonType.cancel, ButtonType.mainCruise) for b in (out.buttonEvents or []))
+    return cls(lat_active=bool(CC.latActive), cancel=cancel, v_ego=float(out.vEgo),
                angle_deg=float(out.steeringAngleDeg), yaw=float(av[2]) if len(av) >= 3 else math.nan,
                brake=bool(out.brakePressed), gas=bool(out.gasPressed),
                steer_fault=bool(out.steerFaultTemporary or out.steerFaultPermanent),
