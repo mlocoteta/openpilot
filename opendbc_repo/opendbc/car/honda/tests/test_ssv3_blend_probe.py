@@ -203,7 +203,7 @@ class Car:
     self.board = Board()
     self.tick = 0
 
-  def step(self, *, torque=0.05, lat=True, cancel=False, yaw=0.0, eps_status=0, send_520=True, program=None, **pt):
+  def step(self, *, torque=0.05, lat=True, cancel=False, cc_cancel=False, yaw=0.0, eps_status=0, send_520=True, program=None, **pt):
     t = 1_000_000_000 + self.tick * 10_000_000
     frames = pt_frames(self.ci.CP, self.packer, self.tick, **pt)
     frames += [(400, fw3_400(self.tick, lkas_ack=True, eps_status=eps_status), 0), (427, fw3_427(self.tick, 0), 0)]
@@ -212,9 +212,11 @@ class Car:
     cs = self.ci.update([(t, frames)])
     if program is not None and self.ci.CC.ssv3 is not None:
       self.ci.CC.ssv3.requested_probe = program
+    if cancel:   # driver CANCEL button press
+      cs.buttonEvents = [structs.CarState.ButtonEvent(type=structs.CarState.ButtonEvent.Type.cancel, pressed=True)]
     cc = structs.CarControl(latActive=lat, enabled=lat)
     cc.actuators.torque = torque
-    cc.cruiseControl.cancel = cancel
+    cc.cruiseControl.cancel = cc_cancel
     cc.angularVelocity = [0.0, 0.0, yaw] if yaw is not None else []
     _, sends = self.ci.apply(cc.as_reader(), t)
     self.tick += 1
@@ -306,6 +308,22 @@ def test_every_abort_through_carinterface(name, change, end):
     assert max(abs(b - a) for a, b in zip(seq, seq[1:])) <= 8
     assert tail[-1] == -12
   assert car.probe.state == ProbeState.DONE
+
+
+def test_openpilot_cruise_cancel_command_does_not_abort():
+  # always-on-lateral: controlsd asserts CC.cruiseControl.cancel continuously while latActive stays True
+  car = warmed()
+  into_hold(car)
+  for _ in range(300):
+    car.step(program=1, cc_cancel=True)
+  assert car.probe.state in (ProbeState.HOLD, ProbeState.REST) and car.probe.end == ProbeEnd.NONE
+
+
+def test_driver_cancel_button_aborts():
+  car = warmed()
+  into_hold(car)
+  car.step(program=1, cancel=True)
+  assert car.probe.end == ProbeEnd.CANCEL
 
 
 def test_board_lost_through_carinterface():
