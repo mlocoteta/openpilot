@@ -389,7 +389,7 @@ def ssv3_blend_probe_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Su
   # Accord 9G SSV3 developer blend probe (opendbc/car/honda/ssv3.py): 1 armed, 2 fixed command, 3 rest
   s = sm['starpilotCarState'].ssv3
   if s.blendProbeState == 1:
-    title, detail = "Blend test armed", "Engaged, 11-28 mph, wheel straight to start"
+    title, detail = "Blend test armed", "Engaged, 11-50 mph, wheel straight to start"
   elif s.blendProbeState == 2:
     side = "right" if s.blendProbeCommand > 0 else "left"
     title, detail = "Blend test running", f"Window {s.blendProbeWindow + 1}: {abs(s.blendProbeCommand)} {side}. Hold straight"
