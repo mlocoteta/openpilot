@@ -230,22 +230,24 @@ PROBE_PROGRAMS = {
   4: (-60,),
   5: (120,),
   6: (-120,),
+  7: (120, -120, 180, -180, 240),   # highway-band program: up to the full SSV3 range, 70 s
 }
-PROBE_MAX_COUNTS = 120          # |command| never above this, whatever the table says
+PROBE_MAX_COUNTS = 240          # |command| never above this (the full SSV3 range), whatever the table says
 PROBE_HOLD_S = 10.0             # one fixed-command window
 PROBE_REST_S = 5.0              # normal openpilot control between windows
-PROBE_TOTAL_S = 60.0            # hard limit from the first window's start
+PROBE_TOTAL_S = 90.0            # hard limit from the first window's start
 PROBE_ARM_SETTLE_S = 2.0        # start conditions must hold this long before the first window
 PROBE_ARM_TIMEOUT_S = 120.0     # armed but never started -> give up and clear the param
 MPH = 0.44704
 PROBE_V_MIN = 10.0 * MPH        # abort outside [V_MIN, V_MAX]
-PROBE_V_MAX = 30.0 * MPH
+PROBE_V_MAX = 52.0 * MPH
 PROBE_START_V_MIN = 11.0 * MPH  # start only inside a narrower band, so a start never sits on an abort edge
-PROBE_START_V_MAX = 28.0 * MPH
+PROBE_START_V_MAX = 50.0 * MPH
 PROBE_START_ANGLE_DEG = 30.0    # |steering angle| to start
 PROBE_ABORT_ANGLE_DEG = 45.0
 PROBE_START_YAW = 0.05          # rad/s (calibrated yaw rate, CarControl.angularVelocity[2])
-PROBE_ABORT_YAW = 0.10          # ~5.7 deg/s; ~1 m/s^2 at 22 mph
+PROBE_ABORT_YAW = 0.25          # absolute yaw-rate ceiling (~14 deg/s; ~1.1 m/s^2 at 10 mph)
+PROBE_ABORT_LAT_ACCEL = 1.5     # m/s^2, |yaw rate * vEgo|: the speed-aware limit (0.075 rad/s at 45 mph)
 PROBE_DT = 0.01                 # CarController.update runs at 100 Hz
 
 
@@ -313,7 +315,7 @@ def probe_abort_reason(i: ProbeInputs) -> int:
     return ProbeEnd.SPEED
   if not abs(i.angle_deg) <= PROBE_ABORT_ANGLE_DEG:
     return ProbeEnd.ANGLE
-  if not abs(i.yaw) <= PROBE_ABORT_YAW:
+  if not (abs(i.yaw) <= PROBE_ABORT_YAW and abs(i.yaw) * i.v_ego <= PROBE_ABORT_LAT_ACCEL):   # NaN fails
     return ProbeEnd.YAW
   if i.steer_fault or i.steer_status != 0:
     return ProbeEnd.EPS_FAULT
