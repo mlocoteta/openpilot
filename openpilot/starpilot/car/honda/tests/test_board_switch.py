@@ -172,7 +172,7 @@ class BoardSwitchGateTest(unittest.TestCase):
     self.request()
     self.assertTrue(self.run_for(0.2))
     self.assertEqual(self.result(), {'id': 'r1', 'board': 'ssv3', 'applied': 'now',
-                                     'reason': 'switching ti -> ssv3: openpilot restarts (about 10 s)'})
+                                     'reason': 'Switching, about 10 s'})
     self.assertIs(self.params.values['TorqueInterceptorEnabled'], False)
     self.assertEqual(self.params.values['AccordSteeringBoard'], 'auto')
     self.assertEqual(self.params.values['AccordSteeringBoardPrevious'], 'ti')

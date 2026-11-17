@@ -1913,7 +1913,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if board is not None:
           if live_request is None:
             cloudlog.info(f"galaxy: hud steering board -> {board} (offroad, used at start)")
-            self.json(200, {'applied': 'now', 'board': board, 'reason': 'offroad: used when openpilot starts'})
+            self.json(200, {'applied': 'now', 'board': board, 'reason': 'Used when openpilot starts'})
             return
           from openpilot.common.params import Params
           result = hud_writes.await_switch(Params, live_request)
@@ -1921,7 +1921,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             with hud_personality_lock:
               result = hud_writes.withdraw_switch(Params(), board, live_request)
           if result is None:
-            reason = 'openpilot is not running yet: staged, applies as it starts or at the next stop with openpilot off'
+            reason = 'Saved: applies at next start'
             cloudlog.info(f"galaxy: hud steering board -> {board} (no card answer, staged)")
             self.json(200, {'applied': 'after_disengage', 'board': board, 'staged': True, 'reason': reason})
             return

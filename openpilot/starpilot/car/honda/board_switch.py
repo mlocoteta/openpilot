@@ -51,11 +51,11 @@ APPLIED_NOW = 'now'
 APPLIED_REFUSED = 'refused'
 APPLIED_AFTER_DISENGAGE = 'after_disengage'
 
-REFUSE_ENGAGED = 'Disengage openpilot first (steering board switches only while openpilot is off and the car is stopped)'
-REFUSE_LAT = 'Steering is active: turn lateral off first (switches only while openpilot is off and the car is stopped)'
-REFUSE_MOVING = 'Stop the car first (steering board switches only at a standstill)'
-REFUSE_UNKNOWN = 'openpilot is still starting: try again in a few seconds'
-REFUSE_DWELL = 'openpilot was engaged or the car moved: try again once stopped with openpilot off'
+REFUSE_ENGAGED = 'Disengage first'
+REFUSE_LAT = 'Turn steering off first'
+REFUSE_MOVING = 'Stop the car first'
+REFUSE_UNKNOWN = 'Still starting, try again'
+REFUSE_DWELL = 'Wait a moment, try again'
 
 
 def running_board(CP):
@@ -223,7 +223,7 @@ class BoardSwitch:
       if pending_board(self.params) is not None:
         clear_pending(self.params, BOARD_PENDING)
       _remove(self.params, SWITCH_PARAM)
-      reason = 'already active' if self.board == board else 'openpilot is off: used when it starts'
+      reason = 'already active' if self.board == board else 'Used when openpilot starts'
       _result(self.params, rid, board, APPLIED_NOW, reason)
       cloudlog.event('accord_board_switch', board=board, applied=APPLIED_NOW, reason=reason)
       return
@@ -262,7 +262,7 @@ class BoardSwitch:
     _remove(self.params, SWITCH_PARAM)
     self.committed_at = self.clock()
     self.committed_board = board
-    _result(self.params, rid, board, APPLIED_NOW, f'switching {self.board} -> {board}: openpilot restarts (about 10 s)')
+    _result(self.params, rid, board, APPLIED_NOW, 'Switching, about 10 s')
     self.params.put_bool(CYCLE_PARAM, True, block=True)
     cloudlog.event('accord_board_switch', board=board, applied=APPLIED_NOW, previous=self.board, staged=rid is None)
 
