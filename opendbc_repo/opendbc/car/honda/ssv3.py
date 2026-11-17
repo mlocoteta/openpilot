@@ -134,7 +134,8 @@ SSV3_PARSER_BUS = Bus.alt
 
 
 def ssv3_can_parser(CP, dbc_name):
-  return Ssv3Parser(dbc_name, [("SS_STATUS", math.nan), ("STEER_MOTOR_TORQUE", math.nan)], CanBus(CP).pt)
+  return Ssv3Parser(dbc_name, [("SS_STATUS", math.nan), ("STEER_MOTOR_TORQUE", math.nan), ("EPS_RAW", math.nan)],
+                    CanBus(CP).pt)
 
 
 def signed_motor_torque(raw: float) -> int:
@@ -155,6 +156,12 @@ class Ssv3CarState:
     self.lkas_blocked = False   # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
     self.frames_since_520 = 0
     self.steer_status = 0       # raw 400 STEER_STATUS (EPS status bits), every firmware; blend probe abort input
+    # Wind-up guard inputs (firmware 3 only; Ssv3WindupGuard). Defaults = "steering applied".
+    self.board_mode = BOARD_MODE_STEER   # 524 MODE, last valid frame
+    self.board_request = False           # 524 STEER_REQUEST: the board sees our request bit
+    self.frames_since_524 = 0
+    self.lin_fatal = False               # 400 LIN_INTERFACE_FATAL_ERROR: set on the frame after an EPS serial gap
+    self.frames_without_400 = 0          # carState updates in a row with no new 400 (EPS serial frame) at all
 
   def _drop_to_fw2(self):
     # SS_STATUS stopped (or reported < 3): firmware-2 treatment, no options, no fw3 fields
@@ -163,6 +170,9 @@ class Ssv3CarState:
     self.eps_lkas_ack = False
     self.camera_fault = False
     self.motor_torque = 0
+    self.board_mode = BOARD_MODE_STEER
+    self.board_request = False
+    self.lin_fatal = False
 
   def update(self, cp_ssv3, cp_pt, ret: structs.CarState) -> None:
     # vl_all only holds this update's checksum/counter-valid frames; vl keeps stale/default values.
@@ -184,13 +194,117 @@ class Ssv3CarState:
       self.hardware_rev = int(cp_ssv3.vl["SS_STATUS"]["HARDWARE_REV"])
       self.lkas_blocked = bool(cp_ssv3.vl["SS_STATUS"]["LKAS_ALLOWED"])
     self.steer_status = int(cp_pt.vl["STEER_STATUS"]["STEER_STATUS"])
+    # 400/427/524 are all emitted per EPS serial frame (100 Hz): none in this update = the EPS is not talking
+    self.frames_without_400 = 0 if cp_pt.vl_all["STEER_STATUS"]["STEER_STATUS"] else self.frames_without_400 + 1
+    if cp_ssv3.vl_all["EPS_RAW"]["MODE"]:
+      self.frames_since_524 = 0
+    else:
+      self.frames_since_524 += 1
 
     if not self.fw3:
       return
+    if self.frames_since_524 == 0:
+      self.board_mode = int(cp_ssv3.vl["EPS_RAW"]["MODE"])
+      self.board_request = bool(cp_ssv3.vl["EPS_RAW"]["STEER_REQUEST"])
+    elif self.frames_since_524 > EPS_RAW_STALE_FRAMES:
+      # 524 stopped (not sent by this board build): mode unknown, never treated as a cut
+      self.board_mode, self.board_request = BOARD_MODE_STEER, False
+    self.lin_fatal = bool(cp_pt.vl["STEER_STATUS"]["LIN_INTERFACE_FATAL_ERROR"])
     self.eps_lkas_ack = bool(cp_pt.vl["STEER_STATUS"]["EPS_LKAS_ACK"])
     self.camera_fault = bool(cp_pt.vl["STEER_STATUS"]["CAMERA_FAULT"])
     self.motor_torque = signed_motor_torque(cp_ssv3.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"])
     ret.steeringTorqueEps = float(self.motor_torque)
+
+
+# ---- Wind-up guard (report 2026-11-17-ssv3-windup-fix.md) ----
+#
+# openpilot cannot see when the SSV3/EPS stops applying our torque, so the controller kept winding 0xE4 up to +-240
+# into a board that had cut LKAS (524 MODE IDLE at |driver| ~90) or an EPS that had stopped acking (below ~3 mph),
+# and the board then stepped that stale command back in on release. While a cut is seen, the command (the car
+# controller's rate-limited torque, CarControl.actuatorsOutput.torque) is capped:
+#   BOARD_IDLE  524 MODE != STEER while 524 STEER_REQUEST = 1, and for BOARD_LEAD_IN_FRAMES after the board is back in
+#               STEER: the board has sent LKAS-off and then sends its 5-frame zero lead-in, so nothing of ours is
+#               applied -> cap 0. At the 84-90 count hysteresis edge the board flips IDLE/STEER every few frames
+#               with the ack still up; the latch keeps the command down through that chatter.
+#   EPS_NO_ACK  400 EPS_LKAS_ACK = 0 for ACK_DEBOUNCE_FRAMES: the EPS says it is not applying LKAS -> cap 0.
+#               Both cap-0 cuts drop the command to the +-1 keep-alive at once (invisible: nothing is applied), and
+#               the ramp-in on release starts from 0, where the EPS actually is.
+#   LIN_FATAL / SERIAL_GAP  400 LIN_INTERFACE_FATAL_ERROR, or no EPS frame for SERIAL_GAP_FRAMES: the EPS serial
+#               link dropped; whether the EPS is still applying is unknown (2/11 gaps came back acked, and a
+#               gap ride-through firmware keeps steering) -> hold: no growth, no step. If the board then goes IDLE or
+#               the ack drops, the cap-0 rules take over.
+# The smallest cap wins. Release: the cap goes away on the first clean frame and the normal STEER_DELTA_UP rate
+# limit (7.2 counts per frame, 0.33 s to full) ramps back from the capped value. Because actuatorsOutput.torque
+# then differs from actuators.torque, controlsd's existing steer_limited_by_safety freezes the torque controller's
+# integrator and skips the saturation timer, so no controlsd change and no alert. Firmware 3 only, latActive only,
+# never during a blend-probe window, never on the TI path (Ssv3Controller does not exist there). A newer board
+# firmware that ramps its own release only meets a command that is already ramping from 0.
+BOARD_MODE_STEER = 2
+EPS_RAW_STALE_FRAMES = 50       # 524 missing this long -> mode unknown (not a cut)
+ACK_DEBOUNCE_FRAMES = 2
+BOARD_LEAD_IN_FRAMES = 5        # firmware 2/3 send zero for 5 frames after IDLE -> STEER (bridge.cpp lead-in)
+SERIAL_GAP_FRAMES = 4           # >= 40 ms with no EPS frame (gaps are 60-70 ms; normal batching gives 0-1)
+
+
+class Ssv3Cut:
+  NONE = 0
+  BOARD_IDLE = 1
+  EPS_NO_ACK = 2
+  LIN_FATAL = 4
+  SERIAL_GAP = 8
+
+
+class Ssv3WindupGuard:
+  def __init__(self):
+    self.reason = Ssv3Cut.NONE     # this frame's cut reasons (bit mask), logged in starpilotCarState.ssv3
+    self.no_ack_frames = 0
+    self.steer_frames = BOARD_LEAD_IN_FRAMES   # board frames in STEER since its last IDLE-with-request
+    self.cut_frames = 0             # consecutive frames with any cut
+
+  def update(self, ssv3, lat_active: bool) -> int:
+    if ssv3 is None or not ssv3.fw3 or not lat_active:
+      self.__init__()
+      return self.reason
+    self.no_ack_frames = 0 if ssv3.eps_lkas_ack else self.no_ack_frames + 1
+    idle = ssv3.board_request and ssv3.board_mode != BOARD_MODE_STEER
+    self.steer_frames = 0 if idle else min(self.steer_frames + 1, BOARD_LEAD_IN_FRAMES)
+    reason = Ssv3Cut.NONE
+    if self.steer_frames < BOARD_LEAD_IN_FRAMES:
+      reason |= Ssv3Cut.BOARD_IDLE
+    if self.no_ack_frames >= ACK_DEBOUNCE_FRAMES:
+      reason |= Ssv3Cut.EPS_NO_ACK
+    if ssv3.lin_fatal:
+      reason |= Ssv3Cut.LIN_FATAL
+    if ssv3.frames_without_400 >= SERIAL_GAP_FRAMES:
+      reason |= Ssv3Cut.SERIAL_GAP
+    self.reason = reason
+    self.cut_frames = self.cut_frames + 1 if reason else 0
+    return reason
+
+  def limit(self, torque: float, last_torque: float) -> float:
+    """Caps this frame's rate-limited normalized torque given last frame's output (both openpilot sign)."""
+    if not self.reason:
+      return torque
+    cap = abs(last_torque)          # any cut: no growth (LIN_FATAL / SERIAL_GAP: hold)
+    if self.reason & (Ssv3Cut.BOARD_IDLE | Ssv3Cut.EPS_NO_ACK):
+      cap = 0.0
+    return max(-cap, min(cap, torque))
+
+
+# ---- EPS deadband compensation (developer A/B, SSV3DeadbandComp, default off) ----
+# The EPS gives ~0 motor torque for |0xE4| <= ~20 counts (report 2026-11-17-ssv3-raw-vs-can.md). When on, a
+# sign-following offset of DEADBAND_COMP_COUNTS is added to the wire command, faded in over the first
+# DEADBAND_FADE_COUNTS so the command stays continuous through zero. Applied to the wire value only (the
+# controller's actuatorsOutput.torque is unchanged), only while steering is applied (no cut).
+DEADBAND_COMP_COUNTS = 20.0
+DEADBAND_FADE_COUNTS = 20.0
+
+
+def deadband_compensate(raw: float, steer_max: float) -> float:
+  if raw == 0.0:
+    return raw
+  out = raw + math.copysign(DEADBAND_COMP_COUNTS * min(1.0, abs(raw) / DEADBAND_FADE_COUNTS), raw)
+  return max(-steer_max, min(steer_max, out))
 
 
 class Ssv3Controller:
@@ -202,6 +316,13 @@ class Ssv3Controller:
     # Developer-only EPS torque-blend probe (SSV3BlendProbe, default 0 = off), set by the openpilot side.
     self.requested_probe = 0
     self.probe = Ssv3BlendProbe()
+    self.guard = Ssv3WindupGuard()
+    # SSV3DeadbandComp (default off), set by the openpilot side; firmware 3 only.
+    self.requested_deadband_comp = False
+
+  def deadband_comp(self, CS) -> bool:
+    ssv3 = getattr(CS, "ssv3", None)
+    return bool(self.requested_deadband_comp and ssv3 is not None and ssv3.fw3)
 
   def options(self, CS) -> int:
     ssv3 = getattr(CS, "ssv3", None)
