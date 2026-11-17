@@ -44,10 +44,13 @@ FW3_LOST_FRAMES = 50
 # 2026-11-16, after the first SSV3 openpilot-steered drive (report 2026-11-16-ssv3-first-drive.md): LAF 0.90 -> 1.6
 # (open-loop refit 1.4-1.8, torqued raw 2.4-2.8 pinned at the old window edge; windows now LAF 1.12-2.08) and
 # FRICTION 0.12 -> 0.15 (torqued raw 0.18-0.19; window 0.075-0.225).
-SSV3_LAT_ACCEL_FACTOR = 1.6
+# 2026-11-17 (reports 2026-11-16-ssv3-blend-on-vs-off.md, 2026-11-16-drive-ff-acedd8b.md): LAF 1.6 -> 1.9 (torqued
+# filtered 1.80-1.93, raw 2.07-2.13; window now 1.33-2.47) and delay 0.20 -> 0.30 (lagd 0.45, blend probe ~0.50 s).
+# FRICTION 0.15 kept (torqued 0.147-0.156).
+SSV3_LAT_ACCEL_FACTOR = 1.9
 SSV3_FRICTION = 0.15
-# Gives lagd an initial total of 0.40 s (+0.2 s), the lag the TI path learned.
-SSV3_STEER_ACTUATOR_DELAY = 0.20
+# Gives lagd an initial total of 0.50 s (+0.2 s), the lag measured on the SSV3 drives.
+SSV3_STEER_ACTUATOR_DELAY = 0.30
 
 
 def apply_ssv3_lateral_tune(cp) -> None:

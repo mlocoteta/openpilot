@@ -43,7 +43,7 @@ class TestSsv3TuneRuntime(unittest.TestCase):
   def test_prepare_picks_the_tune_with_the_board(self):
     ssv3 = VehicleStartupPreferences().prepare(accord())          # TI switch off = SSV3 only
     self.assertFalse(ti_qualified(ssv3))
-    for got, want in zip(tune(ssv3), (1.6, 0.15, SSV3_STEER_ACTUATOR_DELAY), strict=True):
+    for got, want in zip(tune(ssv3), (1.9, 0.15, 0.30), strict=True):
       self.assertAlmostEqual(got, want, places=6)
     ti = VehicleStartupPreferences(honda_torque_interceptor=True).prepare(accord())
     self.assertTrue(ti_qualified(ti))
@@ -63,9 +63,19 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertEqual(other.friction, 0.19)
 
   def test_ssv3_custom_values_still_apply_on_the_ssv3_basis(self):
-    raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.6", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.15"}
+    raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.9", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.15"}
     got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
     self.assertEqual((got.factor, got.friction), (1.8, 0.08))
+
+  def test_values_saved_against_the_previous_ssv3_tune_do_not_reach_the_new_basis(self):
+    # 2026-11-17 retune LAF 1.6 -> 1.9: a custom factor saved against the LAF 1.6 marker is not this basis's setting
+    raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.6", "SteerFriction": b"0.15", "SteerFrictionStock": b"0.15"}
+    got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
+    self.assertEqual((got.factor, got.friction), (None, None))
+    self.assertEqual((got.factor_mode, got.friction_mode), (LegacyMode.STOCK, LegacyMode.STOCK))
+    # a value equal to the old stock 1.6 with its own marker is stock too
+    old_stock = {"SteerLatAccel": b"1.6", "SteerLatAccelStock": b"1.6"}
+    self.assertIsNone(interpret_legacy(old_stock, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G").factor)
 
   def test_torque_runtime_and_torqued_start_from_the_ssv3_tune(self):
     from openpilot.starpilot.lateral.torque_runtime import manual_overrides_present, read_settings, TorqueHost
@@ -78,10 +88,10 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertIsNone(settings.user_friction)
     self.assertFalse(manual_overrides_present(cp, self.params))
     est = TorqueEstimator(cp.as_reader())
-    self.assertAlmostEqual(est.offline_latAccelFactor, 1.6, places=6)
+    self.assertAlmostEqual(est.offline_latAccelFactor, 1.9, places=6)
     self.assertAlmostEqual(est.offline_friction, 0.15, places=6)
-    self.assertAlmostEqual(est.min_lataccel_factor, 1.12, places=5)
-    self.assertAlmostEqual(est.max_lataccel_factor, 2.08, places=5)
+    self.assertAlmostEqual(est.min_lataccel_factor, 1.33, places=5)
+    self.assertAlmostEqual(est.max_lataccel_factor, 2.47, places=5)
 
 
 if __name__ == "__main__":
