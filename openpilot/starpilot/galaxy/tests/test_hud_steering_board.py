@@ -17,8 +17,8 @@ from openpilot.starpilot.galaxy import hud_writes
 
 NOW = 1794000000.0
 DAY = 86400
-OFFROAD = 'offroad: used when openpilot starts'
-STAGED = 'openpilot is not running yet: staged, applies as it starts or at the next stop with openpilot off'
+OFFROAD = 'Used when openpilot starts'
+STAGED = 'Saved: applies at next start'
 
 
 class FakeParams:
@@ -288,7 +288,7 @@ class HudWritesServerTest(unittest.TestCase):
     bs = self.run_card('ti')
     status, body = self.board('ssv3')
     self.assertEqual((status, body['applied'], body['board']), (200, 'now', 'ssv3'))
-    self.assertIn('openpilot restarts', body['reason'])
+    self.assertEqual(body['reason'], 'Switching, about 10 s')
     self.assertIs(FakeParams.values['TorqueInterceptorEnabled'], False)
     self.assertIs(FakeParams.values[bs.CYCLE_PARAM], True)               # controlled onroad re-init
     self.assertNotIn('AccordSteeringBoardPending', FakeParams.values)    # nothing staged
