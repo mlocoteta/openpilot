@@ -51,8 +51,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"AccordSteeringBoardSeen", {PERSISTENT, JSON}},
     // board configured before the last head-unit switch: switching back to it is always allowed (galaxy/hud_writes)
     {"AccordSteeringBoardPrevious", {PERSISTENT, STRING}},
-    // head-unit choices made while onroad / engaged: staged here, applied to the live params at the next offroad (galaxy/hud_writes)
+    // head-unit choices staged while no card could take them: board -> applied at card start / next disengaged stop /
+    // offroad (starpilot/car/honda/board_switch.py); openpilotEnabled -> next offroad (galaxy/hud_writes)
     {"AccordSteeringBoardPending", {PERSISTENT, STRING}},
+    // live 9G board switch: galaxy -> running card {"board", "id"}; card's answer {"id", "board", "applied", "reason"}
+    {"AccordSteeringBoardSwitch", {CLEAR_ON_MANAGER_START, JSON}},
+    {"AccordSteeringBoardSwitchResult", {CLEAR_ON_MANAGER_START, JSON}},
     {"OpenpilotEnabledPending", {PERSISTENT, STRING}},
     // Honda 9G Accord TI lateral controller (F03). Names, formats and defaults as on 6.x.
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1"}},
