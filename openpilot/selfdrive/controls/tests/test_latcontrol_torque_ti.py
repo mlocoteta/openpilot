@@ -627,7 +627,7 @@ def test_ff_tuning_params_are_read_live():
 
 # ---- SSV3 path (TI off at startup): no TI shaping, even with the TI tune params still set on the device ----
 # 2026-11-16: the car (TorqueInterceptorEnabled=0, SSV3) still has the TI tune params from the TI drives.
-# None of them may reach the SSV3 path: it runs the plain LatControlTorque with the SSV3 tune (LAF 1.6 /
+# None of them may reach the SSV3 path: it runs the plain LatControlTorque with the SSV3 tune (LAF 1.9 /
 # FRICTION 0.15) and a linear torque curve; the TI controller (sigmoid, TISteerKp, damping, offsets) is never built.
 
 SSV3_DEVICE_TI_PARAMS = dict(
@@ -655,17 +655,17 @@ def test_ssv3_path_builds_the_plain_torque_controller(monkeypatch):
   _, controller = _ssv3_controller(monkeypatch)
   assert type(controller) is LatControlTorque
   assert controller.starpilot_extension is None
-  assert controller.torque_params.latAccelFactor == pytest.approx(1.6)
+  assert controller.torque_params.latAccelFactor == pytest.approx(1.9)
   assert controller.torque_params.friction == pytest.approx(0.15)
   assert not hasattr(controller, "sigmoid_params")
 
 
 @pytest.mark.parametrize("lat_accel", (0.05, 0.1, 0.25, 0.5, 1.0, 1.5))
 def test_ssv3_torque_curve_is_linear(monkeypatch, lat_accel):
-  # The TI sigmoid (15, 0.72, 0.16) gives 0.18 at 0.1 m/s^2; the SSV3 path must give 0.1 / 1.6.
+  # The TI sigmoid (15, 0.72, 0.16) gives 0.18 at 0.1 m/s^2; the SSV3 path must give 0.1 / 1.9.
   _, controller = _ssv3_controller(monkeypatch)
   for x in (lat_accel, -lat_accel):
-    assert controller.torque_from_lateral_accel(x, controller.torque_params) == pytest.approx(x / 1.6)
+    assert controller.torque_from_lateral_accel(x, controller.torque_params) == pytest.approx(x / 1.9)
 
 
 def test_ssv3_output_is_pid_lat_accel_over_laf(monkeypatch):
@@ -685,7 +685,7 @@ def test_ssv3_output_is_pid_lat_accel_over_laf(monkeypatch):
     torque, _, pid_log = controller.update(True, CS, VM, lp, False, curvature, False, 0.4)
     assert pid_log.active
     if abs(torque) < 0.999:
-      assert -pid_log.output * 1.6 == pytest.approx(pid_log.p + pid_log.i + pid_log.f, abs=1e-5)
+      assert -pid_log.output * 1.9 == pytest.approx(pid_log.p + pid_log.i + pid_log.f, abs=1e-5)
       assert torque == pytest.approx(pid_log.output, abs=1e-6)
     outputs.append(torque)
   assert max(abs(x) for x in outputs) > 0.01

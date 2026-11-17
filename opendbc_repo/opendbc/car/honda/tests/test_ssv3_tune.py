@@ -90,9 +90,9 @@ def test_ssv3_path_gets_the_ssv3_tune(pedal):
   cp = params(pedal=pedal, ti=False)
   assert not ti_qualified(cp)
   assert cp.lateralTuning.which() == "torque"
-  assert (SSV3_LAT_ACCEL_FACTOR, SSV3_FRICTION, SSV3_STEER_ACTUATOR_DELAY) == (1.6, 0.15, 0.20)
+  assert (SSV3_LAT_ACCEL_FACTOR, SSV3_FRICTION, SSV3_STEER_ACTUATOR_DELAY) == (1.9, 0.15, 0.30)
   assert (cp.lateralTuning.torque.latAccelFactor, cp.lateralTuning.torque.friction, cp.steerActuatorDelay) == \
-         pytest.approx((1.6, 0.15, 0.20), abs=1e-6)
+         pytest.approx((1.9, 0.15, 0.30), abs=1e-6)
   assert cp.lateralTuning.torque.latAccelOffset == 0.0
 
 
