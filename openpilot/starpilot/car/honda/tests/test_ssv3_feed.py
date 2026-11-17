@@ -55,3 +55,39 @@ def test_firmware3_companion():
   assert (out.firmwareVersion, out.hardwareRev, out.epsLkasAck, out.cameraFault, out.motorTorque, out.options) == \
          (3, 4, True, False, -42, Ssv3Option.LSB_TOGGLE_DISABLE)
   assert msg.starpilotCarState.sourceCarStateMonoTime == 123
+
+
+def test_deadband_comp_param_registered_default_off_and_read():
+  from openpilot.starpilot.car.honda.ssv3_feed import DEADBAND_COMP_PARAM, read_deadband_comp
+  text = open(__file__.rsplit("/starpilot/", 1)[0] + "/common/params_keys.h").read()
+  assert DEADBAND_COMP_PARAM == "SSV3DeadbandComp"
+  assert '{"SSV3DeadbandComp", {PERSISTENT, BOOL, "0"}}' in text
+  assert read_deadband_comp(FakeParams({})) is False
+  assert read_deadband_comp(FakeParams({"SSV3DeadbandComp": True})) is True
+
+  class Broken:
+    def get_bool(self, key):
+      raise OSError
+  assert read_deadband_comp(Broken()) is False
+  car = ci()
+  feed = install(car, FakeParams({"SSV3DeadbandComp": True}))
+  feed.update(State(), None, car_state_stamp=1)
+  assert car.CC.ssv3.requested_deadband_comp is True
+  assert car.CC.ssv3.deadband_comp(car.CS) is False          # firmware 2: never
+  car.CS.ssv3.fw3 = True
+  assert car.CC.ssv3.deadband_comp(car.CS) is True
+
+
+def test_windup_guard_state_is_logged():
+  from opendbc.car.honda.ssv3 import Ssv3Cut
+  car = ci()
+  feed = install(car, FakeParams({}))
+  s = car.CS.ssv3
+  s.fw3, s.version, s.eps_lkas_ack, s.board_mode, s.board_request, s.lin_fatal = True, 3, False, 1, True, True
+  car.CC.ssv3.guard.reason = Ssv3Cut.EPS_NO_ACK | Ssv3Cut.BOARD_IDLE | Ssv3Cut.LIN_FATAL
+  out = feed.update(State(), None, car_state_stamp=5).starpilotCarState.ssv3
+  assert out.lkasCut and out.cutReason == 7
+  assert (out.boardMode, out.boardSteerRequest, out.linFatalError, out.deadbandComp) == (1, True, True, False)
+  car.CC.ssv3.guard.reason = 0
+  out = feed.update(State(), None, car_state_stamp=6).starpilotCarState.ssv3
+  assert not out.lkasCut and out.cutReason == 0
