@@ -5,6 +5,9 @@
   board has reported firmware >= 3 for this drive; a firmware-2 board never sees them.
 * Once firmware >= 3 is seen, adds starpilotCarState.ssv3 (version, EPS_LKAS_ACK, CAMERA_FAULT, signed
   motor torque, options sent) to the carState companion. Nothing is published for firmware 2.
+* SSV3DeadbandComp (developer A/B, default off): read with the option params; the car controller adds the EPS
+  deadband offset only on firmware 3. The wind-up guard state (lkasCut, cutReason, boardMode, ...) is published
+  in starpilotCarState.ssv3 so it is in every log.
 * SSV3BlendProbe (developer EPS torque-blend probe, default 0 = off, cleared at every manager start and onroad /
   offroad transition): read with the option params and handed to the car controller's probe
   (opendbc/car/honda/ssv3.py Ssv3BlendProbe). When the probe ends (completed or aborted) the param is cleared here,
@@ -22,6 +25,7 @@ OPTION_PARAMS = (
 )
 PARAM_INTERVAL = 100  # carState frames (~1 s)
 PROBE_PARAM = "SSV3BlendProbe"
+DEADBAND_COMP_PARAM = "SSV3DeadbandComp"
 
 
 def read_options(params) -> int:
@@ -33,6 +37,13 @@ def read_options(params) -> int:
     except Exception:
       pass  # unreadable = off
   return options
+
+
+def read_deadband_comp(params) -> bool:
+  try:
+    return bool(params.get_bool(DEADBAND_COMP_PARAM))
+  except Exception:
+    return False  # unreadable = off
 
 
 def read_probe(params) -> int:
@@ -66,6 +77,7 @@ class Ssv3Feed:
   def update(self, CS, message, *, car_state_stamp):
     if self.frame % PARAM_INTERVAL == 0:
       self.controller.requested_options = read_options(self.params)
+      self.controller.requested_deadband_comp = read_deadband_comp(self.params)
       probe = read_probe(self.params)
       if self.probe_awaiting_clear:
         self.controller.requested_probe = 0
@@ -96,6 +108,13 @@ class Ssv3Feed:
     out.blendProbeEnd = probe.end
     out.blendProbeTime = probe.total * 0.01
     out.steerStatus = max(0, min(255, int(ssv3.steer_status)))
+    guard = self.controller.guard
+    out.lkasCut = bool(guard.reason)
+    out.cutReason = int(guard.reason)
+    out.boardMode = max(0, min(255, int(ssv3.board_mode)))
+    out.boardSteerRequest = bool(ssv3.board_request)
+    out.linFatalError = bool(ssv3.lin_fatal)
+    out.deadbandComp = self.controller.deadband_comp(self.owner)
     return message
 
   def _clear_finished_probe(self):

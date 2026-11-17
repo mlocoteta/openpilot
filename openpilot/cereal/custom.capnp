@@ -241,6 +241,13 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
     blendProbeEnd @11 :UInt8;  # ProbeEnd: 1 completed, 2 latInactive, 3 brake, 4 gas, 5 cancel, 6 speed, 7 angle, 8 yaw, 9 epsFault, 10 timeLimit, 11 boardLost, 12 armTimeout, 13 badProgram, 14 stopped
     blendProbeTime @12 :Float32;  # s since the first window started
     steerStatus @13 :UInt8;  # raw 400 STEER_STATUS (EPS status bits)
+    # Wind-up guard (opendbc/car/honda/ssv3.py Ssv3WindupGuard): openpilot's command is capped while set
+    lkasCut @14 :Bool;  # board/EPS not applying our torque this frame (any cutReason)
+    cutReason @15 :UInt8;  # bit mask: 1 boardIdle (524 MODE != STEER with request), 2 epsNoAck, 4 linFatal (400), 8 serialGap
+    boardMode @16 :UInt8;  # 524 MODE: 0 passthrough, 1 idle, 2 steer
+    boardSteerRequest @17 :Bool;  # 524 STEER_REQUEST
+    linFatalError @18 :Bool;  # 400 LIN_INTERFACE_FATAL_ERROR (frame after an EPS serial gap)
+    deadbandComp @19 :Bool;  # SSV3DeadbandComp active (firmware 3)
   }
 
   struct ToyotaCruise {
