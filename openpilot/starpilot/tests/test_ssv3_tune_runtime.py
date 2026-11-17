@@ -39,7 +39,7 @@ class TestSsv3TuneRuntime(unittest.TestCase):
       Path(self.params.get_param_path(key)).write_bytes(value)
 
   def test_9g_carparams_carry_the_ssv3_tune(self):
-    for got, want in zip(tune(accord()), (0.90, 0.12, SSV3_STEER_ACTUATOR_DELAY), strict=True):
+    for got, want in zip(tune(accord()), (1.9, 0.15, 0.30), strict=True):
       self.assertAlmostEqual(got, want, places=6)
 
   def test_ti_era_custom_values_do_not_reach_the_ssv3_basis(self):
@@ -55,9 +55,16 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertEqual(other.friction, 0.19)
 
   def test_ssv3_custom_values_still_apply_on_the_ssv3_basis(self):
+    raw = {"SteerLatAccel": b"1.8", "SteerLatAccelStock": b"1.9", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.15"}
+    got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
+    self.assertEqual((got.factor, got.friction), (1.8, 0.08))
+
+  def test_values_saved_against_the_previous_ssv3_tune_do_not_reach_the_new_basis(self):
+    # 2026-11-17 retune 0.90/0.12 -> 1.9/0.15: custom values saved against the old markers are not this basis's
     raw = {"SteerLatAccel": b"1.0", "SteerLatAccelStock": b"0.9", "SteerFriction": b"0.08", "SteerFrictionStock": b"0.12"}
     got = interpret_legacy(raw, SSV3_BASIS, fingerprint="HONDA_ACCORD_9G")
-    self.assertEqual((got.factor, got.friction), (1.0, 0.08))
+    self.assertEqual((got.factor, got.friction), (None, None))
+    self.assertEqual((got.factor_mode, got.friction_mode), (LegacyMode.STOCK, LegacyMode.STOCK))
 
   def test_torque_runtime_and_torqued_start_from_the_ssv3_tune(self):
     from openpilot.starpilot.lateral.torque_runtime import manual_overrides_present, read_settings, TorqueHost
@@ -70,10 +77,10 @@ class TestSsv3TuneRuntime(unittest.TestCase):
     self.assertIsNone(settings.user_friction)
     self.assertFalse(manual_overrides_present(cp, self.params))
     est = TorqueEstimator(cp.as_reader())
-    self.assertAlmostEqual(est.offline_latAccelFactor, 0.90, places=6)
-    self.assertAlmostEqual(est.offline_friction, 0.12, places=6)
-    self.assertAlmostEqual(est.min_lataccel_factor, 0.63, places=5)
-    self.assertAlmostEqual(est.max_lataccel_factor, 1.17, places=5)
+    self.assertAlmostEqual(est.offline_latAccelFactor, 1.9, places=6)
+    self.assertAlmostEqual(est.offline_friction, 0.15, places=6)
+    self.assertAlmostEqual(est.min_lataccel_factor, 1.33, places=5)
+    self.assertAlmostEqual(est.max_lataccel_factor, 2.47, places=5)
 
 
 if __name__ == "__main__":

@@ -85,6 +85,26 @@ class TestLagd(OpenpilotTestCase):
     assert lag == msg.lateralDelay.lateralDelayEstimate
     assert valid_blocks == msg.lateralDelay.validBlocks
 
+  def test_9g_cached_lag_is_dropped_when_the_tune_basis_changes(self):
+    params = Params()
+    # distinct constructor args: new_message() returns a shared instance for identical ones
+    old, new = car.CarParams.new_message(steerRatio=15.0), car.CarParams.new_message(steerRatio=15.5)
+    for cp, laf, fr, delay in ((old, 0.9, 0.12, 0.2), (new, 1.9, 0.15, 0.3)):
+      cp.carFingerprint = "HONDA_ACCORD_9G"
+      cp.lateralTuning.init('torque')
+      cp.lateralTuning.torque.latAccelFactor = laf
+      cp.lateralTuning.torque.friction = fr
+      cp.steerActuatorDelay = delay
+    msg = messaging.new_message('lateralDelay')
+    msg.lateralDelay.lateralDelayEstimate = 0.45
+    msg.lateralDelay.validBlocks = 50
+    msg.lateralDelay.version = VERSION
+    put_cache(params, "LiveDelay", msg, block=True)
+    put_cache(params, "CarParamsPrevRoute", old, block=True)
+    assert retrieve_initial_lag(params, old) is not None          # same basis: restored
+    assert retrieve_initial_lag(params, new) is None              # SSV3 retune: measured fresh
+    assert params.get("LiveDelay") is None
+
   def test_read_invalid_saved_params(self, subtests):
     params = Params()
 

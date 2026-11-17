@@ -37,11 +37,14 @@ FW3_LOST_FRAMES = 50
 # Initial lateral tune for the SSV3 path (stock-LKAS dashcam drive 000000f3--740a520643, report
 # 2026-11-15-ssv3-initial-tune.md). Upstream's 9G tune is HONDA_ACCORD's via substitute.toml (LAF 1.69,
 # FRICTION 0.32): above the SSV3's plausible band (0.5-1.2) and ~3x its measured friction step. FRICTION is in normalized torque units (x240 counts).
-# torqued learns from these (its +-30 % / +-50 % windows: LAF 0.63-1.17, FRICTION 0.06-0.18).
-SSV3_LAT_ACCEL_FACTOR = 0.90
-SSV3_FRICTION = 0.12
-# Gives lagd an initial total of 0.40 s (+0.2 s), the lag the TI path learned.
-SSV3_STEER_ACTUATOR_DELAY = 0.20
+# torqued learns from these (its +-30 % / +-50 % windows).
+# 2026-11-17, from the openpilot-steered SSV3 drives (torqued LAF 1.8-2.13, friction 0.147-0.156, lagd 0.45 s,
+# blend probe ~0.50 s): LAF 0.90 -> 1.9, FRICTION 0.12 -> 0.15, delay 0.20 -> 0.30 (torqued windows LAF 1.33-2.47,
+# FRICTION 0.075-0.225). Same values as the accord-7.0-port SSV3 path.
+SSV3_LAT_ACCEL_FACTOR = 1.9
+SSV3_FRICTION = 0.15
+# Gives lagd an initial total of 0.50 s (+0.2 s), the lag measured on the SSV3 drives.
+SSV3_STEER_ACTUATOR_DELAY = 0.30
 
 
 def apply_ssv3_lateral_tune(cp) -> None:
