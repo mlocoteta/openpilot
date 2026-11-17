@@ -243,6 +243,10 @@ class Car:
 
     is_release = self.params.get_bool("IsReleaseBranch")
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
+    if not REPLAY:
+      # 9G board staged / requested while no card ran: becomes this start's board before any CarParams exist
+      from openpilot.starpilot.car.honda.board_switch import consume_at_start as consume_honda_board_at_start
+      consume_honda_board_at_start(self.params)
     startup_preferences = VehicleStartupPreferences.read(self.params, enabled=openpilot_enabled_toggle)
 
     def initialize_aol_preference(cp):
@@ -477,6 +481,9 @@ class Car:
     from openpilot.starpilot.car.honda.steering_board_watch import install_seen as install_honda_board_seen
     # every 9G drive (also openpilot disabled): persistent TI/SSV3 'last heard' record for the head-unit board switch
     self.honda_board_seen = install_honda_board_seen(self.CP, self.CI, self.params) if self.CP.brand == 'honda' else None
+    from openpilot.starpilot.car.honda.board_switch import install as install_honda_board_switch
+    # 9G: head-unit TI <-> SSV3 switch while the car is on (disengaged + stopped -> onroad cycle re-init)
+    self.honda_board_switch = install_honda_board_switch(self.CP, self.params) if self.CP.brand == 'honda' else None
 
     # Write CarParams for controls and radard
     self.vehicle_startup.seal_publication()
@@ -1964,6 +1971,11 @@ class Car:
 
   def step(self):
     CS, RD = self.state_update(defer_radar=True)
+    board_switch = getattr(self, 'honda_board_switch', None)
+    if board_switch is not None and board_switch.update(CS, self.sm['carControl'], self.sm.alive['carControl']):
+      # committed 9G board switch: nothing may engage before the onroad cycle stops this card
+      from openpilot.starpilot.car.honda.board_switch import block_engagement
+      block_engagement(CS)
 
     if self.vehicle_startup.owner is not None:
       self.vehicle_startup.maintain(configured=self.startup_panda_configured())
