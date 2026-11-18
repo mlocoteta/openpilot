@@ -27,6 +27,9 @@ VERY_LONG_PRESS = 5 * CRUISE_LONG_PRESS
 MEDIA_LONG_NS = CRUISE_LONG_PRESS * 10_000_000  # Convert 100 Hz ticks to source-packet nanoseconds.
 MEDIA_VERY_LONG_NS = VERY_LONG_PRESS * 10_000_000
 ButtonType = car.CarState.ButtonEvent.Type
+# IntFlag operators cost microseconds each; ioniq6_media_eligible runs ~5x per 100 Hz card frame.
+_EV6_MEDIA_REQUIRED = HyundaiFlags.CANFD | HyundaiFlags.EV
+_EV6_MEDIA_EXCLUDED = HyundaiFlags.CCNC | HyundaiFlags.CANFD_ANGLE_STEERING
 
 
 def ioniq6_media_eligible(CP: car.CarParams) -> bool:
@@ -37,9 +40,9 @@ def ioniq6_media_eligible(CP: car.CarParams) -> bool:
   """
   if CP.carFingerprint == HYUNDAI_CAR.HYUNDAI_IONIQ_6:
     return config_index(CP) is not None and CanBus(CP).ECAN in (1, 5)
-  required = HyundaiFlags.CANFD | HyundaiFlags.EV
-  return (CP.brand == 'hyundai' and CP.carFingerprint == HYUNDAI_CAR.KIA_EV6 and
-          CP.flags & required == required and not CP.flags & (HyundaiFlags.CCNC | HyundaiFlags.CANFD_ANGLE_STEERING) and
+  if CP.brand != 'hyundai' or CP.carFingerprint != HYUNDAI_CAR.KIA_EV6:
+    return False
+  return (CP.flags & _EV6_MEDIA_REQUIRED == _EV6_MEDIA_REQUIRED and not CP.flags & _EV6_MEDIA_EXCLUDED and
           config_index(CP) is not None and CanBus(CP).ECAN in (0, 1, 4, 5))
 
 
