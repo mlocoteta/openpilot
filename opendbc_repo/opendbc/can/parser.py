@@ -105,10 +105,11 @@ class VLDict(dict):
     super().__init__()
     self.parser = parser
 
-  def __getitem__(self, key):
-    if key not in self:
-      self.parser._add_message(key)
-    return super().__getitem__(key)
+  # __missing__ instead of a __getitem__ override: hits stay on the C dict path
+  # (carstate reads vl[...] ~55 times per 100 Hz frame); a miss still adds the message.
+  def __missing__(self, key):
+    self.parser._add_message(key)
+    return dict.__getitem__(self, key)
 
 
 class CANParser:
