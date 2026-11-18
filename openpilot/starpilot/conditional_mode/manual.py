@@ -27,7 +27,6 @@ VERY_LONG_PRESS = 5 * CRUISE_LONG_PRESS
 MEDIA_LONG_NS = CRUISE_LONG_PRESS * 10_000_000  # Convert 100 Hz ticks to source-packet nanoseconds.
 MEDIA_VERY_LONG_NS = VERY_LONG_PRESS * 10_000_000
 ButtonType = car.CarState.ButtonEvent.Type
-
 _EV6_MEDIA_REQUIRED = int(HyundaiFlags.CANFD | HyundaiFlags.EV)
 _EV6_MEDIA_EXCLUDED = int(HyundaiFlags.CCNC | HyundaiFlags.CANFD_ANGLE_STEERING)
 
