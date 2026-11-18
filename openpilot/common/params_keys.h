@@ -78,6 +78,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SSV3LsbToggleDisable", {PERSISTENT, BOOL, "0"}},
     {"SSV3ZeroTorqueKeepsLkasOn", {PERSISTENT, BOOL, "0"}},
     {"SSV3DeadbandComp", {PERSISTENT, BOOL, "0"}},
+    {"AccordBigCoreMaxKHz", {PERSISTENT, INT, "2400000"}},
     {"SSV3BlendProbe", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, INT, "0"}},
     {"HondaGasFactorParams", {PERSISTENT, FLOAT, "1.0"}},
     {"HondaWindFactorParams", {PERSISTENT, FLOAT, "1.0"}},

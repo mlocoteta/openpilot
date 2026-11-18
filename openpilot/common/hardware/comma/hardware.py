@@ -322,8 +322,10 @@ class HardwareComma(HardwareBase):
       gov = 'ondemand' if powersave_enabled else 'performance'
       sudo_write(gov, f'/sys/devices/system/cpu/cpufreq/policy{n}/scaling_governor')
       if not powersave_enabled:
-        # cap max core freq to 1689 Mhz
-        sudo_write('1689600', f'/sys/devices/system/cpu/cpufreq/policy{n}/scaling_max_freq')
+        # cap max core freq to 1689 Mhz; big cluster: AccordBigCoreMaxKHz (0 = this upstream cap)
+        from openpilot.starpilot.system.big_core_freq import UPSTREAM_MAX_KHZ, big_core_max_khz
+        max_khz = big_core_max_khz() if n == '4' else UPSTREAM_MAX_KHZ
+        sudo_write(str(max_khz), f'/sys/devices/system/cpu/cpufreq/policy{n}/scaling_max_freq')
 
     # *** IRQ config ***
 
