@@ -80,13 +80,19 @@ class TestGate:
     assert cbd.lead_needs_brake(V65, True, 25.0, 1.0)  # inside 1 s even if pulling away
 
   def test_actuator_mapping_matches_the_7_0_carcontroller(self):
-    # friction onset: brake = -accel/4.8 exceeds wind_brake(v); pedal closes at 0.75 * WIND_FACTOR_HOLD * wind_brake
+    # friction onset: brake = -accel/3.6 (9G scale) exceeds wind_brake(v); the pedal (stock 4.8 brake term) closes at
+    # 4.8 * 0.75 * WIND_FACTOR_HOLD * wind_brake
     assert cbd.PEDAL_WIND_FACTOR == WIND_FACTOR_HOLD
-    gas, brake = carcontroller.compute_gb_honda_nidec(-0.7, V65)
+    assert cbd.BRAKE_ACCEL_PER_UNIT == 3.6 and cbd.PEDAL_ACCEL_PER_UNIT == 4.8
+    cc = TestCarController()._run(None, 0.0, None, frames=0)[2]
+    assert cc.brake_accel_per_unit == cbd.BRAKE_ACCEL_PER_UNIT  # one shared value
+    gas, brake = carcontroller.compute_gb_honda_nidec(-0.7, V65, cc.brake_accel_per_unit)
     assert gas == 0.0 and brake == pytest.approx(0.7 / cbd.BRAKE_ACCEL_PER_UNIT)
     assert cbd.friction_request(-0.7, V65) == pytest.approx(brake - cbd.wind_brake(V65))
-    assert cbd.friction_request(-4.8 * cbd.wind_brake(V65) + 0.01, V65) == 0.0
+    assert cbd.friction_request(-3.6 * cbd.wind_brake(V65) + 0.01, V65) == 0.0
+    assert cbd.friction_request(-3.6 * cbd.wind_brake(V65) - 0.01, V65) > 0.0
     close = cbd.pedal_close_accel(V65)
+    assert close == pytest.approx(-4.8 * 0.75 * WIND_FACTOR_HOLD * cbd.wind_brake(V65))
     assert -1.2 < close < -0.9
     assert cbd.pedal_close_accel(8.0) == cbd.I_FLOOR_MAX  # low speed: clipped
 
@@ -109,7 +115,8 @@ class TestCarController:
     def capture(packer, CAN, apply_brake, *args):
       brakes.append(apply_brake)
       return CREATE_BRAKE_COMMAND(packer, CAN, apply_brake, *args)
-    monkeypatch.setattr(carcontroller.hondacan, "create_brake_command", capture)
+    if monkeypatch is not None:
+      monkeypatch.setattr(carcontroller.hondacan, "create_brake_command", capture)
     command = structs.CarControl(enabled=True, longActive=True, latActive=False)
     command.actuators.accel = accel
     command.actuators.longControlState = "pid"
@@ -131,7 +138,7 @@ class TestCarController:
   def test_cruise_hold_brake_held_off_pedal_still_follows(self, monkeypatch):
     stock, stock_gas, _ = self._run(monkeypatch, -0.8, None)
     held, held_gas, cc = self._run(monkeypatch, -0.8, plan())
-    assert min(stock[-50:]) > 0  # -0.8 at 65 mph is past the friction onset (-0.6)
+    assert min(stock[-50:]) > 0  # -0.8 at 65 mph is past the friction onset (about -0.5 at the 9G 3.6 scale)
     assert held[:40] == stock[:40]  # stock for DEMAND_HOLD_S after engage (100 brake frames at 50 Hz)
     assert max(held[-50:]) == 0
     assert held_gas == pytest.approx(stock_gas)  # pedal command unchanged

@@ -4,10 +4,10 @@ At a steady set speed on a slight downgrade the I-only long PID crosses the fric
 brake comes on for ~0.5-1.5 s with the pedal still open, so speed ripples around the set speed (6.x routes 33d/352;
 7.0 Nov 5-9: 46-54 such pulses per hour of free cruise, median 0.5-1 s).
 
-7.0 actuator mapping (carcontroller): brake = -accel / 4.8, friction brake = brake - wind_brake(v) (so it starts at
-accel ~ -4.8 * wind_brake(v), -0.4 m/s^2 at 45 mph, -0.6 at 65), and the pedal closes only at
-accel = -4.8 * 0.75 * WIND_FACTOR_HOLD * wind_brake(v) (-0.7 / -1.0 m/s^2). Between the two the car brakes with
-the pedal open.
+7.0 actuator mapping on the 9G (carcontroller): brake = -accel / 3.6 (nidec_brake_scale), friction brake =
+brake - wind_brake(v) (so it starts at accel ~ -3.6 * wind_brake(v), -0.3 m/s^2 at 45 mph, -0.45 at 65), and the
+pedal (stock 4.8 brake term) closes only at accel = -4.8 * 0.75 * WIND_FACTOR_HOLD * wind_brake(v)
+(-0.7 / -1.0 m/s^2). Between the two the car brakes with the pedal open.
 
 While cruising at or just above the planner's cruise speed with no real decel demand, this gate holds the friction
 brake off. The pedal keeps following the accel command down to closed, so the car coasts and may drift up to
@@ -22,6 +22,8 @@ second, no restart).
 """
 import numpy as np
 
+from opendbc.car.honda.nidec_brake_scale import ACCORD_9G_BRAKE_ACCEL_PER_UNIT, NIDEC_ACCEL_PER_UNIT
+
 MPH = 0.44704
 MIN_SPEED = 17.0  # m/s; highway cruise hold only (38 mph)
 BAND_EXIT = 2.0 * MPH  # over the cruise speed: brakes allowed again
@@ -35,7 +37,10 @@ LEAD_CLOSING_MIN = 0.3  # m/s
 OVERSPEED_RAMP = 0.25  # brake units (0..1) per second when the brakes return only because of overspeed
 RELEASE_CLEAR_S = 1.0  # after an overspeed release, re-arm only once the stock request has been 0 this long
 
-BRAKE_ACCEL_PER_UNIT = 4.8  # carcontroller.compute_gb_honda_nidec
+# Only the 9G runs this gate. Friction side = carcontroller's 9G brake scale; the pedal command keeps the stock
+# 4.8 brake term (carcontroller passes the stock brake to the interceptor).
+BRAKE_ACCEL_PER_UNIT = ACCORD_9G_BRAKE_ACCEL_PER_UNIT
+PEDAL_ACCEL_PER_UNIT = NIDEC_ACCEL_PER_UNIT
 PEDAL_WIND_FACTOR = 2.3  # pedal_learner.WIND_FACTOR_HOLD (the 9G holds its wind factor)
 I_FLOOR_MIN, I_FLOOR_MAX = -1.2, -0.3
 
@@ -47,7 +52,7 @@ def wind_brake(v_ego: float) -> float:
 
 def pedal_close_accel(v_ego: float) -> float:
   """Accel command at which the pedal interceptor command reaches 0 (the car coasts)."""
-  return float(np.clip(-BRAKE_ACCEL_PER_UNIT * 0.75 * PEDAL_WIND_FACTOR * wind_brake(v_ego), I_FLOOR_MIN, I_FLOOR_MAX))
+  return float(np.clip(-PEDAL_ACCEL_PER_UNIT * 0.75 * PEDAL_WIND_FACTOR * wind_brake(v_ego), I_FLOOR_MIN, I_FLOOR_MAX))
 
 
 def friction_request(accel: float, v_ego: float) -> float:
