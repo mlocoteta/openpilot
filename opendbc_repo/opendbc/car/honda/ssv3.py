@@ -134,8 +134,8 @@ SSV3_PARSER_BUS = Bus.alt
 
 
 def ssv3_can_parser(CP, dbc_name):
-  return Ssv3Parser(dbc_name, [("SS_STATUS", math.nan), ("STEER_MOTOR_TORQUE", math.nan), ("EPS_RAW", math.nan)],
-                    CanBus(CP).pt)
+  return Ssv3Parser(dbc_name, [("SS_STATUS", math.nan), ("STEER_MOTOR_TORQUE", math.nan), ("EPS_RAW", math.nan),
+                               ("BLEND_STATE", math.nan)], CanBus(CP).pt)
 
 
 def signed_motor_torque(raw: float) -> int:
@@ -162,6 +162,22 @@ class Ssv3CarState:
     self.frames_since_524 = 0
     self.lin_fatal = False               # 400 LIN_INTERFACE_FATAL_ERROR: set on the frame after an EPS serial gap
     self.frames_without_400 = 0          # carState updates in a row with no new 400 (EPS serial frame) at all
+    # Board firmware build >= 4 (526 BLEND_STATE; Ssv3WindupGuard 526 rules). Defaults = "no 526" = build-3 rules.
+    self.frames_since_526 = BLEND_STALE_FRAMES + 1
+    self._blend_defaults()
+
+  def _blend_defaults(self):
+    self.blend_gain = BLEND_GAIN_FULL    # 526 BLEND_GAIN, last frame (255 = full LKAS)
+    self.blend_rise_frames = 0           # consecutive 526 frames with a rising gain (the board's release ramp)
+    self.eps_gap_active = False          # 526 EPS_GAP_ACTIVE: the board is riding through an EPS serial gap
+    self.frames_since_eps_gap = BLEND_GAP_RECOVERY_FRAMES   # carState updates since EPS_GAP_ACTIVE was last seen
+    self.steer_applied = 0               # 400 STEER_APPLIED (build >= 4: post-blend torque sent to the EPS)
+    self.new_400 = False                 # a 400 frame arrived in this update
+
+  @property
+  def blend_state(self) -> bool:
+    """526 BLEND_STATE is being received (board firmware build >= 4)."""
+    return self.fw3 and self.frames_since_526 <= BLEND_STALE_FRAMES
 
   def _drop_to_fw2(self):
     # SS_STATUS stopped (or reported < 3): firmware-2 treatment, no options, no fw3 fields
@@ -173,6 +189,7 @@ class Ssv3CarState:
     self.board_mode = BOARD_MODE_STEER
     self.board_request = False
     self.lin_fatal = False
+    self._blend_defaults()
 
   def update(self, cp_ssv3, cp_pt, ret: structs.CarState) -> None:
     # vl_all only holds this update's checksum/counter-valid frames; vl keeps stale/default values.
@@ -200,9 +217,12 @@ class Ssv3CarState:
       self.frames_since_524 = 0
     else:
       self.frames_since_524 += 1
+    gains = cp_ssv3.vl_all["BLEND_STATE"]["BLEND_GAIN"]
+    self.frames_since_526 = 0 if gains else min(self.frames_since_526 + 1, BLEND_STALE_FRAMES + 1)
 
     if not self.fw3:
       return
+    self._update_blend(cp_ssv3, cp_pt, gains)
     if self.frames_since_524 == 0:
       self.board_mode = int(cp_ssv3.vl["EPS_RAW"]["MODE"])
       self.board_request = bool(cp_ssv3.vl["EPS_RAW"]["STEER_REQUEST"])
@@ -214,6 +234,25 @@ class Ssv3CarState:
     self.camera_fault = bool(cp_pt.vl["STEER_STATUS"]["CAMERA_FAULT"])
     self.motor_torque = signed_motor_torque(cp_ssv3.vl["STEER_MOTOR_TORQUE"]["MOTOR_TORQUE"])
     ret.steeringTorqueEps = float(self.motor_torque)
+
+  def _update_blend(self, cp_ssv3, cp_pt, gains) -> None:
+    if not self.blend_state:
+      # no 526 (build 3) or it stopped: none of the 526 rules apply
+      self._blend_defaults()
+      return
+    gap_flags = cp_ssv3.vl_all["BLEND_STATE"]["EPS_GAP_ACTIVE"]
+    for g in gains:
+      g = int(g)
+      self.blend_rise_frames = self.blend_rise_frames + 1 if g > self.blend_gain else 0
+      self.blend_gain = g
+    if gains:
+      self.eps_gap_active = bool(gap_flags[-1])
+    if any(gap_flags):
+      self.frames_since_eps_gap = 0
+    else:
+      self.frames_since_eps_gap = min(self.frames_since_eps_gap + 1, BLEND_GAP_RECOVERY_FRAMES)
+    self.new_400 = bool(cp_pt.vl_all["STEER_STATUS"]["STEER_APPLIED"])
+    self.steer_applied = int(cp_pt.vl["STEER_STATUS"]["STEER_APPLIED"])
 
 
 # ---- Wind-up guard (report 2026-11-17-ssv3-windup-fix.md) ----
@@ -239,11 +278,43 @@ class Ssv3CarState:
 # integrator and skips the saturation timer, so no controlsd change and no alert. Firmware 3 only, latActive only,
 # never during a blend-probe window, never on the TI path (Ssv3Controller does not exist there). A newer board
 # firmware that ramps its own release only meets a command that is already ramping from 0.
+#
+# Board firmware build 4 (report 2026-11-19-ssv3-guard-526.md; firmware report 2026-11-17-ssv3-fw-blend-v4.md) no
+# longer drops to IDLE on a driver override: it stays in STEER and scales our command by its blend gain (cut from
+# ~30 driver counts, total at ~45, released linearly over 0.5 s), and rides through EPS serial gaps up to 100 ms. So
+# BOARD_IDLE no longer fires on an override. Build 4 sends 526 BLEND_STATE (100 Hz) and makes 400 STEER_APPLIED the
+# torque actually sent; only while 526 is being received (Ssv3CarState.blend_state):
+#   BOARD_BLEND    BLEND_GAIN <= BLEND_CUT_GAIN (cut >= 50 %) and the board is not releasing -> cap 0, as BOARD_IDLE.
+#   BLEND_PARTIAL  BLEND_GAIN < BLEND_HOLD_GAIN (cut > 10 %) and not releasing -> hold (no growth): a light push keeps
+#                  part of our torque applied, so no drop, but no wind-up either. Road bumps (<= ~7 % cuts) are below it.
+#   APPLIED_LOW    a fresh 400 STEER_APPLIED below APPLIED_FRACTION of every one of our last APPLIED_WINDOW wire
+#                  commands (all one sign, >= APPLIED_MIN_COUNTS), for APPLIED_DEBOUNCE frames -> cap 0. Catches a cut
+#                  526 does not explain; the window covers the 1-2 frame board/EPS lag of a rising command. Once
+#                  capped there is nothing to compare (+-1), so it is latched APPLIED_LATCH_FRAMES; then the ramp-in
+#                  re-checks (while it stays unapplied the wire saws between +-1 and ~65 counts, none of it applied).
+#   EPS_GAP_ACTIVE -> SERIAL_GAP (hold). During a ridden-through gap and for BLEND_GAP_RECOVERY_FRAMES after it, the
+#                  board's own gap fade is not a driver cut: low gain only holds, and APPLIED_LOW is off.
+# Releasing = the gain rose for BLEND_RELEASE_STREAK frames in a row (the board's 0.5 s release ramp): no blend cap,
+# so our STEER_DELTA_UP ramp-in runs alongside the board's (applied = gain x command, both ramping from 0). Build 3
+# (no 526, or 526 stale for BLEND_STALE_FRAMES) keeps exactly the rules above; BOARD_IDLE/EPS_NO_ACK/LIN_FATAL/
+# SERIAL_GAP still apply on build 4 (faults > 100 ms, engage, low-speed refusal).
 BOARD_MODE_STEER = 2
 EPS_RAW_STALE_FRAMES = 50       # 524 missing this long -> mode unknown (not a cut)
 ACK_DEBOUNCE_FRAMES = 2
 BOARD_LEAD_IN_FRAMES = 5        # firmware 2/3 send zero for 5 frames after IDLE -> STEER (bridge.cpp lead-in)
 SERIAL_GAP_FRAMES = 4           # >= 40 ms with no EPS frame (gaps are 60-70 ms; normal batching gives 0-1)
+# build 4 (526 BLEND_STATE)
+BLEND_GAIN_FULL = 255
+BLEND_STALE_FRAMES = 10         # no 526 for 100 ms -> build-3 rules only
+BLEND_CUT_GAIN = 127            # gain <= this (cut >= 50 %) -> not applied: cap 0
+BLEND_HOLD_GAIN = 230           # gain below this (cut > 10 %) -> hold
+BLEND_RELEASE_STREAK = 3        # gain rising this many 526 frames in a row = the board is releasing
+BLEND_GAP_RECOVERY_FRAMES = 60  # after EPS_GAP_ACTIVE: the gap fade (to 100 ms) + 0.5 s release is not a driver cut
+APPLIED_MIN_COUNTS = 30         # APPLIED_LOW only checks commands at least this big (wire counts)
+APPLIED_FRACTION = 0.5
+APPLIED_WINDOW = 4              # our last N wire commands (board + EPS lag 1-2 frames)
+APPLIED_DEBOUNCE = 2
+APPLIED_LATCH_FRAMES = 25      # APPLIED_LOW keeps the cap this long, then the ramp-in re-checks (nothing to compare at +-1)
 
 
 class Ssv3Cut:
@@ -252,6 +323,10 @@ class Ssv3Cut:
   EPS_NO_ACK = 2
   LIN_FATAL = 4
   SERIAL_GAP = 8
+  BOARD_BLEND = 16      # build 4: 526 BLEND_GAIN cut >= 50 % -> cap 0
+  BLEND_PARTIAL = 32    # build 4: 526 BLEND_GAIN cut > 10 % -> hold
+  APPLIED_LOW = 64      # build 4: 400 STEER_APPLIED far below our command -> cap 0
+  CAP_ZERO = BOARD_IDLE | EPS_NO_ACK | BOARD_BLEND | APPLIED_LOW
 
 
 class Ssv3WindupGuard:
@@ -260,6 +335,43 @@ class Ssv3WindupGuard:
     self.no_ack_frames = 0
     self.steer_frames = BOARD_LEAD_IN_FRAMES   # board frames in STEER since its last IDLE-with-request
     self.cut_frames = 0             # consecutive frames with any cut
+    self.sent = []                  # our last APPLIED_WINDOW wire commands (build-4 APPLIED_LOW)
+    self.applied_low_frames = 0
+    self.applied_low_latch = 0
+
+  def note_sent(self, wire: int) -> None:
+    """The 0xE4 STEER_TORQUE just built (car controller, SSV3 path, after this frame's update/limit)."""
+    self.sent = (self.sent + [int(wire)])[-APPLIED_WINDOW:]
+
+  def _blend_reason(self, ssv3) -> int:
+    # build 4 only (526 being received); see the block comment above
+    if not getattr(ssv3, "blend_state", False):
+      self.applied_low_frames = self.applied_low_latch = 0
+      return Ssv3Cut.NONE
+    reason = Ssv3Cut.NONE
+    gap_recent = ssv3.eps_gap_active or ssv3.frames_since_eps_gap < BLEND_GAP_RECOVERY_FRAMES
+    releasing = ssv3.blend_rise_frames >= BLEND_RELEASE_STREAK
+    if ssv3.eps_gap_active:
+      reason |= Ssv3Cut.SERIAL_GAP
+    if not releasing:
+      if ssv3.blend_gain <= BLEND_CUT_GAIN and not gap_recent:
+        reason |= Ssv3Cut.BOARD_BLEND
+      elif ssv3.blend_gain < BLEND_HOLD_GAIN:
+        reason |= Ssv3Cut.BLEND_PARTIAL
+    if ssv3.new_400:
+      low = False
+      if len(self.sent) == APPLIED_WINDOW and not releasing and not gap_recent:
+        sign = 1 if self.sent[-1] > 0 else -1
+        if all(w * sign >= APPLIED_MIN_COUNTS for w in self.sent):
+          ref = min(w * sign for w in self.sent)
+          low = ssv3.steer_applied * sign < APPLIED_FRACTION * ref
+      self.applied_low_frames = self.applied_low_frames + 1 if low else 0
+    if self.applied_low_frames >= APPLIED_DEBOUNCE:
+      self.applied_low_latch = APPLIED_LATCH_FRAMES
+    if self.applied_low_latch > 0:
+      self.applied_low_latch -= 1
+      reason |= Ssv3Cut.APPLIED_LOW
+    return reason
 
   def update(self, ssv3, lat_active: bool) -> int:
     if ssv3 is None or not ssv3.fw3 or not lat_active:
@@ -277,6 +389,7 @@ class Ssv3WindupGuard:
       reason |= Ssv3Cut.LIN_FATAL
     if ssv3.frames_without_400 >= SERIAL_GAP_FRAMES:
       reason |= Ssv3Cut.SERIAL_GAP
+    reason |= self._blend_reason(ssv3)
     self.reason = reason
     self.cut_frames = self.cut_frames + 1 if reason else 0
     return reason
@@ -286,7 +399,7 @@ class Ssv3WindupGuard:
     if not self.reason:
       return torque
     cap = abs(last_torque)          # any cut: no growth (LIN_FATAL / SERIAL_GAP: hold)
-    if self.reason & (Ssv3Cut.BOARD_IDLE | Ssv3Cut.EPS_NO_ACK):
+    if self.reason & Ssv3Cut.CAP_ZERO:
       cap = 0.0
     return max(-cap, min(cap, torque))
 

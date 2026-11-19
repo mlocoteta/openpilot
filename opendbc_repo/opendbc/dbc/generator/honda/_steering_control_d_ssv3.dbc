@@ -72,6 +72,21 @@ BO_ 525 BOARD_DIAG: 8 EPS
  SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
  SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
 
+BO_ 526 BLEND_STATE: 8 EPS
+ SG_ BLEND_GAIN : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ DRIVER_FILTERED : 15|8@0- (1,0) [-128|127] "" XXX
+ SG_ DRIVER_HOLD : 23|8@0- (1,0) [-128|127] "" XXX
+ SG_ DRIVER_ZERO : 31|8@0- (0.125,0) [-16|15.875] "" XXX
+ SG_ EPS_GAP_MS : 39|8@0+ (1,0) [0|255] "ms" XXX
+ SG_ EPS_GAP_COUNT : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ EPS_GAP_ACTIVE : 48|1@0+ (1,0) [0|1] "" XXX
+ SG_ ZERO_LEARNING : 49|1@0+ (1,0) [0|1] "" XXX
+ SG_ EPS_GAP_FAULT_SEEN : 50|1@0+ (1,0) [0|1] "" XXX
+ SG_ BOARD_BLEND_ACTIVE : 51|1@0+ (1,0) [0|1] "" XXX
+ SG_ EPS_GAP_FAULTS : 55|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 63|4@0+ (1,0) [0|15] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+
 CM_ "SSV3 serial-steering board on the 2016-17 Accord (9G). Frames 228 and 400 are _steering_control_d_ext.dbc verbatim plus new signals (test_ssv3_dbc.py checks that); 520/523/524/525 are the board's own frames. Layout source: LKAS_EPS_V3 dbc/lkas_eps_v3.dbc (firmware 3). Every new signal is zero or absent on firmware 2 or must be gated on SS_STATUS.VERSION_NUM >= 3 (firmware 2 uses 400 bit 39 for its own steer-blended flag).";
 CM_ SG_ 228 TORQUE_BLEND_DISABLE "Firmware 3 option: no on-board rate or driver-torque limiting, request only clamped to +-255. Firmware 2 reads this bit as 'disable torque limiting': never set it unless VERSION_NUM >= 3";
 CM_ SG_ 228 TX_ALL_LKAS_DATA "Firmware 3 option: request raw frames 523/524 (on by default in firmware 3). Firmware 2 reads this bit as 'send debug frame 521'";
@@ -85,5 +100,15 @@ CM_ SG_ 524 BOARD_TIME "Board millisecond clock, low 8 bits, when the EPS frame 
 CM_ SG_ 524 CAMERA_FRAME_AGE "Milliseconds since the current camera frame began, saturating at 15";
 CM_ SG_ 525 FIRMWARE_BUILD "VERSION_BUILD from the board's include/version.h";
 CM_ SG_ 525 TX_DROPPED "CAN frames the board could not queue since boot, saturating";
+CM_ SG_ 400 STEER_APPLIED "Build >= 4: torque in the last frame given to the EPS, after the board's limiting and blend, before the LSB toggle; 0 in IDLE and lead-in. Build 3: the limited request";
+CM_ BO_ 526 "Firmware build >= 4 only (absent on build 3). Blend and EPS-gap state, one frame per camera frame (100 Hz) once openpilot has been seen. Layout source: LKAS_EPS_V3 dbc/lkas_eps_v3.dbc build 4";
+CM_ SG_ 526 BLEND_GAIN "Board blend gain: 255 = full LKAS, 0 = fully cut. Cut fraction = 1 - BLEND_GAIN/255. 255 when TORQUE_BLEND_DISABLE";
+CM_ SG_ 526 DRIVER_FILTERED "Driver torque minus learned zero, low-passed ~2.7 Hz, counts, left positive";
+CM_ SG_ 526 DRIVER_HOLD "Smallest |DRIVER_FILTERED| over the last 100 ms if all one sign (signed), else 0. This drives the cut";
+CM_ SG_ 526 DRIVER_ZERO "Learned driver-torque zero offset, counts";
+CM_ SG_ 526 EPS_GAP_MS "ms since the last valid EPS frame when the frame was sent (10 normally)";
+CM_ SG_ 526 EPS_GAP_COUNT "EPS gaps over 20 ms that ended within 100 ms (ridden through), saturating";
+CM_ SG_ 526 EPS_GAP_ACTIVE "1 = riding through an EPS serial gap now";
+CM_ SG_ 526 EPS_GAP_FAULTS "EPS gaps over 100 ms (serial fault, LKAS-off), saturating at 15";
 VAL_ 400 STEER_STATUS 7 "permanent_fault" 6 "tmp_fault" 5 "fault_1" 4 "no_torque_alert_2" 3 "low_speed_lockout" 2 "no_torque_alert_1" 1 "driver_steering" 0 "normal" ;
 VAL_ 524 MODE 0 "PASSTHROUGH" 1 "IDLE" 2 "STEER" ;
