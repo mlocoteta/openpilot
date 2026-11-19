@@ -7,6 +7,7 @@ from opendbc.car.honda import hondacan
 from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_stock_qualified
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
+from opendbc.car.honda.nidec_brake_scale import NIDEC_ACCEL_PER_UNIT, nidec_brake_accel_per_unit
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
@@ -24,14 +25,16 @@ def compute_gb_honda_bosch(accel, speed):
   return 0.0, 0.0
 
 
-def compute_gb_honda_nidec(accel, speed):
+def compute_gb_honda_nidec(accel, speed, brake_accel_per_unit=NIDEC_ACCEL_PER_UNIT):
+  # brake_accel_per_unit scales the brake side only (opendbc/car/honda/nidec_brake_scale.py); gas stays at 4.8
   creep_brake = 0.0
   creep_speed = 2.3
   creep_brake_value = 0.15
   if speed < creep_speed:
     creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
-  gb = float(accel) / 4.8 - creep_brake
-  return np.clip(gb, 0.0, 1.0), np.clip(-gb, 0.0, 1.0)
+  gb = float(accel) / NIDEC_ACCEL_PER_UNIT - creep_brake
+  gb_brake = float(accel) / brake_accel_per_unit - creep_brake
+  return np.clip(gb, 0.0, 1.0), np.clip(-gb_brake, 0.0, 1.0)
 
 
 def compute_gas_brake(accel, speed, CP):
@@ -120,6 +123,11 @@ class CarController(CarControllerBase):
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
 
+    # m/s^2 per friction brake unit: 3.6 on the Accord 9G (6.x F06 brake half), stock 4.8 on every other Nidec.
+    # Friction brake only: the pedal interceptor and the PCM speed target keep the stock 4.8 brake term.
+    self.brake_accel_per_unit = (NIDEC_ACCEL_PER_UNIT if CP.flags & HondaFlags.BOSCH else
+                                 nidec_brake_accel_per_unit(CP.carFingerprint))
+
     self.braking = False
     self.brake_steady = 0.
     self.brake_last = 0.
@@ -151,9 +159,13 @@ class CarController(CarControllerBase):
     if CC.longActive:
       accel = actuators.accel
       gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo, self.CP)
+      friction_brake = brake
+      if self.brake_accel_per_unit != NIDEC_ACCEL_PER_UNIT:
+        friction_brake = float(compute_gb_honda_nidec(actuators.accel, CS.out.vEgo, self.brake_accel_per_unit)[1])
     else:
       accel = 0.0
       gas, brake = 0.0, 0.0
+      friction_brake = 0.0
 
     # *** rate limit steer ***
     if _projection is not None:
@@ -179,7 +191,7 @@ class CarController(CarControllerBase):
     self.last_torque = limited_torque
 
     # *** apply brake hysteresis ***
-    pre_limit_brake, self.braking, self.brake_steady = actuator_hysteresis(brake, self.braking, self.brake_steady)
+    pre_limit_brake, self.braking, self.brake_steady = actuator_hysteresis(friction_brake, self.braking, self.brake_steady)
 
     # *** rate limit after the enable check ***
     self.brake_last = rate_limit(pre_limit_brake, self.brake_last, -2., DT_CTRL)
