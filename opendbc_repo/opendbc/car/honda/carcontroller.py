@@ -149,6 +149,10 @@ class CarController(CarControllerBase):
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_v_cruise = hud_control.setSpeed / CS.v_cruise_factor if hud_control.speedVisible else 255
+    if (hud_control.speedVisible and self.CP.carFingerprint == CAR.HONDA_ACCORD_9G and
+        not CS.is_metric and not CS.dynamic_v_cruise_units):
+      # Dash label only: the 9G cluster rounds kph -> mph up, so "70" must be sent as 112, not 113 (6.x F06).
+      hud_v_cruise = hondacan.imperial_cluster_cruise_kph(hud_control.setSpeed)
     pcm_cancel_cmd = CC.cruiseControl.cancel
     if self.bosch_longitudinal is not None:
       self.bosch_longitudinal.observe_orientation(CC.orientationNED)
