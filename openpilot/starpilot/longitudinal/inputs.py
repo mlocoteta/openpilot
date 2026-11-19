@@ -193,12 +193,24 @@ class LongitudinalInputs:
                 else cc_evidence.has_lead if cc_evidence is not None else volt_observation[0]
                 if volt_observation is not None else None),
       honda_cruise=self._honda_cruise_inputs() if getattr(self, 'honda_cruise_enabled', False) and active else None,
+      leads=self._honda_leads() if getattr(self, 'honda_cruise_enabled', False) and active else None,
       vehicle_stop_evidence=cc_evidence if cc_evidence is not None else self._gm_suburban_evidence()
         if self.gm_suburban_enabled and active else self._gm_ascm_evidence()
         if self.gm_ascm_enabled and active else self._gm_euv_evidence()
         if self.gm_euv_enabled and active else self._gm_volt_stop_from_observation(volt_observation),
     )
 
+
+  def _honda_leads(self):
+    """Accord 9G brake-onset hold (honda_brake_onset.py): radar leads, or None when radarState isn't usable."""
+    sm = self.sm
+    try:
+      if not (sm.seen['radarState'] and sm.valid['radarState'] and sm.alive['radarState']):
+        return None
+      radar = sm['radarState']
+      return (radar.leadOne, radar.leadTwo)
+    except (AttributeError, KeyError, TypeError, ValueError):
+      return None
 
   def _honda_cruise_inputs(self):
     """Accord 9G cruise-hold brake deadband inputs, same rules as card's feed (cruise_brake_caller.py)."""
