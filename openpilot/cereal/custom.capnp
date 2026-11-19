@@ -243,7 +243,7 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
     steerStatus @13 :UInt8;  # raw 400 STEER_STATUS (EPS status bits)
     # Wind-up guard (opendbc/car/honda/ssv3.py Ssv3WindupGuard): openpilot's command is capped while set
     lkasCut @14 :Bool;  # board/EPS not applying our torque this frame (any cutReason)
-    cutReason @15 :UInt8;  # bit mask: 1 boardIdle (524 MODE != STEER with request), 2 epsNoAck, 4 linFatal (400), 8 serialGap
+    cutReason @15 :UInt8;  # bit mask: 1 boardIdle (524 MODE != STEER with request), 2 epsNoAck, 4 linFatal (400), 8 serialGap, 16 boardBlend (526 gain cut >= 50%), 32 blendPartial (526 cut > 10%, hold), 64 appliedLow (400 STEER_APPLIED); 16-64 board build >= 4 only
     boardMode @16 :UInt8;  # 524 MODE: 0 passthrough, 1 idle, 2 steer
     boardSteerRequest @17 :Bool;  # 524 STEER_REQUEST
     linFatalError @18 :Bool;  # 400 LIN_INTERFACE_FATAL_ERROR (frame after an EPS serial gap)

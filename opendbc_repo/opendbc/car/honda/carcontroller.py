@@ -206,6 +206,8 @@ class CarController(CarControllerBase):
       apply_torque = ssv3_steer_command(float(apply_torque_raw), CC.latActive, self.ssv3_last_nonzero)
       self.ssv3_last_nonzero = apply_torque if CC.latActive and apply_torque != 0 else (
         self.ssv3_last_nonzero if CC.latActive else 0)
+      # build-4 APPLIED_LOW compares the board's STEER_APPLIED against the commands we actually sent
+      self.ssv3.guard.note_sent(apply_torque)
 
     # Send CAN commands
     can_sends = []
