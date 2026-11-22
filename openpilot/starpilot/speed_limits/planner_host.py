@@ -18,6 +18,35 @@ SLC_ACTIONS = ('accept', 'reject', 'adopt')
 SLC_CRUISE_EVENTS = ('driverChange', 'confirmationAccept', 'confirmationReject', 'engagementAdopt')
 
 
+def map_data_available() -> bool:
+  """F29: can this drive read Maps at all (packaged provider + a selected offline snapshot)?
+
+  Cheap disk check only (no binary hash): the manager's full preflight still decides whether
+  the provider runs; this only answers whether a remembered Maps limit has any data behind it.
+  """
+  try:
+    from openpilot.starpilot.maps import shadow_lifecycle as shadow
+    return bool(shadow.PROVIDER_BINARY.is_file() and shadow._owned_root(shadow.OFFLINE_ROOT, shadow.STORAGE_ANCHOR) and
+                shadow._selected_snapshot(shadow.OFFLINE_ROOT))
+  except Exception:
+    return False
+
+
+def restorable_previous_limit(previous, cp):
+  """F29 (Accord 9G): no map data means no map limit.
+
+  Upstream restores the last accepted limit on every drive, from any source, even when that
+  source cannot produce data (no offline maps downloaded -> mapd never starts). On the 9G that
+  re-applied a held Maps 45 mph (+offset = 53) on every engagement on 55 mph highways. Drop a
+  remembered Maps limit when no map data can exist this drive; SET stays the target until a
+  live source is accepted. The saved record is left untouched.
+  """
+  if (previous is not None and str(cp.carFingerprint) == 'HONDA_ACCORD_9G' and
+      previous.candidate.source == 'map' and not map_data_available()):
+    return None
+  return previous
+
+
 class SavedSlcLifecycle:
   """Refresh saved admission; offsets and display units preserve driver choices."""
 
@@ -91,7 +120,8 @@ class SavedSlcLifecycle:
       self.runtime = (SlcRuntime(settings, vision_enabled=vision,
                                  vision_control_qualified=configuration[3],
                                  vision_display_qualified=configuration[4], is_metric=configuration[5],
-                                 session_id=session_id, previous_limit=history.decode(saved_history, session_id=session_id),
+                                 session_id=session_id,
+                                 previous_limit=restorable_previous_limit(history.decode(saved_history, session_id=session_id), self.cp),
                                  source_stability=stability)
                       if configuration[0] else None)
     self.configuration = configuration
