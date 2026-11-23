@@ -44,6 +44,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RadarRecoveryAlert", {PERSISTENT, BOOL, "0"}},
     {"HondaBoschARadar", {PERSISTENT, BOOL, "1"}},
     {"TorqueInterceptorEnabled", {PERSISTENT, BOOL, "0"}},
+    // 9G steering board: "ti" / "ssv3" force a board, anything else = auto (opendbc/car/honda/steering_board.py)
+    {"AccordSteeringBoard", {PERSISTENT, STRING, "auto"}},
+    {"TorqueInterceptorMissing", {PERSISTENT, BOOL, "0"}},
     // Honda 9G Accord TI lateral controller (F03). Names, formats and defaults as on 6.x.
     {"TISigmoidEnabled", {PERSISTENT, BOOL, "1"}},
     {"TISigmoidLive", {PERSISTENT, BOOL, "1"}},
@@ -60,6 +63,12 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"TIFrictionHighway", {PERSISTENT, FLOAT, "0.0"}},
     {"TIABEnabled", {PERSISTENT, BOOL, "0"}},
     {"AccordCruiseBrakeDeadband", {PERSISTENT, BOOL, "1"}},
+    {"SSV3TorqueBlendDisable", {PERSISTENT, BOOL, "0"}},
+    {"SSV3TxAllLkasData", {PERSISTENT, BOOL, "0"}},
+    {"SSV3LsbToggleDisable", {PERSISTENT, BOOL, "0"}},
+    {"SSV3ZeroTorqueKeepsLkasOn", {PERSISTENT, BOOL, "0"}},
+    {"SSV3DeadbandComp", {PERSISTENT, BOOL, "0"}},
+    {"SSV3BlendProbe", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, INT, "0"}},
     {"HondaGasFactorParams", {PERSISTENT, FLOAT, "1.0"}},
     {"HondaWindFactorParams", {PERSISTENT, FLOAT, "1.0"}},
     {"FordHandsFreeCluster", {PERSISTENT, BOOL, "0"}},

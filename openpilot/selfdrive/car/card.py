@@ -415,6 +415,11 @@ class Car:
     if not self.ioniq6_previous_cp_saved:
       self.save_previous_car_params()
 
+    from openpilot.starpilot.car.honda.ssv3_feed import install as install_honda_ssv3
+    self.honda_ssv3_feed = install_honda_ssv3(self.CI, self.params) if self.CP.brand == 'honda' else None
+    from openpilot.starpilot.car.honda.steering_board_watch import install as install_honda_board_watch
+    self.honda_board_watch = install_honda_board_watch(self.CI, self.params) if self.CP.brand == 'honda' else None
+
     self.vehicle_startup.seal_publication()
     cp_bytes = self.CP.to_bytes()
     from openpilot.starpilot.car.tesla.pedal_startup import install as install_preap_pedal
@@ -1157,6 +1162,12 @@ class Car:
     elif self.CP.brand == 'hyundai':
       from openpilot.starpilot.car.hyundai.dashboard import compose as hyundai_compose
       companion = hyundai_compose(self.CP, self.CI.CS, CS, companion, car_state_stamp=int(cs_send.logMonoTime))
+    if getattr(self, 'honda_ssv3_feed', None) is not None:
+      # Accord 9G SSV3: option params -> 0xE4 (firmware 3 only), starpilotCarState.ssv3 once firmware 3 is seen
+      companion = self.honda_ssv3_feed.update(CS, companion, car_state_stamp=int(cs_send.logMonoTime))
+    if getattr(self, 'honda_board_watch', None) is not None:
+      # 9G TI drive: record a missing TI (next start falls back to the SSV3) or clear a stale record
+      self.honda_board_watch.update()
     self.car_gps_publisher.update(self.CI.CS, self.pm, companion)
     self.pm.send('carState', cs_send)
     if getattr(self, 'learning_stamp_observer', None) is not None:

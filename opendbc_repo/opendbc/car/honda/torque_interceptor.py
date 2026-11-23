@@ -1,8 +1,11 @@
 """Honda 9G Accord gen1 Torque Interceptor (TI).
 
-The 9G Accord has no factory LKAS, so 0xE4 STEERING_CONTROL reaches nothing. Lateral exists
-only through an aftermarket TI board on bus 0: openpilot sends 0x249 TI_STEERING_CONTROL and
-the board reports 0x24A TI_FEEDBACK. Everything TI-specific lives in this module; the shared
+The 9G Accord has no factory LKAS. On the TI path lateral goes only through the aftermarket TI
+board on bus 0: openpilot sends 0x249 TI_STEERING_CONTROL and the board reports 0x24A TI_FEEDBACK.
+0xE4 STEERING_CONTROL still goes out with zero torque and the request bit following latActive. With
+an SSV3 serial-steering board fitted (Mat's car) 0xE4 reaches the SSV3, which then holds the EPS in
+LKAS-off, so the TI is the only actuator; the SSV3 ignores 0x249. SSV3 option bits are never sent
+on the TI path (ssv3.py objects are not built there). Everything TI-specific lives in this module; the shared
 Honda files only construct these classes when ti_qualified(CP) holds.
 
 Switching TI on is a startup decision (apply_torque_interceptor, called from openpilot's vehicle
@@ -137,12 +140,16 @@ def apply_torque_interceptor(cp, requested: bool) -> None:
   """Startup only, before CarState/CarController exist. Sets or clears the TI safety bit."""
   if not ti_supported(cp):
     return
+  from opendbc.car.honda.ssv3 import apply_ssv3_lateral_tune, restore_shared_lateral_tune
   config = cp.safetyConfigs[0]
   if requested:
     config.safetyParam = int(config.safetyParam) | TI_SAFETY_PARAM
+    restore_shared_lateral_tune(cp)
     cp.steerActuatorDelay = TI_STEER_ACTUATOR_DELAY
   else:
     config.safetyParam = base_safety_param(config.safetyParam)
+    # SSV3 path (or no board): its own initial lateral tune; the TI keeps the shared params.toml tune.
+    apply_ssv3_lateral_tune(cp)
 
 
 def ti_output_headroom_limits(driver_torque_min, driver_torque_max, LIMITS):
