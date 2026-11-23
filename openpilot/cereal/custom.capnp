@@ -223,6 +223,32 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   steeringLimitInfo @39 :StarPilotCarControl.SteeringLimitInfo;
   toyotaCruise @38 :ToyotaCruise;
   gmRegenGear @40 :Bool;
+  ssv3 @41 :Ssv3Status;  # Accord 9G SSV3 board, only published once firmware >= 3 is seen
+
+  struct Ssv3Status {
+    firmwareVersion @0 :UInt8;  # SS_STATUS.VERSION_NUM
+    hardwareRev @1 :UInt8;
+    epsLkasAck @2 :Bool;  # STEER_STATUS.EPS_LKAS_ACK: EPS reports LKAS engaged (~120 ms lag)
+    cameraFault @3 :Bool;  # STEER_STATUS.CAMERA_FAULT (meaning not confirmed; logged only)
+    motorTorque @4 :Int16;  # STEER_MOTOR_TORQUE.MOTOR_TORQUE, signed on firmware 3
+    lkasBlocked @5 :Bool;  # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
+    options @6 :UInt8;  # 0xE4 byte 2 option bits actually sent
+    # Developer EPS torque-blend probe (SSV3BlendProbe; opendbc/car/honda/ssv3.py Ssv3BlendProbe)
+    blendProbeProgram @7 :UInt8;  # program id armed/running, 0 = off
+    blendProbeState @8 :UInt8;  # 0 idle, 1 armed, 2 hold (fixed command), 3 rest (normal control), 4 done
+    blendProbeWindow @9 :Int8;  # window index while hold/rest, -1 otherwise
+    blendProbeCommand @10 :Int16;  # 0xE4 wire counts held this frame (positive = right), 0 outside hold
+    blendProbeEnd @11 :UInt8;  # ProbeEnd: 1 completed, 2 latInactive, 3 brake, 4 gas, 5 cancel, 6 speed, 7 angle, 8 yaw, 9 epsFault, 10 timeLimit, 11 boardLost, 12 armTimeout, 13 badProgram, 14 stopped
+    blendProbeTime @12 :Float32;  # s since the first window started
+    steerStatus @13 :UInt8;  # raw 400 STEER_STATUS (EPS status bits)
+    # Wind-up guard (opendbc/car/honda/ssv3.py Ssv3WindupGuard): openpilot's command is capped while set
+    lkasCut @14 :Bool;  # board/EPS not applying our torque this frame (any cutReason)
+    cutReason @15 :UInt8;  # bit mask: 1 boardIdle (524 MODE != STEER with request), 2 epsNoAck, 4 linFatal (400), 8 serialGap, 16 boardBlend (526 gain cut >= 50%), 32 blendPartial (526 cut > 10%, hold), 64 appliedLow (400 STEER_APPLIED); 16-64 board build >= 4 only
+    boardMode @16 :UInt8;  # 524 MODE: 0 passthrough, 1 idle, 2 steer
+    boardSteerRequest @17 :Bool;  # 524 STEER_REQUEST
+    linFatalError @18 :Bool;  # 400 LIN_INTERFACE_FATAL_ERROR (frame after an EPS serial gap)
+    deadbandComp @19 :Bool;  # SSV3DeadbandComp active (firmware 3)
+  }
 
   struct ToyotaCruise {
     version @0 :UInt16;

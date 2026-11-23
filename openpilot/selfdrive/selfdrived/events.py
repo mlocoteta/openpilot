@@ -385,6 +385,19 @@ def invalid_lkas_setting_alert(CP: car.CarParams, CS: car.CarState, sm: messagin
 
 
 
+def ssv3_blend_probe_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  # Accord 9G SSV3 developer blend probe (opendbc/car/honda/ssv3.py): 1 armed, 2 fixed command, 3 rest
+  s = sm['starpilotCarState'].ssv3
+  if s.blendProbeState == 1:
+    title, detail = "Blend test armed", "Engaged, 11-50 mph, wheel straight to start"
+  elif s.blendProbeState == 2:
+    side = "right" if s.blendProbeCommand > 0 else "left"
+    title, detail = "Blend test running", f"Window {s.blendProbeWindow + 1}: {abs(s.blendProbeCommand)} {side}. Hold straight"
+  else:
+    title, detail = "Blend test running", "Rest: normal steering"
+  return Alert(title, detail, AlertStatus.normal, AlertSize.mid, Priority.LOW, VisualAlert.none, AudibleAlert.none, .2)
+
+
 EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ********** events with no alerts **********
 
@@ -1013,6 +1026,10 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.userBookmarkNotPaired: {
     ET.PERMANENT: NormalPermanentAlert("Bookmark Saved", "pair to connect\nto view", duration=1.5),
+  },
+
+  EventName.ssv3BlendProbe: {
+    ET.PERMANENT: ssv3_blend_probe_alert,
   },
 }
 
