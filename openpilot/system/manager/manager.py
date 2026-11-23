@@ -162,7 +162,7 @@ def manager_thread() -> bool:
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
   sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates', 'modelV2', 'drivingModelData',
-                               'narrowRoadCameraState', 'wideRoadCameraState'], poll='deviceState')
+                               'narrowRoadCameraState', 'wideRoadCameraState', 'carControl'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
   save_me_vehicle = PhysicalSource(sm) if save_me.available() else None
 
