@@ -43,6 +43,8 @@ from opendbc.car.gm.values import bolt_pedal_in_drive_requires_low
 from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
 from openpilot.starpilot.ui.home_state import DriveStatsData, HomeMode, HomeState
+from openpilot.selfdrive.ui.lib.cell_status import cell_status
+from openpilot.starpilot.ui.sim_check import SimCheckTracker
 from openpilot.starpilot.models.jetlink_status import JetlinkStatusFeed
 from openpilot.starpilot.ui.onroad_state import conditional_lead_from_message
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
@@ -305,6 +307,11 @@ class PersonalityNotice:
     return native_alert
 
 
+NetworkType = log.DeviceState.NetworkType
+MODEM_READ_INTERVAL_NS = 2_000_000_000
+MODEM_CHECK_READ_INTERVAL_NS = 500_000_000  # while a tapped SIM check waits for the daemon's answer
+
+
 class RuntimeSnapshotAdapter:
   """Build one coherent display snapshot after each UIState.update()."""
 
@@ -312,8 +319,13 @@ class RuntimeSnapshotAdapter:
                bluetooth_powered: Callable[[], str | bool] | None = None,
                *, home_stats: Callable[[bool], DriveStatsData | None] | None = None,
                mono_clock: Callable[[], int] = time.monotonic_ns,
-               boot_clock: Callable[[], int] = _boot_time_ns):
+               boot_clock: Callable[[], int] = _boot_time_ns,
+               modem_state: Callable[[], dict] | None = None, sim_check: SimCheckTracker | None = None):
     self.ui_state = ui_state
+    self._modem_source = modem_state
+    self.sim_check = sim_check or SimCheckTracker()
+    self._modem_value: dict = {}
+    self._modem_read_ns: int | None = None
     self.galaxy_access = galaxy_access
     self.bluetooth_powered = bluetooth_powered
     self.home_stats = home_stats
@@ -357,6 +369,29 @@ class RuntimeSnapshotAdapter:
     self._last_pair_offset_ns: int | None = None
     self._pair_failed = False
     self._replay_epoch: int | None = None
+
+  def _cell_status(self, network: str, read: bool = True):
+    """Accord: modem state (tmpfs JSON) read every 2 s, only on Home while Wi-Fi/ETH carries the data
+    (or a tapped SIM check is waiting, then every 0.5 s)."""
+    pending = self.sim_check.pending
+    if network not in ("wifi", "ethernet") and not pending:
+      return None
+    now = time.monotonic_ns()  # plain throttle clock; the injected device clocks may raise
+    interval = MODEM_CHECK_READ_INTERVAL_NS if pending else MODEM_READ_INTERVAL_NS
+    if read and (self._modem_read_ns is None or now - self._modem_read_ns >= interval):
+      self._modem_read_ns = now
+      try:
+        if self._modem_source is None:
+          from openpilot.common.hardware import HARDWARE
+          self._modem_source = HARDWARE.get_modem_state
+        value = self._modem_source()
+        self._modem_value = value if isinstance(value, dict) else {}
+      except Exception:
+        self._modem_value = {}
+      self.sim_check.observe(self._modem_value)
+    if network not in ("wifi", "ethernet") or not self._modem_value:  # no modem daemon output (PC, early boot): no second line
+      return None
+    return cell_status(NetworkType.wifi if network == "wifi" else NetworkType.ethernet, self._modem_value)
 
   def _parked(self, ui: Any, pair: tuple[int, int, int] | None) -> bool:
     if host_parked():
@@ -837,6 +872,7 @@ class RuntimeSnapshotAdapter:
       strength = max(0, min(5, raw_strength + 1)) if raw_strength > 0 else 0
       ping = int(device.lastAthenaPingTime)
       connection = "ONLINE" if 0 < ping <= now_ns and now_ns - ping < 80_000_000_000 else "OFFLINE"
+    cell = self._cell_status(network, read=mode == ShellMode.HOME)
     try:
       value = self.bluetooth_powered() if mode == ShellMode.HOME and self.bluetooth_powered is not None else ""
       bluetooth = value if value in ("off", "on", "connected") else "on" if value is True else "off" if value is False else ""
@@ -860,7 +896,8 @@ class RuntimeSnapshotAdapter:
                            HomeMode.EXPERIMENTAL if experimental else HomeMode.CHILL),
                      experimental_enabled=experimental, experimental_available=bool(ui.has_longitudinal_control),
                      stats=self.home_stats(bool(ui.is_metric)) if mode == ShellMode.HOME and self.home_stats is not None else None,
-                     paired=bool(ui.prime_state.is_paired()), network=network, network_strength=strength,
+                     paired=bool(ui.prime_state.is_paired()), network=network, network_strength=strength, cell=cell,
+                     sim_check=self.sim_check.view() if mode == ShellMode.HOME else None,
                      temperature_c=device.maxTempC if device is not None else None, metric=bool(ui.is_metric),
                      temperature_high=device is not None and device.thermalStatus != log.DeviceState.ThermalStatus.ok,
                      vehicle_online=panda_connected, connection=connection,
