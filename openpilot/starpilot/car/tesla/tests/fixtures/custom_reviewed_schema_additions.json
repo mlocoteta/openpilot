@@ -18,7 +18,7 @@
       },
       "new_storage": {
         "dataWordCount": 3,
-        "pointerCount": 7,
+        "pointerCount": 8,
         "preferredListEncoding": "inlineComposite",
         "isGroup": false,
         "discriminantCount": 0,
@@ -101,6 +101,26 @@
           "discriminantValue": 65535,
           "ordinal": {
             "explicit": 40
+          }
+        },
+        {
+          "slot": {
+            "offset": 7,
+            "type": {
+              "struct": {
+                "typeId": 12427285215884680116
+              }
+            },
+            "defaultValue": {
+              "schemaValueHex": "00000000040000000000000002000100100000000000000000000000000000000000000000000000"
+            },
+            "hadExplicitDefault": false
+          },
+          "name": "ssv3",
+          "codeOrder": 41,
+          "discriminantValue": 65535,
+          "ordinal": {
+            "explicit": 41
           }
         }
       ]
