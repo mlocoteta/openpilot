@@ -24,6 +24,9 @@ from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 
 BLUETOOTH_COLORS = {"off": rl.Color(255, 255, 255, 102), "on": rl.Color(255, 255, 255, 230), "connected": rl.Color(0, 130, 252, 230)}
 JETLINK_COLORS = {"plugged": rl.Color(160, 160, 160, 255), "connected": rl.Color(70, 200, 110, 255)}
+CELL_WARNING = rl.Color(218, 202, 37, 255)
+SIM_CHECKING = rl.Color(120, 190, 255, 255)
+SIM_FLASH = (0, 130, 252)  # Accord: result highlight after a tapped SIM check (blue; yellow if no reply)
 
 
 def draw_jetlink(rect: rl.Rectangle, state: str) -> None:
@@ -151,6 +154,10 @@ class HomeView:
                   rl.Rectangle(pair.x + 35, pair.y + 10, pair.width - 70, pair.height - 20))
 
   def _sidebar(self, state: HomeState):
+    check = state.sim_check
+    if check is not None and check.phase != "checking" and check.highlight > 0:
+      rgb = SIM_FLASH if check.phase == "done" else (110, 110, 110)
+      rl.draw_rectangle_rounded(rl.Rectangle(34, 186, 236, 138), 0.2, 10, rl.Color(*rgb, int(150 * check.highlight)))
     self._icon("images/button_settings.png", 200, 117, 50, 35)
     self._icon("images/button_home.png", 180, 180, 60, 860)
     for index in range(5):
@@ -158,6 +165,12 @@ class HomeView:
       rl.draw_circle(71 + index * 37, 209, 13, color)
     network_labels = {"none": "--", "wifi": "Wi-Fi", "ethernet": "ETH", "cell2G": "2G", "cell3G": "3G", "cell4G": "LTE", "cell5G": "5G"}
     self._text(network_labels.get(state.network, "Unknown"), FontRole.NORMAL, 35, 58, 247)
+    if check is not None and check.phase == "checking":
+      self._text("Checking SIM...", FontRole.NORMAL, 30, 58, 291, SIM_CHECKING)
+    elif check is not None and check.phase == "no_reply":
+      self._text("No reply", FontRole.NORMAL, 30, 58, 291, CELL_WARNING)
+    elif state.cell is not None:
+      self._cell_line(state.cell, 58, 291)
     temperature = format_temperature(state.temperature_c, state.temperature_metric)
     metrics = [("TEMP", temperature, rl.Color(201, 34, 49, 255) if state.temperature_high else rl.WHITE, 338),
                ("VEHICLE" if state.vehicle_online else "NO", "ONLINE" if state.vehicle_online else "PANDA",
@@ -177,6 +190,18 @@ class HomeView:
     if state.recording_audio:
       rl.draw_rectangle_rounded(rl.Rectangle(170, 245, 75, 40), 1, 10, rl.Color(201, 34, 49, 255))
       self._icon("icons/microphone.png", 30, 30, 192.5, 250)
+
+  def _cell_line(self, cell, x: float, y: float):
+    """Accord: cell status under Wi-Fi/ETH: "+ LTE" + 5 small bars, or yellow "No LTE" / "No SIM"."""
+    if cell.kind != "cell":
+      self._text(cell.label, FontRole.NORMAL, 30, x, y, CELL_WARNING)
+      return
+    text = "+ " + cell.label
+    self._text(text, FontRole.NORMAL, 30, x, y)
+    dx = x + self._measure(text, FontRole.NORMAL, 30).width + 14
+    cy = y + 30 * self.fonts.profile.font_scale / 2
+    for index in range(5):
+      rl.draw_circle(int(dx + index * 19 + 7), int(cy), 7, rl.WHITE if index < cell.bars else rl.Color(84, 84, 84, 255))
 
   def _mode_banner(self, state: HomeState, rect: rl.Rectangle):
     clip.begin_scissor_mode(int(rect.x), int(rect.y), int(rect.width), int(rect.height))
