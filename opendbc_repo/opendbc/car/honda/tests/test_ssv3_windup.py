@@ -1,4 +1,4 @@
-"""9G Accord SSV3 wind-up guard, ramp-in and deadband compensation (opendbc/car/honda/ssv3.py Ssv3WindupGuard).
+"""9G Accord SSV3 wind-up guard and ramp-in (opendbc/car/honda/ssv3.py Ssv3WindupGuard).
 
 Through the real CarInterface (CAN in -> 0xE4 out): while the board has cut LKAS (524 MODE != STEER with our request),
 the EPS is not acking (400 EPS_LKAS_ACK = 0), or the EPS serial link dropped (400 LIN_INTERFACE_FATAL_ERROR, or no
@@ -12,8 +12,8 @@ from opendbc.can import CANPacker
 from opendbc.car import structs
 from opendbc.car.honda import ssv3
 from opendbc.car.honda.interface import CarInterface
-from opendbc.car.honda.ssv3 import (ACK_DEBOUNCE_FRAMES, BOARD_LEAD_IN_FRAMES, DEADBAND_COMP_COUNTS, SERIAL_GAP_FRAMES,
-                                    Ssv3Cut, Ssv3WindupGuard, deadband_compensate)
+from opendbc.car.honda.ssv3 import (ACK_DEBOUNCE_FRAMES, BOARD_LEAD_IN_FRAMES, SERIAL_GAP_FRAMES,
+                                    Ssv3Cut, Ssv3WindupGuard)
 from opendbc.car.honda.hondacan import honda_checksum
 from opendbc.car.honda.tests.test_ssv3 import ACCORD_DBC, _finish, car_frames, fw2_400, fw2_427, fw3_427, fw3_raw, ss_status
 from opendbc.car.honda.tests.test_ssv3_tune import params
@@ -261,41 +261,13 @@ def test_guard_unit_caps():
   assert g.update(s, True) == 0 and g.update(None, True) == 0
 
 
-# ---- deadband compensation (SSV3DeadbandComp, default off) ----
-
-def test_deadband_compensate_shape():
-  assert deadband_compensate(0.0, 240) == 0.0
-  assert deadband_compensate(10.0, 240) == pytest.approx(20.0)
-  assert deadband_compensate(-10.0, 240) == pytest.approx(-20.0)
-  assert deadband_compensate(20.0, 240) == pytest.approx(40.0)
-  assert deadband_compensate(100.0, 240) == pytest.approx(100 + DEADBAND_COMP_COUNTS)
-  assert deadband_compensate(230.0, 240) == 240 and deadband_compensate(-239.0, 240) == -240
-
-
-def test_deadband_comp_off_by_default_and_on_adds_offset():
-  base = Car()
-  assert base.ci.CC.ssv3.requested_deadband_comp is False
-  off = [o[0] for o in base.run(60, 0.25)]
-  on_car = Car()
-  on_car.ci.CC.ssv3.requested_deadband_comp = True
-  on = [o[0] for o in on_car.run(60, 0.25)]
-  assert off[-1] == -60 and on[-1] == -80
-  # never while cut
-  cut = [o[0] for o in on_car.run(20, 0.25, ack=False)]
-  assert cut[-1] == -1
-
-
-def test_deadband_comp_needs_firmware3():
-  car = Car(firmware=2)
-  car.ci.CC.ssv3.requested_deadband_comp = True
-  assert car.run(60, 0.25)[-1][0] == -60
-
-
-def test_steer_max_lookup_is_the_deadband_clamp():
+def test_steer_max_lookup_is_the_ssv3_clamp():
   assert max(abs(v) for v in CarControllerParams(params(ti=False)).STEER_LOOKUP_V) == 240
 
 
 def test_ssv3_module_constants():
   assert (ACK_DEBOUNCE_FRAMES, BOARD_LEAD_IN_FRAMES, SERIAL_GAP_FRAMES) == (2, 5, 4)
-  assert ssv3.BOARD_MODE_STEER == 2 and DEADBAND_COMP_COUNTS == 20.0
+  assert ssv3.BOARD_MODE_STEER == 2
+  # retired 2026-11-23: blend probe and deadband compensation
+  assert not hasattr(ssv3, "Ssv3BlendProbe") and not hasattr(ssv3, "deadband_compensate")
   assert honda_checksum  # imported for frame builders

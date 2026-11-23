@@ -230,10 +230,10 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
     hardwareRev @1 :UInt8;
     epsLkasAck @2 :Bool;  # STEER_STATUS.EPS_LKAS_ACK: EPS reports LKAS engaged (~120 ms lag)
     cameraFault @3 :Bool;  # STEER_STATUS.CAMERA_FAULT (meaning not confirmed; logged only)
-    motorTorque @4 :Int16;  # STEER_MOTOR_TORQUE.MOTOR_TORQUE, signed on firmware 3
+    motorTorque @4 :Int16;  # 427 STEER_MOTOR_TORQUE.MOTOR_TORQUE (DBC name), signed on firmware 3. NOT the EPS motor output (that is 0x18E); tracks driver torque at standstill
     lkasBlocked @5 :Bool;  # SS_STATUS.LKAS_ALLOWED (inverted sense: 1 = board cannot steer)
     options @6 :UInt8;  # 0xE4 byte 2 option bits actually sent
-    # Developer EPS torque-blend probe (SSV3BlendProbe; opendbc/car/honda/ssv3.py Ssv3BlendProbe)
+    # Retired developer EPS torque-blend probe (removed 2026-11-23; kept for old logs, always idle: 0 / window -1)
     blendProbeProgram @7 :UInt8;  # program id armed/running, 0 = off
     blendProbeState @8 :UInt8;  # 0 idle, 1 armed, 2 hold (fixed command), 3 rest (normal control), 4 done
     blendProbeWindow @9 :Int8;  # window index while hold/rest, -1 otherwise
@@ -247,7 +247,7 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
     boardMode @16 :UInt8;  # 524 MODE: 0 passthrough, 1 idle, 2 steer
     boardSteerRequest @17 :Bool;  # 524 STEER_REQUEST
     linFatalError @18 :Bool;  # 400 LIN_INTERFACE_FATAL_ERROR (frame after an EPS serial gap)
-    deadbandComp @19 :Bool;  # SSV3DeadbandComp active (firmware 3)
+    deadbandComp @19 :Bool;  # retired SSV3DeadbandComp (removed 2026-11-23; kept for old logs, always false)
   }
 
   struct ToyotaCruise {

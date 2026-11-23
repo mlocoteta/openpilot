@@ -28,7 +28,7 @@ def test_params_are_registered_and_default_off():
   for key, _ in OPTION_PARAMS:
     assert f'{{"{key}", {{PERSISTENT, BOOL, "0"}}}}' in text
   assert read_options(FakeParams({})) == 0
-  assert read_options(FakeParams({k: True for k, _ in OPTION_PARAMS})) == Ssv3Option.ALL
+  assert read_options(FakeParams({k: True for k, _ in OPTION_PARAMS})) == Ssv3Option.SENDABLE
 
 
 def test_only_the_9g_gets_a_feed():
@@ -57,25 +57,17 @@ def test_firmware3_companion():
   assert msg.starpilotCarState.sourceCarStateMonoTime == 123
 
 
-def test_deadband_comp_param_registered_default_off_and_read():
-  from openpilot.starpilot.car.honda.ssv3_feed import DEADBAND_COMP_PARAM, read_deadband_comp
+def test_retired_params_are_gone_and_their_log_fields_stay_idle():
   text = open(__file__.rsplit("/starpilot/", 1)[0] + "/common/params_keys.h").read()
-  assert DEADBAND_COMP_PARAM == "SSV3DeadbandComp"
-  assert '{"SSV3DeadbandComp", {PERSISTENT, BOOL, "0"}}' in text
-  assert read_deadband_comp(FakeParams({})) is False
-  assert read_deadband_comp(FakeParams({"SSV3DeadbandComp": True})) is True
-
-  class Broken:
-    def get_bool(self, key):
-      raise OSError
-  assert read_deadband_comp(Broken()) is False
+  for key in ("SSV3BlendProbe", "SSV3DeadbandComp", "SSV3TxAllLkasData", "SLCSourceStability"):
+    assert f'"{key}"' not in text
+  assert "SSV3TxAllLkasData" not in [k for k, _ in OPTION_PARAMS]
   car = ci()
-  feed = install(car, FakeParams({"SSV3DeadbandComp": True}))
-  feed.update(State(), None, car_state_stamp=1)
-  assert car.CC.ssv3.requested_deadband_comp is True
-  assert car.CC.ssv3.deadband_comp(car.CS) is False          # firmware 2: never
-  car.CS.ssv3.fw3 = True
-  assert car.CC.ssv3.deadband_comp(car.CS) is True
+  feed = install(car, FakeParams({}))
+  car.CS.ssv3.fw3, car.CS.ssv3.version = True, 3
+  out = feed.update(State(), None, car_state_stamp=7).starpilotCarState.ssv3
+  assert (out.blendProbeProgram, out.blendProbeState, out.blendProbeWindow, out.blendProbeCommand,
+          out.blendProbeEnd, out.blendProbeTime, out.deadbandComp) == (0, 0, -1, 0, 0, 0.0, False)
 
 
 def test_windup_guard_state_is_logged():
@@ -87,7 +79,7 @@ def test_windup_guard_state_is_logged():
   car.CC.ssv3.guard.reason = Ssv3Cut.EPS_NO_ACK | Ssv3Cut.BOARD_IDLE | Ssv3Cut.LIN_FATAL
   out = feed.update(State(), None, car_state_stamp=5).starpilotCarState.ssv3
   assert out.lkasCut and out.cutReason == 7
-  assert (out.boardMode, out.boardSteerRequest, out.linFatalError, out.deadbandComp) == (1, True, True, False)
+  assert (out.boardMode, out.boardSteerRequest, out.linFatalError) == (1, True, True)
   car.CC.ssv3.guard.reason = 0
   out = feed.update(State(), None, car_state_stamp=6).starpilotCarState.ssv3
   assert not out.lkasCut and out.cutReason == 0
