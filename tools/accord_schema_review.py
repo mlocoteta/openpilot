@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Record the Accord fork's own cereal additions as reviewed, so upstream's schema-policy tests pass.
 
-The Accord port adds two things upstream's schema guards don't know about:
-  * log.capnp      OnroadEvent.EventName `ssv3BlendProbe @105` (SSV3 developer blend-probe alert)
+The Accord port adds one thing upstream's schema guards don't know about:
   * custom.capnp   StarPilotCarState `ssv3 @N :Ssv3Status` (N = the next ordinal after upstream's last field)
+log.capnp has no Accord lines since the blend-probe event was retired (2026-11-23), so its pin stays upstream's;
+ACCORD_LOG_LINES is kept (empty) so a future Accord event can be listed there.
 
 Upstream pins log.capnp by sha256 (tools/ci/schema-policy.json) and StarPilotCarState's compiled layout
 (starpilot/car/tesla/tests/fixtures/custom_reviewed_schema_additions.json). This script re-derives the three
@@ -27,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STARPILOT_CAR_STATE = '0xf35cc4560bbf6ec2'
-ACCORD_LOG_LINES = (re.compile(r'^\s*ssv3BlendProbe @\d+;.*$'),)
+ACCORD_LOG_LINES: tuple[re.Pattern, ...] = ()
 ACCORD_CAR_STATE_FIELDS = ('ssv3',)
 
 

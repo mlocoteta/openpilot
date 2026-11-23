@@ -11,8 +11,7 @@ from opendbc.car.honda.nidec_brake_scale import NIDEC_ACCEL_PER_UNIT, nidec_brak
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
-from opendbc.car.honda.ssv3 import (ProbeInputs, ProbeState, Ssv3Controller, deadband_compensate, ssv3_qualified,
-                                    ssv3_steer_command)
+from opendbc.car.honda.ssv3 import Ssv3Controller, ssv3_qualified, ssv3_steer_command
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -175,20 +174,13 @@ class CarController(CarControllerBase):
     if _projection is not None:
       _projection.capture_honda(self.modified_civic_steering, CS)
     torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
-    probe_torque = None
-    if self.ssv3 is not None and (self.ssv3.requested_probe or self.ssv3.probe.state != ProbeState.IDLE):
-      # SSV3 path only (never TI): developer blend probe, default off. Replaces the torque value only; the rate limit
-      # below and the SSV3 command shaping still apply.
-      probe_torque = self.ssv3.probe.update(self.ssv3.requested_probe, ProbeInputs.from_car(CC, CS), self.params.STEER_MAX)
-      if probe_torque is not None:
-        torque_cmd = probe_torque
     limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
     ssv3_cut = 0
     if self.ssv3 is not None:
       # SSV3 path only: wind-up guard (opendbc/car/honda/ssv3.py Ssv3WindupGuard). Caps the output while the board
       # or EPS is not applying it; controlsd sees actuatorsOutput != actuators and freezes the integrator.
-      ssv3_cut = self.ssv3.guard.update(getattr(CS, 'ssv3', None), bool(CC.latActive and probe_torque is None))
+      ssv3_cut = self.ssv3.guard.update(getattr(CS, 'ssv3', None), bool(CC.latActive))
       if ssv3_cut:
         limited_torque = self.ssv3.guard.limit(limited_torque, self.last_torque)
     _projection_previous = self.last_torque if _projection is not None else 0.
@@ -217,8 +209,6 @@ class CarController(CarControllerBase):
     if self.ssv3 is not None:
       # SSV3 path only: round, and never an exact 0 while steering (the board would drop LKAS for ~170 ms).
       # The projection keeps the shared codec value, so a frame this changes reads as limited there.
-      if CC.latActive and not ssv3_cut and self.ssv3.deadband_comp(CS):
-        apply_torque_raw = deadband_compensate(float(apply_torque_raw), float(max(abs(v) for v in self.params.STEER_LOOKUP_V)))
       apply_torque = ssv3_steer_command(float(apply_torque_raw), CC.latActive, self.ssv3_last_nonzero)
       self.ssv3_last_nonzero = apply_torque if CC.latActive and apply_torque != 0 else (
         self.ssv3_last_nonzero if CC.latActive else 0)

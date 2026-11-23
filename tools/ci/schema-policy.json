@@ -9,7 +9,7 @@
     "opendbc_repo/opendbc/car/include/c++.capnp": "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44",
     "opendbc_repo/opendbc/car/rlog.capnp": "76331a09f36764d08228ba1ed6c03419cc8cdfcc797db98c4d56fab52a6ac050"
   },
-  "log_sha256": "a0390ad2df85579abd50695a7e76529b5e3e2615ccae4156f42a2a76fbbc191c",
+  "log_sha256": "aa5d562b94a3452f067eb74299c7997716862b84e2276113786f80492f8f59f8",
   "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n# Automatic FLM adds children only to existing reserved fork carriers.\n# All evidence clocks are explicitly MONOTONIC; default/version0 is invalid.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n# Live tracking trials are a separate protocol, never ReplayValidation.\n\n\n\n\n\n\n\n\n",
   "historical_empty_slots": [],
   "historical_restored": {
