@@ -84,7 +84,14 @@ The Vue router in `web/js/app.js` and the route handlers in `server.py` are the
 current route map. API groups include `/api/auth`, `/api/system/monitor`,
 `/api/software/status`, `/api/settings`, `/api/models`, `/api/maps`,
 `/api/sounds`, `/api/bluetooth`, `/api/vehicle-selection`, `/api/recordings`, `/api/replay`,
-`/api/sentry/events`, and `/api/flm`. An unknown API route returns an error;
+`/api/sentry/events`, and `/api/flm`. `GET /api/hud` is a read-only driving
+snapshot for an external head-unit display: like Plots, its worker subscribes
+only while an authenticated client polls (4 Hz at most, gone 6 s after the last
+request) and reports missing or stale inputs as null. `GET /api/hud/scene?hz=5..20`
+(`scene.py`) streams the fast part (model lines, path, lead, vEgo, yaw rate) as
+NDJSON, one line per new modelV2 at most `hz` per second, at most 2 streams of
+60 s each. `tools/hud_replay_dump.py`
+replays route logs through the same projection on a host. An unknown API route returns an error;
 there is no arbitrary Params or shell-command endpoint. The retired
 `POST /api/companion` cross-origin bridge is no longer supported. Local hotspot
 access uses the same authenticated, same-origin HTTP API as local Wi-Fi.
