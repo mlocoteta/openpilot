@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.honda.interface import CarInterface
+from opendbc.car.honda.steering_board import TI_MISSING_FRAMES
 from opendbc.car.honda.values import CAR
 from openpilot.starpilot.car.honda.steering_board_watch import install
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
@@ -77,14 +78,65 @@ def test_watch_records_once_and_clears_once():
   params = FakeParams(missing=True)
   watch = install(ci, params)
   ci.CS.ti.feedback_seen = True
-  watch.update()
-  watch.update()
+  watch.update(True)
+  watch.update(True)
   assert params.writes == [("TorqueInterceptorMissing", False)]
   ci.CS.ti.feedback_seen = False
   ci.CS.ti_presence.missing = True
-  watch.update()
-  watch.update()
+  for _ in range(TI_MISSING_FRAMES + 5):
+    watch.update(True)
   assert params.writes[-1] == ("TorqueInterceptorMissing", True) and len(params.writes) == 2
+
+
+def test_no_record_while_controls_not_running():
+  # 2026-11-22 route 127: controlsd crashed at start, no 0x249 ever went out, the silent TI latched missing
+  cp = cp_9g()
+  from opendbc.car.honda.torque_interceptor import apply_torque_interceptor
+  apply_torque_interceptor(cp, True)
+  ci = CarInterface(cp)
+  params = FakeParams(missing=False)
+  watch = install(ci, params)
+  ci.CS.ti_presence.missing = True
+  for _ in range(3 * TI_MISSING_FRAMES):
+    watch.update(False)
+  for _ in range(TI_MISSING_FRAMES - 1):
+    watch.update(True)
+  assert params.writes == []
+  watch.update(True)
+  assert params.writes == [("TorqueInterceptorMissing", True)]
+
+
+def test_broken_window_starts_over():
+  # controlsd dropping out mid-window (restart) means 0x249 stopped: the window must be unbroken
+  cp = cp_9g()
+  from opendbc.car.honda.torque_interceptor import apply_torque_interceptor
+  apply_torque_interceptor(cp, True)
+  ci = CarInterface(cp)
+  params = FakeParams(missing=False)
+  watch = install(ci, params)
+  ci.CS.ti_presence.missing = True
+  for _ in range(3):
+    for _ in range(TI_MISSING_FRAMES - 1):
+      watch.update(True)
+    watch.update(False)
+  assert params.writes == []
+  for _ in range(TI_MISSING_FRAMES):
+    watch.update(True)
+  assert params.writes == [("TorqueInterceptorMissing", True)]
+
+
+def test_ti_answering_never_records():
+  cp = cp_9g()
+  from opendbc.car.honda.torque_interceptor import apply_torque_interceptor
+  apply_torque_interceptor(cp, True)
+  ci = CarInterface(cp)
+  params = FakeParams(missing=False)
+  watch = install(ci, params)
+  ci.CS.ti.feedback_seen = True
+  ci.CS.ti_presence.missing = False
+  for _ in range(3 * TI_MISSING_FRAMES):
+    watch.update(True)
+  assert params.writes == []
 
 
 def test_no_watch_off_the_ti_path():
