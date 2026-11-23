@@ -623,3 +623,69 @@ def test_ff_tuning_params_are_read_live():
   for _ in range(TI_LIVE_PARAMS_INTERVAL):
     controller.update(True, CS, VM, lp, False, 0.0, False, 0.4)
   assert (controller.offset_ff, controller.roll_comp_ratio, controller.friction_hwy, controller.ab_enabled) == (-0.15, 0.8, 0.25, True)
+
+
+# ---- SSV3 path (TI off at startup): no TI shaping, even with the TI tune params still set on the device ----
+# 2026-11-16: the car (TorqueInterceptorEnabled=0, SSV3) still has the TI tune params from the TI drives.
+# None of them may reach the SSV3 path: it runs the plain LatControlTorque with the SSV3 tune (LAF 1.9 /
+# FRICTION 0.15) and a linear torque curve; the TI controller (sigmoid, TISteerKp, damping, offsets) is never built.
+
+SSV3_DEVICE_TI_PARAMS = dict(
+  TISigmoidEnabled=True, TISigmoidLive=True, TISigmoidA=15.0, TISigmoidB=0.72, TISigmoidC=0.16, TISteerKp=0.5,
+  TILowSpeedDampingEnabled=True, TILowSpeedCenterDampingEnabled=True, TIOffsetFF=-0.2, TIRollCompRatio=0.8,
+  TIFrictionHighway=0.25, TIABEnabled=False, SteerLatAccel=1.1878130435943604, SteerFriction=0.19,
+)
+
+
+def _ssv3_controller(monkeypatch):
+  from openpilot.starpilot.lateral.controller_selection import default_selection
+
+  def no_ti(*_args, **_kwargs):
+    raise AssertionError("TI controller / TI params touched on the SSV3 path")
+
+  monkeypatch.setattr(ti, "TiLiveParams", no_ti)
+  monkeypatch.setattr(ti.LatControlTorqueTI, "__init__", no_ti)
+  cp = ti_cp(ti_on=False)
+  assert not ti_lateral_qualified(cp)
+  controller = create_lateral_controller(cp.as_reader(), CarInterface(cp), DT_CTRL, mode=default_selection(cp.as_reader()).mode)
+  return cp, controller
+
+
+def test_ssv3_path_builds_the_plain_torque_controller(monkeypatch):
+  _, controller = _ssv3_controller(monkeypatch)
+  assert type(controller) is LatControlTorque
+  assert controller.starpilot_extension is None
+  assert controller.torque_params.latAccelFactor == pytest.approx(1.9)
+  assert controller.torque_params.friction == pytest.approx(0.15)
+  assert not hasattr(controller, "sigmoid_params")
+
+
+@pytest.mark.parametrize("lat_accel", (0.05, 0.1, 0.25, 0.5, 1.0, 1.5))
+def test_ssv3_torque_curve_is_linear(monkeypatch, lat_accel):
+  # The TI sigmoid (15, 0.72, 0.16) gives 0.18 at 0.1 m/s^2; the SSV3 path must give 0.1 / 1.9.
+  _, controller = _ssv3_controller(monkeypatch)
+  for x in (lat_accel, -lat_accel):
+    assert controller.torque_from_lateral_accel(x, controller.torque_params) == pytest.approx(x / 1.9)
+
+
+def test_ssv3_output_is_pid_lat_accel_over_laf(monkeypatch):
+  cp, controller = _ssv3_controller(monkeypatch)
+  VM = VehicleModel(cp)
+  lp = log.VehicleParameters.new_message()
+  lp.steerRatio = cp.steerRatio
+  lp.stiffnessFactor = 1.0
+  lp.roll = 0.01
+  CS = car.CarState.new_message()
+  CS.vEgo = 25.0
+  CS.gearShifter = car.CarState.GearShifter.drive
+  outputs = []
+  for frame in range(400):
+    CS.steeringAngleDeg = 0.6 * math.sin(frame * 0.05)
+    curvature = 0.0004 * math.sin(frame * 0.03)
+    torque, _, pid_log = controller.update(True, CS, VM, lp, False, curvature, False, 0.4)
+    assert pid_log.active
+    if abs(torque) < 0.999:
+      assert -pid_log.output * 1.9 == pytest.approx(pid_log.p + pid_log.i + pid_log.f, abs=1e-5)
+      assert torque == pytest.approx(pid_log.output, abs=1e-6)
+    outputs.append(torque)
+  assert max(abs(x) for x in outputs) > 0.01

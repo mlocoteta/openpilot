@@ -13,6 +13,7 @@ from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, GAIN_VEH
 DOCUMENT_KEY = "TorqueOverrideDocument"
 LEGACY_KEYS = ("SteerLatAccel", "SteerFriction", "SteerLatAccelStock", "SteerFrictionStock")
 MAX_DOCUMENT_BYTES = 16_384
+SPLIT_TUNE_9G = "HONDA_ACCORD_9G"
 
 from openpilot.starpilot.flm.torque_surface import GmFlmBinding
 from opendbc.car.values import PLATFORMS
@@ -125,6 +126,11 @@ def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, fl
       result.append(None)
       modes.append(LegacyMode.ABSENT)
     elif round(value, 2) == round(stock, 2) or marker is not None and math.isclose(value, marker, abs_tol=1e-6):
+      result.append(None)
+      modes.append(LegacyMode.STOCK)
+    elif fingerprint == SPLIT_TUNE_9G and marker is not None and not math.isclose(marker, stock, abs_tol=1e-4):
+      # 9G Accord: one fingerprint, two steering boards with different stock tunes (TI = params.toml, SSV3 =
+      # opendbc honda/ssv3.py). A value saved against the other board's stock marker is that board's setting.
       result.append(None)
       modes.append(LegacyMode.STOCK)
     else:

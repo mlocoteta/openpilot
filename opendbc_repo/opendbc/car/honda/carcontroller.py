@@ -11,6 +11,8 @@ from opendbc.car.honda.nidec_brake_scale import NIDEC_ACCEL_PER_UNIT, nidec_brak
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
+from opendbc.car.honda.ssv3 import (ProbeInputs, ProbeState, Ssv3Controller, deadband_compensate, ssv3_qualified,
+                                    ssv3_steer_command)
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -113,6 +115,10 @@ class CarController(CarControllerBase):
     # plan (starpilot/car/honda/cruise_brake_caller.py); None on every other car.
     self.cruise_brake_deadband = (CruiseBrakeDeadband() if self.nidec_interceptor is not None and
                                   CP.carFingerprint == CAR.HONDA_ACCORD_9G else None)
+    # 9G SSV3 board: firmware-3 option bits in 0xE4, only once firmware 3 is seen (opendbc/car/honda/ssv3.py).
+    # Never on the TI path (0xE4 carries zero torque there).
+    self.ssv3 = Ssv3Controller() if ssv3_qualified(CP) and self.ti is None else None
+    self.ssv3_last_nonzero = 0
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -169,8 +175,22 @@ class CarController(CarControllerBase):
     if _projection is not None:
       _projection.capture_honda(self.modified_civic_steering, CS)
     torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
+    probe_torque = None
+    if self.ssv3 is not None and (self.ssv3.requested_probe or self.ssv3.probe.state != ProbeState.IDLE):
+      # SSV3 path only (never TI): developer blend probe, default off. Replaces the torque value only; the rate limit
+      # below and the SSV3 command shaping still apply.
+      probe_torque = self.ssv3.probe.update(self.ssv3.requested_probe, ProbeInputs.from_car(CC, CS), self.params.STEER_MAX)
+      if probe_torque is not None:
+        torque_cmd = probe_torque
     limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
+    ssv3_cut = 0
+    if self.ssv3 is not None:
+      # SSV3 path only: wind-up guard (opendbc/car/honda/ssv3.py Ssv3WindupGuard). Caps the output while the board
+      # or EPS is not applying it; controlsd sees actuatorsOutput != actuators and freezes the integrator.
+      ssv3_cut = self.ssv3.guard.update(getattr(CS, 'ssv3', None), bool(CC.latActive and probe_torque is None))
+      if ssv3_cut:
+        limited_torque = self.ssv3.guard.limit(limited_torque, self.last_torque)
     _projection_previous = self.last_torque if _projection is not None else 0.
     self.last_torque = limited_torque
 
@@ -187,12 +207,23 @@ class CarController(CarControllerBase):
 
     # steer torque is converted back to CAN reference (positive when steering right)
     # Preserve integer CAN rounding while steering limits are owned by the platform.
-    apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX,
-                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V))
+    apply_torque_raw = np.interp(-limited_torque * self.params.STEER_MAX,
+                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V)
+    apply_torque = int(apply_torque_raw)
     if _projection is not None:
       _projection.input(apply_torque, self.params.STEER_MAX, _projection_previous, CS.out.steeringTorque, self.params,
                         limiter='normalized_rate', mapping='honda_lookup', codec_input=torque_cmd,
                         lookup_x=self.params.STEER_LOOKUP, lookup_y=self.params.STEER_LOOKUP_V, limited_input=limited_torque)
+    if self.ssv3 is not None:
+      # SSV3 path only: round, and never an exact 0 while steering (the board would drop LKAS for ~170 ms).
+      # The projection keeps the shared codec value, so a frame this changes reads as limited there.
+      if CC.latActive and not ssv3_cut and self.ssv3.deadband_comp(CS):
+        apply_torque_raw = deadband_compensate(float(apply_torque_raw), float(max(abs(v) for v in self.params.STEER_LOOKUP_V)))
+      apply_torque = ssv3_steer_command(float(apply_torque_raw), CC.latActive, self.ssv3_last_nonzero)
+      self.ssv3_last_nonzero = apply_torque if CC.latActive and apply_torque != 0 else (
+        self.ssv3_last_nonzero if CC.latActive else 0)
+      # build-4 APPLIED_LOW compares the board's STEER_APPLIED against the commands we actually sent
+      self.ssv3.guard.note_sent(apply_torque)
 
     # Send CAN commands
     can_sends = []
@@ -202,14 +233,17 @@ class CarController(CarControllerBase):
       if self.frame % 10 == 0:
         can_sends.append(make_tester_present_msg(0x18DAB0F1, 1, suppress_response=True))
 
-    # Send steering command. On the TI car 0xE4 reaches no EPS: it carries zero torque
-    # (request still follows latActive) and the torque goes to the TI board on 0x249.
+    # Send steering command. On the TI path 0xE4 carries zero torque (request still follows latActive) and
+    # the torque goes to the TI board on 0x249; an SSV3 that is also fitted gets the zero torque and keeps
+    # the EPS in LKAS-off. No SSV3 option bits on this path (self.ssv3 is None).
     if self.ti is not None:
       ti_apply_steer, ti_option = self.ti.update(CC, CS, torque_cmd)
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, 0, CC.latActive, self.tja_control))
       can_sends.append(create_ti_steering_control(self.packer, ti_apply_steer, ti_option))
     else:
       can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
+    if self.ssv3 is not None:
+      self.ssv3.apply(can_sends, CS, self.CAN.lkas)
     if _projection is not None:
       _projection.emit('honda.STEERING_CONTROL', apply_torque, CC.latActive, can_sends[-1])
 
