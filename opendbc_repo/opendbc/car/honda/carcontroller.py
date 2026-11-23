@@ -6,6 +6,8 @@ from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, struc
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_stock_qualified
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
+from opendbc.car.honda.cruise_brake_deadband import CruiseBrakeDeadband
+from opendbc.car.honda.nidec_brake_scale import NIDEC_ACCEL_PER_UNIT, nidec_brake_accel_per_unit
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.torque_interceptor import TI_LIMITS, TorqueInterceptor, create_ti_steering_control, ti_qualified
@@ -21,14 +23,16 @@ def compute_gb_honda_bosch(accel, speed):
   return 0.0, 0.0
 
 
-def compute_gb_honda_nidec(accel, speed):
+def compute_gb_honda_nidec(accel, speed, brake_accel_per_unit=NIDEC_ACCEL_PER_UNIT):
+  # brake_accel_per_unit scales the brake side only (opendbc/car/honda/nidec_brake_scale.py); gas stays at 4.8
   creep_brake = 0.0
   creep_speed = 2.3
   creep_brake_value = 0.15
   if speed < creep_speed:
     creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
-  gb = float(accel) / 4.8 - creep_brake
-  return np.clip(gb, 0.0, 1.0), np.clip(-gb, 0.0, 1.0)
+  gb = float(accel) / NIDEC_ACCEL_PER_UNIT - creep_brake
+  gb_brake = float(accel) / brake_accel_per_unit - creep_brake
+  return np.clip(gb, 0.0, 1.0), np.clip(-gb_brake, 0.0, 1.0)
 
 
 def compute_gas_brake(accel, speed, CP):
@@ -105,9 +109,18 @@ class CarController(CarControllerBase):
     self.interceptor_learning_params = None
     self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
     self.ti = TorqueInterceptor(CP) if ti_qualified(CP) else None
+    # Accord 9G pedal long: hold the friction brake off at a steady cruise (set-speed brake taps). card.py feeds it the
+    # plan (starpilot/car/honda/cruise_brake_caller.py); None on every other car.
+    self.cruise_brake_deadband = (CruiseBrakeDeadband() if self.nidec_interceptor is not None and
+                                  CP.carFingerprint == CAR.HONDA_ACCORD_9G else None)
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
+
+    # m/s^2 per friction brake unit: 3.6 on the Accord 9G (6.x F06 brake half), stock 4.8 on every other Nidec.
+    # Friction brake only: the pedal interceptor and the PCM speed target keep the stock 4.8 brake term.
+    self.brake_accel_per_unit = (NIDEC_ACCEL_PER_UNIT if CP.flags & HondaFlags.BOSCH else
+                                 nidec_brake_accel_per_unit(CP.carFingerprint))
 
     self.braking = False
     self.brake_steady = 0.
@@ -130,16 +143,27 @@ class CarController(CarControllerBase):
     actuators = CC.actuators
     hud_control = CC.hudControl
     hud_v_cruise = hud_control.setSpeed / CS.v_cruise_factor if hud_control.speedVisible else 255
+    if (hud_control.speedVisible and self.CP.carFingerprint == CAR.HONDA_ACCORD_9G and
+        not CS.is_metric and not CS.dynamic_v_cruise_units):
+      # Dash label only: the 9G cluster rounds kph -> mph up, so "70" must be sent as 112, not 113 (6.x F06).
+      hud_v_cruise = hondacan.imperial_cluster_cruise_kph(hud_control.setSpeed)
     pcm_cancel_cmd = CC.cruiseControl.cancel
     if self.bosch_longitudinal is not None:
       self.bosch_longitudinal.observe_orientation(CC.orientationNED)
+    if self.nidec_interceptor is not None:
+      self.nidec_interceptor.observe_orientation(CC.orientationNED)
+      self.nidec_interceptor.tick(self.frame)
 
     if CC.longActive:
       accel = actuators.accel
       gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo, self.CP)
+      friction_brake = brake
+      if self.brake_accel_per_unit != NIDEC_ACCEL_PER_UNIT:
+        friction_brake = float(compute_gb_honda_nidec(actuators.accel, CS.out.vEgo, self.brake_accel_per_unit)[1])
     else:
       accel = 0.0
       gas, brake = 0.0, 0.0
+      friction_brake = 0.0
 
     # *** rate limit steer ***
     if _projection is not None:
@@ -151,7 +175,7 @@ class CarController(CarControllerBase):
     self.last_torque = limited_torque
 
     # *** apply brake hysteresis ***
-    pre_limit_brake, self.braking, self.brake_steady = actuator_hysteresis(brake, self.braking, self.brake_steady)
+    pre_limit_brake, self.braking, self.brake_steady = actuator_hysteresis(friction_brake, self.braking, self.brake_steady)
 
     # *** rate limit after the enable check ***
     self.brake_last = rate_limit(pre_limit_brake, self.brake_last, -2., DT_CTRL)
@@ -246,6 +270,13 @@ class CarController(CarControllerBase):
                                                         self.stopping_counter, self.CP, gas_force=gas_force, braking=braking))
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
+          if self.cruise_brake_deadband is not None:
+            brake_limit = self.cruise_brake_deadband.update(
+              CC.longActive and actuators.longControlState == LongCtrlState.pid, CS.out.vEgo, accel, float(apply_brake),
+              2 * DT_CTRL)
+            if brake_limit is not None:
+              # the pedal still follows accel (it closes on its own), only the friction brake is held off
+              apply_brake = min(apply_brake, brake_limit)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
           pump_on, self.last_pump_ts = brake_pump_hysteresis(apply_brake, self.apply_brake_last, self.last_pump_ts, ts)
 
@@ -255,7 +286,7 @@ class CarController(CarControllerBase):
           self.apply_brake_last = apply_brake
           self.brake = apply_brake / self.params.NIDEC_BRAKE_MAX
           if self.nidec_interceptor is not None:
-            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake)
+            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake, apply_brake)
             can_sends.append(create_command(self.packer, command, (self.frame // 2) % 16))
 
     # Send dashboard UI commands.
