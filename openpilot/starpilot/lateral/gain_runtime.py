@@ -120,7 +120,11 @@ class GenericGainOwner:
 
 
 def create_gain_owner(params, cp, controller) -> GenericGainOwner | None:
+  # The 9G TI controller (LatControlTorqueTI) is not a LatControlTorque: it has no controller_mode and takes its
+  # proportional gain from TISteerKp, so the manual gain owner never applies to it (controlsd crashed at start).
   if not gain_supported(cp):
+    return None
+  if cp.lateralTuning.which() != "pid" and getattr(controller, 'controller_mode', None) is None:
     return None
   basis = gain_basis(cp, controller)
   value = _selected(params, cp, basis)

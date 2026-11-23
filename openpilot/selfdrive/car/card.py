@@ -1206,7 +1206,8 @@ class Car:
       companion = self.honda_ssv3_feed.update(CS, companion, car_state_stamp=int(cs_send.logMonoTime))
     if getattr(self, 'honda_board_watch', None) is not None:
       # 9G TI drive: record a missing TI (next start falls back to the SSV3) or clear a stale record
-      self.honda_board_watch.update()
+      # only frames with controlsd alive count (0x249 goes out only then; a crashed controlsd is not a missing TI)
+      self.honda_board_watch.update(self.sm.alive['carControl'])
     self.car_gps_publisher.update(self.CI.CS, self.pm, companion)
     self.pm.send('carState', cs_send)
     if getattr(self, 'learning_stamp_observer', None) is not None:

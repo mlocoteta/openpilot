@@ -17,6 +17,7 @@ talk at all), then only the cheap CS.ti check stays. One write per board per dri
 import json
 import time
 
+from opendbc.car.honda.steering_board import TI_MISSING_FRAMES
 from openpilot.common.swaglog import cloudlog
 
 PARAM = "TorqueInterceptorMissing"
@@ -31,21 +32,30 @@ PRESENT_DAYS = 30
 
 
 class SteeringBoardWatch:
+  """Only frames in which openpilot was really commanding the TI count: the TI is silent until it gets 0x249, and
+  0x249 only goes out while controlsd publishes carControl. A drive where controlsd never ran must not record the
+  TI as missing (that latch then keeps every later drive on the SSV3). The window must be unbroken: a controlsd
+  restart mid-window starts it over."""
+
   def __init__(self, car_state, params):
     self.cs = car_state
     self.params = params
     self.recorded = False
     self.cleared = False
+    self.commanded_frames = 0
 
-  def update(self) -> None:
+  def update(self, commanded: bool) -> None:
     presence = self.cs.ti_presence
-    if presence.missing and not self.recorded:
+    # consecutive frames only: a full TI_MISSING_FRAMES window of 0x249 going out with no TI_FEEDBACK
+    self.commanded_frames = self.commanded_frames + 1 if commanded else 0
+    if presence.missing and self.commanded_frames >= TI_MISSING_FRAMES and not self.recorded:
       self.recorded = True
       try:
         self.params.put_bool(PARAM, True)   # block=False = queued write (7.0 Params)
       except Exception:
         cloudlog.exception("steering_board_watch: could not record TorqueInterceptorMissing")
-      cloudlog.event("accord_ti_missing", frames=presence.frames, status_frames=presence.status_frames)
+      cloudlog.event("accord_ti_missing", frames=presence.frames, status_frames=presence.status_frames,
+                     commanded_frames=self.commanded_frames)
     elif self.cs.ti.feedback_seen and not self.cleared:
       self.cleared = True
       try:
