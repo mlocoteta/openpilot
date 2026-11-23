@@ -1901,10 +1901,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         replay_api.post(self, path, payload)
         return
       if path in ('/api/hud/steeringBoard', '/api/hud/openpilotEnabled'):
-        # Head-unit choices for the NEXT car start (params read once when card starts, never mid-drive):
-        # steeringBoard = 9G TI or SSV3 (ssv3 = TI switch off = SSV3 only), openpilotEnabled = openpilot on, or off =
-        # datalogger (OpenpilotEnabledToggle off: card goes passive, panda noOutput, loggerd still records every drive).
-        # Refusals and the no-lock-out rules: galaxy/hud_writes.py.
+        # steeringBoard = 9G TI or SSV3 (ssv3 = TI switch off = SSV3 only): switched while the car is on, by the running
+        # card (only disengaged, not latActive, stopped; openpilot restarts in ~10 s, no ignition cycle).
+        # openpilotEnabled = openpilot on, or off = datalogger (OpenpilotEnabledToggle off: card goes passive, panda
+        # noOutput, loggerd still records every drive): NEXT car start. Rules: galaxy/hud_writes.py, card/board_switch.py.
         if not self.require_session():
           return
         from openpilot.starpilot.galaxy import hud_writes
@@ -1921,14 +1921,16 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             self.json(400, {'error': 'enabled must be true or false'})
             return
           rate = hud_enabled_rate
+        live_request = None
         with hud_personality_lock:
           from openpilot.common.params import Params
           params = Params()
-          # Not provably offroad (the comma reports onroad whenever the car is in accessory): stage, never change live params
+          # Not provably offroad (the comma reports onroad whenever the car is in accessory): board -> the running card,
+          # openpilotEnabled -> staged; never a live param change under a running card
           staged = hud_writes.stage_needed(params, check_engaged=board is not None or not enabled)
           reason = hud_writes.fitted_refusal(params, board) if board is not None else None
           if reason:
-            self.json(409, {'error': reason})
+            self.json(409, {'error': reason, 'applied': 'refused', 'reason': reason})
             return
           if rate.blocked():
             self.json(429, {'error': f'One change per {hud_writes.WRITE_GAP_S:g} seconds'})
@@ -1936,7 +1938,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
           rate.mark()
           if board is not None:
             if staged:
-              hud_writes.stage_board(params, board)
+              from openpilot.starpilot.car.honda.board_switch import new_request_id
+              live_request = new_request_id()
+              hud_writes.request_switch(params, board, live_request)
             else:
               hud_writes.write_board(params, board)
               if hud_writes.pending_board(params) is not None:
@@ -1947,14 +1951,31 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
             params.put_bool('OpenpilotEnabledToggle', enabled)
             if hud_writes.pending_enabled(params) is not None:
               hud_writes.clear_pending(params, hud_writes.ENABLED_PENDING)
-        note = ' (staged, applies next start)' if staged else ' (next start)'
-        body = {'applied': 'next_start'}
         if board is not None:
-          cloudlog.info(f"galaxy: hud steering board -> {board}{note}")
-          body['board'] = board
-        else:
-          cloudlog.info(f"galaxy: hud openpilot enabled -> {enabled}{note}")
-          body['enabled'] = enabled
+          if live_request is None:
+            cloudlog.info(f"galaxy: hud steering board -> {board} (offroad, used at start)")
+            self.json(200, {'applied': 'now', 'board': board, 'reason': 'Used when openpilot starts'})
+            return
+          from openpilot.common.params import Params
+          result = hud_writes.await_switch(Params, live_request)
+          if result is None:
+            with hud_personality_lock:
+              result = hud_writes.withdraw_switch(Params(), board, live_request)
+          if result is None:
+            reason = 'Saved: applies at next start'
+            cloudlog.info(f"galaxy: hud steering board -> {board} (no card answer, staged)")
+            self.json(200, {'applied': 'after_disengage', 'board': board, 'staged': True, 'reason': reason})
+            return
+          applied, reason = result.get('applied'), str(result.get('reason') or '')
+          cloudlog.info(f"galaxy: hud steering board -> {board}: {applied} ({reason})")
+          if applied == 'now':
+            self.json(200, {'applied': 'now', 'board': board, 'reason': reason})
+          else:
+            self.json(409, {'applied': 'refused', 'board': board, 'reason': reason, 'error': reason})
+          return
+        note = ' (staged, applies next start)' if staged else ' (next start)'
+        body = {'applied': 'next_start', 'enabled': enabled}
+        cloudlog.info(f"galaxy: hud openpilot enabled -> {enabled}{note}")
         if staged:
           body['staged'] = True
         self.json(200, body)
