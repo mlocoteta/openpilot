@@ -419,6 +419,9 @@ class Car:
     self.honda_ssv3_feed = install_honda_ssv3(self.CI, self.params) if self.CP.brand == 'honda' else None
     from openpilot.starpilot.car.honda.steering_board_watch import install as install_honda_board_watch
     self.honda_board_watch = install_honda_board_watch(self.CI, self.params) if self.CP.brand == 'honda' else None
+    from openpilot.starpilot.car.honda.steering_board_watch import install_seen as install_honda_board_seen
+    # every 9G drive (also openpilot disabled): persistent TI/SSV3 'last heard' record for the head-unit board switch
+    self.honda_board_seen = install_honda_board_seen(self.CP, self.CI, self.params) if self.CP.brand == 'honda' else None
 
     self.vehicle_startup.seal_publication()
     cp_bytes = self.CP.to_bytes()
@@ -500,6 +503,8 @@ class Car:
     observe_controller_can(self.CI, can_list)
     CS = self.CI.update(can_list)
     self.RI.v_ego = CS.vEgo   # the Honda Bosch-A decoder bounds a reversing coast with it
+    if getattr(self, 'honda_board_seen', None) is not None:
+      self.honda_board_seen.update(can_list)
     from openpilot.starpilot.car.gm.aol import f1_conventional_lateral_owner
     cancel_boot_ns = (time.clock_gettime_ns(time.CLOCK_BOOTTIME)
                       if (getattr(self.CI.CS, 'ev6_aol_source_healthy', False) or

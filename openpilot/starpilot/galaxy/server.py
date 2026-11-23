@@ -41,6 +41,8 @@ from openpilot.starpilot.galaxy.sentry_events import SentryEvents, SentryEventsU
 from openpilot.starpilot.sentry_mode.notifications import NotificationOwner, NotificationUnavailable
 from openpilot.starpilot.galaxy.map_status import MapStatus, MapUnavailable
 from openpilot.starpilot.galaxy.map_operations import MapOperationError, MapOperations, validate_action
+from openpilot.starpilot.galaxy.hud import Hud
+from openpilot.starpilot.galaxy.scene import HZ_DEFAULT, HZ_RANGE, SceneStreams
 from openpilot.starpilot.galaxy.plots import Plots
 from openpilot.starpilot.galaxy.software_status import SoftwareStatus, SoftwareUnavailable
 from openpilot.starpilot.galaxy.web_manifest import web_manifest
@@ -61,6 +63,9 @@ from openpilot.starpilot.controllers.transport import (ControllerBusy, Controlle
                                                       request_status as controller_status)
 from openpilot.starpilot.models.runtime import ModelStatusSource
 from openpilot.starpilot.audio.downloads import SoundDownloads, SoundDownloadError
+
+# Accord 4.2: /api/hud/personality names -> log.LongitudinalPersonality values (cereal: aggressive 0, standard 1, relaxed 2)
+HUD_PERSONALITIES = {'aggressive': 0, 'standard': 1, 'relaxed': 2}
 
 
 WEB = Path(__file__).resolve().parent / 'web'
@@ -94,7 +99,7 @@ def forget_app_keys(address):
 
 
 def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashes=None, software=None, maps=None, models=None, settings=None,
-                plots=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
+                plots=None, hud=None, map_operations=None, recordings=None, recording_media=None, segment_summary=None,
                 sentry_events=None, notifications=None, training_results=None, bluetooth=None, vehicle_selection=None,
                 model_manager=None, layouts=None, favorites=None,
                 sounds=None, software_operations=None, drive_stats=None, layout_preview_socket=None, controllers_socket=None,
@@ -102,7 +107,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
                 starport_client=None, navigation=None, offline_maps=None, drive_state=None, cloud_provider=None, cloud_offroad=None, projection_layout=None,
                 local_access=None, tmux_live=None, starport_logs=None, starport_log_sender=None, log_relay_stager=None, hotspot=None, toyota_tools=None,
                 replay_client=None, replay_root=None,
-                spotify_setup=None, companion=None, phone_location=None, reverse_proxy=None, local_hostnames=None, sound_preview=None):
+                spotify_setup=None, companion=None, phone_location=None, reverse_proxy=None, local_hostnames=None, sound_preview=None, scene=None):
   from openpilot.starpilot.galaxy.local_hostnames import LocalHostnames
   hostname_source = local_hostnames if local_hostnames is not None else LocalHostnames(clock=clock)
   from openpilot.starpilot.galaxy.companion import CompanionRegistry, APK_PATH
@@ -261,6 +266,11 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   session_lock = threading.Lock()
   sample_lock = threading.Lock()
   effect_lock = threading.Lock()
+  hud_personality_lock = threading.Lock()
+  hud_personality_at = [0.0]
+  from openpilot.starpilot.galaxy.hud_writes import RateLimit
+  hud_board_rate = RateLimit()
+  hud_enabled_rate = RateLimit()
   settings_lock = threading.Lock()
   models_lock = threading.Lock()
   settings_gateway = settings
@@ -272,6 +282,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   model_manager_source = model_manager
   plot_source = plots
   plots_lock = threading.Lock()
+  hud_source = hud
+  hud_lock = threading.Lock()
+  scene_source = scene
   bluetooth_lock = threading.Lock()
   bluetooth_source = bluetooth
   uniden_source = None
@@ -498,6 +511,22 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         plot_source = Plots()
         server.plots_source = plot_source
     return plot_source.snapshot()
+
+  def hud_status():
+    nonlocal hud_source
+    with hud_lock:
+      if hud_source is None:
+        hud_source = Hud()
+        server.hud_source = hud_source
+    return hud_source.snapshot()
+
+  def scene_streams():
+    nonlocal scene_source
+    with hud_lock:
+      if scene_source is None:
+        scene_source = SceneStreams()
+        server.scene_source = scene_source
+    return scene_source
 
   def local_media():
     nonlocal recording_media_source
@@ -1568,6 +1597,50 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         else:
           if self.require_session():
             self.json(200, result)
+      elif path == '/api/hud':
+        if not self.require_session():
+          return
+        try:
+          result = hud_status()
+        except (OSError, ValueError, RuntimeError):
+          if self.require_session():
+            self.json(503, {'error': 'HUD data is unavailable'})
+        else:
+          if self.require_session():
+            self.json(200, result)
+      elif path == '/api/hud/scene':
+        if not self.require_session():
+          return
+        try:
+          query = parse_qs(urlsplit(self.path).query, max_num_fields=2)
+          if set(query) - {'hz'}:
+            raise ValueError
+          hz = min(max(int(query.get('hz', [HZ_DEFAULT])[0]), HZ_RANGE[0]), HZ_RANGE[1])
+        except (ValueError, TypeError):
+          self.json(400, {'error': 'hz must be an integer 5..20'})
+          return
+        try:
+          source = scene_streams()
+          admitted = source.acquire()
+        except (OSError, RuntimeError):
+          self.json(503, {'error': 'Scene stream is unavailable'})
+          return
+        if not admitted:
+          self.json(429, {'error': 'Too many scene streams'})
+          return
+        try:
+          self.close_connection = True
+          self.send_response(200)
+          self.send_header('Content-Type', 'application/x-ndjson')
+          self.send_header('Cache-Control', 'no-store')
+          self.send_header('X-Content-Type-Options', 'nosniff')
+          self.end_headers()
+          if self.command != 'HEAD':
+            source.stream(self.wfile.write, hz, stopped=lambda: getattr(self.server, '_draining', False))
+        except (OSError, ValueError):
+          pass    # the client went away (broken pipe, reset, 4 s send timeout)
+        finally:
+          source.release()
       elif path == '/api/favorites/slots':
         if not self.require_session():
           return
@@ -1768,7 +1841,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         if self.require_session():
           self.json(404, {'error': 'Not found'})
         return
-      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location',
+      if path not in ('/api/companion/uplink', '/api/companion/settings', '/api/companion/location', '/api/hud/personality', '/api/hud/steeringBoard', '/api/hud/openpilotEnabled',
                       '/api/connect/proxy', '/api/connect/provider', '/api/auth/login', '/api/auth/logout', '/api/settings/preview', '/api/settings/confirm',
                       '/api/settings/recovery/preview', '/api/settings/recovery/confirm',
                       '/api/settings/flm-backup/preview', '/api/settings/flm-backup/confirm',
@@ -1892,6 +1965,85 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         return
       if path.startswith('/api/replay/'):
         replay_api.post(self, path, payload)
+        return
+      if path in ('/api/hud/steeringBoard', '/api/hud/openpilotEnabled'):
+        # Head-unit choices for the NEXT car start (params read once when card starts, never mid-drive):
+        # steeringBoard = 9G TI or SSV3 (ssv3 = TI switch off = SSV3 only), openpilotEnabled = openpilot on, or off =
+        # datalogger (OpenpilotEnabledToggle off: card goes passive, panda noOutput, loggerd still records every drive).
+        # Refusals and the no-lock-out rules: galaxy/hud_writes.py.
+        if not self.require_session():
+          return
+        from openpilot.starpilot.galaxy import hud_writes
+        board = enabled = None
+        if path == '/api/hud/steeringBoard':
+          board = payload.get('board') if isinstance(payload, dict) else None
+          if board not in hud_writes.BOARDS:
+            self.json(400, {'error': 'board must be ti or ssv3'})
+            return
+          rate = hud_board_rate
+        else:
+          enabled = payload.get('enabled') if isinstance(payload, dict) else None
+          if not isinstance(enabled, bool):
+            self.json(400, {'error': 'enabled must be true or false'})
+            return
+          rate = hud_enabled_rate
+        with hud_personality_lock:
+          from openpilot.common.params import Params
+          params = Params()
+          # Not provably offroad (the comma reports onroad whenever the car is in accessory): stage, never change live params
+          staged = hud_writes.stage_needed(params, check_engaged=board is not None or not enabled)
+          reason = hud_writes.fitted_refusal(params, board) if board is not None else None
+          if reason:
+            self.json(409, {'error': reason})
+            return
+          if rate.blocked():
+            self.json(429, {'error': f'One change per {hud_writes.WRITE_GAP_S:g} seconds'})
+            return
+          rate.mark()
+          if board is not None:
+            if staged:
+              hud_writes.stage_board(params, board)
+            else:
+              hud_writes.write_board(params, board)
+              if hud_writes.pending_board(params) is not None:
+                hud_writes.clear_pending(params, hud_writes.BOARD_PENDING)
+          elif staged:
+            hud_writes.stage_enabled(params, enabled)
+          else:
+            params.put_bool('OpenpilotEnabledToggle', enabled)
+            if hud_writes.pending_enabled(params) is not None:
+              hud_writes.clear_pending(params, hud_writes.ENABLED_PENDING)
+        note = ' (staged, applies next start)' if staged else ' (next start)'
+        body = {'applied': 'next_start'}
+        if board is not None:
+          cloudlog.info(f"galaxy: hud steering board -> {board}{note}")
+          body['board'] = board
+        else:
+          cloudlog.info(f"galaxy: hud openpilot enabled -> {enabled}{note}")
+          body['enabled'] = enabled
+        if staged:
+          body['staged'] = True
+        self.json(200, body)
+        return
+      if path == '/api/hud/personality':
+        # Accord (Botty Car 4.2 speed profiles v1): the head unit picks the driving personality. Same param write as the
+        # wheel distance button (selfdrived re-reads LongitudinalPersonality every 0.1 s); never touches MAX or any tune.
+        if not self.require_session():
+          return
+        value = HUD_PERSONALITIES.get(payload.get('personality') if isinstance(payload, dict) else None)
+        if value is None:
+          self.json(400, {'error': 'personality must be relaxed, standard or aggressive'})
+          return
+        with hud_personality_lock:
+          now = time.monotonic()
+          if now - hud_personality_at[0] < 1.0:
+            self.json(429, {'error': 'One personality change per second'})
+            return
+          hud_personality_at[0] = now
+          from openpilot.common.params import Params
+          Params().put('LongitudinalPersonality', value)
+        cloudlog.info(f"galaxy: hud personality -> {payload['personality']}")
+        self.json(200, {'personality': payload['personality']})
         return
       if path == '/api/companion/location':
         if getattr(self.server, 'remote_transport', False) or not self.direct_local():
@@ -3327,6 +3479,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
     server.model_source = model_source
   if plot_source is not None:
     server.plots_source = plot_source
+  if hud_source is not None:
+    server.hud_source = hud_source
+  if scene_source is not None:
+    server.scene_source = scene_source
   if settings_gateway is not None:
     server.settings_source = settings_gateway
   if toyota_source is not None:
@@ -3347,6 +3503,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       from openpilot.starpilot.galaxy.starport_setup import remove_legacy_google_files
       remove_legacy_google_files()
   server.maintain_starport = maintain_starport
+  server.hud_write_lock = hud_personality_lock
   server.start_drive_history = lambda: statistics_owner().start()
   return server
 
@@ -3365,6 +3522,10 @@ def main():
   args = parser.parse_args()
   with make_server(port=args.port, host=args.host) as server:
     server.start_drive_history()
+    from openpilot.starpilot.galaxy.hud_writes import PendingApplier
+    from openpilot.common.params import Params
+    applier = PendingApplier(Params, log=cloudlog.info)
+    threading.Thread(target=applier.run, args=(server.hud_write_lock,), daemon=True, name='galaxy-hud-pending').start()
     print(f'Galaxy listening on {args.host}:{server.server_port}', flush=True)
     try:
       server.serve_forever()
