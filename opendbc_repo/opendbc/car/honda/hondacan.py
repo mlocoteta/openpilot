@@ -1,3 +1,5 @@
+import math
+
 from opendbc.car import CanBusBase
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.values import HondaFlags, CarControllerParams
@@ -256,3 +258,12 @@ def honda_checksum(address: int, sig, d: bytearray) -> int:
   if extended:
     s += 3
   return s & 0xF
+
+
+def imperial_cluster_cruise_kph(set_speed_ms: float) -> int:
+  # 9G Accord dash label (6.x F06 dash half, ce2fa4a56): ACC_HUD CRUISE_SPEED is whole kph and the cluster shows
+  # ceil(kph / 1.609) mph, so the packer's round-to-nearest turns 70 mph (112.65 kph) into 113 kph = "71".
+  # Send the largest whole kph that still reads as the rounded mph: ceil(floor(N * 1.609) / 1.609) == N.
+  # Capped below 252 (stopped) / 255 (no speed); only reachable above 156 mph.
+  mph = round(set_speed_ms * CV.MS_TO_MPH)
+  return min(math.floor(mph * CV.MPH_TO_KPH + 1e-6), 250)

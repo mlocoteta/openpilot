@@ -17,6 +17,7 @@ from opendbc.car.interfaces import CarInterfaceBase
 
 TransmissionType = structs.CarParams.TransmissionType
 RADARLESS_PORTS = frozenset((CAR.HONDA_FIT_4G, CAR.ACURA_INTEGRA, CAR.ACURA_ADX))
+ACCORD_9G_PEDAL_LONG_ACTUATOR_DELAY = 0.30  # s, 6.x LongitudinalActuatorDelay on the 9G pedal car
 
 
 class CarInterface(CarInterfaceBase):
@@ -239,6 +240,12 @@ class CarInterface(CarInterfaceBase):
 
     from opendbc.car.honda.parameter_profiles import apply_factory_profile
     apply_factory_profile(ret, candidate)
+
+    if candidate == CAR.HONDA_ACCORD_9G and ret.flags & HondaFlags.GAS_INTERCEPTOR:
+      # 9G pedal long (6.x F12, c75153aab): the measured command -> accel lag is 0.40-0.50 s (2026-09-26..28 rlogs),
+      # so 6.x ran LongitudinalActuatorDelay 0.30 in the planner and modeld from 2026-09-28 to the 7.0 port. 7.0 has no
+      # such param and fell back to the 0.15 default; CarParams is the one place both read it from.
+      ret.longitudinalActuatorDelay = ACCORD_9G_PEDAL_LONG_ACTUATOR_DELAY
 
     if candidate == CAR.ACURA_RDX_3G_MMR:
       ret.dashcamOnly = is_release  # TODO: release from dashcam when there's enough driving data for torqued/paramsd to converge
