@@ -539,7 +539,7 @@ class Car:
     from openpilot.starpilot.car.gm.aol import f1_conventional_lateral_owner
     cancel_boot_ns = (time.clock_gettime_ns(time.CLOCK_BOOTTIME)
                       if (getattr(self.CI.CS, 'ev6_aol_source_healthy', False) or
-                          qualified_honda_stock_aol(self.CP, marked_only=True) or
+                          self.honda_stock_aol_qualified() or
                           self.CP.brand == 'volkswagen' and self.CP.openpilotLongitudinalControl or
                           qualified_gm(self.CP) and (is_bolt_present_no_acc_pedal_profile(self.CP) or
                                                      f1_conventional_lateral_owner(self.CP)) and
@@ -902,7 +902,7 @@ class Car:
       from opendbc.car import Bus
       from openpilot.starpilot.car.volkswagen.aol import cancel_source
       return cancel_source(self.CP, CS, self.CI.can_parsers[Bus.pt], observation, now_ns)
-    if getattr(getattr(self, 'CP', None), 'brand', '') == 'honda' and qualified_honda_stock_aol(self.CP, marked_only=True):
+    if getattr(getattr(self, 'CP', None), 'brand', '') == 'honda' and self.honda_stock_aol_qualified():
       from opendbc.car import Bus
       parser = self.CI.can_parsers[Bus.pt]
       stamp = int(parser.ts_nanos.get('SCM_BUTTONS', {}).get('CRUISE_BUTTONS', 0))
@@ -937,7 +937,7 @@ class Car:
 
   def aol_honda_brake_source(self, CS, now_ns: int) -> int:
     observation = getattr(self, '_aol_can_observation', None)
-    if (not CS.brakePressed or not qualified_honda_stock_aol(self.CP, marked_only=True) or
+    if (not CS.brakePressed or not self.honda_stock_aol_qualified() or
         observation is None or observation[0] is not CS):
       return 0
     from opendbc.car import Bus
@@ -1015,11 +1015,18 @@ class Car:
       cached = self._aol_owner_cache = (self.CP, owners)
     return cached[1]
 
+  def honda_stock_aol_qualified(self) -> bool:
+    # CP is fixed once the drive starts; qualified() (a long CP walk) ran 3-4 times per 100 Hz frame here.
+    cached = getattr(self, '_honda_stock_aol_cache', None)
+    if cached is None or cached[0] is not self.CP:
+      cached = self._honda_stock_aol_cache = (self.CP, bool(qualified_honda_stock_aol(self.CP, marked_only=True)))
+    return cached[1]
+
   def aol_honda_native_observation(self, native, *, latched, panda_ready, restricted, now_ns, pending_since_ns):
     acknowledged = getattr(self, '_honda_aol_acknowledgment', None)
     key = None
     host_requested = False
-    if native is not None and qualified_honda_stock_aol(self.CP, marked_only=True):
+    if native is not None and self.honda_stock_aol_qualified():
       key = (cp_identity(self.CP), str(native.axisSessionId), str(native.pandaSerial),
              tuple((p.hardwareSerial, p.safetyModel, p.safetyParam) for p in native.pandaInventory))
       try:
