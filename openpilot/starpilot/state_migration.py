@@ -18,7 +18,10 @@ PREFERENCES = frozenset({
   "ShowDebugInfo", "GsmMetered", "OpenpilotEnabledToggle",
 })
 # Keys removed from the registry. Saved copies are archived at startup instead of blocking it.
-RETIRED_KEYS = frozenset({'ShareUsageStats'})
+# Accord 9G settings removed 2026-11-23 (blend probe, deadband comp, dead TX_ALL option, F28 SLC debounce):
+# archived like ShareUsageStats so a saved value never blocks startup as an unknown key.
+ACCORD_RETIRED_KEYS = frozenset({'SSV3BlendProbe', 'SSV3DeadbandComp', 'SSV3TxAllLkasData', 'SLCSourceStability'})
+RETIRED_KEYS = frozenset({'ShareUsageStats'}) | ACCORD_RETIRED_KEYS
 RENAMED_BOOL_KEYS = {'AndroidAutoEnabled': 'StarPortEnabled'}
 MAX_VALUE_BYTES = 32 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
