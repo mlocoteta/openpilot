@@ -130,10 +130,22 @@ def qualified(cp, *, marked_only=False):
 
 
 def temporary_restriction(cp, state):
-  gears = structs.CarState.GearShifter
-  return bool(state is not None and qualified(cp, marked_only=True) and state.canValid and not state.canTimeout
-              and not state.steerFaultPermanent and
-              (state.gearShifter not in (gears.drive, gears.sport, gears.low, gears.brake) or state.steerFaultTemporary))
+  return bool(state is not None and qualified(cp, marked_only=True) and _state_restricted(state))
+
+
+def qualified_temporary_restriction(_cp, state):
+  """temporary_restriction() for a CP the caller already proved qualified(cp, marked_only=True).
+  card resolves that once per drive; re-running qualified() here cost it every 100 Hz frame."""
+  return bool(state is not None and _state_restricted(state))
+
+
+_DRIVE_GEARS = (structs.CarState.GearShifter.drive, structs.CarState.GearShifter.sport,
+                structs.CarState.GearShifter.low, structs.CarState.GearShifter.brake)
+
+
+def _state_restricted(state):
+  return (state.canValid and not state.canTimeout and not state.steerFaultPermanent and
+          (state.gearShifter not in _DRIVE_GEARS or state.steerFaultTemporary))
 
 
 def native_observation(native, *, latched, panda_ready, restricted, now_ns, pending_since_ns,
