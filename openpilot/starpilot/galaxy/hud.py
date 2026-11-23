@@ -258,7 +258,9 @@ def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall
   """/api/hud steeringBoard: configured (next start), active (this / the last drive; null with openpilot off),
   presence (this drive or card's record within PRESENT_DAYS), tiLastSeen / ssv3LastSeen (epoch s from card's record,
   null = never heard; numbers because the head unit's 4.2.4 parser reads epoch s/ms), staged (board chosen while onroad,
-  applied at the next offroad; null = none), pendingRestart (configured != active, or a staged value exists)."""
+  applied at card start / the next disengaged stop / offroad; null = none), pendingRestart (configured != active, or a
+  staged value exists; for ~10 s after a live switch while openpilot restarts), liveSwitch (this comma switches the
+  board while the car is on: POST answers applied now / refused, starpilot/car/honda/board_switch.py)."""
   from openpilot.starpilot.car.honda.steering_board_watch import parse_seen, seen_recently
   ti = ti_car(car_params)
   active = None if ti is None or _passive(car_params) else 'ti' if ti else 'ssv3'
@@ -274,7 +276,8 @@ def steering_board(car_params, ti_enabled, override, seen, record=None, now_wall
           'ssv3Present': bool(seen.get('ssv3')) or seen_recently(record, 'ssv3', now_wall),
           'ssv3Firmware': version, 'tiLastSeen': record['ti'], 'ssv3LastSeen': record['ssv3'],
           'staged': staged if staged in ('ti', 'ssv3') else None,
-          'pendingRestart': bool((configured is not None and active is not None and configured != active) or staged in ('ti', 'ssv3'))}
+          'pendingRestart': bool((configured is not None and active is not None and configured != active) or staged in ('ti', 'ssv3')),
+          'liveSwitch': True}
 
 
 def openpilot_enabled(car_params, configured, staged=None):

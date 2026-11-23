@@ -1,12 +1,18 @@
-"""Head-unit writes that only apply at the next car start: steering board (9G TI/SSV3) and openpilot on/off.
+"""Head-unit writes: steering board (9G TI/SSV3, switched while the car is on) and openpilot on/off (next start).
 
-Both are params read once when card starts; the endpoints only decide whether a write is allowed now.
 Answers (galaxy server.py): 400 bad value, 409 {"error": reason} when the board isn't fitted, 429 when the last
-accepted write of the same kind is under WRITE_GAP_S old, else 200 {"applied": "next_start", ...}.
-Offroad (IsOffroad == 1, not engaged): the live params are written. Onroad / engaged / IsOffroad unreadable (the comma
-reports onroad whenever the car is in accessory): the value is STAGED instead (AccordSteeringBoardPending /
-OpenpilotEnabledPending) and the answer carries "staged": true; nothing live changes mid-drive. apply_pending() moves
-a staged value to the live params at the next provably-offroad moment (galaxy PendingApplier thread) and clears it.
+accepted write of the same kind is under WRITE_GAP_S old.
+
+Steering board (2026-11-17 on-the-fly switch, starpilot/car/honda/board_switch.py):
+- provably offroad (IsOffroad == 1, not engaged): the live params are written, 200 {"applied": "now"} (used at start).
+- otherwise the request goes to the running card (AccordSteeringBoardSwitch) and galaxy waits up to SWITCH_WAIT_S for
+  its answer: 200 {"applied": "now"} = switched (card restarts openpilot, ~10 s, no ignition cycle), or
+  409 {"applied": "refused", "reason", "error"} = engaged / latActive / moving / openpilot still starting.
+  No answer (card not running yet) = STAGED (AccordSteeringBoardPending), 200 {"applied": "after_disengage",
+  "staged": true}: card applies it when it starts, or at the next stop with openpilot off; galaxy's PendingApplier
+  applies it at offroad.
+openpilot on/off: params read once when card starts. Offroad: written live; onroad / engaged / unreadable: staged
+(OpenpilotEnabledPending), applied at the next offroad; answer {"applied": "next_start"[, "staged": true]}.
 
 No lock-out:
 - steering board: a board is fitted when card heard it within PRESENT_DAYS (AccordSteeringBoardSeen, kept across
@@ -110,13 +116,13 @@ def fitted_refusal(params, board, now=None):
   return f'{name} board not seen in the last {PRESENT_DAYS} days'
 
 
-def write_board(params, board):
+def write_board(params, board, block=False):
   """TorqueInterceptorEnabled (ssv3 = off = SSV3 only), AccordSteeringBoard=auto, remember the board switched away from."""
   current = configured_board(params)
   if current in BOARDS and current != board:
-    params.put(PREVIOUS_PARAM, current)
-  params.put_bool('TorqueInterceptorEnabled', board == 'ti')
-  params.put('AccordSteeringBoard', 'auto')
+    params.put(PREVIOUS_PARAM, current, block=block)
+  params.put_bool('TorqueInterceptorEnabled', board == 'ti', block=block)
+  params.put('AccordSteeringBoard', 'auto', block=block)
 
 
 def enabled_refusal(params, enabled):
@@ -215,6 +221,53 @@ class PendingApplier:
     while not self.stop:
       self.step(lock)
       time.sleep(self.interval)
+
+
+SWITCH_WAIT_S = 3.5        # card: REQUEST_TIMEOUT_S 2.5 + 10 Hz poll + margin; under the head unit's 5 s HTTP read timeout
+SWITCH_POLL_S = 0.05
+
+
+def request_switch(params, board, request_id):
+  """Hand a live board switch to the running card (board_switch.BoardSwitch)."""
+  from openpilot.starpilot.car.honda.board_switch import RESULT_PARAM, SWITCH_PARAM
+  try:
+    params.remove(RESULT_PARAM)
+  except Exception:
+    pass
+  params.put(SWITCH_PARAM, {'board': board, 'id': request_id}, block=True)
+
+
+def await_switch(params_factory, request_id, timeout=None, clock=time.monotonic, sleep=time.sleep):
+  """card's answer {'applied', 'reason', ...} to request_id, or None when no card answered within timeout."""
+  from openpilot.starpilot.car.honda.board_switch import read_result
+  timeout = SWITCH_WAIT_S if timeout is None else timeout
+  end = clock() + timeout
+  while True:
+    try:
+      result = read_result(params_factory())
+    except Exception:
+      result = None
+    if result is not None and result.get('id') == request_id and result.get('applied') in ('now', 'refused'):
+      return result
+    if clock() >= end:
+      return None
+    sleep(SWITCH_POLL_S)
+
+
+def withdraw_switch(params, board, request_id):
+  """No card answer: take the request back and stage it. Returns card's answer instead if it arrived meanwhile."""
+  from openpilot.starpilot.car.honda.board_switch import SWITCH_PARAM, read_request, read_result
+  result = read_result(params)
+  if result is not None and result.get('id') == request_id and result.get('applied') in ('now', 'refused'):
+    return result
+  request = read_request(params)
+  if request is not None and request.get('id') == request_id:
+    try:
+      params.remove(SWITCH_PARAM)
+    except Exception:
+      params.put(SWITCH_PARAM, '')
+  stage_board(params, board)
+  return None
 
 
 class RateLimit:
