@@ -34,7 +34,7 @@ def test_native_handlers_keep_card_priority_and_lazy_honda_binding(admitted):
                   preap.native_observation, mazda.native_observation, card.honda_observer, ford.native_observation,
                   hyundai.native_observation)
   restrictions = (volvo.temporary_restriction, rivian.temporary_restriction, volkswagen_restriction.temporary_restriction, nissan.temporary_restriction,
-                  preap.temporary_restriction, mazda.temporary_restriction, honda.temporary_restriction, ford.temporary_restriction,
+                  preap.temporary_restriction, mazda.temporary_restriction, honda.qualified_temporary_restriction, ford.temporary_restriction,
                   hyundai.temporary_restriction)
   expected = next((i for i, flag in enumerate(admitted) if flag), len(admitted))
   names = ('volvo_aol', 'rivian_aol', 'volkswagen_aol', 'nissan_aol', 'preap_aol', 'mazda_aol', 'honda_aol', 'ford_aol')
